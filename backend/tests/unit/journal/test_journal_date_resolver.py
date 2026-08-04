@@ -1,10 +1,12 @@
 """Unit tests for journal date resolution and the future-dated rule.
 
 A journal's *date* is the local date of its ``event_date_range.start`` in the
-acting user's timezone — the same date the journal list groups it under, and the
-date the tasks model's future-dated invariant is judged against. Every case here
-is a case where a UTC reading would give a different answer, because a rule that
-only holds at midday is not a rule.
+acting user's *configured* timezone, and it is the date the tasks model's
+future-dated invariant is judged against. (It is meant to be the date the
+journal list groups it under too, but that list groups in the *browser's*
+timezone — see the module under test for the recorded divergence.) Every case
+here is a case where a UTC reading would give a different answer, because a rule
+that only holds at midday is not a rule.
 
 The instants are fixed rather than relative to ``now`` so the day boundaries and
 the two Sydney daylight-saving transitions of 2026 are exercised deterministically:
@@ -124,8 +126,17 @@ class TestTodayIn:
         )
 
     def test_defaults_to_the_current_instant(self) -> None:
-        """Omitting ``now`` anchors on the real clock, in the given timezone."""
-        assert today_in(SYDNEY) == datetime.datetime.now(SYDNEY).date()
+        """Omitting ``now`` anchors on the real clock, in the given timezone.
+
+        Sandwiched between two readings of the clock rather than compared to a
+        second one: a bare equality would fail whenever the two readings landed
+        either side of Sydney's midnight.
+        """
+        before = datetime.datetime.now(datetime.UTC)
+        resolved = today_in(SYDNEY)
+        after = datetime.datetime.now(datetime.UTC)
+
+        assert local_date(before, SYDNEY) <= resolved <= local_date(after, SYDNEY)
 
 
 @pytest.mark.unit

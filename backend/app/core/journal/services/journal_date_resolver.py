@@ -1,10 +1,16 @@
 """Resolving a journal's date, and the future-dated rule, in the user's timezone.
 
 A journal's **date** is the local date of its ``event_date_range.start`` in the
-acting user's timezone — the same date the journal list groups it under, and the
-date the tasks model judges its future-dated invariant against. A multi-day
-journal is therefore dated by the day it *starts*: a trip that began yesterday
-and runs until tomorrow is past, however much of it is still ahead.
+acting user's *configured* timezone, and it is the date the tasks model judges
+its future-dated invariant against. A multi-day journal is therefore dated by
+the day it *starts*: a trip that began yesterday and runs until tomorrow is
+past, however much of it is still ahead.
+
+This is intended to be the date the journal list groups a journal under, but
+that equality does **not** hold unconditionally today: ``groupJournalsByDay``
+groups in the *browser's* timezone, which differs when a user travels or has
+configured another zone. See *Journal date resolution (user-local)* in
+``docs/architecture/domain-architecture.md``.
 
 The module is split deliberately:
 
