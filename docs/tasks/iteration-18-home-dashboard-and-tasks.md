@@ -903,10 +903,19 @@ consistent enough to state as a rule.** 1923 against 480 is 4.0× on the estimat
 it is **5.8×**, which lands on the ×6 Phase 2 proposed and Phase 3 confirmed. What the advance figure
 missed was not the service (218 against ~130 predicted) but the **test-to-production ratio for a rule
 that only exists at its boundaries: 1341 test lines against 332 production, or 4.0× the production line
-count in tests alone.** 32 unit tests and 13 integration tests, and none of them is redundant — each
+count in tests alone.** 36 unit tests and 15 integration tests, and none of them is redundant — each
 pins a different corner of the same five-line predicate. **Suggested amendment to rule 13:** for a
 rule-defining phase, estimate the tests at ~4× the production estimate and the total at ×6, rather than
 applying a flat multiplier to a guessed production figure.
+
+**A note on where the review rounds landed, because it bears on how to test the next rule-defining
+phase.** Four of the six findings the PR's automated review raised were about *boundaries the tests did
+not reach* — a clock read twice across midnight, a row deleted between its check and its write — rather
+than about the rule itself, which the 44 tests written first had covered. The one that mattered most
+was only catchable against a real database: the unit test for the vanished-anchor mapping was built on
+a hand-written error and passed while the code was wrong. **For a rule whose failure mode is an
+error-message shape, the integration test is not a confirmation of the unit test — it is the only real
+test.**
 
 Rule 3 prefers splitting an oversized PR. **Splitting was declined.** The only available cut is
 "service now, invariants later", which would ship a create path that skips its own rules — a direct
@@ -1004,6 +1013,23 @@ service's contact check is the single place the rule lands.
   that bound it from the request body — which a `**payload`-style wiring would do silently — would make
   invariant 4 opt-out for every client. The docstring says so at the parameter, and Phase 5 carries an
   acceptance criterion that neither surface accepts it.
+- **A row that vanishes between its check and the write keeps its domain error** — raised by the PR's
+  automated review, and the same class of finding Phase 2 took on `FOR KEY SHARE`. The anchor checks
+  are a plain read, so a journal deleted in the window before the insert fails the foreign key and
+  would surface a raw `IntegrityError` — a 500 where the caller was promised a 404. The violation is
+  now mapped back to `TaskAnchorJournalNotFoundError`, naming the anchor, and the same one row over for
+  a vanished contact. **Locking was considered and rejected:** closing the window needs an owner-scoped
+  *locking* read on `JournalRepository` — another domain's port — to change an outcome that is
+  identical either way, since the journal is gone and the task cannot anchor to it. Nothing is at risk
+  in the data (the anchors are `ON DELETE RESTRICT`); only which error the caller sees. A violation
+  naming anything else is re-raised untouched, so a broken constraint cannot masquerade as a 404.
+- **The match is against the driver's message, not `str(error)` — and only a real database found
+  that.** SQLAlchemy's string form appends the failing statement, whose column list names **both**
+  anchors, so matching against it reports whichever is tested first. The unit test built on a
+  hand-written error passed; the integration test, which deletes the journal inside the transaction and
+  lets PostgreSQL raise, failed and named the wrong anchor. The fix reads `error.orig`. The unit test's
+  fabricated statement now carries the full column list too, so it would catch the same mistake —
+  mutation-checked by restoring `str(error)`, which fails both suites.
 - **The clock is read once per create** — raised by the PR's automated review. `is_future_dated` and
   the error's `today_in` were each passed a bare `now=None`, so each read the clock independently: a
   create landing on local midnight could be refused against one day and told about another. The service
@@ -1048,7 +1074,7 @@ connection, which is the coupling the port exists to prevent.
 violation. Integration — the service against real journals, including another user's journal as the due
 journal (rejected) and a contact owned by another user (rejected). No e2e.
 
-- **Unit (27 tests):** `backend/tests/unit/tasks/test_task_service_create.py`. Repositories are mocked;
+- **Unit (31 tests):** `backend/tests/unit/tasks/test_task_service_create.py`. Repositories are mocked;
   `JournalDateResolver` is the **real** collaborator over a mocked settings repository, because the
   timezone rule is part of the behaviour under test. *Creation (7):* the saved entity's text, anchors
   and default `NOT_DONE`; the persisted row is what the caller gets; contacts become link rows against
@@ -1065,17 +1091,22 @@ journal (rejected) and a contact owned by another user (rejected). No e2e.
   is rejected on the user's local day, and its mirror is accepted where UTC would reject — plus the
   timezone being read exactly once, and **the clock being resolved once** so the decision and the
   message cannot disagree across a midnight (added from the PR review). *Contacts (2):* an unknown id
-  is rejected and nothing is saved.
+  is rejected and nothing is saved. *Vanished rows (4, added in review):* a foreign-key violation on
+  either anchor is reported as that anchor's 404 and a violated contact link as `ContactNotFoundError`,
+  while a violation naming anything else is re-raised untouched.
 - **Unit (5 tests):** `backend/tests/unit/api/test_task_error_mapping.py` — each task error's JSON:API
   code and status, that the two creation failures are told apart, that Phase 1–2's errors are mapped
   too, and that the base class still renders generically.
-- **Integration (13 tests):** `backend/tests/integration/tasks/test_task_service_create_integration.py`
+- **Integration (15 tests):** `backend/tests/integration/tasks/test_task_service_create_integration.py`
   against real PostgreSQL. *Creation (3):* the row survives the round trip with both anchors and the
   default status; contacts and task are both visible once the create returns (one unit of work);
   creating == due against a real row. *Unit of work (1, added in review):* a contact link that fails
   **after** the task row exists rolls the task back — the one case that distinguishes `@transactional`
   from the structural "validate before writing" guarantee, and mutation-checked by deleting the
-  decorator. *Ownership (3):* another user's journal rejected as the **due**
+  decorator. *Vanished anchor (2, added in review):* a journal deleted inside the transaction, between
+  the anchor check and the insert, still reports its anchor's 404 — the violation raised by real
+  PostgreSQL rather than hand-built, which is what caught the `str(error)` bug the unit tests missed.
+  *Ownership (3):* another user's journal rejected as the **due**
   anchor and as the **creating** anchor, with no task row written either time; and a foreign journal
   producing an error indistinguishable from an absent one. *Future-dating (3):* the Sydney case decided
   on the user's local day where UTC disagrees, with nothing written; the UTC fallback for a user with no

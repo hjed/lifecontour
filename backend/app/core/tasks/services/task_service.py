@@ -35,6 +35,7 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
 )
+from sqlalchemy.exc import IntegrityError
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.services.journal_date_resolver import (
@@ -59,6 +60,36 @@ if TYPE_CHECKING:
 def _ordered_unique(values: Iterable[int]) -> list[int]:
     """``values`` with duplicates dropped, keeping first-mention order."""
     return list(dict.fromkeys(values))
+
+
+# The anchor columns, as the violated constraint names them. Matching on the
+# column rather than on PostgreSQL's generated constraint name keeps this from
+# depending on how an unnamed foreign key happens to be named; the column is a
+# name migration 0105 chose.
+_ANCHOR_COLUMNS: tuple[tuple[TaskJournalAnchor, str], ...] = (
+    ("creating", "creating_journal_id"),
+    ("due", "due_journal_id"),
+)
+
+
+def _driver_message(error: IntegrityError) -> str:
+    """The database's own message, without the statement SQLAlchemy appends.
+
+    This distinction is the whole of the matching below. ``str(error)`` includes
+    the failing ``INSERT``, whose column list names **both** anchors, so any
+    match against it reports whichever the loop tests first — a bug that passes
+    every test built on a hand-written error and fails against a real one.
+    """
+    return str(error.orig) if error.orig is not None else ""
+
+
+def _violated_anchor(error: IntegrityError) -> TaskJournalAnchor | None:
+    """Which anchor a foreign-key violation is about, if it is about one."""
+    message = _driver_message(error)
+    for anchor, column in _ANCHOR_COLUMNS:
+        if column in message:
+            return anchor
+    return None
 
 
 class TaskService:
@@ -139,11 +170,52 @@ class TaskService:
         await self._require_future_dated(user_id, due_journal_id, due_journal, now)
         contacts = await self._resolve_contacts(contact_ids)
 
-        created = await self.task_repo.save(task)
+        created = await self._save(task, creating_journal_id, due_journal_id)
         assert created.id is not None, "Task ID must be set after save"
         for contact_id in contacts:
-            await self.task_repo.add_contact(created.id, contact_id, user_id)
+            await self._link_contact(created.id, contact_id, user_id)
         return created
+
+    async def _save(
+        self, task: Task, creating_journal_id: int, due_journal_id: int
+    ) -> Task:
+        """Insert the task, keeping the promised error if an anchor just vanished.
+
+        The anchor checks are a plain read, so a journal deleted between that read
+        and this insert would fail the foreign key and surface a raw
+        ``IntegrityError`` — a 500 in place of the 404 the caller was promised.
+        The window is narrow and the database is never wrong here (the anchors are
+        ``ON DELETE RESTRICT``, so nothing is corrupted); what is at stake is only
+        which error the caller sees, so it is mapped back rather than locked out.
+
+        Locking the journal rows for the duration would close the window, but it
+        needs an owner-scoped *locking* read on ``JournalRepository`` — another
+        domain's port — to change an outcome that is identical either way: the
+        journal is gone, and the task cannot anchor to it. A violation naming
+        anything else is re-raised untouched.
+        """
+        try:
+            return await self.task_repo.save(task)
+        except IntegrityError as error:
+            anchor = _violated_anchor(error)
+            if anchor is None:
+                raise
+            journal_id = creating_journal_id if anchor == "creating" else due_journal_id
+            raise TaskAnchorJournalNotFoundError(anchor, journal_id) from error
+
+    async def _link_contact(self, task_id: int, contact_id: int, user_id: str) -> None:
+        """Link one contact, keeping the promised error if it just vanished.
+
+        The same race as :meth:`_save`, one row over: the contact was proved to
+        exist a few statements ago, and a delete since then must still read as
+        ``ContactNotFoundError`` rather than as a raw integrity error.
+        """
+        try:
+            await self.task_repo.add_contact(task_id, contact_id, user_id)
+        except IntegrityError as error:
+            if "contact_id" not in _driver_message(error):
+                raise
+            raise ContactNotFoundError(contact_id) from error
 
     async def _resolve_anchors(
         self, user_id: str, creating_journal_id: int, due_journal_id: int

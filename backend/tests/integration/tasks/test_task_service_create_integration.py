@@ -24,10 +24,12 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from core_shared.models.tasks import (
+    Task,
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskStatus,
 )
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
@@ -232,6 +234,95 @@ class TestTheWriteIsOneUnitOfWork:
             )
 
         assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+
+@pytest.mark.integration
+class TestAnAnchorThatVanishesMidCreate:
+    """A journal deleted between the anchor check and the insert still 404s.
+
+    The anchor checks are a plain read, so the foreign key is what catches a
+    journal deleted in the window before the insert. Left alone that surfaces a
+    raw ``IntegrityError`` — a 500 where the caller was promised a 404. The
+    error is raised by real PostgreSQL here rather than hand-built, so the
+    mapping is proved against the message the database actually produces.
+    """
+
+    async def test_a_deleted_due_journal_still_reports_the_domain_error(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        user_settings_repository: SqlUserSettingsRepository,
+        anchors: tuple[int, int],
+    ):
+        """The due anchor is named, not leaked as an integrity error."""
+        creating_id, due_id = anchors
+
+        class _VanishingJournalRepository(SqlTaskRepository):
+            async def save(self, task: Task) -> Task:
+                await async_connection.execute(
+                    text("DELETE FROM journals WHERE id = :id"), {"id": due_id}
+                )
+                return await super().save(task)
+
+        service = TaskService(
+            task_repo=_VanishingJournalRepository(async_connection),
+            journal_repo=journal_repository,
+            contact_repo=SqlContactRepository(async_connection),
+            date_resolver=JournalDateResolver(
+                user_settings_repo=user_settings_repository
+            ),
+        )
+
+        with pytest.raises(TaskAnchorJournalNotFoundError) as exc_info:
+            await service.create_task(
+                user_id=USER_ID,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text="print the permit",
+                transaction=async_connection,
+            )
+
+        assert exc_info.value.anchor == "due"
+        assert exc_info.value.journal_id == due_id
+        assert exc_info.value.status_code == 404
+
+    async def test_a_deleted_creating_journal_names_that_anchor(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        user_settings_repository: SqlUserSettingsRepository,
+        anchors: tuple[int, int],
+    ):
+        """Each anchor is told apart by the column the violation names."""
+        creating_id, due_id = anchors
+
+        class _VanishingJournalRepository(SqlTaskRepository):
+            async def save(self, task: Task) -> Task:
+                await async_connection.execute(
+                    text("DELETE FROM journals WHERE id = :id"), {"id": creating_id}
+                )
+                return await super().save(task)
+
+        service = TaskService(
+            task_repo=_VanishingJournalRepository(async_connection),
+            journal_repo=journal_repository,
+            contact_repo=SqlContactRepository(async_connection),
+            date_resolver=JournalDateResolver(
+                user_settings_repo=user_settings_repository
+            ),
+        )
+
+        with pytest.raises(TaskAnchorJournalNotFoundError) as exc_info:
+            await service.create_task(
+                user_id=USER_ID,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text="print the permit",
+                transaction=async_connection,
+            )
+
+        assert exc_info.value.anchor == "creating"
+        assert exc_info.value.journal_id == creating_id
 
 
 @pytest.mark.integration

@@ -29,6 +29,7 @@ from core_shared.models.tasks import (
     TaskStatus,
     TaskValidationError,
 )
+from sqlalchemy.exc import IntegrityError
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
@@ -726,6 +727,109 @@ class TestFutureDatedInvariant:
         await create(service, mock_transaction)
 
         assert mock_settings_repo.get_timezone.await_count == 1
+
+
+@pytest.mark.unit
+class TestRowsThatVanishMidCreate:
+    """A row deleted between its check and the write keeps its domain error.
+
+    The integration suite proves the mapping against the message PostgreSQL
+    really produces; these pin the dispatch itself, including the case that must
+    **not** be mapped.
+    """
+
+    @staticmethod
+    def integrity_error(constraint: str) -> IntegrityError:
+        """An integrity error shaped like the one a violated foreign key raises.
+
+        The statement carries the **full column list**, exactly as the real one
+        does, because that is what makes this test able to fail: matching the
+        constraint against ``str(error)`` would find both anchor columns in the
+        ``INSERT`` and report whichever was tested first. Only the driver's own
+        message names the one constraint that was actually violated.
+        """
+        return IntegrityError(
+            "INSERT INTO tasks (user_id, text, creating_journal_id, due_journal_id) "
+            "VALUES ($1, $2, $3, $4)",
+            {},
+            Exception(
+                f'insert or update on table "tasks" violates foreign key '
+                f'constraint "{constraint}"'
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_vanished_due_journal_is_reported_as_its_anchor(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The promised 404 survives, rather than a raw integrity error escaping."""
+        mock_task_repo.save.side_effect = self.integrity_error(
+            "tasks_due_journal_id_fkey"
+        )
+
+        with pytest.raises(TaskAnchorJournalNotFoundError) as exc_info:
+            await create(service, mock_transaction)
+
+        assert exc_info.value.anchor == "due"
+        assert exc_info.value.journal_id == DUE_JOURNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_a_vanished_creating_journal_is_reported_as_its_anchor(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The two anchors are told apart by the column the violation names."""
+        mock_task_repo.save.side_effect = self.integrity_error(
+            "tasks_creating_journal_id_fkey"
+        )
+
+        with pytest.raises(TaskAnchorJournalNotFoundError) as exc_info:
+            await create(service, mock_transaction)
+
+        assert exc_info.value.anchor == "creating"
+        assert exc_info.value.journal_id == CREATING_JOURNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_an_unrelated_integrity_error_is_left_alone(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Only anchor violations are translated; anything else must surface as-is.
+
+        Swallowing every integrity error into a 404 would turn a genuine bug —
+        a broken constraint, a bad migration — into a plausible-looking "not
+        found" the caller would act on.
+        """
+        mock_task_repo.save.side_effect = self.integrity_error("ck_tasks_status")
+
+        with pytest.raises(IntegrityError):
+            await create(service, mock_transaction)
+
+    @pytest.mark.asyncio
+    async def test_a_vanished_contact_is_reported_as_a_missing_contact(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_contact_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The same race one row over: the link's own violation keeps its 404."""
+        mock_contact_repo.find_names_by_ids.return_value = {3: ("Sarah", None, None)}
+        mock_task_repo.add_contact.side_effect = self.integrity_error(
+            "task_contacts_contact_id_fkey"
+        )
+
+        with pytest.raises(ContactNotFoundError) as exc_info:
+            await create(service, mock_transaction, contact_ids=[3])
+
+        assert exc_info.value.contact_id == 3
 
 
 @pytest.mark.unit
