@@ -132,9 +132,12 @@ the *creating* journal where it arose and the *due* journal where it matters.
 - **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
   `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
   request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`)
-- **Domain Services**: not yet — `TaskService` lands in ITER18-001 Phase 4. The date semantics the
-  future-dated invariant is judged against are **not** the tasks domain's: they live in
-  `JournalDateResolver` (journal domain — see
+- **Domain Services**: `TaskService`
+  (`backend/app/core/tasks/services/task_service.py`), provided at request scope by `TaskProvider`.
+  It is where the specification's *core invariants* are enforced, so REST and MCP both inherit them
+  rather than each re-implementing them — see *[Task creation invariants](#task-creation-invariants)*
+  below. The date semantics the future-dated invariant is judged against are **not** the tasks
+  domain's: they live in `JournalDateResolver` (journal domain — see
   *[Journal date resolution (user-local)](#journal-date-resolution-user-local)*), which `TaskService`
   consumes rather than re-derives
 - **Repository contract**: **owner scoping is part of the port, not an implementation detail.** Every
@@ -413,6 +416,45 @@ domain can import, and the home dashboard's agenda reads journals rather than ta
 duplication to collapse:** `OutdoorDashboardService._window` / `._user_timezone` and
 `compute_search_window` (`app/core/integrations/immich/album_creation_service.py`) predate this module
 and should be migrated onto it; that migration was deliberately kept out of the phase that introduced it.
+
+### Task creation invariants
+
+The [tasks specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#core-invariants)
+calls its core invariants *absolute* and requires them at **every** entry point, MCP included. They are
+therefore enforced in `TaskService` (`backend/app/core/tasks/services/task_service.py`), not in a
+controller: REST and MCP are thin callers, so neither can drift from the other or forget a rule.
+
+Validation is split by what each layer can know, and each rule sits at the lowest layer that can decide it:
+
+| Rule | Enforced by | Because |
+|---|---|---|
+| Non-empty text; both anchor ids present and positive | `Task.__post_init__` | Needs nothing but the entity |
+| The task belongs to the acting user | `TaskRepository` (owner-scoped port) | A property of every statement, not of one method |
+| Both anchors **exist** and are the user's | `TaskService` | Needs journal data |
+| The due journal is **future-dated** | `TaskService`, via `JournalDateResolver` | Needs journal data *and* the user's timezone |
+| Referenced contacts exist | `TaskService` | Needs the contact domain |
+
+Three things about the service half are load-bearing:
+
+- **Ownership is enforced by the query, not by a comparison.** Both anchors are resolved in one
+  `JournalRepository.find_by_ids_for_user` call, so another user's journal is simply absent from the
+  result. Existence and ownership therefore fail as the *same* error, and it says nothing about
+  ownership — the same stance the task repository's port documents, and it means a rejected create
+  cannot be used to probe for another user's journals. One call also covers both anchors, so the
+  creating == due case costs no extra round trip.
+- **The future-dated check is a write-time rule.** It runs when a due journal is set — on creation, and
+  on retargeting later — and never again. Nothing re-validates it on read, which is precisely what makes
+  a **lapsed** task (one whose due journal has since passed) reachable rather than unloadable.
+- **The timezone is read once per call** and handed to the module's pure predicate, rather than calling
+  the resolver's per-journal wrapper — the shape batch callers need, and the reason the resolver splits
+  that way.
+
+**Contacts have no owner in this system.** The `contacts` table carries no `user_id`
+(`app/infrastructure/contacts/contact_tables.py`), so "the linked contact must belong to the acting
+user" is not enforceable at the data layer; the service enforces contact **existence** instead. Recorded
+as a divergence in [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md), matching the same
+finding in iteration 13's contact merge. If contacts ever gain ownership, `TaskService._resolve_contacts`
+is the single place the rule lands.
 
 ### Incomplete Outdoor Activities Review (read projection)
 
