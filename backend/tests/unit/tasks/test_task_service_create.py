@@ -18,6 +18,7 @@ repository, because the timezone rule is part of the behaviour being tested.
 
 import datetime
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from core_shared.models.journals import EventDateRange, Journal
@@ -649,6 +650,52 @@ class TestFutureDatedInvariant:
         await create(service, mock_transaction, contact_ids=[3, 5])
 
         mock_settings_repo.get_timezone.assert_awaited_once_with(USER_ID)
+
+    @pytest.mark.asyncio
+    async def test_reads_the_clock_once_when_no_instant_is_given(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+        creating_journal: Journal,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The decision and the error's "today" come from the same instant.
+
+        Left to a bare ``now=None`` the predicate and the error would each read
+        the clock, and a create landing on local midnight could be refused
+        against one day while being told about another. Asserting the resolved
+        instant reaches the predicate is what pins that, since the alternative —
+        actually straddling midnight — is not something a test can arrange.
+        """
+        seen: list[datetime.datetime | None] = []
+
+        def recording_is_future_dated(
+            journal: Journal,
+            tz: ZoneInfo,
+            now: datetime.datetime | None = None,
+        ) -> bool:
+            seen.append(now)
+            return False
+
+        monkeypatch.setattr(
+            "app.core.tasks.services.task_service.is_future_dated",
+            recording_is_future_dated,
+        )
+        mock_journal_repo.find_by_ids_for_user.return_value = [
+            creating_journal,
+            make_journal(DUE_JOURNAL_ID, at(YESTERDAY)),
+        ]
+
+        with pytest.raises(TaskDueJournalNotFutureError) as exc_info:
+            await create(service, mock_transaction, now=None)
+
+        assert len(seen) == 1
+        resolved = seen[0]
+        assert resolved is not None, "the clock must be resolved before the predicate"
+        # The settings mock reports UTC, so the error's "today" must be that very
+        # instant's date — not a second, later reading of the clock.
+        assert exc_info.value.today == resolved.astimezone(datetime.UTC).date()
 
     @pytest.mark.asyncio
     async def test_checks_the_future_rule_once_at_creation(

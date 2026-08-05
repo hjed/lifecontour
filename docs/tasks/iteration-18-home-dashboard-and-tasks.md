@@ -903,7 +903,7 @@ consistent enough to state as a rule.** 1923 against 480 is 4.0× on the estimat
 it is **5.8×**, which lands on the ×6 Phase 2 proposed and Phase 3 confirmed. What the advance figure
 missed was not the service (218 against ~130 predicted) but the **test-to-production ratio for a rule
 that only exists at its boundaries: 1341 test lines against 332 production, or 4.0× the production line
-count in tests alone.** 31 unit tests and 13 integration tests, and none of them is redundant — each
+count in tests alone.** 32 unit tests and 13 integration tests, and none of them is redundant — each
 pins a different corner of the same five-line predicate. **Suggested amendment to rule 13:** for a
 rule-defining phase, estimate the tests at ~4× the production estimate and the total at ×6, rather than
 applying a flat multiplier to a guessed production figure.
@@ -1000,6 +1000,14 @@ service's contact check is the single place the rule lands.
   that bound it from the request body — which a `**payload`-style wiring would do silently — would make
   invariant 4 opt-out for every client. The docstring says so at the parameter, and Phase 5 carries an
   acceptance criterion that neither surface accepts it.
+- **The clock is read once per create** — raised by the PR's automated review. `is_future_dated` and
+  the error's `today_in` were each passed a bare `now=None`, so each read the clock independently: a
+  create landing on local midnight could be refused against one day and told about another. The service
+  now resolves the instant before the predicate and passes it to both. Resolving it here rather than
+  comparing dates inline is deliberate — it keeps the definition of "future-dated" in the journal
+  domain's predicate rather than re-deriving `>` in the tasks domain. Pinned by asserting the predicate
+  receives a concrete instant and that the error's `today` is that instant's date; mutation-checked by
+  restoring the two bare `now`s.
 - **The one thing `@transactional` really guarantees is now tested.** Every rejection in this phase
   happens *before* the first write, so "no partial task" holds structurally on those paths whether or
   not a unit of work is open — which means none of them would notice the decorator being deleted.
@@ -1026,7 +1034,7 @@ service's contact check is the single place the rule lands.
 violation. Integration — the service against real journals, including another user's journal as the due
 journal (rejected) and a contact owned by another user (rejected). No e2e.
 
-- **Unit (26 tests):** `backend/tests/unit/tasks/test_task_service_create.py`. Repositories are mocked;
+- **Unit (27 tests):** `backend/tests/unit/tasks/test_task_service_create.py`. Repositories are mocked;
   `JournalDateResolver` is the **real** collaborator over a mocked settings repository, because the
   timezone rule is part of the behaviour under test. *Creation (7):* the saved entity's text, anchors
   and default `NOT_DONE`; the persisted row is what the caller gets; contacts become link rows against
@@ -1041,7 +1049,9 @@ journal (rejected) and a contact owned by another user (rejected). No e2e.
   the case where collapsing the two roles could skip the date check along with the second lookup (added
   in review); the message carries both dates; **the Sydney pair** — a journal a UTC reading would accept
   is rejected on the user's local day, and its mirror is accepted where UTC would reject — plus the
-  timezone being read exactly once. *Contacts (2):* an unknown id is rejected and nothing is saved.
+  timezone being read exactly once, and **the clock being resolved once** so the decision and the
+  message cannot disagree across a midnight (added from the PR review). *Contacts (2):* an unknown id
+  is rejected and nothing is saved.
 - **Unit (5 tests):** `backend/tests/unit/api/test_task_error_mapping.py` — each task error's JSON:API
   code and status, that the two creation failures are told apart, that Phase 1–2's errors are mapped
   too, and that the base class still renders generically.

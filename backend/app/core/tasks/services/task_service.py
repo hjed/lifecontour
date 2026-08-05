@@ -26,6 +26,7 @@ since passed — reachable rather than unloadable.
 
 from __future__ import annotations
 
+import datetime
 from typing import TYPE_CHECKING
 
 from core_shared.models.tasks import (
@@ -44,7 +45,6 @@ from app.core.journal.services.journal_date_resolver import (
 from app.infrastructure.unit_of_work import transactional
 
 if TYPE_CHECKING:
-    import datetime
     from collections.abc import Iterable, Sequence
 
     from core_shared.models.journals import Journal
@@ -189,13 +189,22 @@ class TaskService:
         The id is passed in rather than read off the journal: the caller looked
         it up by that id, so it is known to be an ``int`` there and would need a
         redundant narrowing check here.
+
+        **The clock is read once.** Both the predicate and the error's "today"
+        derive from one instant, because a bare ``now=None`` would let each read
+        the clock separately — and a create landing on local midnight would then
+        be refused against one day and told about another. Resolving the instant
+        here rather than comparing dates inline keeps the rule itself in
+        :func:`~app.core.journal.services.journal_date_resolver.is_future_dated`,
+        which is the module that owns what "future-dated" means.
         """
         tz = await self.date_resolver.timezone_for(user_id)
-        if is_future_dated(due_journal, tz, now):
+        moment = now if now is not None else datetime.datetime.now(tz)
+        if is_future_dated(due_journal, tz, moment):
             return
 
         raise TaskDueJournalNotFutureError(
-            due_journal_id, journal_date(due_journal, tz), today_in(tz, now)
+            due_journal_id, journal_date(due_journal, tz), today_in(tz, moment)
         )
 
     async def _resolve_contacts(self, contact_ids: Sequence[int] | None) -> list[int]:
