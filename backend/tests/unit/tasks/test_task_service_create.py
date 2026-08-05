@@ -394,22 +394,36 @@ class TestAnchorInvariants:
         mock_journal_repo.find_by_id.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_says_nothing_about_ownership_when_an_anchor_is_unreachable(
+    async def test_does_not_attribute_an_unreachable_anchor_to_ownership(
         self,
         service: TaskService,
         mock_journal_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Another user's journal is indistinguishable from one that never existed."""
+        """The message states the constraint but never says which half failed.
+
+        Naming the constraint — a journal must exist *and* be yours — is what
+        makes the error actionable for someone who picked a journal they cannot
+        use. What would leak is *attribution*: telling the user that this
+        particular journal is somebody else's answers a question about another
+        user's data. The integration suite pins the stronger form of the same
+        property, that a foreign journal and an absent one produce an identical
+        message.
+        """
         mock_journal_repo.find_by_ids_for_user.return_value = []
 
         with pytest.raises(TaskAnchorJournalNotFoundError) as exc_info:
             await create(service, mock_transaction)
 
         message = str(exc_info.value).lower()
-        assert "another user" not in message
-        assert "permission" not in message
-        assert "not yours" not in message
+        for attribution in (
+            "another user",
+            "someone else",
+            "not yours",
+            "permission",
+            "forbidden",
+        ):
+            assert attribution not in message
 
     @pytest.mark.asyncio
     async def test_rejects_empty_text_before_touching_a_repository(

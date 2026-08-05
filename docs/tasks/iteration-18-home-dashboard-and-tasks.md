@@ -972,12 +972,16 @@ service's contact check is the single place the rule lands.
 
 **Decisions taken (Phase 4):**
 
-- **Existence and ownership are one error, not two.** A journal the acting user does not own and a
-  journal that does not exist raise the same `TaskAnchorJournalNotFoundError` with the same message,
-  and the message says nothing about ownership. This is the stance `TaskRepository`'s port already
-  documents for tasks, extended to their anchors, and it is what stops a rejected create being used to
-  probe for another user's journals. A test asserts the two rejections are indistinguishable once the
-  ids are stripped, so a future "more helpful" message cannot quietly reintroduce the leak.
+- **Existence and ownership are one error, not two — and the guarantee is indistinguishability, not
+  silence.** A journal the acting user does not own and a journal that does not exist raise the same
+  `TaskAnchorJournalNotFoundError` with a byte-identical message for the same id. This is the stance
+  `TaskRepository`'s port already documents for tasks, extended to their anchors, and it is what stops
+  a rejected create being used to probe for another user's journals. A test asserts the two rejections
+  are indistinguishable once the ids are stripped, so a future "more helpful" message cannot quietly
+  reintroduce the leak. The message *does* name the constraint — a journal must exist and be yours —
+  because a user who picked an unusable journal needs to know why; what it never does is **attribute**
+  the failure to one half or the other. The distinction was sharpened after the PR review caught the
+  exception's docstring claiming the stronger, false property ("says nothing about ownership").
 - **One error class carrying which anchor, rather than one class per anchor.** The rule is single —
   *both anchors must exist and be yours* — so it gets one error with an `anchor` attribute, in the
   shape `TaskValidationError(field, message)` already established. A `TaskJournalAnchor` literal type
@@ -1029,6 +1033,16 @@ service's contact check is the single place the rule lands.
   *a date* cannot be anchored on a moving instant (Phase 3's rule), while tests that only need "a
   future journal" are clearer against the real clock; one helper now serves both, and the docstring
   says which to use.
+
+**Deferred out of the phase (recorded, not dropped):** the PR review also questioned the bare
+`assert saved.id is not None` idiom used to narrow a repository-assigned id. It is an established
+convention with three prior call sites and `python -O` is not used anywhere in this repository, so
+changing only the tasks one would leave the codebase inconsistent about a rule that should be uniform.
+Raised as a codebase-wide question in **issue #1261** rather than settled inside a phase PR. A second
+suggestion — guarding against the service's repositories being bound to a different `AsyncConnection`
+than its `transaction` — was declined: both come from one Dishka request scope so they cannot diverge,
+and the check would require the service to reach past `TaskRepository` into the SQL adapter's
+connection, which is the coupling the port exists to prevent.
 
 **Required Test Coverage:** unit — each invariant including the same-journal case and each ownership
 violation. Integration — the service against real journals, including another user's journal as the due

@@ -48,9 +48,14 @@ class TaskAnchorJournalNotFoundError(TaskDomainError):
     Covers both halves of the same rule: a task must be anchored to two journals
     that **exist** and that **belong to the acting user**. The two are
     deliberately one error, because the anchors are resolved by a single
-    owner-scoped read — a journal belonging to somebody else is indistinguishable
-    from one that never existed, and the message says nothing about ownership so
-    it cannot be used to probe for another user's journals.
+    owner-scoped read.
+
+    **The guarantee is indistinguishability, not silence.** The message states
+    the constraint — a journal must exist *and* be yours — because a user who
+    picked a journal they cannot use needs to know why. What it never reveals is
+    *which* half failed: a journal belonging to somebody else and a journal that
+    never existed produce a byte-identical message for the same id, so the error
+    cannot be used to probe for another user's journals.
     """
 
     def __init__(self, anchor: TaskJournalAnchor, journal_id: int):
