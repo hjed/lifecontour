@@ -2,8 +2,10 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–3 complete** (task tables + domain entity; task repository; journal-date resolution
-and the future-dated rule); next is ITER18-001 Phase 4 (creation service and core invariants).
+**ITER18-001 Phases 1–4 complete** (task tables + domain entity; task repository; journal-date resolution
+and the future-dated rule; the creation service and its core invariants); next is ITER18-001 Phase 5
+(create over REST and MCP) — after which ITER18-002 Phases 1–3 must merge immediately, per the
+Sequencing Strategy.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -67,6 +69,14 @@ registered in both the application and integration-test containers. It covers sa
 delete plus intermediate-journal and contact link add, remove and list, all owner-scoped, with
 idempotent link adds. There is still no service, endpoint, MCP tool or frontend surface, and no
 invariant enforcement beyond task ownership.
+
+**Since ITER18-001 Phase 4:** tasks are creatable in the domain. `TaskService.create_task`
+(`backend/app/core/tasks/services/task_service.py`, provided at request scope by `TaskProvider`)
+enforces the specification's core invariants as one `@transactional` unit of work — both anchors exist
+and belong to the acting user, the due journal is future-dated at the moment it is set, creating and
+due may be the same journal, and referenced contacts exist — raising `TaskAnchorJournalNotFoundError`
+(404) or `TaskDueJournalNotFutureError` (400). There is still no endpoint, MCP tool or frontend
+surface, and no status, retargeting or link operation beyond what creation writes.
 
 ### The home page
 
@@ -874,27 +884,193 @@ against a real user-settings row and the UTC fallback when no timezone is set. N
   change). No frontend or e2e gates — the phase changes no frontend file and ships no user-visible
   surface.
 
-#### Phase 4: Creation Service and Core Invariants
+#### Phase 4: Creation Service and Core Invariants ✅ COMPLETE
 
 **Prerequisites:** Phases 2 and 3.
-**Estimated diff:** ~120 production → **~480 tracked** (×4)
+**Estimated diff:** ~120 production → **~480 tracked** (×4) · **Overrun recorded before work started
+(delivery rule 3): ~190 production → ~900 tracked** · **Actual:** ~332 production → **~1923 tracked**
+(1923 insertions, 41 deletions across 13 files: 332 production — service 218, exceptions 58, DI 33,
+error handlers 11, service package 1, package exports 11 — 1341 tests and fixtures, 250 docs). The ×4
+figure assumes a phase that wires an existing rule to a new surface. This one *defines* the rules, so
+Phase 3's suggested amendment to calibration rule 13 — **×6 for rule-defining phases, whose acceptance
+criteria read as a matrix rather than a capability** — applies here directly, and for the same reason:
+the deliverable only means anything at its boundaries, so every boundary is a test (the strict
+today/tomorrow edge, a non-UTC day boundary and its mirror, each anchor, each ownership violation,
+each rejected contact).
+
+**The pre-recorded overrun undershot as well — the third phase running — and the pattern is now
+consistent enough to state as a rule.** 1923 against 480 is 4.0× on the estimate; against *production*
+it is **5.8×**, which lands on the ×6 Phase 2 proposed and Phase 3 confirmed. What the advance figure
+missed was not the service (218 against ~130 predicted) but the **test-to-production ratio for a rule
+that only exists at its boundaries: 1341 test lines against 332 production, or 4.0× the production line
+count in tests alone.** 31 unit tests and 13 integration tests, and none of them is redundant — each
+pins a different corner of the same five-line predicate. **Suggested amendment to rule 13:** for a
+rule-defining phase, estimate the tests at ~4× the production estimate and the total at ×6, rather than
+applying a flat multiplier to a guessed production figure.
+
+Rule 3 prefers splitting an oversized PR. **Splitting was declined.** The only available cut is
+"service now, invariants later", which would ship a create path that skips its own rules — a direct
+breach of rule 9 (no phase may rely on a later one to restore behaviour it broke), and the invariants
+are the phase's entire product. The alternative cut, separating unit from integration coverage, splits
+tests from the code they pin.
+
+**Divergence recorded before work started (Phase 4) — contacts have no owner:**
+
+The third acceptance criterion requires that a linked contact belong to the acting user. **It cannot be
+enforced as written, and the reason is structural, not an omission here.** The `contacts` table has no
+`user_id` or owner column (`backend/app/infrastructure/contacts/contact_tables.py`), the `core_shared`
+`Contact` entity carries none, and no code path anywhere in the backend validates contact ownership —
+`JournalContactService.add_contact_to_journal` links a contact to a journal without any such check.
+Contacts are single-user in this system. Iteration 13 hit the same wall and recorded it the same way
+(*"the AC's 'same owner' precondition is not applicable at the data layer"*,
+[iteration-13-contact-merge.md](./iteration-13-contact-merge.md)).
+
+So the enforceable half ships — **the contact must exist**, checked in the service before anything is
+written — and the ownership half is recorded here rather than faked. The alternative, inventing a
+transitive rule ("a contact linked to one of your journals"), would be a product decision the
+specification does not make, in a phase with no mandate to make it. The integration test the criterion
+asks for ("a contact owned by another user (rejected)") is therefore written as *a non-existent contact
+is rejected, and no task or link row is written*. **Follow-up:** if contacts ever gain ownership, this
+service's contact check is the single place the rule lands.
 
 **Acceptance Criteria:**
 
-- [ ] `TaskService.create_task` as a `@transactional` unit of work, taking creating journal, text, due
-      journal and optional contacts.
-- [ ] Invariants enforced here so every entry point inherits them: both anchors present; the due journal
+- [x] `TaskService.create_task` as a `@transactional` unit of work, taking creating journal, text, due
+      journal and optional contacts. — `backend/app/core/tasks/services/task_service.py`. Keyword-only
+      arguments so a caller cannot transpose the two journal ids, and `contact_ids` is optional as the
+      specification has it. The decorator's own guard means the `transaction` parameter cannot be
+      dropped without failing at import.
+- [x] Invariants enforced here so every entry point inherits them: both anchors present; the due journal
       **exists**; the due journal is future-dated per Phase 3; creating and due may be the same journal.
-- [ ] **Ownership is an invariant, not an assumption:** both journals must belong to the acting user, as
-      must any linked contact. A task can never span owners.
-- [ ] Distinct, actionable domain errors per violated invariant, mapped to the journal/task domain's
-      existing error-to-status conventions.
-- [ ] The future-date check happens **only** at set time; nothing re-validates it on read. This is what
-      makes a lapsed task reachable at all — see Phase 22's fixture recipe.
+      — presence stays on the entity (`Task.__post_init__`, so it costs no query); existence, ownership
+      and future-dating are the service's. Creating == due is not special-cased: the anchor ids are
+      de-duplicated before the read, so the same journal is fetched once and satisfies both.
+- [x] **Ownership is an invariant, not an assumption:** both journals must belong to the acting user, as
+      must any linked contact. A task can never span owners. — **journals in full; contacts diverge, as
+      recorded above.** Ownership is enforced by the *query* rather than by a comparison: one
+      `find_by_ids_for_user(user_id, [creating, due])` resolves both anchors, so a journal belonging to
+      somebody else is simply absent from the result. Asserted against a **real second user's journals**
+      on each anchor, not against an absent id.
+- [x] Distinct, actionable domain errors per violated invariant, mapped to the journal/task domain's
+      existing error-to-status conventions. — `TaskAnchorJournalNotFoundError` (404, carrying which
+      anchor) and `TaskDueJournalNotFutureError` (400, carrying the journal's date and today's) in
+      `core_shared/core_shared/models/tasks/exceptions.py`, both `TaskDomainError` subclasses so the
+      already-registered `DomainError` handler covers them. Four `error_code_map` entries added — the
+      two new errors plus `TASK_NOT_FOUND` and `TASK_VALIDATION_ERROR`, which Phases 1–2 shipped
+      unmapped and which would otherwise have reached Phase 5's payloads as `DOMAIN_ERROR`.
+- [x] The future-date check happens **only** at set time; nothing re-validates it on read. This is what
+      makes a lapsed task reachable at all — see Phase 22's fixture recipe. — the check lives on the
+      write path, and `is_future_dated` has exactly one caller outside its own module. Pinned
+      positively rather than by absence: `test_the_rule_is_applied_only_when_the_anchor_is_set` creates
+      against a backdated `now` so the due journal was future *then* and is three days past *now*, and
+      the task reads back cleanly. Two honest limits on that evidence. The only read path this phase
+      ships is `TaskRepository.find_by_id`, which never had validation to skip, so the "nothing
+      re-validates" half is really proved by Phase 12–13's read model rather than here. And the recipe
+      is a **backend fixture** recipe: Phase 22 drives Playwright through REST, which must *not* expose
+      `now` (see the decision below), so its lapsed fixtures will seed the row directly or through the
+      repository — not through this call.
+
+**Decisions taken (Phase 4):**
+
+- **Existence and ownership are one error, not two.** A journal the acting user does not own and a
+  journal that does not exist raise the same `TaskAnchorJournalNotFoundError` with the same message,
+  and the message says nothing about ownership. This is the stance `TaskRepository`'s port already
+  documents for tasks, extended to their anchors, and it is what stops a rejected create being used to
+  probe for another user's journals. A test asserts the two rejections are indistinguishable once the
+  ids are stripped, so a future "more helpful" message cannot quietly reintroduce the leak.
+- **One error class carrying which anchor, rather than one class per anchor.** The rule is single —
+  *both anchors must exist and be yours* — so it gets one error with an `anchor` attribute, in the
+  shape `TaskValidationError(field, message)` already established. A `TaskJournalAnchor` literal type
+  names the two roles. The wider *link role* vocabulary (due / created / mentioned) that Phase 13's
+  list-by-role needs is deliberately **not** introduced here; it belongs to the phase that reads it.
+- **`ContactNotFoundError` is reused, not duplicated.** An unknown contact id is a contacts-domain
+  fact, it already exists with the right status and error code, and delivery rule 7 prefers reuse. The
+  service imports it across domains, which is precedented (`contact_merge_service` imports the journal
+  repositories).
+- **Contact existence is one batched read**, `find_names_by_ids`, whose contract already states that
+  only contacts that exist appear in the result. Looping `contact_exists` would have been an N+1 on a
+  path where a user may name several people.
+- **The timezone is fetched once per create and handed to the pure predicate**, rather than calling
+  `JournalDateResolver.is_future_dated` per journal. Phase 3 split the module that way precisely so
+  batch callers would not read settings per row, and this is the first caller to honour it.
+- **`now` is an explicit parameter on the service method — and must never reach it from a request.**
+  There is no `freezegun` in this repo, and the behaviour under test *is* the instant-to-local-date
+  derivation, so an injectable clock is the only way to test either side of a day boundary. It defaults
+  to the real clock, so no caller has to know about it. But it is also a **loaded gun**: a controller
+  that bound it from the request body — which a `**payload`-style wiring would do silently — would make
+  invariant 4 opt-out for every client. The docstring says so at the parameter, and Phase 5 carries an
+  acceptance criterion that neither surface accepts it.
+- **The one thing `@transactional` really guarantees is now tested.** Every rejection in this phase
+  happens *before* the first write, so "no partial task" holds structurally on those paths whether or
+  not a unit of work is open — which means none of them would notice the decorator being deleted.
+  `test_a_failure_while_linking_rolls_the_task_back` makes the contact link fail *after* the task row
+  exists and asserts the row is gone; it was mutation-checked by removing `@transactional`, which makes
+  it (and only it) fail.
+- **Contact links are written in a loop, and that is a knowing deferral.** Each `add_contact` re-proves
+  task ownership with its own `SELECT … FOR KEY SHARE`, so N contacts cost 2N statements to link a task
+  the service created three lines earlier — an odd asymmetry next to the batched existence check.
+  Batching it means a new `add_contacts` on the port and its adapter, which is Phase 11's surface, not
+  this one's. **Follow-up recorded for Phase 11.**
+- **A `make_task_container` helper replaced the two hand-rolled DI containers.** `TaskProvider` no
+  longer stands alone — `TaskService` needs the journal, contact and settings graphs, and Dishka
+  validates the whole graph at construction — so Phase 2's DI test broke the moment the factory landed.
+  Rather than paste the provider list twice, both tests build through one helper in
+  `tests/integration/tasks/task_seeding.py`, whose docstring records why `InfrastructureProvider` and
+  `IntegrationProvider` are in the list despite the tasks domain needing neither.
+- **`create_journal` gained an optional `start`** rather than a second seeding helper. Tests asserting
+  *a date* cannot be anchored on a moving instant (Phase 3's rule), while tests that only need "a
+  future journal" are clearer against the real clock; one helper now serves both, and the docstring
+  says which to use.
 
 **Required Test Coverage:** unit — each invariant including the same-journal case and each ownership
 violation. Integration — the service against real journals, including another user's journal as the due
 journal (rejected) and a contact owned by another user (rejected). No e2e.
+
+- **Unit (26 tests):** `backend/tests/unit/tasks/test_task_service_create.py`. Repositories are mocked;
+  `JournalDateResolver` is the **real** collaborator over a mocked settings repository, because the
+  timezone rule is part of the behaviour under test. *Creation (7):* the saved entity's text, anchors
+  and default `NOT_DONE`; the persisted row is what the caller gets; contacts become link rows against
+  the assigned id; no contacts means no link and no contact read; duplicates collapse keeping
+  first-mention order; existence is one batched call; **creating == due is accepted and fetched once**.
+  *Anchors (7):* a missing creating journal, a missing due journal, both missing (the creating anchor is
+  named, deterministically); the lookup is the owner-scoped one and `find_by_id` is never used; the
+  message leaks no ownership language; empty text is rejected before any I/O; a zero anchor id is
+  rejected. *Future-dated (10):* tomorrow accepted, **today rejected** (the strict boundary Phase 3
+  settled), yesterday rejected; a multi-day journal already under way rejected and dated by its start;
+  **the same journal as both anchors rejected when it is not future-dated** — invariant 6's proviso, and
+  the case where collapsing the two roles could skip the date check along with the second lookup (added
+  in review); the message carries both dates; **the Sydney pair** — a journal a UTC reading would accept
+  is rejected on the user's local day, and its mirror is accepted where UTC would reject — plus the
+  timezone being read exactly once. *Contacts (2):* an unknown id is rejected and nothing is saved.
+- **Unit (5 tests):** `backend/tests/unit/api/test_task_error_mapping.py` — each task error's JSON:API
+  code and status, that the two creation failures are told apart, that Phase 1–2's errors are mapped
+  too, and that the base class still renders generically.
+- **Integration (13 tests):** `backend/tests/integration/tasks/test_task_service_create_integration.py`
+  against real PostgreSQL. *Creation (3):* the row survives the round trip with both anchors and the
+  default status; contacts and task are both visible once the create returns (one unit of work);
+  creating == due against a real row. *Unit of work (1, added in review):* a contact link that fails
+  **after** the task row exists rolls the task back — the one case that distinguishes `@transactional`
+  from the structural "validate before writing" guarantee, and mutation-checked by deleting the
+  decorator. *Ownership (3):* another user's journal rejected as the **due**
+  anchor and as the **creating** anchor, with no task row written either time; and a foreign journal
+  producing an error indistinguishable from an absent one. *Future-dating (3):* the Sydney case decided
+  on the user's local day where UTC disagrees, with nothing written; the UTC fallback for a user with no
+  settings row deciding the same pair the other way; and **the set-time-only rule**, creating against a
+  backdated `now` so the resulting task is already lapsed and still reads back. *Contacts (2):* an
+  unknown contact id rejected with no task and no link row, and a valid contact alongside an invalid one
+  linking nothing. *DI (1):* `TaskService` resolves through a real Dishka request scope. Phase 2's
+  repository DI test was updated to the same helper (its own count unchanged).
+- **E2E:** none — deferral taken as the phase states. Phase 4 ships no controller, MCP tool or frontend
+  surface, so there is nothing for Playwright to drive; ITER18-001's e2e lands in Phase 22.
+- **Docs:** `docs/architecture/domain-architecture.md` gained a *Task creation invariants* section (the
+  layer table for who enforces which rule, the three load-bearing properties of the service half, and
+  the contact-ownership divergence), and the Tasks Domain's *Domain Services* entry now names
+  `TaskService` instead of deferring it.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (846 files) and
+  `core_shared`; `mypy` clean over 844 backend source files and 93 in `core_shared`; the full
+  `tests/unit/` suite (2704 tests); and `tests/integration/tasks/`, `tests/integration/journal/` and
+  `tests/integration/api/` together (1060 tests). No frontend or e2e gates — the phase changes no
+  frontend file and ships no user-visible surface.
 
 #### Phase 5: Create — REST and MCP
 
@@ -911,6 +1087,16 @@ for service + REST + MCP (calibration rule 2)
 - [ ] Both surfaces reject a non-existent, non-future or non-owned due journal with a message naming the
       constraint, and neither offers a bare date nor creates a journal implicitly.
 - [ ] Controller and tool open no transactions; both call the `@transactional` service.
+- [ ] **Neither surface exposes `TaskService.create_task`'s `now` parameter.** It is the test seam the
+      future-dated invariant is judged against, so a request able to set it would make invariant 4
+      opt-out for any client. Added after Phase 4's review: the request schema must carry no such field
+      and must reject unknown fields, asserted by a test on each surface.
+- [ ] **Decide the status code for a rejected due journal deliberately.** Phase 4 raises
+      `TaskAnchorJournalNotFoundError` as a 404, consistent with `JournalNotFoundError` and
+      `ContactNotFoundError`. On `POST /api/journals/{journal_id}/tasks` that means an invalid *body*
+      field answers 404, which a client may read as "the path journal is missing". Confirm or override
+      it here — and if overridden, do it in the error's mapping rather than by catching in the
+      controller, so MCP inherits the same answer.
 - [ ] **This is the phase after which journal delete and merge can hit the anchor FK.** ITER18-002
       Phases 1–3 must merge immediately after it — see the Sequencing Strategy.
 
@@ -1020,9 +1206,16 @@ each rejection on both surfaces, including the cross-user journal. E2E deferred 
 - [ ] Link and unlink a contact over REST and MCP in the same PR; linking is idempotent.
 - [ ] Links carry **no** relationship type, role or attendance status, and nothing parses contacts out of
       the task text.
-- [ ] Contact links are editable in any status; the contact must belong to the acting user.
+- [ ] Contact links are editable in any status; the contact must belong to the acting user. **Read
+      Phase 4's contact divergence first** — `contacts` has no owner column, so the enforceable rule is
+      existence. If this phase does not change that, it inherits the divergence rather than restating
+      the criterion as met.
 - [ ] Deleting a contact removes its task links without touching the tasks — the FK direction fixed in
       Phase 1, asserted here.
+- [ ] **Follow-up from Phase 4: batch the link write.** `TaskService.create_task` links contacts in a
+      loop, and each `add_contact` re-proves task ownership with its own `SELECT … FOR KEY SHARE` — 2N
+      statements for N contacts. This is the phase that owns the contact-link surface, so an
+      `add_contacts` on the port and its adapter belongs here, with `create_task` migrated onto it.
 
 **Required Test Coverage:** unit — schemas, tool schemas, idempotency. Integration — round-trips, contact
 deletion behaviour, cross-user rejection, both surfaces. E2E deferred to Phase 22.

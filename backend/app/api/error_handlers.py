@@ -37,6 +37,12 @@ from core_shared.models.journals import (
     TravelFlightValidationError,
     TravelTransportationValidationError,
 )
+from core_shared.models.tasks import (
+    TaskAnchorJournalNotFoundError,
+    TaskDueJournalNotFutureError,
+    TaskNotFoundError,
+    TaskValidationError,
+)
 from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -144,6 +150,11 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         JournalCycleError: "JOURNAL_CYCLE_ERROR",
         JournalMaxDepthExceededError: "JOURNAL_MAX_DEPTH_EXCEEDED",
         JournalTypeDependencyError: "JOURNAL_TYPE_DEPENDENCY_ERROR",
+        # Task errors
+        TaskNotFoundError: "TASK_NOT_FOUND",
+        TaskValidationError: "TASK_VALIDATION_ERROR",
+        TaskAnchorJournalNotFoundError: "TASK_ANCHOR_JOURNAL_NOT_FOUND",
+        TaskDueJournalNotFutureError: "TASK_DUE_JOURNAL_NOT_FUTURE",
         # Calendar errors
         CalendarNotFoundError: "CALENDAR_NOT_FOUND",
         CalendarValidationError: "CALENDAR_VALIDATION_ERROR",

@@ -23,20 +23,19 @@ service-layer concerns and arrive with Phases 3 and 4.
 import pytest
 import pytest_asyncio
 from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
-from dishka import Provider, Scope, make_async_container, provide
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.repositories import TaskRepository
-from app.infrastructure.di.tasks import TaskProvider
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     count,
     create_contact,
     create_journal,
+    make_task_container,
 )
 
 _COUNT_INTERMEDIATE = (
@@ -628,19 +627,7 @@ class TestDependencyInjection:
         self, async_connection: AsyncConnection
     ):
         """Resolving the port yields the SQL adapter on the request connection."""
-
-        class _ConnectionProvider(Provider):
-            def __init__(self, connection: AsyncConnection) -> None:
-                super().__init__()
-                self.connection = connection
-
-            @provide(scope=Scope.REQUEST)
-            def get_connection(self) -> AsyncConnection:
-                return self.connection
-
-        container = make_async_container(
-            _ConnectionProvider(async_connection), TaskProvider()
-        )
+        container = make_task_container(async_connection)
         try:
             async with container() as request_container:
                 repository = await request_container.get(TaskRepository)
