@@ -198,21 +198,29 @@ class TaskRepository(ABC):
 
 
 class TaskAnchorRepository(ABC):
-    """Reads which tasks anchor a journal, for the journal delete guard.
+    """The tasks a journal anchors, for the journal domain's two anchor rules.
+
+    Deleting a journal that anchors a task is refused, and merging one moves the
+    links instead. Both are the journal domain asking about task rows it does not
+    own, so both live here.
 
     Kept apart from :class:`TaskRepository` because it answers a different
     domain's question. Its consumer is the journal domain, which must not be
-    handed the ability to write tasks in order to find out whether it may delete
-    a journal.
+    handed the ability to *write tasks* — to change a task's text, status or
+    contacts, or to delete one — in order to find out whether it may delete a
+    journal, or to keep its own foreign keys intact through a merge. Re-pointing
+    writes task rows, but only their journal columns, and only to the extent the
+    foreign keys demand.
 
-    **This is the one task read that is not owner-scoped, and deliberately so.**
-    It stands in for a foreign-key check, so it has to see every row the
-    ``ON DELETE RESTRICT`` anchors see: a row it filtered away would come back as
-    the raw ``IntegrityError`` the guard exists to replace. Nothing is exposed
-    that the delete path did not already reach — ``JournalService.delete_journal``
-    and the journal lookup before it are themselves unscoped — and a task can
-    only anchor to a journal the acting user owns, because task creation
-    resolves both anchors owner-scoped.
+    **Nothing here is owner-scoped, and deliberately so.** Every method stands in
+    for a foreign-key check, so each has to see every row the
+    ``ON DELETE RESTRICT`` anchors see: a row filtered away would come back as
+    the raw ``IntegrityError`` the guard exists to replace, or as a link left
+    pointing at a journal that no longer exists. Nothing is exposed that the
+    delete path did not already reach — ``JournalService.delete_journal`` and the
+    journal lookup before it are themselves unscoped — and a task can only anchor
+    to a journal the acting user owns, because task creation resolves both
+    anchors owner-scoped.
     """
 
     @abstractmethod
@@ -235,4 +243,51 @@ class TaskAnchorRepository(ABC):
         Returns:
             The blocking tasks, ordered by task id, or an empty list when the
             journal anchors nothing.
+        """
+
+    @abstractmethod
+    async def repoint_journal_links(
+        self, *, source_journal_id: int, target_journal_id: int
+    ) -> None:
+        """Move every task link off one journal and onto another.
+
+        Called by a journal merge before it deletes the absorbed journal. Unlike
+        a delete, a merge is never refused — it is what makes calendar sync
+        usable — so all three kinds of link move: the creating anchor, the due
+        anchor and intermediate links. The resulting shape obeys the
+        specification's rules:
+
+        - a task is never linked twice to the same journal in the same role;
+        - a survivor that becomes both the creating **and** the due journal of a
+          task is permitted, and the task is otherwise unaffected;
+        - an intermediate link that has become redundant with one of the task's
+          own anchors is dropped, because the anchor role already says more —
+          but only for a task this merge actually touched, since a task can
+          reach that shape without any merge (retargeting keeps the previous due
+          journal as an intermediate link);
+        - no task's ``status`` or ``text`` changes. ``updated_at`` does move on
+          a task whose anchors were re-pointed: its links really did change.
+
+        An implementation must hold **both** journals for the rest of the
+        transaction, in a consistent order across callers. The absorbed journal
+        so that a task cannot be anchored to it after the re-point and before
+        the caller's delete, which would fail the delete on the anchor foreign
+        key; the survivor so that two merges into the same journal cannot both
+        move a link onto it and collide. Either way the result would be a merge
+        blocked by task rows.
+
+        **Call this before writing either journal row.** The lock order only
+        buys anything if it is the transaction's first claim on the pair — a
+        caller that updates the survivor first has already taken that lock out
+        of order, and two callers running in opposite directions will deadlock
+        on each other however carefully this method sorts.
+
+        Idempotent: running it again with the same pair changes nothing, and
+        passing the same journal as both source and target is a no-op rather
+        than a self-collapse.
+
+        Args:
+            source_journal_id: The journal being absorbed, which is about to be
+                deleted
+            target_journal_id: The surviving journal the links move onto
         """

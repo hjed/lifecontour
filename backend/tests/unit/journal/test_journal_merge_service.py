@@ -14,6 +14,7 @@ from core_shared.models.journals import (
 from app.core.journal.services.journal_merge_service import (
     JournalMergeService,
 )
+from app.core.tasks.models.repositories import TaskAnchorRepository
 
 
 @pytest.fixture
@@ -27,6 +28,19 @@ def mock_journal_repo(mock_transaction):
 @pytest.fixture
 def mock_event_publisher():
     return AsyncMock()
+
+
+@pytest.fixture
+def mock_task_anchor_repo():
+    """An anchor-repository mock held to the real port's surface.
+
+    ``spec`` matters here: the merge service must call a method the port
+    actually declares, so a typo or a method that only exists on the mock
+    cannot pass. It also pins that merge reaches tasks through the *anchor*
+    port, which cannot write a task's text, status or contacts, rather than
+    through the full ``TaskRepository``.
+    """
+    return AsyncMock(spec=TaskAnchorRepository)
 
 
 @pytest.fixture
@@ -44,10 +58,11 @@ def mock_transaction():
 
 
 @pytest.fixture
-def merge_service(mock_journal_repo, mock_event_publisher):
+def merge_service(mock_journal_repo, mock_event_publisher, mock_task_anchor_repo):
     return JournalMergeService(
         journal_repo=mock_journal_repo,
         event_publisher=mock_event_publisher,
+        task_anchor_repo=mock_task_anchor_repo,
     )
 
 
@@ -772,6 +787,113 @@ class TestAdditiveFitnessMerge:
         assert len(move_calls) == 1
 
 
+class TestTaskLinkRepointing:
+    """Merge moves a task's journal links onto the survivor.
+
+    A task's two anchors are ``ON DELETE RESTRICT`` foreign keys and its
+    intermediate links are ``ON DELETE CASCADE``, so *when* the re-point runs
+    decides whether the merge raises an integrity error or quietly destroys
+    links. These tests pin the orchestration — that it happens, once, with the
+    ids the right way round, and before the source journal is deleted.
+
+    The rules the statements themselves implement — duplicate collapse, the
+    creating-equals-due outcome, cross-role redundancy — are set-based SQL over
+    two tables, so they are pinned against the real schema in
+    ``tests/integration/tasks/test_journal_merge_task_links_integration.py``
+    instead. A primary-key violation and an ``ON DELETE CASCADE`` cannot happen
+    against a mock.
+    """
+
+    @staticmethod
+    def _arrange(mock_journal_repo):
+        """Point the repo at a target (1) and a source (2)."""
+        target = create_test_journal(id=1, title="Target Title")
+        source = create_test_journal(id=2, title="Target Title")
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        return target
+
+    @pytest.mark.asyncio
+    async def test_merge_repoints_task_links_onto_the_survivor(
+        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+    ):
+        """The source's task links are re-pointed exactly once, ids not transposed."""
+        self._arrange(mock_journal_repo)
+
+        await merge_service.merge_journals(1, 2, mock_transaction)
+
+        mock_task_anchor_repo.repoint_journal_links.assert_awaited_once_with(
+            source_journal_id=2, target_journal_id=1
+        )
+
+    @pytest.mark.asyncio
+    async def test_task_links_are_repointed_before_any_journal_is_written(
+        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+    ):
+        """Order is the whole point, and it is load-bearing twice.
+
+        Re-pointing after the **delete** would raise a foreign-key violation on
+        the ``RESTRICT`` anchors, and the intermediate links would already have
+        been cascaded away.
+
+        Re-pointing after the **save** would be subtler and worse. The
+        repository locks both journals in ascending id order, which only keeps
+        two merges from deadlocking if nothing in the transaction locked a
+        journal first — and ``save(target)`` locks the target. So the re-point
+        has to come before every journal write, not merely before the delete,
+        and this asserts the stronger order.
+        """
+        self._arrange(mock_journal_repo)
+        order: list[str] = []
+
+        def record(name: str):
+            def record_call(*_args: Any, **_kwargs: Any) -> None:
+                order.append(name)
+
+            return record_call
+
+        mock_task_anchor_repo.repoint_journal_links.side_effect = record("repoint")
+        mock_journal_repo.save.side_effect = record("save_target")
+        mock_journal_repo.delete.side_effect = record("delete_source")
+
+        await merge_service.merge_journals(1, 2, mock_transaction)
+
+        assert order == ["repoint", "save_target", "delete_source"]
+
+    @pytest.mark.asyncio
+    async def test_merge_touches_nothing_else_on_a_task(
+        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+    ):
+        """Merge re-points links and stops there — it never changes a status.
+
+        Asserted as "no other repository method was called" rather than "status
+        is unchanged". The anchor port cannot change a status at all, so this
+        also pins that the service has not quietly grown a second task
+        dependency that could.
+        """
+        self._arrange(mock_journal_repo)
+
+        await merge_service.merge_journals(1, 2, mock_transaction)
+
+        called = {name for name, _args, _kwargs in mock_task_anchor_repo.mock_calls}
+        assert called == {"repoint_journal_links"}
+
+    @pytest.mark.asyncio
+    async def test_merge_is_not_blocked_by_tasks(
+        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+    ):
+        """Unlike delete, merge stays available — calendar sync depends on it."""
+        target = self._arrange(mock_journal_repo)
+
+        result = await merge_service.merge_journals(1, 2, mock_transaction)
+
+        assert result is target
+        mock_journal_repo.delete.assert_called_once_with(2)
+        mock_task_anchor_repo.repoint_journal_links.assert_awaited_once()
+
+
 class TestHasBaseConflicts:
     """Tests for the has_base_conflicts method that determines if two journals have conflicting fields."""
 
@@ -796,6 +918,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
+            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
         )
         assert service.has_base_conflicts(target, source) is False
 
@@ -820,6 +943,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
+            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
         )
         assert service.has_base_conflicts(target, source) is True
 
@@ -844,6 +968,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
+            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
         )
         assert service.has_base_conflicts(target, source) is True
 
@@ -871,6 +996,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
+            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
         )
         assert service.has_base_conflicts(target, source) is True
 
@@ -895,6 +1021,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
+            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
         )
         assert service.has_base_conflicts(target, source) is False
 
@@ -919,5 +1046,6 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
+            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
         )
         assert service.has_base_conflicts(target, source) is False

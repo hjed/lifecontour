@@ -33,6 +33,9 @@ from app.core.journal.adapters.sql.fitness_data_repository import (
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 USER_ID = "user123"
@@ -59,6 +62,7 @@ class TestFitnessMergeModes:
         return JournalMergeService(
             journal_repo=journal_repo,
             event_publisher=OutboxEventPublisher(clean_database),
+            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
         )
 
     async def _create_journal(self, journal_repo, title: str) -> int:

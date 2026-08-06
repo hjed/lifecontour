@@ -2004,6 +2004,83 @@ class TestMergeMcpToolsMountedIntegration:
         return extract_mcp_json_payload(response.text)
 
     @pytest.mark.asyncio
+    async def test_merge_journals_repoints_an_anchored_task(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """An agent can merge a journal a task is anchored to.
+
+        The MCP tool builds its own ``JournalMergeService`` rather than
+        resolving one from the container, so this is the only test that proves
+        *that* construction hands the service its task repository.
+        """
+        creating_id, due_id = task_anchors
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            target_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Survivor",
+                            "content": "Target content",
+                            "event_date_range": {
+                                "start": "2024-06-01T00:00:00Z",
+                                "end": "2024-06-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert target_response.status_code == 201
+            target_id = int(target_response.json()["data"]["id"])
+
+            task_response = await authenticated_client.post(
+                f"/api/journals/{creating_id}/tasks",
+                json={
+                    "data": {
+                        "type": "tasks",
+                        "attributes": {
+                            "text": "print the permit",
+                            "due_journal_id": due_id,
+                        },
+                    }
+                },
+            )
+            assert task_response.status_code == 201
+            task_id = int(task_response.json()["data"]["id"])
+
+            session_id = await initialize_mcp_session(authenticated_client)
+            import json
+
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "merge_journals",
+                {
+                    "target_journal_id": target_id,
+                    "merge_data": json.dumps({"source_journal_id": creating_id}),
+                },
+            )
+
+        assert payload["id"] == target_id
+        anchors = await clean_database.execute(
+            text(
+                "SELECT creating_journal_id, due_journal_id, status "
+                "FROM tasks WHERE id = :task_id"
+            ),
+            {"task_id": task_id},
+        )
+        row = anchors.fetchone()
+        assert row is not None
+        assert row.creating_journal_id == target_id
+        assert row.due_journal_id == due_id
+        assert row.status == "not_done"
+
+    @pytest.mark.asyncio
     async def test_merge_journals_simple(
         self,
         authenticated_lifespan_client,

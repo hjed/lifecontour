@@ -4,10 +4,11 @@
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
 **ITER18-001 Phases 1–5 complete** (task tables + domain entity; task repository; journal-date resolution
 and the future-dated rule; the creation service and its core invariants; create over REST and MCP).
-**ITER18-002 Phase 1 complete** (the delete guard: journal deletion is refused, explanatorily, for any
-journal anchoring a task). **ITER18-002 Phases 2–3 must merge next**, per the Sequencing Strategy —
-`POST /api/journals/{id}/merge` can still hit the anchor foreign keys, and the delete refusal is not yet
-shaped for REST and MCP callers.
+**ITER18-002 Phases 1 and 3 complete** (the delete guard: journal deletion is refused, explanatorily, for
+any journal anchoring a task; and merge, which is never refused — it re-points task links onto the
+survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw integrity
+error). **ITER18-002 Phase 2 must merge next**, per the Sequencing Strategy — the delete refusal is not
+yet shaped for REST and MCP callers.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -1755,10 +1756,15 @@ is impossible, so it should follow ITER18-001 closely.
    domain consistency and cross-domain parity agree here, so iteration 17's tie-breaker never had to be
    applied. `JournalHasAnchoredTasksError` carries the status; the JSON:API body listing the blockers is
    Phase 2's.
-2. **Whether merge also collapses an intermediate link that duplicates a new anchor link** (a task whose
-   intermediate journal is absorbed into its own due journal) — settled in **Phase 2**. The
-   specification's "cannot be linked twice in the same role" leaves the cross-role case unstated;
-   recommended: drop the redundant intermediate link, since the stronger role already covers it.
+2. ~~**Whether merge also collapses an intermediate link that duplicates a new anchor link**~~ — ✅
+   **settled in Phase 3: yes, the redundant intermediate link is dropped.** (Recorded here as "settled
+   in Phase 2", but Phase 2 is the delete-guard *surface*; Phase 3 is the phase that touches merge, so
+   it is settled where it is implemented.) The recommendation stands as written: an intermediate link
+   says "the task was mentioned here", which the creating or due anchor already says in a stronger
+   form, so keeping both would be the same fact twice. The rule is applied to the **survivor** in both
+   directions — an intermediate link absorbed into an anchor, and an anchor absorbed into a journal
+   already linked as intermediate — and is the fourth of the repository's four statements, run last
+   because it reads the anchors the third has just moved.
 
 > **These phases are not optional follow-up work.** From the moment ITER18-001 Phase 5 makes tasks
 > creatable, the `ON DELETE RESTRICT` anchor FKs mean `DELETE /api/journals/{id}` **and**
@@ -1962,30 +1968,195 @@ deletes; one query for many tasks. No e2e (Phase 5).
 surfaces with several blocking tasks, with a done-only blocker, and with intermediate-only links (succeeds).
 No e2e (Phase 5).
 
-#### Phase 3: Merge — Re-pointing and De-duplication
+#### Phase 3: Merge — Re-pointing and De-duplication ✅ COMPLETE
 
-**Prerequisites:** ITER18-001 Phase 5.
-**Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Prerequisites:** ITER18-001 Phase 5. **Merged after Phase 1**, which changed where this phase's row
+work lives — see below.
+**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Actual:** ~274 production → **~1277
+tracked** across 12 files (production 274 — repository SQL and its docstrings 213, port contract 47,
+service 8, DI 3, MCP tool construction 3 — 810 tests and fixtures, 193 docs). The production estimate
+was the right order (274 against 140, and 154 of it before four review findings were addressed), which
+is roughly what calibration rule 13's ×4 assumes for a phase that wires an existing rule to a new
+surface. **The tests did not follow: 810 test lines against 274 production is 3.0×, and the total is
+4.7× the production figure.**
+
+**Why the tests overran when the production code did not.** The four statements are short, but each one
+exists to prevent a *different* failure the others cannot: a `RESTRICT` refusal, a silent `CASCADE`
+deletion, a primary-key collision, and a redundant row. None of those is observable from the others'
+tests, and none is observable at all without a real database — so the phase needs one integration test
+per failure mode plus their mirrors (446 lines), and then the same journey again at each of the two
+merge surfaces, because REST resolves the service from Dishka while the MCP tool constructs it by hand
+and neither proves the other. This is Phase 4's rule-defining pattern in a different guise: **when the
+deliverable is "an operation that must not corrupt data", the test count is set by the number of ways
+the data can be corrupted, not by the size of the code that prevents it.** Suggested amendment to rule
+13: for a phase whose acceptance criteria are *integrity* outcomes, estimate tests at ~4–5× production
+even when the production estimate itself is sound.
+
+**The re-point lives on `TaskAnchorRepository`, and Phase 1 is why.** This phase was built first, against
+`TaskRepository`, and rebasing onto Phase 1 made that placement obviously wrong twice over. Phase 1 had
+introduced a port for exactly this boundary — the journal domain asking about task rows it does not own —
+with the explicit rationale that the journal domain "must not be handed the ability to write tasks in
+order to find out whether it may delete a journal". A merge service holding the full `TaskRepository`
+could change a task's text, status or contacts, or delete one outright; holding `TaskAnchorRepository` it
+can do exactly two things, both of which are anchor integrity. The port's "deliberately not owner-scoped"
+paragraph was already written, and re-pointing needs the same exemption for the same reason.
+
+**It also deleted a lesson this phase had recorded.** Before the rebase, giving `JournalMergeService` a
+`TaskRepository` broke **eleven test containers** — Dishka validates the whole graph at construction, so
+every container registering `JournalProvider` without `TaskProvider` failed with
+`GraphMissingFactoryError` before a single test body ran, and each had to register a provider it had no
+interest in. Phase 1 had already solved that by providing `SqlTaskAnchorRepository` **from
+`JournalProvider`**, following the consumer while ownership stays with the tasks domain. Moving onto that
+port took those eleven files back to untouched and cut the phase from 24 changed files to 12. **The
+carry-forward is not "cross-domain dependencies tax every container" but the narrower, more useful rule
+Phase 1 found first: when one domain needs a sliver of another, give it a port scoped to the question and
+provide it from the consumer's own provider — the alternative fans out over every container in the
+suite.**
+
+**Deviation recorded before work started — where the "re-pointing rules" unit tests went.**
+
+The required coverage below asks for **unit** tests of "re-pointing rules and the creating-equals-due
+outcome". Those rules are four set-based statements over two tables; the only way to unit-test them
+would be to re-express them as a pure Python function that production never calls, and then assert the
+copy rather than the code. **So the split was moved rather than the coverage:** the unit tests hold the
+service's *orchestration* — that the re-point happens exactly once, with the ids the right way round,
+**before** the source journal is deleted, and that merge touches no other task-repository method (which
+is how "merge never changes a status" is asserted at that level, since the service has no other route
+to a task). The rules themselves are pinned against the real schema in
+`tests/integration/tasks/test_journal_merge_task_links_integration.py`.
+
+This follows Phase 4's recorded finding directly — *"for a rule whose failure mode is an error-message
+shape, the integration test is not a confirmation of the unit test — it is the only real test"* — and
+here it is stronger still, because two of the four failure modes (a primary-key violation and an
+`ON DELETE CASCADE`) **cannot exist** outside a database. The de-duplication test was verified as a
+genuine detector rather than assumed to be one: with statement 1 removed,
+`test_duplicate_intermediate_links_collapse` fails on the duplicate key, and passes again when it is
+restored.
+
+**Six latent bugs review caught, and what they say about writing a set-based repair.**
+
+The first two were in the fourth statement's *scope* rather than in any of the four statements' logic,
+and neither was reachable from a surface that ships today — which is exactly why they needed a reviewer
+rather than a test.
+
+1. **The redundancy cleanup deleted bystanders.** As first written, statement 4 said "no task keeps an
+   intermediate link to a journal that is now one of its anchors" and applied it to every task, with a
+   code comment claiming that state could only arise from this merge. **It cannot claim that.** Nothing
+   forbids the shape, and the specification's own retarget rule *manufactures* it: retargeting keeps the
+   previous due journal as an intermediate link (§*Retargeting*), so retargeting back onto that journal
+   leaves it an anchor and an intermediate link at once. An unrelated merge into that journal would then
+   silently delete a task's record of where it had been. Fixed by reading the ids of the tasks that
+   reference the absorbed journal **before** anything moves — afterwards there is nothing left pointing
+   at it to identify them by — and restricting statement 4 to that set. **The lesson: a set-based repair
+   states an invariant over the whole table, so it is only safe if the invariant is actually enforced.
+   Ours was not; scoping to the rows the operation touched is the honest version.**
+2. **Passing the same journal as source and target destroyed its links.** `merge_journals` refuses a
+   self-merge upstream, so the repository never saw it — but the port presents the method as a general
+   primitive and promises idempotence, and statement 1's `EXISTS` matches each intermediate link against
+   itself, so every one would have been deleted. Fixed with an early return.
+
+The **third through sixth** came from the PR review, and they are the ones that bite hardest on the
+phase's own promise, because every one of them ends with a merge failing on task rows.
+
+3. **A task anchored to the absorbed journal mid-merge.** The affected-task read is a non-locking
+   snapshot, so a concurrent `create_task` could anchor a task to the absorbed journal *after* the
+   re-point and *before* the merge's delete: nothing moves it, and the delete then fails on the
+   `RESTRICT` foreign key. Closed by taking `FOR UPDATE` on the absorbed journal before the snapshot —
+   inserting a task takes `FOR KEY SHARE` on each anchor journal to hold its own foreign key, and
+   `FOR UPDATE` is the weakest mode that conflicts with it, so a concurrent creation waits for the merge
+   and then fails its own anchor check against a journal that is genuinely gone.
+4. **Two merges into the same survivor.** If a task has intermediate links to *two* journals and both are
+   absorbed into the same target concurrently, both merges clear the de-duplication step before either
+   has written its `(task_id, target)` link, and the second `UPDATE` violates the composite primary key.
+   **This one is not reachable through `JournalMergeService` today** — it writes the target journal row
+   at step 1, so two merges into the same target already serialise there — but that is a property of one
+   caller rather than of the method, and a caller that stopped writing the target would silently reopen
+   it. Closed by locking the survivor as well, **in ascending id order** so two merges sharing a journal
+   queue rather than deadlock.
+
+5. **The lock order was a claim, not yet a fact.** Sorting the two journal ids inside
+   `repoint_journal_links` only prevents a deadlock if that call is the transaction's **first** claim on
+   either row — and it was the *last* step of the merge, by which time `journal_repo.save(target)` had
+   already taken the survivor's row lock out of order. Two merges in opposite directions (A into B, B
+   into A) would each hold the other's target and deadlock. Fixed by moving the re-point to **step 0**,
+   before every other write, which is where the ordering guarantee actually holds. The unit test was
+   strengthened from "before the delete" to "before the save *and* the delete", so the property that
+   matters is the one asserted.
+6. **And one deadlock no lock order can close, recorded rather than hidden.** Inserting a task takes its
+   `FOR KEY SHARE` locks in foreign-key declaration order — creating anchor, then due anchor — which is
+   the task's own pairing, not an ordering of ids. A task created with its creating anchor on the
+   survivor and its due anchor on the absorbed journal grabs the higher id first, against this method's
+   lower-id-first, and PostgreSQL aborts one side. **This is strictly smaller than the window the lock
+   closes** — before it, *any* concurrent creation anchoring to the absorbed journal failed the merge —
+   but it is not zero, and the docstring says so instead of claiming the locks made deadlock impossible,
+   which is what it claimed before review round 3.
+
+**All of these are documented rather than pinned**, on the same terms ITER18-001 Phase 2 recorded for
+`_require_task_owned`'s `FOR KEY SHARE`: the integration fixture is one savepoint-bound transaction, so a
+second connection cannot see the journals involved, and the serialised form of any of these cases does
+not distinguish a held lock from an absent one. **The general lesson, learned three times over in one
+phase: "never blocked" is a concurrency claim. A snapshot read followed by a delete does not make it
+true; nor does a guarantee resting on what some other layer happens to write first; nor does sorting
+lock acquisitions in one method while an earlier statement in the same transaction has already taken one
+of them.**
+
+**The first two fixes are pinned by tests that were verified to fail without them**, on the same footing
+as the de-duplication detector: `test_a_bystanders_redundant_link_is_left_alone` (which needed a second,
+genuinely-merged task, because without one the new early return means statement 4 never runs and the
+test would have passed for the wrong reason) and `test_repointing_a_journal_onto_itself_changes_nothing`,
+the one test that calls the repository directly because no merge can reach that case.
 
 **Acceptance Criteria:**
 
-- [ ] `JournalMergeService` re-points every task link from the absorbed journal to the survivor — creating,
-      due and intermediate — **before** it deletes the source, so the merge never trips the anchor FK.
-- [ ] A task can never end up linked twice to the same journal **in the same role**; duplicates are removed
+- [x] `JournalMergeService` re-points every task link from the absorbed journal to the survivor — creating,
+      due and intermediate — **before** it deletes the source, so the merge never trips the anchor FK. —
+      new step 10 in `merge_journals`, immediately before `_publish_events_and_cleanup` (which is what
+      deletes the source). The ordering is asserted directly, not implied: a unit test records the call
+      order and fails if the step moves after the delete.
+- [x] A task can never end up linked twice to the same journal **in the same role**; duplicates are removed
       **before** the update statement rather than relying on `ON CONFLICT`, which is unavailable on an
-      `UPDATE` (the ITER17-001 Phase 4 lesson).
-- [ ] A survivor that becomes both the creating and the due journal of a task is permitted and the task is
-      unaffected.
-- [ ] The cross-role redundancy in open decision 2 is handled as decided.
-- [ ] Merge **never** changes a task's status, and merge is never blocked by tasks — it stays usable for
-      calendar-sync workflows, as the specification requires.
-- [ ] The row work lives in the repository, not the service, matching the journal domain's SQL-free service
-      convention.
+      `UPDATE` (the ITER17-001 Phase 4 lesson). — statement 1 is a `DELETE … WHERE EXISTS` in the same
+      shape as `JournalTagRepository.merge_into`. The two anchors are single-valued columns, so the
+      same-role duplicate is only reachable through `task_intermediate_journals`, which is where the
+      composite primary key lives.
+- [x] A survivor that becomes both the creating and the due journal of a task is permitted and the task is
+      unaffected. — not special-cased: statement 3 re-points both anchors in one `UPDATE` with a `CASE`
+      per column, so a task anchored to the source in both roles simply ends up with the survivor in
+      both. Asserted with text and status unchanged.
+- [x] The cross-role redundancy in open decision 2 is handled as decided. — statement 4, in both
+      directions, with a test each, and **restricted to the tasks this merge touched** for the reason
+      recorded above.
+- [x] Merge **never** changes a task's status, and merge is never blocked by tasks — it stays usable for
+      calendar-sync workflows, as the specification requires. — `status` and `text` are absent from
+      statement 3's `SET` list; asserted per status value (`not_done`, `done`, `cancelled`) and, at the
+      unit level, as "no other repository method is called".
+- [x] The row work lives in the repository, not the service, matching the journal domain's SQL-free service
+      convention. — `TaskAnchorRepository.repoint_journal_links` owns all four statements plus the locks;
+      the service's addition is one keyword-argument call. It sits on the **anchor** port Phase 1
+      introduced, not on `TaskRepository`, so the journal domain can move task links without also being
+      handed the ability to change a task's text, status or contacts. Like everything on that port it is
+      **journal-scoped rather than owner-scoped**, and deliberately so: the source journal is about to be
+      deleted and its anchors are `RESTRICT`, so a row skipped by an owner filter would fail the merge.
+      The merge has already established that both journals share an owner.
 
 **Required Test Coverage:** unit — re-pointing rules and the creating-equals-due outcome. Integration —
 merge with overlapping links raises no duplicate-key error **and the test fails if the de-duplication step
 is removed**; merging a journal that anchors a task succeeds end to end (the regression this phase exists to
 prevent); children/tags/contacts behaviour unchanged; status untouched. No e2e (Phase 5).
+
+**Delivered:** 4 unit tests (`tests/unit/journal/test_journal_merge_service.py::TestTaskLinkRepointing`)
+and 17 integration tests — 15 in `tests/integration/tasks/test_journal_merge_task_links_integration.py`
+(13 test functions, one parametrised over the three statuses) covering each anchor, the intermediate
+link, duplicate collapse, creating-equals-due, both cross-role directions, the bystander whose link must
+survive, the self-repoint no-op, every status, orphan rows, an untouched unrelated task and
+children/tags/contacts still moving; plus one at each merge surface
+(`tests/integration/api/test_journal_merge_endpoint.py`, `tests/integration/mcp/test_journal_tools_integration.py`)
+because the REST path resolves the service from Dishka while the MCP tool builds it by hand, so neither
+is evidence for the other. `tests/integration/tasks/task_seeding.py` gains a shared `create_task`
+seeder, which deliberately goes through the repository rather than `TaskService.create_task`: the
+future-dated rule is a creation-time invariant, so the service cannot produce a done or cancelled task
+to merge around. **No e2e and no frontend code**, as the phase specifies — the delete-failure UI and its
+e2e are Phase 5.
 
 #### Phase 4: Cancellation as a Lapse Reason
 
