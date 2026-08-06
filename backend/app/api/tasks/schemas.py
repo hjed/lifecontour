@@ -18,6 +18,7 @@ from.
 """
 
 from datetime import datetime
+from typing import Literal
 
 from core_shared.models.tasks import TaskStatus
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.api.common.schemas import JsonApiCreateRequest, JsonApiLinks, JsonApiResponse
 
 RESOURCE_TYPE_DESC = "Resource type"
-TASK_RESOURCE_TYPE = "tasks"
+TASK_RESOURCE_TYPE: Literal["tasks"] = "tasks"
 
 
 class TaskAttributes(BaseModel):
@@ -77,11 +78,19 @@ class TaskCreateAttributes(BaseModel):
 
 
 class TaskCreateData(BaseModel):
-    """Data for creating a task."""
+    """Data for creating a task.
+
+    The resource type is pinned rather than merely defaulted. A generic JSON:API
+    client chooses its request shape from the type it declares, so accepting
+    ``"contacts"`` here and answering with a task would mean that client
+    performed a mutation on a resource type it never asked for. Raised in review.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    type: str = Field(default=TASK_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC)
+    type: Literal["tasks"] = Field(
+        default=TASK_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
     attributes: TaskCreateAttributes = Field(
         ..., description="Task attributes to create"
     )

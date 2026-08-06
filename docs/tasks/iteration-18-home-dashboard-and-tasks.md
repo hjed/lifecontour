@@ -347,10 +347,10 @@ rules below follow from that record and apply to every phase in this document:
     ITER18-004 Phase 9 (important-date occurrence resolution) and Phase 10 (contact importance signals)
     are the next two this catches — both are estimated at ×4 today.
 15. **A phase exposing an existing rule on N surfaces costs ~one rejection matrix per surface** — added
-    after ITER18-001 Phase 5 came in at 1802 against a 600 estimate (3.0×) and **5.3× its own
+    after ITER18-001 Phase 5 came in at 1962 against a 600 estimate (3.3×) and **5.6× its own
     production**, despite being exactly the "wires an existing rule to a new surface" case rule 14 says
     ×4 still fits. It does not. The service was already written and tested, yet the endpoint and the MCP
-    tool each needed the *whole* rejection matrix — 15 and 12 near-identical tests — because the two
+    tool each needed the *whole* rejection matrix — 16 and 12 near-identical tests — because the two
     surfaces render errors through completely different machinery, and a shared service is no evidence
     that both callers reach it. That is not defensive over-testing: the phase found a real defect on
     exactly that seam (every task rejection reaching AI clients as "internal error"), invisible to the
@@ -1153,9 +1153,10 @@ journal (rejected) and a contact owned by another user (rejected). No e2e.
 **Prerequisites:** Phase 4.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — a capability triple, at the measured floor
 for service + REST + MCP (calibration rule 2) · **Overrun recorded before work started (delivery rule 3):
-~290 production → ~1300 tracked** · **Actual:** ~340 production → **~1802 tracked** (1776 insertions,
-26 deletions across 16 files: 340 production — MCP tool 120, REST schemas 99, controller 84, error
-handler 20, DI 6, registration 9, packages 2 — 1237 tests, 225 docs)
+~290 production → ~1300 tracked** · **Actual:** ~349 production → **~1962 tracked** (1894 insertions,
+68 deletions across 19 files: 349 production — MCP tool 120, REST schemas 108, controller 84, error
+handler 20, DI 6, registration 9, packages 2 — 1335 tests and fixtures, 278 docs; includes the two
+review rounds)
 
 **Why the advance figure is higher than the estimate.** The ×4 assumes a capability triple where the
 service is the bulk of the production line count. Here the service already exists, so the phase is
@@ -1171,11 +1172,11 @@ of delivery rule 5 — MCP parity lands in the same phase, never as a trailing t
 separating the rejection matrix from the surfaces it is asserted against, splits tests from the code
 they pin.
 
-**The pre-recorded overrun undershot for the fourth phase running — 1802 against a 1300 advance figure
+**The pre-recorded overrun undershot for the fourth phase running — 1962 against a 1300 advance figure
 and a 600 estimate — and the reasoning behind it was sound; only the arithmetic was optimistic.** The
-production estimate was nearly right (340 against ~290). What it under-counted, again, was the tests:
-1237 lines, **3.6× the production line count**, against the 900 predicted. Against production the
-total is **5.3×**, which lands inside the ×6 band Phases 2–4 established, so the *shape* of the rule
+production estimate was nearly right (349 against ~290). What it under-counted, again, was the tests:
+1335 lines, **3.8× the production line count**, against the 900 predicted. Against production the
+total is **5.6×**, which lands inside the ×6 band Phases 2–4 established, so the *shape* of the rule
 holds. **The refinement this phase suggests to calibration rule 13** is that a phase which puts N
 surfaces over an existing rule costs roughly one full rejection matrix per surface, not one matrix plus
 a small delta: the 15 endpoint tests and the 12 tool tests are near-identical in structure and neither
@@ -1284,17 +1285,39 @@ actually protects: both surfaces get the same answer from the same place.
   server-level description an AI client reads before choosing a tool, not a per-tool catalogue, so it
   does not breach the "tools document themselves" convention. It states the two things a model cannot
   infer from any single tool: there is no separate task list, and there is no due date.
+- **The JSON:API resource type is pinned, not merely defaulted** — raised by the PR's automated review.
+  `type` was a plain `str` with a `"tasks"` default, copying every other create schema in this
+  repository, so a body declaring `"contacts"` created a task and was answered with `"tasks"`. A
+  generic JSON:API client picks its request shape from the type it declares, which makes that a
+  mutation on a resource type the client never asked for. It is now `Literal["tasks"]`, so a mismatch
+  is a 400. **This diverges from the other create surfaces**, which all still accept any type; the
+  divergence is toward the specification and is recorded rather than propagated. It also sits oddly
+  next to `extra="forbid"` in the original: forbidding an unknown *attribute* while accepting the wrong
+  *resource* was the inconsistency the review found. JSON:API prescribes **409 Conflict** for a type
+  mismatch; **400 is used deliberately**, because reaching 409 needs the controller to catch and
+  re-raise, which breaks the "controller catches nothing" rule this phase is built on and would not be
+  inherited by MCP (which has no resource type at all). **Follow-up:** whether the other create
+  surfaces should pin their types too is a codebase-wide question, not this phase's to settle.
+- **Three task test files had copy-pasted the same fixture block** — caught by the Sonar duplication
+  gate at 3.2% on new code, not by review. `journal_repository`, `user_settings_repository`, `anchors`
+  and the two row-count constants now live in `tests/integration/tasks/task_seeding.py`, which was
+  already the shared home for task seeding, and are imported where needed. They are exported from a
+  helper module rather than a `conftest.py` because their three consumers sit in different directories
+  (`tasks/`, `api/`, `mcp/`) whose only common conftest is the root integration one — where
+  task-specific fixtures do not belong. This also touched Phase 4's service integration test, which is
+  where the duplication started; deduplicating two of three copies would have left the gate failing and
+  the reuse rule half-applied.
 
 **Required Test Coverage:** unit — request/response schemas and the MCP tool schema. Integration — endpoint
 and tool against a real database, one test per rejected invariant on each surface, including cross-user
 attempts. E2E deferred to Phase 22.
 
-- **Unit (16 tests):** `backend/tests/unit/api/test_task_schemas.py` — the minimal body; contacts
-  optional; the defaulted resource type; text and due journal required; **no `creating_journal_id`
-  field and sending one rejected**; **no `now` field, sending one rejected, unknown attributes rejected
-  in general, and `now` smuggled one level up beside `attributes` rejected too**; no date field and
-  `due_date` rejected; the response resource's anchors, the status rendering as `not_done`, and
-  timestamps optional.
+- **Unit (17 tests):** `backend/tests/unit/api/test_task_schemas.py` — the minimal body; contacts
+  optional; the defaulted resource type **and a mismatched one rejected** (added in review); text and
+  due journal required; **no `creating_journal_id` field and sending one rejected**; **no `now` field,
+  sending one rejected, unknown attributes rejected in general, and `now` smuggled one level up beside
+  `attributes` rejected too**; no date field and `due_date` rejected; the response resource's anchors,
+  the status rendering as `not_done`, and timestamps optional.
 - **Unit (7 tests):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` — asserted against the
   **generated tool schema**, which is what a model actually reads, rather than the Python signature:
   the three required arguments, contacts optional, the injected service and connection absent from the
@@ -1303,15 +1326,15 @@ attempts. E2E deferred to Phase 22.
 - **Unit (7 tests):** `backend/tests/unit/mcp/shared/test_task_error_handling.py` — each task error's
   rendering through the shared handler, plus the two "not too broad" guards. All five of the first kind
   were red before the branch landed, which is how the gap above was found.
-- **Integration (15 tests):** `backend/tests/integration/api/test_task_endpoints.py` against real
+- **Integration (16 tests):** `backend/tests/integration/api/test_task_endpoints.py` against real
   PostgreSQL. *Creation (4):* the resource and its anchors; **the row read back after the response**
   (the only way to tell a committed write from an open transaction); creating == due; contacts linked.
   *Unreachable anchors (3):* an absent due journal naming the due anchor **and not the path journal's
   id**; another user's due journal byte-identical to an absent one once the ids are stripped; another
   user's *path* journal rejected as the creating anchor — each with no task row written.
   *Future-dating (3):* a past due journal with both dates, and the Kiritimati/Midway pair.
-  *Rejected bodies (5):* unknown contact (nothing written, no link row), empty text, `now`, `due_date`,
-  and `creating_journal_id`.
+  *Rejected bodies (6):* unknown contact (nothing written, no link row), empty text, `now`, `due_date`,
+  `creating_journal_id`, and **a body declaring another resource type** (added in review).
 - **Integration (12 tests):** `backend/tests/integration/mcp/test_task_tools_mcp.py` — the same matrix
   through `tools/call` over the mounted MCP HTTP transport, including the indistinguishability pair and
   the timezone pair, and a call carrying `now` refused as an unexpected keyword with no row written.
@@ -1323,8 +1346,8 @@ attempts. E2E deferred to Phase 22.
   five conventions this surface pins down). `mcp-setup.md` and `mcp-tools.md` deliberately untouched.
 - **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (865 files) and
   `core_shared` (128); `mypy` clean over 860 backend files and 126 in `core_shared`; the full
-  `tests/unit/` suite (2739 tests); and `tests/integration/tasks/`, `tests/integration/api/` and
-  `tests/integration/mcp/` together (839 tests). No frontend or e2e gates — the phase changes no
+  `tests/unit/` suite (2740 tests); and `tests/integration/tasks/`, `tests/integration/api/` and
+  `tests/integration/mcp/` together (840 tests). No frontend or e2e gates — the phase changes no
   frontend file and ships no user-visible surface.
 
 #### Phase 6: Status Lifecycle — Service, REST and MCP

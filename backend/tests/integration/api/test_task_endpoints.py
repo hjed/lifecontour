@@ -26,10 +26,7 @@ are 25 hours apart, so their local dates differ at every instant — no clock, n
 race, and a UTC reading fails both.
 """
 
-from datetime import UTC, datetime
-
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -39,20 +36,15 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 )
 from app.core.settings.models import UserSettings
 from tests.integration.tasks.task_seeding import (
+    COUNT_CONTACT_LINKS,
+    COUNT_TASKS,
+    FIXED_PAST_INSTANT,
     OTHER_USER_ID,
     USER_ID,
     count,
     create_contact,
     create_journal,
 )
-
-_COUNT_TASKS = "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id"
-_COUNT_CONTACT_LINKS = "SELECT COUNT(*) FROM task_contacts"
-
-# Midday UTC on 1 January 2020 — long past in every timezone, and a day apart
-# between the two zones below: 02:00 on the 2nd in Kiritimati, 01:00 on the 1st
-# in Midway.
-FIXED_PAST_INSTANT = datetime(2020, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def _body(**attributes: object) -> dict[str, object]:
@@ -67,30 +59,6 @@ def _error(response_json: dict[str, object]) -> dict[str, object]:
     return first
 
 
-@pytest_asyncio.fixture
-async def journal_repository(
-    async_connection: AsyncConnection,
-) -> SqlJournalRepository:
-    return SqlJournalRepository(async_connection)
-
-
-@pytest_asyncio.fixture
-async def user_settings_repository(
-    async_connection: AsyncConnection,
-) -> SqlUserSettingsRepository:
-    return SqlUserSettingsRepository(async_connection)
-
-
-@pytest_asyncio.fixture
-async def anchors(journal_repository: SqlJournalRepository) -> tuple[int, int]:
-    """A creating journal and a future-dated due journal, as ``(creating, due)``."""
-    creating_id = await create_journal(journal_repository, title="Where it arose")
-    due_id = await create_journal(
-        journal_repository, title="Where it matters", days_offset=7
-    )
-    return creating_id, due_id
-
-
 @pytest.mark.integration
 class TestCreateTaskEndpoint:
     """The happy paths, and what the response says about them."""
@@ -98,10 +66,10 @@ class TestCreateTaskEndpoint:
     async def test_creates_a_task_anchored_to_the_path_journal(
         self,
         authenticated_client: AsyncClient,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """The creating journal is the one in the URL — the body cannot name it."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -121,7 +89,7 @@ class TestCreateTaskEndpoint:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """The service's unit of work commits; the controller opens none.
 
@@ -129,7 +97,7 @@ class TestCreateTaskEndpoint:
         committed write from one still sitting in an open transaction that the
         connection provider will roll back at teardown.
         """
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -137,7 +105,7 @@ class TestCreateTaskEndpoint:
         )
         assert response.status_code == 201
 
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 1
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 1
 
     async def test_accepts_the_same_journal_as_both_anchors(
         self,
@@ -163,9 +131,9 @@ class TestCreateTaskEndpoint:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
         first = await create_contact(async_connection, first_name="Sarah")
         second = await create_contact(async_connection, first_name="Tom")
 
@@ -179,7 +147,7 @@ class TestCreateTaskEndpoint:
         )
 
         assert response.status_code == 201
-        assert await count(async_connection, _COUNT_CONTACT_LINKS, {}) == 2
+        assert await count(async_connection, COUNT_CONTACT_LINKS, {}) == 2
 
 
 @pytest.mark.integration
@@ -190,14 +158,14 @@ class TestUnreachableAnchorsAnswer404:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """404 is ambiguous on its own; the payload is what disambiguates it.
 
         The path journal exists, so a client reading only the status line could
         conclude it did not. The error names the *due* anchor and its id instead.
         """
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -209,21 +177,21 @@ class TestUnreachableAnchorsAnswer404:
         assert error["code"] == "TASK_ANCHOR_JOURNAL_NOT_FOUND"
         assert "due journal (ID 999999)" in str(error["detail"])
         assert str(creating_id) not in str(error["detail"])
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_another_users_due_journal_reads_as_an_absent_one(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """Phase 4's indistinguishability guarantee survives the surface.
 
         Both rejections must be byte-identical once the ids are stripped, or a
         rejected create becomes a way to probe for another user's journals.
         """
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
         foreign_id = await create_journal(
             journal_repository,
             title="Somebody else's trip",
@@ -246,17 +214,17 @@ class TestUnreachableAnchorsAnswer404:
         assert str(foreign_error["detail"]).replace(str(foreign_id), "X") == str(
             absent_error["detail"]
         ).replace("999999", "X")
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_another_users_path_journal_is_rejected_as_the_creating_anchor(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """A task can never span owners, whichever anchor the intruder is."""
-        _, due_id = anchors
+        _, due_id = task_anchors
         foreign_id = await create_journal(
             journal_repository,
             title="Somebody else's day",
@@ -272,7 +240,7 @@ class TestUnreachableAnchorsAnswer404:
         error = _error(response.json())
         assert error["code"] == "TASK_ANCHOR_JOURNAL_NOT_FOUND"
         assert f"creating journal (ID {foreign_id})" in str(error["detail"])
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
 
 @pytest.mark.integration
@@ -284,9 +252,9 @@ class TestTheFutureDatedRuleReachesTheEndpoint:
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
         past_id = await create_journal(
             journal_repository, title="Last week", days_offset=-7
         )
@@ -300,7 +268,7 @@ class TestTheFutureDatedRuleReachesTheEndpoint:
         error = _error(response.json())
         assert error["code"] == "TASK_DUE_JOURNAL_NOT_FUTURE"
         assert "not after today" in str(error["detail"])
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     @pytest.mark.parametrize(
         ("timezone", "expected_date"),
@@ -314,7 +282,7 @@ class TestTheFutureDatedRuleReachesTheEndpoint:
         authenticated_client: AsyncClient,
         journal_repository: SqlJournalRepository,
         user_settings_repository: SqlUserSettingsRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
         timezone: str,
         expected_date: str,
     ):
@@ -324,7 +292,7 @@ class TestTheFutureDatedRuleReachesTheEndpoint:
         in both — which makes this an assertion about the day boundary that does
         not depend on when the test runs.
         """
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
         await user_settings_repository.save(
             UserSettings(user_id=USER_ID, timezone=timezone)
         )
@@ -349,9 +317,9 @@ class TestRejectedBodies:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -362,16 +330,16 @@ class TestRejectedBodies:
 
         assert response.status_code == 404
         assert _error(response.json())["code"] == "CONTACT_NOT_FOUND"
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
-        assert await count(async_connection, _COUNT_CONTACT_LINKS, {}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_CONTACT_LINKS, {}) == 0
 
     async def test_empty_text_is_rejected(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -380,13 +348,13 @@ class TestRejectedBodies:
 
         assert response.status_code == 400
         assert _error(response.json())["code"] == "TASK_VALIDATION_ERROR"
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_a_body_carrying_now_is_rejected(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """Invariant 4 is not opt-out for any client.
 
@@ -394,7 +362,7 @@ class TestRejectedBodies:
         outright — rather than ignoring it — is what stops a future wiring change
         from quietly handing it to the service.
         """
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -406,15 +374,15 @@ class TestRejectedBodies:
         )
 
         assert response.status_code == 400
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_a_body_offering_a_bare_date_is_rejected(
         self,
         authenticated_client: AsyncClient,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """A task is due in a journal; a date would imply creating one."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -426,10 +394,10 @@ class TestRejectedBodies:
     async def test_a_body_naming_the_creating_journal_is_rejected(
         self,
         authenticated_client: AsyncClient,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """The path is the only way to say where a task arose."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         response = await authenticated_client.post(
             f"/api/journals/{creating_id}/tasks",
@@ -441,3 +409,30 @@ class TestRejectedBodies:
         )
 
         assert response.status_code == 400
+
+    async def test_a_body_declaring_another_resource_type_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A client that declares "contacts" must not end up creating a task.
+
+        Raised in review: the type was previously accepted and silently answered
+        with `"tasks"`, so a generic JSON:API client could perform a mutation on
+        a resource type it never asked for.
+        """
+        creating_id, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json={
+                "data": {
+                    "type": "contacts",
+                    "attributes": {"text": "book it", "due_journal_id": due_id},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0

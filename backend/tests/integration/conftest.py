@@ -1029,6 +1029,44 @@ async def sample_journal_id(async_connection: AsyncConnection) -> int:
     return int(row[0])
 
 
+@pytest_asyncio.fixture
+async def journal_repository(async_connection: AsyncConnection) -> Any:
+    """The journal repository on the test's single savepoint connection."""
+    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+
+    return SqlJournalRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def user_settings_repository(async_connection: AsyncConnection) -> Any:
+    """The settings repository, for tests that fix the acting user's timezone."""
+    from app.core.settings.adapters.sql.user_settings_repository import (
+        SqlUserSettingsRepository,
+    )
+
+    return SqlUserSettingsRepository(async_connection)
+
+
+@pytest_asyncio.fixture
+async def task_anchors(journal_repository: Any) -> tuple[int, int]:
+    """A creating journal and a future-dated due journal, as ``(creating, due)``.
+
+    Every file exercising task *creation* — the service, the endpoint and the MCP
+    tool — starts from this same position. It lives here rather than in
+    ``task_seeding`` because those three files sit in different directories whose
+    only shared conftest is this one, and pytest discovers fixtures by
+    inheritance rather than by import (importing them instead trips ruff's F811
+    at every test that names one).
+    """
+    from tests.integration.tasks.task_seeding import create_journal
+
+    creating_id = await create_journal(journal_repository, title="Where it arose")
+    due_id = await create_journal(
+        journal_repository, title="Where it matters", days_offset=7
+    )
+    return creating_id, due_id
+
+
 @pytest.fixture
 def run_alembic() -> Any:
     """Return a helper that runs ``alembic <command> <target>`` against a db URL.

@@ -14,11 +14,9 @@ the user's timezone — with two zones 25 hours apart, whose local dates therefo
 differ at every instant.
 """
 
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -32,19 +30,15 @@ from tests.integration.mcp.http_helpers import (
     mcp_headers,
 )
 from tests.integration.tasks.task_seeding import (
+    COUNT_CONTACT_LINKS,
+    COUNT_TASKS,
+    FIXED_PAST_INSTANT,
     OTHER_USER_ID,
     USER_ID,
     count,
     create_contact,
     create_journal,
 )
-
-_COUNT_TASKS = "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id"
-_COUNT_CONTACT_LINKS = "SELECT COUNT(*) FROM task_contacts"
-
-# See the endpoint tests: 02:00 on the 2nd in Kiritimati, 01:00 on the 1st in
-# Midway, and long past in both.
-FIXED_PAST_INSTANT = datetime(2020, 1, 1, 12, 0, tzinfo=UTC)
 
 
 async def _raw_tool_call(client: Any, session_id: str, arguments: dict[str, Any]):
@@ -68,30 +62,6 @@ async def _create_task(
     return extract_mcp_json_payload(response.text)
 
 
-@pytest_asyncio.fixture
-async def journal_repository(
-    async_connection: AsyncConnection,
-) -> SqlJournalRepository:
-    return SqlJournalRepository(async_connection)
-
-
-@pytest_asyncio.fixture
-async def user_settings_repository(
-    async_connection: AsyncConnection,
-) -> SqlUserSettingsRepository:
-    return SqlUserSettingsRepository(async_connection)
-
-
-@pytest_asyncio.fixture
-async def anchors(journal_repository: SqlJournalRepository) -> tuple[int, int]:
-    """A creating journal and a future-dated due journal, as ``(creating, due)``."""
-    creating_id = await create_journal(journal_repository, title="Where it arose")
-    due_id = await create_journal(
-        journal_repository, title="Where it matters", days_offset=7
-    )
-    return creating_id, due_id
-
-
 @pytest.mark.integration
 class TestCreateTaskTool:
     """The happy paths through the tool."""
@@ -100,9 +70,9 @@ class TestCreateTaskTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
             session_id = await initialize_mcp_session(client)
@@ -120,7 +90,7 @@ class TestCreateTaskTool:
         assert payload["due_journal_id"] == due_id
         assert payload["status"] == "not_done"
         assert int(payload["id"]) > 0
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 1
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 1
 
     async def test_accepts_the_same_journal_as_both_anchors(
         self,
@@ -149,9 +119,9 @@ class TestCreateTaskTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
         first = await create_contact(clean_database, first_name="Sarah")
         second = await create_contact(clean_database, first_name="Tom")
 
@@ -167,7 +137,7 @@ class TestCreateTaskTool:
             )
 
         assert "error" not in payload
-        assert await count(clean_database, _COUNT_CONTACT_LINKS, {}) == 2
+        assert await count(clean_database, COUNT_CONTACT_LINKS, {}) == 2
 
 
 @pytest.mark.integration
@@ -178,9 +148,9 @@ class TestUnreachableAnchors:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
 
         async with authenticated_lifespan_client() as client:
             session_id = await initialize_mcp_session(client)
@@ -195,17 +165,17 @@ class TestUnreachableAnchors:
         assert payload["error"] == "Not found"
         assert "due journal (ID 999999)" in payload["message"]
         assert "exist and belong to you" in payload["message"]
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_another_users_due_journal_reads_as_an_absent_one(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
         journal_repository: SqlJournalRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """Indistinguishability holds for an AI client too."""
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
         foreign_id = await create_journal(
             journal_repository,
             title="Somebody else's trip",
@@ -234,16 +204,16 @@ class TestUnreachableAnchors:
         assert foreign["message"].replace(str(foreign_id), "X") == absent[
             "message"
         ].replace("999999", "X")
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_another_users_creating_journal_is_rejected(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
         journal_repository: SqlJournalRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        _, due_id = anchors
+        _, due_id = task_anchors
         foreign_id = await create_journal(
             journal_repository, title="Somebody else's day", user_id=OTHER_USER_ID
         )
@@ -260,7 +230,7 @@ class TestUnreachableAnchors:
 
         assert payload["error"] == "Not found"
         assert f"creating journal (ID {foreign_id})" in payload["message"]
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
 
 @pytest.mark.integration
@@ -272,9 +242,9 @@ class TestTheFutureDatedRuleReachesTheTool:
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
         journal_repository: SqlJournalRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
         past_id = await create_journal(
             journal_repository, title="Last week", days_offset=-7
         )
@@ -292,7 +262,7 @@ class TestTheFutureDatedRuleReachesTheTool:
         assert payload["error"] == "Task error"
         assert "not after today" in payload["message"]
         assert "must be a journal dated in the future" in payload["message"]
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     @pytest.mark.parametrize(
         ("timezone", "expected_date"),
@@ -306,11 +276,11 @@ class TestTheFutureDatedRuleReachesTheTool:
         authenticated_lifespan_client,
         journal_repository: SqlJournalRepository,
         user_settings_repository: SqlUserSettingsRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
         timezone: str,
         expected_date: str,
     ):
-        creating_id, _ = anchors
+        creating_id, _ = task_anchors
         await user_settings_repository.save(
             UserSettings(user_id=USER_ID, timezone=timezone)
         )
@@ -339,9 +309,9 @@ class TestRejectedArguments:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
             session_id = await initialize_mcp_session(client)
@@ -355,16 +325,16 @@ class TestRejectedArguments:
             )
 
         assert payload["error"] == "Contact not found"
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 0
-        assert await count(clean_database, _COUNT_CONTACT_LINKS, {}) == 0
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(clean_database, COUNT_CONTACT_LINKS, {}) == 0
 
     async def test_empty_text_is_rejected(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
             session_id = await initialize_mcp_session(client)
@@ -377,13 +347,13 @@ class TestRejectedArguments:
             )
 
         assert "text" in payload["message"]
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_a_call_carrying_now_is_rejected_by_the_tool_schema(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """Invariant 4 is not opt-out for an AI client either.
 
@@ -391,7 +361,7 @@ class TestRejectedArguments:
         before the service is ever reached — no task is created against a
         pretend clock.
         """
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
             session_id = await initialize_mcp_session(client)
@@ -411,4 +381,4 @@ class TestRejectedArguments:
         # the unexpected-keyword error tells a rejection from an acceptance.
         assert '"isError":true' in response.text
         assert "unexpected_keyword_argument" in response.text
-        assert await count(clean_database, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0

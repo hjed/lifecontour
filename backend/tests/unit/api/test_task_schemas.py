@@ -61,6 +61,23 @@ class TestTaskCreateRequest:
 
         assert request.data.type == "tasks"
 
+    def test_a_mismatched_resource_type_is_rejected(self) -> None:
+        """Declaring one resource type and mutating another is a contract breach.
+
+        A generic JSON:API client picks its request shape from the type it
+        declares, so accepting ``"contacts"`` here and returning a task means
+        that client performed a mutation it did not ask for.
+        """
+        with pytest.raises(ValidationError):
+            TaskCreateRequest.model_validate(
+                {
+                    "data": {
+                        "type": "contacts",
+                        "attributes": {"text": "x", "due_journal_id": 1},
+                    }
+                }
+            )
+
     def test_text_is_required(self) -> None:
         with pytest.raises(ValidationError):
             TaskCreateRequest.model_validate(
