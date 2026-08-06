@@ -59,7 +59,7 @@ def mock_task_repo() -> AsyncMock:
         return task
 
     repo.save.side_effect = save
-    repo.find_by_id.return_value = make_task()
+    repo.find_by_id_for_update.return_value = make_task()
     return repo
 
 
@@ -145,7 +145,7 @@ class TestAllowedTransitions:
         target: TaskStatus,
     ) -> None:
         """Every permitted change is written and returned."""
-        mock_task_repo.find_by_id.return_value = make_task(current)
+        mock_task_repo.find_by_id_for_update.return_value = make_task(current)
 
         result = await set_status(service, mock_transaction, target)
 
@@ -155,16 +155,27 @@ class TestAllowedTransitions:
         assert result.status == target
 
     @pytest.mark.asyncio
-    async def test_reads_the_task_owner_scoped(
+    async def test_reads_the_task_owner_scoped_and_locked(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Ownership is enforced by the query, not by a comparison afterwards."""
+        """Ownership is enforced by the query, and the row is held while deciding.
+
+        The locking read is asserted here rather than through a concurrent
+        integration test because *which read is used* is the whole of the fix:
+        this method decides from the status it read and writes that decision
+        back, so an unlocked read lets two overlapping calls both pass the
+        matrix and the later one win. A refactor that "simplified" this back to
+        the plain read would reopen that hole silently, and the race itself is
+        also covered end-to-end in
+        ``test_task_service_set_status_integration.py``.
+        """
         await set_status(service, mock_transaction, TaskStatus.DONE)
 
-        mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, USER_ID)
+        mock_task_repo.find_by_id_for_update.assert_awaited_once_with(TASK_ID, USER_ID)
+        mock_task_repo.find_by_id.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_leaves_the_anchors_and_text_alone(
@@ -199,7 +210,7 @@ class TestNoJournalIsInvolved:
         target: TaskStatus,
     ) -> None:
         """No intermediate journal is attached by a status change."""
-        mock_task_repo.find_by_id.return_value = make_task(
+        mock_task_repo.find_by_id_for_update.return_value = make_task(
             TaskStatus.DONE if target is TaskStatus.NOT_DONE else TaskStatus.NOT_DONE
         )
 
@@ -252,7 +263,9 @@ class TestRefusedTransitions:
         target: TaskStatus,
     ) -> None:
         """A cancelled task is reopened by retargeting, never by a status call."""
-        mock_task_repo.find_by_id.return_value = make_task(TaskStatus.CANCELLED)
+        mock_task_repo.find_by_id_for_update.return_value = make_task(
+            TaskStatus.CANCELLED
+        )
 
         with pytest.raises(TaskStatusTransitionError) as exc_info:
             await set_status(service, mock_transaction, target)
@@ -274,7 +287,7 @@ class TestUnreachableTasks:
         mock_transaction: AsyncMock,
     ) -> None:
         """An id that matches nothing raises rather than writing."""
-        mock_task_repo.find_by_id.return_value = None
+        mock_task_repo.find_by_id_for_update.return_value = None
 
         with pytest.raises(TaskNotFoundError) as exc_info:
             await set_status(service, mock_transaction, TaskStatus.DONE)
@@ -295,7 +308,7 @@ class TestUnreachableTasks:
         only way the service ever learns of ownership — it never compares a
         ``user_id`` itself, so there is no branch that could say more.
         """
-        mock_task_repo.find_by_id.return_value = None
+        mock_task_repo.find_by_id_for_update.return_value = None
 
         with pytest.raises(TaskNotFoundError) as exc_info:
             await set_status(
@@ -303,7 +316,9 @@ class TestUnreachableTasks:
             )
 
         assert str(exc_info.value) == str(TaskNotFoundError(TASK_ID))
-        mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, OTHER_USER_ID)
+        mock_task_repo.find_by_id_for_update.assert_awaited_once_with(
+            TASK_ID, OTHER_USER_ID
+        )
         mock_task_repo.save.assert_not_awaited()
 
 
@@ -321,7 +336,7 @@ class TestSameStatus:
         status: TaskStatus,
     ) -> None:
         """Including cancelled → cancelled, which is not a reopening."""
-        mock_task_repo.find_by_id.return_value = make_task(status)
+        mock_task_repo.find_by_id_for_update.return_value = make_task(status)
 
         result = await set_status(service, mock_transaction, status)
 

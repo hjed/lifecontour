@@ -1368,11 +1368,12 @@ attempts. E2E deferred to Phase 22.
 
 **Prerequisites:** Phase 5.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
-**Actual:** **304 production → 2,152 tracked** (2,152 insertions, 83 deletions across 23 files: 304
-production — service 60, REST schemas 51, controller 63, MCP tool 58, `core_shared` predicate and error
-65, error handler 2, server instructions 1 — 1,714 tests and fixtures, 134 docs). The `~200 → ~1,050`
-figure first recorded here was wrong: it was written from memory before the diff was measured, and it
-under-counted the tests by roughly half.
+**Actual:** **366 production → 2,483 tracked** (2,483 insertions, 87 deletions: 366 production — service
+78, REST schemas 51, controller 63, MCP tool 58, `core_shared` predicate and error 65, repository
+locking read 50, error handler 2, server instructions 1 — 1,913 tests and fixtures, 204 docs). The
+`~200 → ~1,050` figure first recorded here was wrong: it was written from memory before the diff was
+measured, and it under-counted the tests by roughly half. The final figures include the review round
+(the locking read and its three tests).
 
 **Why it ran to 3.6× the estimate, and what that says about the calibration rule.** The production
 estimate was almost exactly right (304 against ~150 for the two surfaces plus a service method, against
@@ -1454,12 +1455,22 @@ planning time and the estimate revised then.
   **Follow-up:** every other domain's "committed before the response" test rests on the same false
   evidence. Worth a pass over `testing-strategy.md` to make the observing-repository idiom the standard
   way to assert a unit of work, rather than repeating a read that cannot fail.
-- **`set_status` writes the whole row back from the snapshot it read.** `save(replace(task, ...))` makes
-  the repository `SET` `text` and both anchors from a row read moments earlier, with no lock. Harmless
-  now — status is the only field any surface can change — but Phase 8 (retarget) and Phase 9 (text)
-  make concurrent edits real, and a last-writer-wins update would then silently drop one of them.
-  **Follow-up for Phase 9:** either narrow the write to the changed column or take a locking read;
-  deciding it here would be guessing at what those phases need.
+- **The read takes a row lock, because without one the refusal rule could be bypassed by timing.**
+  This was first written down here as a *"harmless today, revisit in Phase 9"* follow-up — the argument
+  being that status is the only mutable field, so a stale whole-row write could not lose anybody's
+  edit. **That was wrong**, and the pull request's automated review said so: the lost update is not a
+  lost *field*, it is a lost *decision*. Two overlapping calls both read `not_done`, both find their
+  transition allowed, and the later write wins — so cancelling a task while somebody else marks it done
+  leaves it **done**, with both callers answered `200`. That is `cancelled → done`, the transition this
+  entire phase exists to refuse, reached by interleaving rather than by request. `set_status` now reads
+  through `find_by_id_for_update`, whose `FOR NO KEY UPDATE` holds the row until the unit of work
+  commits, so the second call waits and then decides against the status the first one actually wrote.
+  `FOR NO KEY UPDATE` rather than `FOR UPDATE` so a link insert's foreign-key check on the same row —
+  which takes `FOR KEY SHARE`, the lock the repository already uses in `_require_task_owned` — is not
+  made to queue behind somebody marking a task done. **The lesson worth carrying:** "nothing else is
+  mutable yet" is an argument about *fields*, and a read-decide-write sequence can lose a *rule*
+  regardless of how many fields it touches. Phases 7–9 inherit the locking read rather than needing to
+  discover it.
 - **Test seeding was shared rather than copied**, following the Phase 5 duplication lesson. `create_task`
   and `stored_status` joined `tests/integration/tasks/task_seeding.py`; `task_repository` joined the root
   integration conftest (three directories consume it); and the `service` fixture the two service test
@@ -1491,13 +1502,18 @@ both surfaces against a real database, plus the cross-user 404. E2E deferred to 
 - **Unit (9 tests, 2 new):** `backend/tests/unit/mcp/shared/test_task_error_handling.py` (extended) — the refusal
   renders as an actionable "Task error" rather than "Not found" (a cancelled task exists; it is the move
   that is refused), and carries the way out.
-- **Integration (14 tests):** `backend/tests/integration/tasks/test_task_service_set_status_integration.py`
+- **Integration (16 tests):** `backend/tests/integration/tasks/test_task_service_set_status_integration.py`
   — every permitted transition read back from the **database** rather than from the returned object; a
   **lapsed** task still completable (the due journal is not re-validated); no intermediate link row; the
   anchors unchanged; `updated_at` unmoved by a same-status call; both refusals leaving the stored row
   untouched; another user's task not found and not modified; an absent id giving the identical message.
-  It also carries the phase's **only decorator-sensitive test** (see the unit-of-work decision above):
-  a repository that observes the connection while it writes proves a unit of work is open around it.
+  It also carries the two tests that are sensitive to the *mechanism* rather than the outcome, both
+  added because a review found the property they pin was unasserted: a repository that observes the
+  connection while it writes proves the unit of work is open around it (the phase's only
+  decorator-sensitive test), and a second reader-for-update proves the row lock blocks until the first
+  transaction commits. Alongside them, a **genuine two-connection race** — a cancel and a done started
+  together on one task — asserts the row can only end up *cancelled*; it commits outside the fixture's
+  rolled-back transaction under a one-off user id and deletes its rows in a `finally`.
 - **Integration (34 tests, 17 new):** `backend/tests/integration/api/test_task_endpoints.py` (extended) — each
   permitted transition over HTTP; the row read back **after** the response (which shows the write
   happened before the client was answered — *not* that it committed; see the decision above); no link

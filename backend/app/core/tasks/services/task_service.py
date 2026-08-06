@@ -216,13 +216,22 @@ class TaskService:
         Returns:
             The task in its new status — or unchanged, when it was already there.
 
+        **The read takes a row lock**, because this method decides from the
+        status it read and then writes that decision back. Without the lock two
+        overlapping calls both read the old status, both find their transition
+        allowed, and the later write wins — so cancelling a task while somebody
+        else marks it done leaves it *done*, which is precisely the transition
+        the matrix refuses. Raised by review on this phase's pull request. The
+        lock lasts until the enclosing unit of work commits, so the second call
+        waits and then re-reads the status the first one wrote.
+
         Raises:
             TaskNotFoundError: When the task does not exist or is not the acting
                 user's. The two are indistinguishable by design.
             TaskStatusTransitionError: When the transition is refused — that is,
                 when it would leave *cancelled*, which only retargeting does.
         """
-        task = await self.task_repo.find_by_id(task_id, user_id)
+        task = await self.task_repo.find_by_id_for_update(task_id, user_id)
         if task is None:
             raise TaskNotFoundError(task_id)
 

@@ -24,6 +24,11 @@ because reaching *cancelled* through the service is itself one of the behaviours
 under test.
 """
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from uuid import uuid4
+
 import pytest
 from core_shared.models.tasks import (
     Task,
@@ -31,7 +36,8 @@ from core_shared.models.tasks import (
     TaskStatus,
     TaskStatusTransitionError,
 )
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -62,6 +68,63 @@ REFUSED_TRANSITIONS = [
     (TaskStatus.CANCELLED, TaskStatus.NOT_DONE),
     (TaskStatus.CANCELLED, TaskStatus.DONE),
 ]
+
+
+@asynccontextmanager
+async def _committed_task(async_engine: AsyncEngine) -> AsyncIterator[tuple[str, int]]:
+    """A task that really is committed, under an owner nobody else will see.
+
+    The concurrency tests need two connections to see the same row, which the
+    savepoint fixture cannot give them: its outer transaction is invisible to
+    everyone else and is rolled back at teardown. So these rows are committed
+    for real, scoped to a one-off user id, and deleted again whatever happens.
+    """
+    user_id = f"race-{uuid4()}"
+    async with async_engine.connect() as setup:
+        journal_id = await create_journal(
+            SqlJournalRepository(setup),
+            title="Where it arose",
+            days_offset=7,
+            user_id=user_id,
+        )
+        task_id = await create_task(
+            SqlTaskRepository(setup),
+            creating_journal_id=journal_id,
+            due_journal_id=journal_id,
+            user_id=user_id,
+        )
+        await setup.commit()
+
+    try:
+        yield user_id, task_id
+    finally:
+        async with async_engine.connect() as cleanup:
+            await cleanup.execute(
+                text("DELETE FROM tasks WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+            await cleanup.execute(
+                text("DELETE FROM journals WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+            await cleanup.commit()
+
+
+def _service_on(
+    connection: AsyncConnection, user_settings_repository: SqlUserSettingsRepository
+) -> TaskService:
+    """A service over real adapters on ``connection``.
+
+    The ``service`` fixture is bound to the test's single savepoint connection;
+    the concurrency test needs one service per real connection, which is the
+    only way two units of work can overlap.
+    """
+    return TaskService(
+        task_repo=SqlTaskRepository(connection),
+        journal_repo=SqlJournalRepository(connection),
+        contact_repo=SqlContactRepository(connection),
+        date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
+    )
 
 
 @pytest.mark.integration
@@ -301,6 +364,127 @@ class TestTheWriteIsAUnitOfWork:
         )
 
         assert async_connection.get_nested_transaction() is None
+
+
+@pytest.mark.integration
+class TestOverlappingCallsCannotBypassTheMatrix:
+    """Two callers racing on one task still obey the refusal rule.
+
+    Raised by review on this phase's pull request. ``set_status`` decides from
+    the status it read and then writes that decision back, so with an unlocked
+    read both callers see *not done*, both find their transition allowed, and
+    the later write wins: cancelling a task while somebody else marks it done
+    could leave it **done** and answer both callers ``200`` — the very
+    transition the matrix refuses, reached by timing rather than by request.
+
+    The row lock makes the outcome the same whichever call gets there first:
+
+    - done commits, then cancel reads *done* and is allowed → **cancelled**;
+    - cancel commits, then done reads *cancelled* and is refused → **cancelled**.
+
+    So *cancelled* is the single correct answer, and the assertion needs no
+    knowledge of the interleaving. This test needs two real connections, which
+    means committing outside the fixture's rolled-back transaction: it uses its
+    own user id and deletes its rows in a ``finally``.
+    """
+
+    async def test_the_read_holds_the_row_until_the_writer_commits(
+        self,
+        async_engine: AsyncEngine,
+    ):
+        """The lock itself, asserted without depending on any interleaving.
+
+        This is the deterministic half of the pair. A second reader-for-update
+        **must block** while the first transaction is open, and must see the
+        committed status once it closes — which is exactly what stops the second
+        caller from deciding against a status that is already stale. Drop the
+        ``FOR NO KEY UPDATE`` and the blocked read returns immediately, so this
+        test fails every time rather than most times.
+        """
+        async with _committed_task(async_engine) as (user_id, task_id):
+            async with (
+                async_engine.connect() as holder,
+                async_engine.connect() as waiter,
+            ):
+                await holder.begin()
+                held = await SqlTaskRepository(holder).find_by_id_for_update(
+                    task_id, user_id
+                )
+                assert held is not None
+
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(
+                        SqlTaskRepository(waiter).find_by_id_for_update(
+                            task_id, user_id
+                        ),
+                        timeout=1.0,
+                    )
+
+                await holder.execute(
+                    text("UPDATE tasks SET status = 'cancelled' WHERE id = :task_id"),
+                    {"task_id": task_id},
+                )
+                await holder.commit()
+
+            async with async_engine.connect() as after:
+                unblocked = await SqlTaskRepository(after).find_by_id_for_update(
+                    task_id, user_id
+                )
+                assert unblocked is not None
+                assert unblocked.status == TaskStatus.CANCELLED
+
+    async def test_a_concurrent_cancel_is_never_overwritten_by_a_done(
+        self,
+        async_engine: AsyncEngine,
+        user_settings_repository: SqlUserSettingsRepository,
+    ):
+        """The whole service path, racing. Fails *most* runs without the lock.
+
+        Kept alongside the deterministic test above rather than instead of it:
+        this one exercises the real thing end to end — two units of work, two
+        connections, one task — where the other proves only the lock primitive.
+        A race test cannot be made to fail on every run without a barrier that
+        the fix itself makes unreachable (the second caller cannot read early
+        once the first holds the row), so the deterministic guarantee lives
+        above and this one is the belt to its braces.
+        """
+        async with _committed_task(async_engine) as (user_id, task_id):
+            async with (
+                async_engine.connect() as first,
+                async_engine.connect() as second,
+            ):
+                # The cancel is started *first* deliberately. Both calls read
+                # before either writes, so without the lock the second write
+                # lands last and wins — and it is the "done" that must not be
+                # allowed to win. Starting them the other way round would let
+                # the correct answer fall out of the ordering rather than out of
+                # the lock, and the test would pass against the bug.
+                results = await asyncio.gather(
+                    _service_on(first, user_settings_repository).set_status(
+                        user_id=user_id,
+                        task_id=task_id,
+                        status=TaskStatus.CANCELLED,
+                        transaction=first,
+                    ),
+                    _service_on(second, user_settings_repository).set_status(
+                        user_id=user_id,
+                        task_id=task_id,
+                        status=TaskStatus.DONE,
+                        transaction=second,
+                    ),
+                    return_exceptions=True,
+                )
+
+            # Either the done was refused, or it landed before the cancel. Both
+            # are legal outcomes *for that call*; what is not legal is the row
+            # ending up done, which is the assertion below.
+            for result in results:
+                assert isinstance(result, Task | TaskStatusTransitionError), result
+
+            async with async_engine.connect() as check:
+                assert await stored_status(check, task_id) == (
+                    TaskStatus.CANCELLED.value
+                )
 
 
 @pytest.mark.integration
