@@ -5,6 +5,8 @@ from typing import Literal
 
 from core_shared.exceptions import DomainError
 
+from .task_status import TaskStatus
+
 # Which of a task's two journal anchors an error is about. A task is anchored to
 # exactly two journals and the roles behave differently — the creating anchor is
 # immutable, the due anchor is retargetable — so an error that names one has to
@@ -40,6 +42,32 @@ class TaskNotFoundError(TaskDomainError):
     def __init__(self, task_id: int):
         super().__init__(f"Task with ID {task_id} not found", 404)
         self.task_id = task_id
+
+
+class TaskStatusTransitionError(TaskDomainError):
+    """Exception raised when a status change is refused by the lifecycle rules.
+
+    Only two transitions are refused, and they are the two that would leave
+    *cancelled*. The specification gives a cancelled task exactly one way back:
+    retargeting it onto a new future journal, which revalidates the future-dated
+    rule and returns the task to *not done*. So the message does not merely
+    refuse — it names the operation that does what the caller was asking for,
+    which is what an AI client needs to recover without guessing.
+
+    **409 rather than 400.** The request is well formed and the status it names
+    is a real one; what it conflicts with is the state the task is in, which is
+    exactly what Conflict means. A caller that re-sends it unchanged after
+    retargeting will succeed.
+    """
+
+    def __init__(self, current_status: TaskStatus, target_status: TaskStatus):
+        super().__init__(
+            f"A task that is {current_status} cannot be moved to {target_status}. "
+            f"Retarget it onto a new future journal to reopen it as not done.",
+            409,
+        )
+        self.current_status = current_status
+        self.target_status = target_status
 
 
 class TaskAnchorJournalNotFoundError(TaskDomainError):

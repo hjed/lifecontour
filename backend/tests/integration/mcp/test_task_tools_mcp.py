@@ -1,4 +1,4 @@
-"""Integration tests for the ``create_task`` MCP tool against real PostgreSQL.
+"""Integration tests for the task MCP tools against real PostgreSQL.
 
 The whole rejection matrix is asserted here as well as against the endpoint,
 deliberately. A shared service is not evidence that both callers reach it: a
@@ -17,6 +17,7 @@ differ at every instant.
 from typing import Any
 
 import pytest
+from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -24,6 +25,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
     initialize_mcp_session,
@@ -31,6 +33,7 @@ from tests.integration.mcp.http_helpers import (
 )
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS,
+    COUNT_INTERMEDIATE_JOURNALS,
     COUNT_TASKS,
     FIXED_PAST_INSTANT,
     OTHER_USER_ID,
@@ -38,26 +41,40 @@ from tests.integration.tasks.task_seeding import (
     count,
     create_contact,
     create_journal,
+    create_task,
+    stored_status,
 )
 
 
-async def _raw_tool_call(client: Any, session_id: str, arguments: dict[str, Any]):
+async def _raw_call(client: Any, session_id: str, tool: str, arguments: dict[str, Any]):
     return await client.post(
         "/mcp-server/mcp",
         json={
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": "create_task", "arguments": arguments},
+            "params": {"name": tool, "arguments": arguments},
         },
         headers=mcp_headers(session_id),
     )
+
+
+async def _raw_tool_call(client: Any, session_id: str, arguments: dict[str, Any]):
+    return await _raw_call(client, session_id, "create_task", arguments)
 
 
 async def _create_task(
     client: Any, session_id: str, **arguments: Any
 ) -> dict[str, Any]:
     response = await _raw_tool_call(client, session_id, arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _set_task_status(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "set_task_status", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -382,3 +399,194 @@ class TestRejectedArguments:
         assert '"isError":true' in response.text
         assert "unexpected_keyword_argument" in response.text
         assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+
+@pytest.mark.integration
+class TestSetTaskStatusTool:
+    """The lifecycle over MCP, asserted against the same matrix as the endpoint."""
+
+    @pytest.mark.parametrize(
+        ("current", "target"),
+        [
+            ("not_done", "done"),
+            ("not_done", "cancelled"),
+            ("done", "not_done"),
+            ("done", "cancelled"),
+        ],
+    )
+    async def test_each_permitted_transition_reaches_the_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+        current: str,
+        target: str,
+    ):
+        """An agent's call changes the same row an HTTP client's would.
+
+        The tool opens no transaction of its own — that is a property of the
+        code, and the unit of work behind it is asserted against the service in
+        ``tests/integration/tasks/``, because the savepoint fixture makes a
+        commit unobservable from out here.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus(current),
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _set_task_status(
+                client, session_id, task_id=task_id, status=target
+            )
+
+        assert "error" not in payload
+        assert payload["id"] == task_id
+        assert payload["status"] == target
+        assert await stored_status(clean_database, task_id) == target
+
+    async def test_no_journal_link_is_created(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """An agent marking a task done attaches it to nothing."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _set_task_status(
+                client, session_id, task_id=task_id, status="cancelled"
+            )
+
+        assert "error" not in payload
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_asking_for_the_current_status_is_accepted(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The same no-op the endpoint allows, so neither surface is the odd one.
+
+        A cancelled task in particular: asking for the status it already has is
+        not a reopening, and an agent re-sending a call must not be told it did
+        something wrong.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _set_task_status(
+                client, session_id, task_id=task_id, status="cancelled"
+            )
+
+        assert "error" not in payload
+        assert payload["status"] == "cancelled"
+        assert await stored_status(clean_database, task_id) == "cancelled"
+
+    @pytest.mark.parametrize("target", ["not_done", "done"])
+    async def test_leaving_cancelled_is_refused_with_an_actionable_message(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+        target: str,
+    ):
+        """A model told only "refused" will retry; this one is told to retarget."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _set_task_status(
+                client, session_id, task_id=task_id, status=target
+            )
+
+        assert payload["error"] == "Task error"
+        assert "retarget" in payload["message"].lower()
+        assert await stored_status(clean_database, task_id) == "cancelled"
+
+    async def test_another_users_task_is_reported_as_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Indistinguishable from an absent one, and the row does not move."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            task_repository,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _set_task_status(
+                client, session_id, task_id=foreign_task, status="done"
+            )
+            absent = await _set_task_status(
+                client, session_id, task_id=999_999, status="done"
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(foreign_task), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await stored_status(clean_database, foreign_task) == "not_done"
+
+    async def test_an_unknown_status_is_rejected_by_the_tool_schema(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The three values are in the schema, so a fourth never reaches the service."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "set_task_status",
+                {"task_id": task_id, "status": "in_progress"},
+            )
+
+        assert '"isError":true' in response.text
+        assert await stored_status(clean_database, task_id) == "not_done"

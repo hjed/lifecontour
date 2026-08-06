@@ -7,9 +7,10 @@ from .exceptions import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
     TaskNotFoundError,
+    TaskStatusTransitionError,
     TaskValidationError,
 )
-from .task_status import TaskStatus
+from .task_status import TaskStatus, is_status_transition_allowed
 
 __all__ = [
     "Task",
@@ -19,5 +20,7 @@ __all__ = [
     "TaskJournalAnchor",
     "TaskNotFoundError",
     "TaskStatus",
+    "TaskStatusTransitionError",
     "TaskValidationError",
+    "is_status_transition_allowed",
 ]

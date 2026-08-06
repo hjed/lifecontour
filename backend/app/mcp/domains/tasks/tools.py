@@ -5,12 +5,13 @@ arose in, and the future-dated one where it matters. Both anchors are the tool's
 arguments because an AI client has no path to take the first from, unlike the
 REST surface.
 
-The tool is controller-equivalent and stays that way: it opens **no**
-transaction and enforces **no** invariant of its own. Every rule — both anchors
+The tools are controller-equivalent and stay that way: they open **no**
+transaction and enforce **no** invariant of their own. Every rule — both anchors
 exist and are the acting user's, the due journal is future-dated at the moment
-it is set, referenced contacts exist — belongs to ``TaskService.create_task``,
-which owns the commit. That is what makes the answers here identical to the
-endpoint's rather than merely similar.
+it is set, referenced contacts exist, and the status transition is one the
+lifecycle permits — belongs to ``TaskService``, which owns the commit. That is
+what makes the answers here identical to the endpoint's rather than merely
+similar.
 
 **No parameter sets "now".** The service takes one so a test can stand either
 side of a local midnight; exposing it would make the future-dated rule opt-out
@@ -21,7 +22,7 @@ argument.
 import json
 from typing import Annotated, Any
 
-from core_shared.models.tasks import Task
+from core_shared.models.tasks import Task, TaskStatus
 from fastmcp import FastMCP
 from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -115,6 +116,51 @@ async def create_task(
     return json.dumps(_task_to_dict(created), indent=2)
 
 
+@mcp_unified_error_handler("set_task_status", "task")
+async def set_task_status(
+    task_id: Annotated[int, Field(description="The id of the task to change.")],
+    status: Annotated[
+        TaskStatus,
+        Field(
+            description=(
+                "The status to move the task to. 'not_done' is outstanding, "
+                "'done' is met, 'cancelled' is no longer relevant."
+            )
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Mark a task done, not done, or cancelled.
+
+    No journal is involved: marking a task done or cancelled needs no journal
+    and creates no journal link, so a task whose due journal has already passed
+    can still be completed or cancelled where it stands.
+
+    Done is reversible — a task marked done can be moved back to not done.
+    Cancelled is not left this way: a cancelled task is reopened by
+    **retargeting** it onto a new future journal, which returns it to not done,
+    so asking here for not_done or done on a cancelled task is refused and the
+    message says what to do instead. Setting the status a task already has
+    changes nothing.
+
+    Returns:
+        JSON string with the task: id, text, status, both journal anchors, and
+        timestamps.
+    """
+    user_id = await get_current_user_id()
+
+    updated = await task_service.set_status(
+        user_id=user_id,
+        task_id=task_id,
+        status=status,
+        transaction=db_connection,
+    )
+    return json.dumps(_task_to_dict(updated), indent=2)
+
+
 def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
+    mcp.add_tool(set_task_status)

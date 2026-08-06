@@ -28,7 +28,12 @@ from typing import Literal
 from core_shared.models.tasks import TaskStatus
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.common.schemas import JsonApiCreateRequest, JsonApiLinks, JsonApiResponse
+from app.api.common.schemas import (
+    JsonApiCreateRequest,
+    JsonApiLinks,
+    JsonApiResponse,
+    JsonApiUpdateRequest,
+)
 
 RESOURCE_TYPE_DESC = "Resource type"
 TASK_RESOURCE_TYPE: Literal["tasks"] = "tasks"
@@ -110,6 +115,58 @@ class TaskCreateRequest(JsonApiCreateRequest[TaskCreateData]):
     silently dropped rather than refused — harmless while nothing reads it, and
     precisely the omission the other two guards exist to prevent. All three
     levels are now closed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TaskUpdateAttributes(BaseModel):
+    """Attributes a client may send to update a task.
+
+    Only the status, for now. Text is editable in any status and the due journal
+    is retargetable, but each has its own rules and its own phase; carrying
+    either field here before those rules exist would accept an edit and silently
+    do nothing with it. ``extra="forbid"`` is what makes that a contract rather
+    than an omission, so a field arriving early is refused rather than dropped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: TaskStatus = Field(
+        ...,
+        description=(
+            "The status to move the task to: not_done, done, or cancelled. A "
+            "cancelled task cannot be moved back here — retarget it onto a new "
+            "future journal to reopen it as not done."
+        ),
+    )
+
+
+class TaskUpdateData(BaseModel):
+    """Data for updating a task.
+
+    The resource type is pinned for the reason the create data pins it, and the
+    id is required because JSON:API identifies the resource in the body as well
+    as in the path. The controller refuses a body whose id disagrees with the
+    path rather than quietly preferring one of them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tasks"] = Field(
+        default=TASK_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="Task ID to update; must match the path")
+    attributes: TaskUpdateAttributes = Field(
+        ..., description="Task attributes to update"
+    )
+
+
+class TaskUpdateRequest(JsonApiUpdateRequest[TaskUpdateData]):
+    """Request model for updating a task.
+
+    Forbids extras in its own right, closing the envelope level the shared base
+    leaves open — the same three-level guard the create request ended up with.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -20,11 +20,13 @@ test that names one as a parameter.
 from datetime import UTC, datetime, timedelta
 
 from core_shared.models.journals import EventDateRange, Journal
+from core_shared.models.tasks import Task, TaskStatus
 from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.infrastructure.di.contacts import ContactProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
 from app.infrastructure.di.integrations import IntegrationProvider
@@ -39,6 +41,7 @@ OTHER_USER_ID = "other-user-456"
 
 COUNT_TASKS = "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id"
 COUNT_CONTACT_LINKS = "SELECT COUNT(*) FROM task_contacts"
+COUNT_INTERMEDIATE_JOURNALS = "SELECT COUNT(*) FROM task_intermediate_journals"
 
 # Midday UTC on 1 January 2020 — long past in every timezone, and a *different
 # local date* in the two zones the surface tests use: 02:00 on the 2nd in
@@ -91,9 +94,50 @@ async def create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") ->
     return int(contact_id)
 
 
+async def create_task(
+    task_repository: SqlTaskRepository,
+    *,
+    creating_journal_id: int,
+    due_journal_id: int,
+    user_id: str = USER_ID,
+    task_text: str = "return Sarah's book",
+    status: TaskStatus = TaskStatus.NOT_DONE,
+) -> int:
+    """Seed a task directly in ``status`` and return its id.
+
+    Every lifecycle test needs a task that is *already* in some status, and the
+    only supported way to reach ``cancelled`` at runtime is a status change —
+    so seeding through the repository rather than through the surface under test
+    keeps the arrange step from depending on the behaviour being asserted.
+    """
+    saved = await task_repository.save(
+        Task(
+            user_id=user_id,
+            text=task_text,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            status=status,
+        )
+    )
+    assert saved.id is not None
+    return saved.id
+
+
 async def count(conn: AsyncConnection, sql: str, params: dict[str, int | str]) -> int:
     """Run a counting query and return the count."""
     return int((await conn.execute(text(sql), params)).scalar_one())
+
+
+async def stored_status(conn: AsyncConnection, task_id: int) -> str:
+    """The status column as the database holds it, bypassing every layer above."""
+    return str(
+        (
+            await conn.execute(
+                text("SELECT status FROM tasks WHERE id = :task_id"),
+                {"task_id": task_id},
+            )
+        ).scalar_one()
+    )
 
 
 def make_task_container(connection: AsyncConnection) -> AsyncContainer:

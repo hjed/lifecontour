@@ -1,4 +1,10 @@
-"""Integration tests for ``POST /api/journals/{journal_id}/tasks``.
+"""Integration tests for the task endpoints.
+
+``POST /api/journals/{journal_id}/tasks`` creates; ``PATCH /api/tasks/{task_id}``
+changes a status. The status endpoint is a *member* route with no collection
+beside it: the specification is explicit that no screen lists every task, and a
+status change involves no journal at all, so reaching a task through one would
+be a fiction.
 
 Phase 4 proved the invariants against the service. What this file proves is that
 the **endpoint inherits them** — which a shared service is not evidence of on its
@@ -11,9 +17,12 @@ Three properties are only observable from out here:
 
 - **the creating journal is the path journal**, never a body field, so a client
   cannot anchor a task to a journal it did not come from;
-- **the write is committed before the response**, because the service owns the
-  unit of work and the controller opens none — the row is queried back after the
-  request returns;
+- **the write has happened before the response**, queried back after the request
+  returns rather than read off the payload. Note what this does *not* show: the
+  fixture marks the connection, so ``unit_of_work`` uses a SAVEPOINT and the row
+  is visible whether or not the service committed. The unit of work itself is
+  asserted in ``tests/integration/tasks/`` where it is observable — the claim
+  here was previously overstated and is corrected;
 - **the status code for each rejection**, including the phase's deliberate
   decision that a due journal that is absent or not yours answers 404 with the
   payload naming *which* anchor.
@@ -27,6 +36,7 @@ race, and a UTC reading fails both.
 """
 
 import pytest
+from core_shared.models.tasks import TaskStatus
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -35,8 +45,10 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS,
+    COUNT_INTERMEDIATE_JOURNALS,
     COUNT_TASKS,
     FIXED_PAST_INSTANT,
     OTHER_USER_ID,
@@ -44,11 +56,17 @@ from tests.integration.tasks.task_seeding import (
     count,
     create_contact,
     create_journal,
+    create_task,
+    stored_status,
 )
 
 
 def _body(**attributes: object) -> dict[str, object]:
     return {"data": {"type": "tasks", "attributes": attributes}}
+
+
+def _update_body(task_id: int, **attributes: object) -> dict[str, object]:
+    return {"data": {"type": "tasks", "id": str(task_id), "attributes": attributes}}
 
 
 def _error(response_json: dict[str, object]) -> dict[str, object]:
@@ -85,17 +103,20 @@ class TestCreateTaskEndpoint:
         assert data["attributes"]["due_journal_id"] == due_id
         assert data["attributes"]["status"] == "not_done"
 
-    async def test_the_row_is_committed_before_the_response(
+    async def test_the_row_is_written_by_the_time_the_response_returns(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
     ):
-        """The service's unit of work commits; the controller opens none.
+        """The row exists once the client has been answered.
 
-        Reading the row back *after* the response is the only way to tell a
-        committed write from one still sitting in an open transaction that the
-        connection provider will roll back at teardown.
+        Renamed and re-scoped: this previously claimed to distinguish a
+        committed write from an open one, which it cannot. The fixture marks the
+        connection, so ``unit_of_work`` emulates the commit with a SAVEPOINT and
+        this read sees the row either way. The unit of work is asserted where it
+        is observable — ``TestTheWriteIsAUnitOfWork`` in
+        ``tests/integration/tasks/test_task_service_set_status_integration.py``.
         """
         creating_id, due_id = task_anchors
 
@@ -464,3 +485,324 @@ class TestRejectedBodies:
 
         assert response.status_code == 400
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+
+@pytest.mark.integration
+class TestUpdateTaskStatusEndpoint:
+    """``PATCH /api/tasks/{task_id}``: the lifecycle at the surface."""
+
+    @pytest.mark.parametrize(
+        ("current", "target"),
+        [
+            ("not_done", "done"),
+            ("not_done", "cancelled"),
+            ("done", "not_done"),
+            ("done", "cancelled"),
+        ],
+    )
+    async def test_each_permitted_transition_is_accepted(
+        self,
+        authenticated_client: AsyncClient,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+        current: str,
+        target: str,
+    ):
+        """Including done → not done: the specification calls done reversible."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus(current),
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, status=target)
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["type"] == "tasks"
+        assert data["id"] == str(task_id)
+        assert data["attributes"]["status"] == target
+        assert data["attributes"]["creating_journal_id"] == creating_id
+        assert data["attributes"]["due_journal_id"] == due_id
+
+    async def test_the_new_status_is_written_by_the_time_the_response_returns(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The row is changed by the time the client is answered.
+
+        **This does not prove the write was committed**, and no assertion out
+        here can. The fixture owns an outer transaction and marks the
+        connection, so ``unit_of_work`` stands a SAVEPOINT in for the commit and
+        this read would see the row either way — deleting ``@transactional``
+        leaves this test green. The unit of work is proved where it is
+        observable, in ``TestTheWriteIsAUnitOfWork`` in
+        ``tests/integration/tasks/test_task_service_set_status_integration.py``,
+        by watching the transaction open around the repository call. What this
+        test does own is the surface half: the controller passed the request
+        connection through and the write happened before the response, rather
+        than being deferred to some later teardown.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, status="done")
+        )
+        assert response.status_code == 200
+
+        assert await stored_status(async_connection, task_id) == "done"
+
+    async def test_no_journal_link_is_created(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Marking a task done or cancelled requires no journal and links none."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        for target in ("done", "not_done", "cancelled"):
+            response = await authenticated_client.patch(
+                f"/api/tasks/{task_id}", json=_update_body(task_id, status=target)
+            )
+            assert response.status_code == 200
+
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_setting_the_status_a_task_already_has_changes_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Idempotent, including on a cancelled task — that is not a reopening."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, status="cancelled")
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["status"] == "cancelled"
+        assert await stored_status(async_connection, task_id) == "cancelled"
+
+
+@pytest.mark.integration
+class TestRefusedTransitionsAnswer409:
+    """Leaving cancelled is a conflict with the task's state, not a bad request."""
+
+    @pytest.mark.parametrize("target", ["not_done", "done"])
+    async def test_leaving_cancelled_is_refused_and_says_how_to_reopen(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+        target: str,
+    ):
+        """A refusal a client cannot act on is worse than no answer at all."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, status=target)
+        )
+
+        assert response.status_code == 409
+        error = _error(response.json())
+        assert error["code"] == "TASK_STATUS_TRANSITION_REFUSED"
+        assert "retarget" in str(error["detail"]).lower()
+        assert await stored_status(async_connection, task_id) == "cancelled"
+
+
+@pytest.mark.integration
+class TestUnreachableTasksAnswer404:
+    """Somebody else's task is invisible, not merely forbidden."""
+
+    async def test_another_users_task_reads_as_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Byte-identical once the ids are stripped, and the row is untouched.
+
+        A distinguishable answer here would turn the endpoint into a way to ask
+        whether a given task id belongs to somebody.
+        """
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            task_repository,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        foreign = await authenticated_client.patch(
+            f"/api/tasks/{foreign_task}", json=_update_body(foreign_task, status="done")
+        )
+        absent = await authenticated_client.patch(
+            "/api/tasks/999999", json=_update_body(999_999, status="done")
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        foreign_error, absent_error = _error(foreign.json()), _error(absent.json())
+        assert foreign_error["code"] == absent_error["code"] == "TASK_NOT_FOUND"
+        assert str(foreign_error["detail"]).replace(str(foreign_task), "X") == str(
+            absent_error["detail"]
+        ).replace("999999", "X")
+        assert await stored_status(async_connection, foreign_task) == "not_done"
+
+
+@pytest.mark.integration
+class TestRejectedUpdateBodies:
+    """What a client may not send to the update endpoint."""
+
+    @pytest.mark.parametrize(
+        "attributes",
+        [
+            {"status": "in_progress"},
+            {"status": "done", "text": "rewritten"},
+            {"status": "done", "now": "2020-01-01T00:00:00+00:00"},
+            {},
+        ],
+        ids=["unknown status", "text", "now", "no status"],
+    )
+    async def test_rejected_attributes_leave_the_status_alone(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+        attributes: dict[str, object],
+    ):
+        """Text belongs to its own phase; there is no fourth status and no ``now``."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, **attributes)
+        )
+
+        assert response.status_code == 400
+        assert await stored_status(async_connection, task_id) == "not_done"
+
+    async def test_a_body_carrying_now_at_the_request_root_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """All three nesting levels are guarded, as the create request learned."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json={
+                "data": {
+                    "type": "tasks",
+                    "id": str(task_id),
+                    "attributes": {"status": "done"},
+                },
+                "now": "2020-01-01T00:00:00+00:00",
+            },
+        )
+
+        assert response.status_code == 400
+        assert await stored_status(async_connection, task_id) == "not_done"
+
+    async def test_a_body_declaring_another_resource_type_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json={
+                "data": {
+                    "type": "contacts",
+                    "id": str(task_id),
+                    "attributes": {"status": "done"},
+                }
+            },
+        )
+
+        assert response.status_code == 400
+        assert await stored_status(async_connection, task_id) == "not_done"
+
+    async def test_a_body_id_that_disagrees_with_the_path_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Two ids naming different tasks is a request nobody can answer safely.
+
+        Preferring the path silently would let a client change a task it
+        believes it is not touching; neither row may move.
+        """
+        creating_id, due_id = task_anchors
+        target_id = await create_task(
+            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        other_id = await create_task(
+            task_repository,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            task_text="somebody else's problem",
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{target_id}", json=_update_body(other_id, status="done")
+        )
+
+        assert response.status_code == 400
+        assert _error(response.json())["code"] == "TASK_VALIDATION_ERROR"
+        assert await stored_status(async_connection, target_id) == "not_done"
+        assert await stored_status(async_connection, other_id) == "not_done"

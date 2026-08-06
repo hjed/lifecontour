@@ -19,6 +19,8 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskNotFoundError,
+    TaskStatus,
+    TaskStatusTransitionError,
     TaskValidationError,
 )
 
@@ -69,6 +71,29 @@ class TestTaskErrorsReachTheClient:
 
         assert response["error"] == "Not found"
         assert "5" in response["message"]
+
+    async def test_a_refused_transition_is_actionable_rather_than_not_found(
+        self,
+    ) -> None:
+        """A cancelled task exists; what is refused is the move, not the lookup.
+
+        Rendering this as "Not found" would send a model looking for a task it
+        can already see.
+        """
+        response = await _render(
+            TaskStatusTransitionError(TaskStatus.CANCELLED, TaskStatus.NOT_DONE)
+        )
+
+        assert response["error"] == "Task error"
+        assert "cancelled" in response["message"]
+
+    async def test_a_refused_transition_names_the_way_out(self) -> None:
+        """Retargeting is the operation the model should reach for instead."""
+        response = await _render(
+            TaskStatusTransitionError(TaskStatus.CANCELLED, TaskStatus.DONE)
+        )
+
+        assert "retarget" in response["message"].lower()
 
 
 class TestTheBranchIsNotTooBroad:

@@ -261,12 +261,14 @@ export.
 
 Tasks are commitments anchored to two journals — the one a task arose in and the
 future-dated one it is due in — so creation hangs off the journal path rather
-than a top-level collection. There is deliberately **no `/api/tasks` index**: a
-task is always reached through a journal.
+than a top-level collection. There is deliberately **no `/api/tasks` collection**:
+no endpoint lists tasks, because no screen does. Member routes under `/api/tasks/`
+do exist for operations that involve no journal at all.
 
 | Verb + path | Purpose | Status |
 |---|---|---|
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
+| `PATCH /api/tasks/{task_id}` | Change a task's status. Body attributes: `status` (`not_done`, `done`, `cancelled`) | 200; 400 unknown status, unknown attribute, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
 
 Conventions this surface pins down:
 
@@ -288,10 +290,25 @@ Conventions this surface pins down:
   is what disambiguates a body-field 404 from a path-journal one. Because the
   answer lives in the mapping, the MCP tool inherits it unchanged.
 - **Transactions:** the controller passes the request-scoped `AsyncConnection`
-  into `TaskService.create_task`, which is `@transactional` and owns the commit.
-  The controller opens none and catches no domain error.
-- The matching MCP tool is `create_task` (documented in its docstring and
-  parameter schema, per the MCP documentation convention).
+  into the `@transactional` service method, which owns the commit. The controller
+  opens none and catches no domain error.
+- **A status change reaches the task by its own id, not through a journal.**
+  Marking a task done or cancelled requires no journal and creates no journal
+  link, and the due journal is not re-read — which is what keeps a *lapsed* task
+  (one whose due journal has passed) completable. Routing it through a journal
+  would imply a relationship the operation does not have.
+- **409 for a refused transition.** Only two are refused, both leaving
+  *cancelled*: a cancelled task is reopened by retargeting it onto a new future
+  journal, which returns it to not done. The body is well formed and the status
+  it names is real, so what it conflicts with is the task's state — and the
+  `detail` names retargeting rather than merely refusing.
+- **A `PATCH` body must carry `data.id`, and it must match the path.** JSON:API
+  identifies the resource in the body as well as in the URL; preferring one
+  silently would let a client change a task it believes it is not touching. This
+  is the one check the controller makes itself, because it is an envelope
+  concern with no domain rule and no MCP counterpart behind it.
+- The matching MCP tools are `create_task` and `set_task_status` (documented in
+  their docstrings and parameter schemas, per the MCP documentation convention).
 
 ## Authentication Guidelines
 

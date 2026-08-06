@@ -22,7 +22,6 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from core_shared.models.tasks import (
     Task,
     TaskAnchorJournalNotFoundError,
@@ -43,6 +42,8 @@ from app.core.settings.models import UserSettings
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_service import TaskService
 from tests.integration.tasks.task_seeding import (
+    COUNT_CONTACT_LINKS,
+    COUNT_TASKS,
     OTHER_USER_ID,
     USER_ID,
     count,
@@ -51,34 +52,10 @@ from tests.integration.tasks.task_seeding import (
     make_task_container,
 )
 
-_COUNT_TASKS = "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id"
-_COUNT_CONTACT_LINKS = "SELECT COUNT(*) FROM task_contacts"
-
 # 06:00 on 6 August in Sydney (+10) — the 5th is still running in UTC.
 SYDNEY_MORNING = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
 # 20:00 on the *same* Sydney day, and the 6th in UTC as well.
 SYDNEY_EVENING = datetime(2026, 8, 6, 10, 0, tzinfo=UTC)
-
-
-@pytest_asyncio.fixture
-async def task_repository(async_connection: AsyncConnection) -> SqlTaskRepository:
-    return SqlTaskRepository(async_connection)
-
-
-@pytest_asyncio.fixture
-async def service(
-    async_connection: AsyncConnection,
-    task_repository: SqlTaskRepository,
-    journal_repository: SqlJournalRepository,
-    user_settings_repository: SqlUserSettingsRepository,
-) -> TaskService:
-    """The service over real adapters on the test's single connection."""
-    return TaskService(
-        task_repo=task_repository,
-        journal_repo=journal_repository,
-        contact_repo=SqlContactRepository(async_connection),
-        date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
-    )
 
 
 @pytest.mark.integration
@@ -209,7 +186,7 @@ class TestTheWriteIsOneUnitOfWork:
                 transaction=async_connection,
             )
 
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
 
 @pytest.mark.integration
@@ -330,7 +307,7 @@ class TestOwnershipIsAnInvariant:
             )
 
         assert exc_info.value.anchor == "due"
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_rejects_another_users_journal_as_the_creating_anchor(
         self,
@@ -356,7 +333,7 @@ class TestOwnershipIsAnInvariant:
             )
 
         assert exc_info.value.anchor == "creating"
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_a_foreign_journal_is_indistinguishable_from_a_missing_one(
         self,
@@ -431,7 +408,7 @@ class TestFutureDatedAgainstStoredSettings:
 
         assert exc_info.value.journal_date == date(2026, 8, 6)
         assert exc_info.value.today == date(2026, 8, 6)
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_falls_back_to_utc_for_a_user_with_no_settings_row(
         self,
@@ -525,8 +502,8 @@ class TestContactLinks:
             )
 
         assert exc_info.value.contact_id == 999_999
-        assert await count(async_connection, _COUNT_TASKS, {"user_id": USER_ID}) == 0
-        assert await count(async_connection, _COUNT_CONTACT_LINKS, {}) == 0
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_CONTACT_LINKS, {}) == 0
 
     async def test_rejects_the_whole_create_when_one_contact_is_unknown(
         self,
@@ -548,7 +525,7 @@ class TestContactLinks:
                 transaction=async_connection,
             )
 
-        assert await count(async_connection, _COUNT_CONTACT_LINKS, {}) == 0
+        assert await count(async_connection, COUNT_CONTACT_LINKS, {}) == 0
 
 
 @pytest.mark.integration

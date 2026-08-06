@@ -1148,7 +1148,7 @@ journal (rejected) and a contact owned by another user (rejected). No e2e.
   `tests/integration/api/` together (1060 tests). No frontend or e2e gates — the phase changes no
   frontend file and ships no user-visible surface.
 
-#### Phase 5: Create — REST and MCP
+#### Phase 5: Create — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 4.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — a capability triple, at the measured floor
@@ -1338,7 +1338,10 @@ attempts. E2E deferred to Phase 22.
   were red before the branch landed, which is how the gap above was found.
 - **Integration (17 tests):** `backend/tests/integration/api/test_task_endpoints.py` against real
   PostgreSQL. *Creation (4):* the resource and its anchors; **the row read back after the response**
-  (the only way to tell a committed write from an open transaction); creating == due; contacts linked.
+  (~~the only way to tell a committed write from an open transaction~~ — **corrected in Phase 6**: under
+  the savepoint fixture that read sees the row with or without `@transactional`, so it shows only that
+  the write happened before the response; see *Decisions taken (Phase 6)*); creating == due; contacts
+  linked.
   *Unreachable anchors (3):* an absent due journal naming the due anchor **and not the path journal's
   id**; another user's due journal byte-identical to an absent one once the ids are stripped; another
   user's *path* journal rejected as the creating anchor — each with no task row written.
@@ -1361,23 +1364,163 @@ attempts. E2E deferred to Phase 22.
   `tests/integration/mcp/` together (841 tests). No frontend or e2e gates — the phase changes no
   frontend file and ships no user-visible surface.
 
-#### Phase 6: Status Lifecycle — Service, REST and MCP
+#### Phase 6: Status Lifecycle — Service, REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 5.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Actual:** **304 production → 2,152 tracked** (2,152 insertions, 83 deletions across 23 files: 304
+production — service 60, REST schemas 51, controller 63, MCP tool 58, `core_shared` predicate and error
+65, error handler 2, server instructions 1 — 1,714 tests and fixtures, 134 docs). The `~200 → ~1,050`
+figure first recorded here was wrong: it was written from memory before the diff was measured, and it
+under-counted the tests by roughly half.
+
+**Why it ran to 3.6× the estimate, and what that says about the calibration rule.** The production
+estimate was almost exactly right (304 against ~150 for the two surfaces plus a service method, against
+a ×2 under-count). What overran is what has overrun in every phase of this iteration: the tests, at
+**5.6× the production line count**. A transition matrix is 3×3, and a *capability triple* asserts it
+three times — once as a pure rule, once per surface — so the test volume is the cell count times the
+surface count, not a multiple of the production lines. **Calibration refinement:** for a phase whose
+subject is a *matrix* rather than a *path*, estimate tests from cells × surfaces, not from a multiplier
+on production. **Delivery rule 3 was breached**: the overrun should have been recorded before work
+started, and was not — the honest reading is that the phase should have been recognised as oversized at
+planning time and the estimate revised then.
 
 **Acceptance Criteria:**
 
-- [ ] `TaskService.set_status` handles the full transition matrix: done is reversible to not done;
+- [x] `TaskService.set_status` handles the full transition matrix: done is reversible to not done;
       cancelled is reachable from any state; **cancelled → not done is rejected here**, because reopening
-      happens only by retargeting (Phase 7).
-- [ ] Marking done or cancelled requires no journal and creates no journal link.
-- [ ] `PATCH /api/tasks/{id}` (status) plus MCP `set_task_status` in the same PR, accepting the three values
-      and rejecting anything else.
-- [ ] Both surfaces 404 on another user's task.
+      happens only by retargeting (Phase 7). — the matrix is a pure predicate,
+      `is_status_transition_allowed` in `core_shared/models/tasks/task_status.py`; the service applies it
+      and raises `TaskStatusTransitionError`. All nine cells are asserted.
+- [x] Marking done or cancelled requires no journal and creates no journal link. — no journal repository
+      call is made on any path (asserted against the mock), and `task_intermediate_journals` is asserted
+      empty after a status change on all three surfaces.
+- [x] `PATCH /api/tasks/{id}` (status) plus MCP `set_task_status` in the same PR, accepting the three values
+      and rejecting anything else. — the status parameter is the domain enum on both surfaces, so the three
+      values are in the JSON:API schema *and* in the generated tool schema.
+- [x] Both surfaces 404 on another user's task. — and byte-identically to an absent id once the ids are
+      stripped, so neither surface can be used to probe for another user's tasks.
+
+**Decisions taken (Phase 6):**
+
+- **`cancelled → done` is refused as well as `cancelled → not done`.** The criterion names only the
+  second. The specification gives cancelled exactly one exit — retargeting onto a new future journal,
+  which revalidates the future-dated rule and always lands on *not done* — so allowing a status call to
+  reach *done* from cancelled would be a second exit that skips those rules, and would in addition assert
+  that a commitment was met after being declared irrelevant. Keeping it as one rule ("cancelled is left
+  only by retargeting") is simpler than two half-rules, and the refusal message names retargeting so a
+  client or an agent can act on it. The specification's *"mark it done, if it turns out they did it"*
+  affordance is about **lapsed** tasks, which are not done, and is untouched.
+- **A refused transition answers 409, not 400.** The body is well formed and the status it names is real;
+  what it conflicts with is the state the task is in. `ContactMergeConflictError` is the existing 409
+  precedent. The MCP handler needed no change — it branches on 404 versus everything else, so a 409 comes
+  through as an actionable "Task error" carrying the domain message.
+- **Setting the status a task already has is a no-op, not a write.** It returns the task without saving,
+  so `updated_at` does not move and no status change is recorded that did not happen — which matters for
+  ITER18-002's history projection, whose events are derived from writes. This is also what keeps
+  `cancelled → cancelled` out of the refusal set: asking for the status a task already has is not a
+  reopening.
+- **`PATCH /api/tasks/{id}` is a member route, and there is still no collection.** The specification's
+  "no `/tasks` route, no global list" is about a *collection*: no endpoint lists tasks because no screen
+  does. A status change involves no journal at all — the due journal is not even re-read, which is what
+  keeps a lapsed task completable — so routing it through a journal would imply a relationship the
+  operation does not have. `api-design.md`'s "no `/api/tasks` index" was narrowed to say so.
+- **The body's `data.id` must match the path, refused with 400.** Every other update surface in this
+  repository requires `data.id` and none checks it; JSON:API says a mismatch is an error, and preferring
+  the path silently would let a client change a task it believes it is not touching. This is the **only**
+  thing the controller decides — an envelope concern with no domain rule and no MCP counterpart behind
+  it — so the "controller catches nothing" rule survives intact. 400 rather than JSON:API's suggested
+  409 keeps it consistent with Phase 5's type-mismatch choice, and 409 is now reserved for the lifecycle
+  refusal, where it says something specific. **Follow-up:** this is the third divergence in a row where
+  the tasks surface is stricter than its neighbours (pinned resource type, three-level `extra="forbid"`,
+  and now the id match). Whether the other update surfaces should check `data.id` too is a codebase-wide
+  question, recorded rather than propagated — the same disposition Phase 5 took.
+- **The status parameter is the domain enum on both surfaces, not a string.** A model reads the generated
+  tool schema to decide what to send; a plain string would leave it guessing at "complete", "closed" or
+  "todo" and learning the answer only from a rejection. A test asserts the schema enumerates exactly the
+  three values, and another that the tool description names retargeting as the way out of cancelled — a
+  model that cannot see that rule retries the refused call instead.
+- **"Read the row back after the response" never proved a commit, and this phase's review caught it.**
+  Phases 4–6 all carried a test whose docstring called that read *"the only way to tell a committed
+  write from one still sitting in an open transaction"*. It is not: the integration fixture owns an
+  outer transaction and marks the connection, so `unit_of_work` stands a SAVEPOINT in for the commit and
+  the row is visible to any later read on that connection **whether or not the service is
+  `@transactional`**. This was verified rather than argued — with the decorator removed, all 34 endpoint
+  tests still passed. Two things follow. The claims are corrected wherever they appear (the test names
+  and docstrings say what the assertion actually shows: the write happened before the client was
+  answered). And the property itself is now asserted where it *is* observable: a repository subclass
+  looks at `connection.get_nested_transaction()` while it writes, which is non-`None` exactly while a
+  unit of work is open — the one test in this phase that fails when the decorator is deleted.
+  **Follow-up:** every other domain's "committed before the response" test rests on the same false
+  evidence. Worth a pass over `testing-strategy.md` to make the observing-repository idiom the standard
+  way to assert a unit of work, rather than repeating a read that cannot fail.
+- **`set_status` writes the whole row back from the snapshot it read.** `save(replace(task, ...))` makes
+  the repository `SET` `text` and both anchors from a row read moments earlier, with no lock. Harmless
+  now — status is the only field any surface can change — but Phase 8 (retarget) and Phase 9 (text)
+  make concurrent edits real, and a last-writer-wins update would then silently drop one of them.
+  **Follow-up for Phase 9:** either narrow the write to the changed column or take a locking read;
+  deciding it here would be guessing at what those phases need.
+- **Test seeding was shared rather than copied**, following the Phase 5 duplication lesson. `create_task`
+  and `stored_status` joined `tests/integration/tasks/task_seeding.py`; `task_repository` joined the root
+  integration conftest (three directories consume it); and the `service` fixture the two service test
+  files had in common moved to a new `tests/integration/tasks/conftest.py`, removing the copy Phase 4
+  left in the creation test. Tasks are seeded **through the repository**, not by driving the surface
+  under test, because reaching *cancelled* through the service is itself one of the behaviours asserted.
 
 **Required Test Coverage:** unit — the transition matrix including every rejected transition. Integration —
 both surfaces against a real database, plus the cross-user 404. E2E deferred to Phase 22.
+
+- **Unit (17 tests):** `backend/tests/unit/tasks/test_task_status_transitions.py` — all nine cells against
+  the pure predicate, a guard asserting the two lists *are* the whole matrix so no cell can be forgotten,
+  done's reversibility and cancelled's reachability stated in their own right, and the refusal error's
+  shape (409, both statuses in the message and on the object, and the word *retarget*).
+- **Unit (18 tests):** `backend/tests/unit/tasks/test_task_service_set_status.py` — each permitted
+  transition persisted; the read is owner-scoped; text and both anchors untouched; **the journal and
+  settings repositories are never touched at all** (asserted on `mock_calls`, not on named methods, so
+  a method added to the port later cannot slip through) and no link is written; both refusals raise and never call `save`; an unknown task and another
+  user's task both raise `TaskNotFoundError` with identical messages and no write; every same-status call
+  returns without saving.
+- **Unit (36 tests, 18 new):** `backend/tests/unit/api/test_task_schemas.py` (extended) — the three status values
+  accepted and a fourth rejected; `status` required; `data.id` required; the resource type pinned; and
+  the update request refusing `text`, `due_journal_id`, `creating_journal_id`, `now` and unknown fields at
+  each of the three nesting levels.
+- **Unit (13 tests, 6 new):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` (extended) — the tool is
+  registered, `task_id` and `status` are required, the status parameter enumerates exactly the three
+  domain values in the **generated schema**, injected collaborators are absent, no journal parameter is
+  offered, and the description names retargeting.
+- **Unit (9 tests, 2 new):** `backend/tests/unit/mcp/shared/test_task_error_handling.py` (extended) — the refusal
+  renders as an actionable "Task error" rather than "Not found" (a cancelled task exists; it is the move
+  that is refused), and carries the way out.
+- **Integration (14 tests):** `backend/tests/integration/tasks/test_task_service_set_status_integration.py`
+  — every permitted transition read back from the **database** rather than from the returned object; a
+  **lapsed** task still completable (the due journal is not re-validated); no intermediate link row; the
+  anchors unchanged; `updated_at` unmoved by a same-status call; both refusals leaving the stored row
+  untouched; another user's task not found and not modified; an absent id giving the identical message.
+  It also carries the phase's **only decorator-sensitive test** (see the unit-of-work decision above):
+  a repository that observes the connection while it writes proves a unit of work is open around it.
+- **Integration (34 tests, 17 new):** `backend/tests/integration/api/test_task_endpoints.py` (extended) — each
+  permitted transition over HTTP; the row read back **after** the response (which shows the write
+  happened before the client was answered — *not* that it committed; see the decision above); no link
+  row; the same-status no-op; both refusals answering 409 `TASK_STATUS_TRANSITION_REFUSED` with the row
+  unchanged; the cross-user 404 proved byte-identical to an absent one; and four rejected bodies
+  (unknown status, `text`, `now`, no status) plus `now` at the request root, another resource type, and
+  a body id disagreeing with the path — the last asserting *neither* task moved.
+- **Integration (22 tests, 10 new):** `backend/tests/integration/mcp/test_task_tools_mcp.py` (extended) — the same
+  matrix through `tools/call` over the mounted MCP transport, including the written row, the absence of
+  link rows, the same-status no-op (so neither surface has behaviour the other lacks), the actionable
+  refusal, the indistinguishable cross-user answer, and a fourth status value refused by the transport
+  before the service is reached.
+- **E2E:** none — deferred as the phase states. The phase ships no frontend surface; ITER18-001's e2e
+  lands in Phase 22.
+- **Docs:** `docs/architecture/api-design.md`'s *Task Endpoints* section gained the `PATCH` row and four
+  conventions (member route versus collection, 409 for a refused transition, the `data.id` match, and the
+  second MCP tool). `mcp-setup.md` and `mcp-tools.md` deliberately untouched — the tools document
+  themselves.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (869 files) and
+  `core_shared` (128); `mypy` clean over 864 backend files and 126 in `core_shared`; the full
+  `tests/unit/` suite (2,802 tests); and `tests/integration/tasks/`, `tests/integration/api/` and
+  `tests/integration/mcp/` together (882 tests). No frontend or e2e gates — the phase changes no frontend
+  file and ships no user-visible surface.
 
 #### Phase 7: Retargeting Semantics — Service
 

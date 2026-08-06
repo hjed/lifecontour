@@ -27,6 +27,7 @@ since passed — reachable rather than unloadable.
 from __future__ import annotations
 
 import datetime
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from core_shared.models.tasks import (
@@ -34,6 +35,10 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
+    TaskNotFoundError,
+    TaskStatus,
+    TaskStatusTransitionError,
+    is_status_transition_allowed,
 )
 from sqlalchemy.exc import IntegrityError
 
@@ -93,7 +98,12 @@ def _violated_anchor(error: IntegrityError) -> TaskJournalAnchor | None:
 
 
 class TaskService:
-    """Creates tasks, enforcing the specification's core invariants."""
+    """Creates tasks and moves them through their lifecycle.
+
+    Both operations enforce the specification's rules here rather than at a
+    surface: the core invariants on creation, and the status transition matrix
+    on a status change. REST and MCP are thin callers of each.
+    """
 
     def __init__(
         self,
@@ -175,6 +185,54 @@ class TaskService:
         for contact_id in contacts:
             await self._link_contact(created.id, contact_id, user_id)
         return created
+
+    @transactional
+    async def set_status(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        status: TaskStatus,
+        transaction: AsyncConnection,
+    ) -> Task:
+        """Move one of the user's tasks to ``status``.
+
+        **No journal is involved.** Marking a task done or cancelled needs no
+        journal and creates no journal link, which is what keeps a *lapsed* task
+        completable: the due journal is not re-read, so the future-dated rule —
+        a write-time rule about *setting* a due journal — is not re-applied to a
+        task whose journal has since passed.
+
+        Asking for the status the task already has is a no-op: nothing is
+        written, so ``updated_at`` does not move and no status change is
+        recorded that did not happen.
+
+        Args:
+            user_id: The acting user; the task must be theirs
+            task_id: The task to move
+            status: The status to move it to
+            transaction: The request connection; the unit of work commits here
+
+        Returns:
+            The task in its new status — or unchanged, when it was already there.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's. The two are indistinguishable by design.
+            TaskStatusTransitionError: When the transition is refused — that is,
+                when it would leave *cancelled*, which only retargeting does.
+        """
+        task = await self.task_repo.find_by_id(task_id, user_id)
+        if task is None:
+            raise TaskNotFoundError(task_id)
+
+        if task.status == status:
+            return task
+
+        if not is_status_transition_allowed(task.status, status):
+            raise TaskStatusTransitionError(task.status, status)
+
+        return await self.task_repo.save(replace(task, status=status))
 
     async def _save(
         self, task: Task, creating_journal_id: int, due_journal_id: int
