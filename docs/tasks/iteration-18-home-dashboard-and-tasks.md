@@ -1865,12 +1865,16 @@ callers before estimating.
   whatever the caller does next. Pinned by an integration test that stages the race — the first look-up
   misses, which is exactly what the window produces, while the row is really there for the foreign key
   to refuse on — and mutation-checked by removing the savepoint, which fails it.
-- **A cancelled calendar series now cancels an anchored instance instead of failing.**
-  `JournalOutboxEventProcessor._delete_cancelled_instance` deletes far-future recurring instances — which
-  is exactly the profile of a task's due journal. Left alone, the guard would have turned a routine sync
-  event into a permanent retry loop. It is caught in the fan-out loop and the instance is marked
-  cancelled, the same outcome as a journal the existing deletion-protection facts protect, and the escape
-  hatch the guard steers users toward. The savepoint means the failed attempt leaves no trace.
+- **A cancelled calendar event now cancels an anchored instance instead of failing — on both of its
+  paths.** `JournalOutboxEventProcessor` deletes far-future recurring instances, which is exactly the
+  profile of a task's due journal. Left alone, the guard would have turned a routine sync event into a
+  permanent retry loop over a journal that is never going to become deletable. Both the series fan-out
+  and the **single** `journal_event.cancelled` path now catch the refusal and mark the instance
+  cancelled — the same outcome an instance the existing deletion-protection facts protect already gets,
+  and the escape hatch the guard steers users toward. The second path was missed on the first pass and
+  found by the PR's automated review; the deletion attempt removes the instance's external links before
+  it reaches the journal, so both call sites wrap it in a savepoint and the refused attempt leaves no
+  trace. Mutation-checked at each site by removing its catch.
 - **`JournalWriteService.delete_journal` was not touched**: it delegates to `JournalService`, so a second
   guard there would be duplicate enforcement, not defence in depth.
 
@@ -1899,9 +1903,16 @@ deletes; one query for many tasks. No e2e (Phase 5).
   intermediate-only journal deletes with its link row and leaves the task and anchors whole; a task-free
   journal deletes; three blockers arrive in **one** statement in id order; a journal only mentioned by a
   task has no blockers; and the container resolves both the adapter and a guard-carrying `JournalService`.
-  Plus `test_journal_series_sync_processor.py` (1) — a series cancellation whose instance a task is due
-  in reports `deleted=0, cancelled=1`, leaves the journal cancelled rather than gone, and leaves the task
-  untouched.
+  Plus `test_journal_series_sync_processor.py` (2) — a series cancellation whose instance a task is due
+  in reports `deleted=0, cancelled=1`, and a single instance cancellation of the same shape reports no
+  deletion; both leave the journal cancelled rather than gone, the task's anchor intact and, for the
+  single path, the external link the attempt had removed restored by the savepoint. Plus the two
+  ownership tests below.
+- **Ownership (2 tests):** `tests/integration/api/test_journal_endpoints.py` and
+  `tests/integration/mcp/test_journal_tools_integration.py` — deleting another user's journal, with a
+  task anchored to it, answers exactly as it does for an id that never existed and leaves the journal
+  standing. Both were mutation-checked, and without the check the other user's task text is right there
+  in the response: a 409 over REST, and the tool payload over MCP.
 - **Statement counting, not call counting.** `AsyncConnection.execute` cannot be patched (the attribute is
   read-only), which turned out to be the better test: the "one query" assertion listens for
   `before_cursor_execute` and counts round trips to PostgreSQL, so a repository that looped internally

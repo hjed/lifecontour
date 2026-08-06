@@ -447,6 +447,58 @@ class TestRecurringInstanceCancellation:
         assert await _journal_exists(async_connection, journal_id)
         assert await _event_state(async_connection, journal_id) == "cancelled"
 
+    async def test_cancelled_instance_a_task_is_due_in_falls_back_to_cancel(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A single instance cancelled upstream takes the same fallback as the
+        whole-series fan-out.
+
+        An anchored task is a normal state of the world, not a failure, so the
+        event must reach its cancellation outcome rather than being retried
+        forever over a journal that is never going to become deletable.
+        """
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+        external_event_id = f"{MASTER_ID}_anchored_instance"
+
+        created = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=external_event_id,
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        journal_id = created["journal_id"]
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=journal_id,
+            due_journal_id=journal_id,
+            user_id=USER_ID,
+        )
+
+        result = await processor.process_event(
+            _sync_event(
+                "journal_event.cancelled",
+                calendar_id=calendar_id,
+                external_event_id=external_event_id,
+                existing_journal_id=journal_id,
+                recurring_event_id=MASTER_ID,
+            )
+        )
+
+        assert result.get("action") != "deleted"
+        assert await _journal_exists(async_connection, journal_id)
+        assert await _event_state(async_connection, journal_id) == "cancelled"
+        # The task kept its anchor, and the external link the deletion attempt
+        # had already removed came back with the savepoint.
+        surviving = await async_connection.execute(
+            text("SELECT due_journal_id FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+        assert surviving.scalar() == journal_id
+        assert await _link_recurring_id(async_connection, journal_id) == MASTER_ID
+
 
 @pytest.mark.integration
 class TestSeriesCancelledWithAnchoredTasks:
