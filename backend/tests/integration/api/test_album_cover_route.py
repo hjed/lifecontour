@@ -23,6 +23,9 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 USER_ID = "test-user-123"
@@ -37,6 +40,7 @@ async def _create_album_journal(
         journal_repo=SqlJournalRepository(connection),
         event_publisher=OutboxEventPublisher(connection),
         contact_relationship_repo=SqlJournalContactRelationshipRepository(connection),
+        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     processor = ImmichAlbumOutboxEventProcessor(
         journal_service=service, connection=connection

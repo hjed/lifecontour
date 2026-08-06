@@ -44,6 +44,9 @@ from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import (
     _fetch_journal_types_and_data,
@@ -92,6 +95,7 @@ class JournalTestProvider(Provider):
             journal_repo=journal_repository,
             event_publisher=event_publisher,
             contact_relationship_repo=contact_relationship_repo,
+            task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
 

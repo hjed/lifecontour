@@ -10,6 +10,7 @@ from core_shared.models.journals import (
     EventDateRange,
     Journal,
     JournalCycleError,
+    JournalHasAnchoredTasksError,
     JournalMaxDepthExceededError,
     JournalNotFoundError,
     JournalType,
@@ -34,8 +35,9 @@ from app.core.journal.models.repositories import (
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
+from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.infrastructure.unit_of_work import transactional
+from app.infrastructure.unit_of_work import savepoint, transactional
 
 logger = structlog.get_logger()
 
@@ -62,6 +64,8 @@ class JournalService:
         event_publisher: OutboxEventPublisher,
         contact_relationship_repo: JournalContactRelationshipRepository | None = None,
         tag_hierarchy: JournalTagHierarchyService | None = None,
+        *,
+        task_anchor_repo: TaskAnchorRepository,
     ):
         """
         Initialize the journal service.
@@ -72,11 +76,19 @@ class JournalService:
             contact_relationship_repo: Repository for contact relationships
             tag_hierarchy: Tag hierarchy service used to expand tag filters to
                 their descendants. Without it, tag filtering stays flat.
+            task_anchor_repo: Reads which tasks anchor a journal, for the delete
+                guard. Required, unlike the two collaborators above: they
+                degrade a feature when absent, whereas a delete that skipped
+                this check would leave the model in a state the specification
+                says is impossible. Keyword-only so the existing positional
+                call sites keep working while the type checker names every one
+                that must supply it.
         """
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
         self.contact_relationship_repo = contact_relationship_repo
         self.tag_hierarchy = tag_hierarchy
+        self.task_anchor_repo = task_anchor_repo
 
     @transactional
     async def create_journal(
@@ -255,11 +267,18 @@ class JournalService:
 
         Raises:
             JournalNotFoundError: If journal doesn't exist
+            JournalHasAnchoredTasksError: If any task is anchored to the journal
+                as its creating or due journal, whatever that task's status
         """
         # Validate journal exists
         journal = await self.journal_repo.find_by_id(journal_id)
         if journal is None:
             raise JournalNotFoundError(journal_id)
+
+        # A task can never exist without both of its journal anchors, so an
+        # anchoring journal cannot be deleted. Checked before anything else is
+        # read or written: the refusal is total, so nothing else is worth doing.
+        await self._refuse_if_tasks_are_anchored(journal_id)
 
         # Fetch external event IDs before deletion so workers know what to delete
         stmt = text("""
@@ -281,8 +300,25 @@ class JournalService:
                 }
             )
 
-        # Delete the journal
-        await self.journal_repo.delete(journal_id)
+        # Delete the journal. The guard above is check-then-act, so a task
+        # anchored to this journal can still commit in the window between them:
+        # the anchors' ON DELETE RESTRICT catches it, and the violation is
+        # turned back into the same explanatory refusal rather than escaping.
+        #
+        # The SAVEPOINT is what makes that possible. A failed statement poisons
+        # its transaction, so without one the re-check could not run at all —
+        # PostgreSQL would refuse it, and the caller would get an aborted
+        # transaction instead of an explanation. It confines the delete because
+        # the repositories and `transaction` are one request-scoped connection
+        # resolved from a single Dishka scope; a service built by hand from
+        # repositories on some *other* connection would leave the savepoint
+        # covering nothing.
+        try:
+            async with savepoint(transaction):
+                await self.journal_repo.delete(journal_id)
+        except IntegrityError:
+            await self._refuse_if_tasks_are_anchored(journal_id)
+            raise
 
         # Publish deletion event
         event = JournalDeleted(
@@ -296,6 +332,27 @@ class JournalService:
         await self.event_publisher.publish(event)
 
         logger.info("Journal deleted", journal_id=journal_id)
+
+    async def _refuse_if_tasks_are_anchored(self, journal_id: int) -> None:
+        """Raise if any task is anchored to this journal, naming every one.
+
+        Returns quietly when nothing is anchored, which is also what makes it
+        usable as the backstop after an ``IntegrityError``: a violation it
+        cannot explain leaves the original error to be re-raised untouched, so
+        an unrelated broken constraint is never reported as a task conflict.
+        """
+        blocking_tasks = await self.task_anchor_repo.find_tasks_anchored_to_journal(
+            journal_id
+        )
+        if not blocking_tasks:
+            return
+
+        logger.info(
+            "Journal deletion refused: tasks are anchored to it",
+            journal_id=journal_id,
+            blocking_task_ids=[task.task_id for task in blocking_tasks],
+        )
+        raise JournalHasAnchoredTasksError(journal_id, tuple(blocking_tasks))
 
     async def get_journal(self, journal_id: int) -> Journal | None:
         """

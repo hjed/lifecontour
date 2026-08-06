@@ -2606,6 +2606,10 @@ async def delete_journal(
     Delete a journal.
 
     Deletes the journal and all its associated data.
+
+    Refused with 409 when a task is anchored to this journal as its creating or
+    due journal, whatever that task's status; cancel, complete or retarget those
+    tasks first, or cancel the journal instead of deleting it.
     """
     existing_journal = await journal_service.get_journal(journal_id)
     if not existing_journal:

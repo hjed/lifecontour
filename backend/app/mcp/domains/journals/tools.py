@@ -137,6 +137,7 @@ from app.core.journal.services.outdoor_dashboard_service import (
     OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
+from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import (
     ActivityTemplateMCPConverter,
@@ -3440,6 +3441,13 @@ async def delete_journal(
     Deletes a journal entry and optionally its children.
     Returns confirmation response.
 
+    Deletion is refused while any task is anchored to this journal as its
+    creating or due journal — whatever that task's status, since a done task's
+    link to the journal it was created in is part of the record. Cancel,
+    complete or retarget those tasks first, or cancel the journal instead of
+    deleting it. A journal a task merely mentions can be deleted; the mention
+    goes with it and the task is unaffected.
+
     Args:
         journal_id: The unique identifier of the journal to delete
         delete_children: Optional flag to delete child journals
@@ -3449,6 +3457,7 @@ async def delete_journal(
 
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
+        JournalHasAnchoredTasksError: If a task is anchored to the journal
     """
     # Explicitly reject unsupported delete_children behavior to avoid silent misuse
     if delete_children:
@@ -3461,7 +3470,10 @@ async def delete_journal(
     journal_repo = SqlJournalRepository(db_connection)
     contact_relationship_repo = SqlJournalContactRelationshipRepository(db_connection)
     journal_service = JournalService(
-        journal_repo, event_publisher, contact_relationship_repo
+        journal_repo,
+        event_publisher,
+        contact_relationship_repo,
+        task_anchor_repo=SqlTaskAnchorRepository(db_connection),
     )
 
     # Delete journal

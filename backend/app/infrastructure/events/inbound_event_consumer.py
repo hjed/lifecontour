@@ -228,6 +228,9 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         from app.core.journal.services.title_similarity_assessor import (
             GeminiTitleSimilarityAssessor,
         )
+        from app.core.tasks.adapters.sql.task_anchor_repository import (
+            SqlTaskAnchorRepository,
+        )
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
@@ -239,6 +242,7 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             journal_repo=journal_repo,
             event_publisher=event_publisher,
             contact_relationship_repo=contact_relationship_repo,
+            task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
         # Need optional detector for gating Phase 2 emission
@@ -314,6 +318,9 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             SqlJournalRepository,
         )
         from app.core.journal.services.journal_service import JournalService
+        from app.core.tasks.adapters.sql.task_anchor_repository import (
+            SqlTaskAnchorRepository,
+        )
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
@@ -325,6 +332,7 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             journal_repo=journal_repo,
             event_publisher=event_publisher,
             contact_relationship_repo=contact_relationship_repo,
+            task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
         processor = ImmichAlbumOutboxEventProcessor(

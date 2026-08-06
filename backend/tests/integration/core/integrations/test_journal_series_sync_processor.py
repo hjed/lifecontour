@@ -28,7 +28,11 @@ from app.core.journal.adapters.sql.journal_series_repository import (
     SqlJournalSeriesRepository,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.tasks.task_seeding import create_task
 
 USER_ID = "series-sync-user"
 MASTER_ID = "recurring-master-1"
@@ -39,6 +43,7 @@ def _processor(connection: AsyncConnection) -> JournalOutboxEventProcessor:
         journal_repo=SqlJournalRepository(connection),
         event_publisher=OutboxEventPublisher(connection),
         contact_relationship_repo=SqlJournalContactRelationshipRepository(connection),
+        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     return JournalOutboxEventProcessor(
         journal_service=service,
@@ -441,6 +446,52 @@ class TestRecurringInstanceCancellation:
         assert result.get("action") != "deleted"
         assert await _journal_exists(async_connection, journal_id)
         assert await _event_state(async_connection, journal_id) == "cancelled"
+
+
+@pytest.mark.integration
+class TestSeriesCancelledWithAnchoredTasks:
+    async def test_an_instance_a_task_is_due_in_is_cancelled_not_deleted(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A far-future instance is exactly the profile of a task's due journal.
+
+        Deleting it would destroy a commitment the user made, so the delete
+        guard refuses — and the sync falls back to marking the instance
+        cancelled, the same outcome as a journal the deletion heuristics
+        protect. The event must still succeed: an anchored task is a normal
+        state of the world, not a failure to retry.
+        """
+        calendar_id = await _create_calendar(async_connection)
+        processor = _processor(async_connection)
+
+        created = await processor.process_event(
+            _sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_anchored",
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        journal_id = created["journal_id"]
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=journal_id,
+            due_journal_id=journal_id,
+            user_id=USER_ID,
+        )
+
+        result = await processor.process_event(_series_cancelled_event(calendar_id))
+
+        assert result["deleted"] == 0
+        assert result["cancelled"] == 1
+        assert await _journal_exists(async_connection, journal_id)
+        assert await _event_state(async_connection, journal_id) == "cancelled"
+        # The task is untouched — cancelling a journal changes no task links.
+        surviving = await async_connection.execute(
+            text("SELECT due_journal_id FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+        assert surviving.scalar() == journal_id
 
 
 @pytest.mark.integration

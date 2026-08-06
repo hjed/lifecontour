@@ -82,6 +82,7 @@ from .exceptions import (
     JournalCycleError,
     JournalDomainError,
     JournalError,
+    JournalHasAnchoredTasksError,
     JournalHierarchyError,
     JournalMaxDepthExceededError,
     JournalNotFoundError,
@@ -163,6 +164,14 @@ from .outdoor_training_data import OutdoorTrainingData
 from .plan_data import PlanData, PlanDocument
 from .review_item import ReviewItem, ReviewReason
 from .snorkelling_data import SnorkellingData
+from .task_anchor import (
+    BlockingTask,
+    TaskAnchorRole,
+    action_anchor_for,
+    blocking_roles,
+    blocking_task_from_anchors,
+    describe_roles,
+)
 from .template_pitch import TemplatePitch
 from .travel_data import (
     TravelAccommodation,
@@ -291,10 +300,18 @@ __all__ = [
     "JournalType",
     "JournalContactRelationshipType",
     "ReviewReason",
+    # Journal anchor integrity (the delete guard's vocabulary)
+    "BlockingTask",
+    "TaskAnchorRole",
+    "action_anchor_for",
+    "blocking_roles",
+    "blocking_task_from_anchors",
+    "describe_roles",
     # Exceptions
     "JournalDomainError",
     "JournalCycleError",
     "JournalError",
+    "JournalHasAnchoredTasksError",
     "JournalHierarchyError",
     "JournalMaxDepthExceededError",
     "JournalNotFoundError",

@@ -18,6 +18,7 @@ from core_shared.models.journals import (
     EventDateRange,
     FitnessData,
     Journal,
+    JournalHasAnchoredTasksError,
 )
 from core_shared.models.journals.gear_maintenance_data import GearMaintenanceData
 from core_shared.models.journals.journal_contact_relationship import (
@@ -788,6 +789,24 @@ class JournalOutboxEventProcessor:
                             calendar_id=calendar_id,
                         )
                         cancelled += 1
+            except JournalHasAnchoredTasksError:
+                # A far-future instance is exactly the profile of a task's due
+                # journal, and a user's commitment outranks a sync tidy-up. The
+                # instance is marked cancelled instead — the same outcome as a
+                # journal the deletion heuristics protect, and the very escape
+                # hatch the delete guard steers users toward. The savepoint
+                # rolled the attempt back, so its external links are intact.
+                logger.info(
+                    "Series-cancelled instance kept: tasks are anchored to it",
+                    journal_id=linked.journal_id,
+                    recurring_event_id=payload.recurring_event_id,
+                )
+                async with savepoint(self.connection):
+                    await self._mark_journal_cancelled(
+                        journal_id=linked.journal_id,
+                        calendar_id=calendar_id,
+                    )
+                cancelled += 1
             except Exception:
                 errors += 1
                 logger.exception(

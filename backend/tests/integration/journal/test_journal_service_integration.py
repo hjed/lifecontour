@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
@@ -54,11 +57,14 @@ class TestJournalServiceIntegration:
         return OutboxEventPublisher(clean_database)
 
     @pytest.fixture
-    def journal_service(self, journal_repo, event_publisher):
+    def journal_service(
+        self, journal_repo, event_publisher, clean_database: AsyncConnection
+    ):
         """Create JournalService with real dependencies."""
         return JournalService(
             journal_repo=journal_repo,
             event_publisher=event_publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
         )
 
     @pytest.mark.asyncio
@@ -313,11 +319,14 @@ class TestJournalServiceFiltering:
         return OutboxEventPublisher(clean_database)
 
     @pytest.fixture
-    def journal_service(self, journal_repo, event_publisher):
+    def journal_service(
+        self, journal_repo, event_publisher, clean_database: AsyncConnection
+    ):
         """Create JournalService with real dependencies."""
         return JournalService(
             journal_repo=journal_repo,
             event_publisher=event_publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
         )
 
     @pytest.mark.asyncio

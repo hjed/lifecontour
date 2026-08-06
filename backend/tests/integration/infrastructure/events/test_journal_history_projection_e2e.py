@@ -49,6 +49,9 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.route_service import RouteService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.history_projection_consumer import (
     HistoryProjectionConsumer,
 )
@@ -210,6 +213,7 @@ class TestJournalHistoryProjectionE2E:
         journal_service = JournalService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=OutboxEventPublisher(async_connection),
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
 
         # 1. Create then update a journal through the real service (UI provenance).
@@ -303,6 +307,7 @@ class TestJournalHistoryProjectionE2E:
         journal_service = JournalService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Mood journal"),
@@ -362,6 +367,7 @@ class TestJournalHistoryProjectionE2E:
         journal_service = JournalService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Climbing journal"),
@@ -423,6 +429,7 @@ class TestJournalHistoryProjectionE2E:
         journal_service = JournalService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Plan journal"),
@@ -529,6 +536,7 @@ class TestJournalHistoryProjectionE2E:
         journal_service = JournalService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Abseil journal"),
@@ -590,6 +598,7 @@ class TestJournalHistoryProjectionE2E:
         journal_service = JournalService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Route journal"),
@@ -697,6 +706,7 @@ class TestJournalHistoryProjectionE2E:
             journal_service=JournalService(
                 journal_repo=SqlJournalRepository(async_connection),
                 event_publisher=OutboxEventPublisher(async_connection),
+                task_anchor_repo=SqlTaskAnchorRepository(async_connection),
             ),
             connection=async_connection,
             event_publisher=OutboxEventPublisher(async_connection),
@@ -879,6 +889,7 @@ class TestJournalTagHistoryProjectionE2E:
         journal_service = JournalService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=publisher,
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("MCP tag journal"),
