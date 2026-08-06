@@ -1,5 +1,5 @@
 """Tasks domain models."""
 
-from .repositories import TaskRepository
+from .repositories import TaskAnchorRepository, TaskRepository
 
-__all__ = ["TaskRepository"]
+__all__ = ["TaskAnchorRepository", "TaskRepository"]

@@ -1,5 +1,5 @@
 ---
-description: Plan (in plan mode) then implement an iteration task/phase with full TDD coverage
+description: Plan then implement an iteration task/phase with full TDD coverage
 argument-hint: <ITER-ID> [phase N] — e.g. ITER11-003 phase 2
 model: opus
 ---
@@ -9,9 +9,10 @@ Plan and then implement **$ARGUMENTS** using TDD. Make sure the plan includes Un
 
 Start by reviewing the documents linked in the iteration doc (especially the product-specification), as well as our standards  and architecture. Then review existing components we can modify or review. Ensure we update the iteration doc with our progress as we go and include this in the plan. Also include a check step in the plan to review our changes against the product specification and itteration doc Ensure all tests specified in the spec are included as a minimum. . Ensure you test all quality gates locally. Ensure UI is accessible and follow best practises for playwright. Make sure all tests are run locally and are passing. Ensure any relevant documentation is updated.
 
-You MUST produce the plan in **plan mode** first. Do not edit any files or run any
-implementation steps until the plan has been presented via `ExitPlanMode` and approved.
-Enter plan mode now (use `EnterPlanMode` if you are not already in it).
+You MUST write the plan first, using the app MCP plan tools. Author it with `set_plan`, then
+call `submit_plan_for_review` and wait. Do not edit any files or run any implementation steps
+until the plan has been approved. Plan mode is not used — the app plan is the only
+task-tracking mechanism for this session, so do not use builtin todo or task tools.
 
 ## Phase 1 — Research (before planning)
 
@@ -36,7 +37,7 @@ You can use explore-auggie, and plan subagents. DO NOT use the generic `explore`
 
 ## Phase 2 — Build the plan
 
-The plan you present with `ExitPlanMode` MUST include:
+The plan document you write with `set_plan` MUST include:
 
 - **Scope**: exactly what phase of **$ARGUMENTS** is in/out of scope, traced to the spec.
 - **Test plan (TDD, tests written first)** with explicit coverage at all three levels:
@@ -67,13 +68,21 @@ The plan you present with `ExitPlanMode` MUST include:
 - **Documentation**: a step to update any relevant docs (architecture, API, specs, READMEs)
   touched by the change.
 
+`set_plan` splits the plan in two: the prose above — scope, test plan, spec-test checklist,
+accessibility, verification — goes in `content` for the user to read, and the ordered
+implementation checklist goes in `steps`. Every requirement listed above must appear in one or
+the other. Then call `submit_plan_for_review` and wait for approval.
+
 ## Phase 3 — Implement (after approval)
 
-Once the plan is approved, execute it in TDD order:
+Once the plan is approved, execute it in TDD order, keeping exactly one step `in_progress` and
+resending the full step list with `set_plan` as statuses change:
 
 1. Write the failing tests first and confirm they fail (red).
 2. Implement the minimum code to pass (green), then refactor.
-3. Update the iteration doc progress as you complete each step.
+3. Update the iteration doc progress as you complete each step (this is the repo's
+   `docs/tasks/` doc, and is separate from the app plan). Record notes and blockers with
+   `report_progress`, and refresh `report_status` after finishing each step.
 4. Run **all** quality gates and the full set of relevant tests locally; fix every failure —
    do not defer. All tests must be passing before you consider the work done.
 5. Perform the check step: review changes against the product spec and iteration doc, confirming

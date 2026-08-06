@@ -21,6 +21,7 @@ from core_shared.models.journals import (
     GPXParsingError,
     JournalCycleError,
     JournalDomainError,
+    JournalHasAnchoredTasksError,
     JournalMaxDepthExceededError,
     JournalNotFoundError,
     JournalTagNotFoundError,
@@ -149,6 +150,7 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         JournalTagNotFoundError: "JOURNAL_TAG_NOT_FOUND",
         JournalValidationError: "JOURNAL_VALIDATION_ERROR",
         JournalCycleError: "JOURNAL_CYCLE_ERROR",
+        JournalHasAnchoredTasksError: "JOURNAL_HAS_ANCHORED_TASKS",
         JournalMaxDepthExceededError: "JOURNAL_MAX_DEPTH_EXCEEDED",
         JournalTypeDependencyError: "JOURNAL_TYPE_DEPENDENCY_ERROR",
         # Task errors

@@ -25,7 +25,6 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
     initialize_mcp_session,
@@ -418,7 +417,6 @@ class TestSetTaskStatusTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
         current: str,
         target: str,
@@ -432,7 +430,7 @@ class TestSetTaskStatusTool:
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            clean_database,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=TaskStatus(current),
@@ -453,13 +451,12 @@ class TestSetTaskStatusTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """An agent marking a task done attaches it to nothing."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         async with authenticated_lifespan_client() as client:
@@ -475,7 +472,6 @@ class TestSetTaskStatusTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """The same no-op the endpoint allows, so neither surface is the odd one.
@@ -486,7 +482,7 @@ class TestSetTaskStatusTool:
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            clean_database,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=TaskStatus.CANCELLED,
@@ -507,14 +503,13 @@ class TestSetTaskStatusTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
         target: str,
     ):
         """A model told only "refused" will retry; this one is told to retarget."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            clean_database,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=TaskStatus.CANCELLED,
@@ -534,7 +529,6 @@ class TestSetTaskStatusTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        task_repository: SqlTaskRepository,
         journal_repository: SqlJournalRepository,
     ):
         """Indistinguishable from an absent one, and the row does not move."""
@@ -545,7 +539,7 @@ class TestSetTaskStatusTool:
             user_id=OTHER_USER_ID,
         )
         foreign_task = await create_task(
-            task_repository,
+            clean_database,
             creating_journal_id=foreign_journal,
             due_journal_id=foreign_journal,
             user_id=OTHER_USER_ID,
@@ -570,13 +564,12 @@ class TestSetTaskStatusTool:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """The three values are in the schema, so a fourth never reaches the service."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         async with authenticated_lifespan_client() as client:

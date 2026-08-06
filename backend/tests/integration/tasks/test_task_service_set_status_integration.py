@@ -88,7 +88,7 @@ async def _committed_task(async_engine: AsyncEngine) -> AsyncIterator[tuple[str,
             user_id=user_id,
         )
         task_id = await create_task(
-            SqlTaskRepository(setup),
+            setup,
             creating_journal_id=journal_id,
             due_journal_id=journal_id,
             user_id=user_id,
@@ -148,7 +148,7 @@ class TestStatusChangesAgainstRealRows:
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=current,
@@ -181,7 +181,7 @@ class TestStatusChangesAgainstRealRows:
             journal_repository, title="Last week", days_offset=-7
         )
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=past_id,
             due_journal_id=past_id,
         )
@@ -205,7 +205,7 @@ class TestStatusChangesAgainstRealRows:
         """Marking a task done or cancelled attaches nothing to any journal."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
         )
@@ -238,7 +238,7 @@ class TestStatusChangesAgainstRealRows:
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=TaskStatus.CANCELLED,
@@ -268,7 +268,7 @@ class TestStatusChangesAgainstRealRows:
         """The creating journal in particular is immutable, whatever else changes."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
         )
@@ -313,7 +313,7 @@ class TestTheWriteIsAUnitOfWork:
     ):
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            SqlTaskRepository(async_connection),
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
         )
@@ -351,7 +351,7 @@ class TestTheWriteIsAUnitOfWork:
         """The scope closes: in production this is the commit before the response."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            SqlTaskRepository(async_connection),
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
         )
@@ -503,7 +503,7 @@ class TestRefusedTransitionsChangeNothing:
     ):
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=current,
@@ -538,7 +538,7 @@ class TestOwnershipIsEnforcedByTheQuery:
             user_id=OTHER_USER_ID,
         )
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=foreign_journal,
             due_journal_id=foreign_journal,
             user_id=OTHER_USER_ID,

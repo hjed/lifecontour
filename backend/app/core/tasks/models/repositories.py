@@ -25,6 +25,7 @@ both inherit them.
 
 from abc import ABC, abstractmethod
 
+from core_shared.models.journals import BlockingTask
 from core_shared.models.tasks import Task
 
 
@@ -219,4 +220,45 @@ class TaskRepository(ABC):
 
         Raises:
             TaskNotFoundError: When no such task belongs to the user.
+        """
+
+
+class TaskAnchorRepository(ABC):
+    """Reads which tasks anchor a journal, for the journal delete guard.
+
+    Kept apart from :class:`TaskRepository` because it answers a different
+    domain's question. Its consumer is the journal domain, which must not be
+    handed the ability to write tasks in order to find out whether it may delete
+    a journal.
+
+    **This is the one task read that is not owner-scoped, and deliberately so.**
+    It stands in for a foreign-key check, so it has to see every row the
+    ``ON DELETE RESTRICT`` anchors see: a row it filtered away would come back as
+    the raw ``IntegrityError`` the guard exists to replace. Nothing is exposed
+    that the delete path did not already reach — ``JournalService.delete_journal``
+    and the journal lookup before it are themselves unscoped — and a task can
+    only anchor to a journal the acting user owns, because task creation
+    resolves both anchors owner-scoped.
+    """
+
+    @abstractmethod
+    async def find_tasks_anchored_to_journal(
+        self, journal_id: int
+    ) -> list[BlockingTask]:
+        """Find every task this journal is the creating or due journal of.
+
+        One query for all of them, each already carrying the journal it can be
+        actioned from, so an explanatory failure costs the same whether one task
+        blocks or twenty.
+
+        Tasks that merely *mention* the journal are not returned: an
+        intermediate link never blocks a deletion, and its row cascades away
+        with the journal.
+
+        Args:
+            journal_id: The journal about to be deleted
+
+        Returns:
+            The blocking tasks, ordered by task id, or an empty list when the
+            journal anchors nothing.
         """

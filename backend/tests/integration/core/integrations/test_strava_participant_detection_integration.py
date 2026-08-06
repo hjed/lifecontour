@@ -23,6 +23,9 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
@@ -36,6 +39,7 @@ async def _create_processor(
         journal_repo=journal_repo,
         event_publisher=event_publisher,
         contact_relationship_repo=contact_relationship_repo,
+        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     contact_repo = SqlContactRepository(connection)
     mapping_repo = SqlStravaAthleteMappingRepository(connection)

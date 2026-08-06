@@ -1,6 +1,7 @@
 """Exceptions for the journal domain."""
 
 from core_shared.exceptions import DomainError
+from core_shared.models.journals.task_anchor import BlockingTask, describe_roles
 
 
 class JournalDomainError(DomainError):
@@ -70,6 +71,53 @@ class JournalNotFoundError(JournalDomainError):
     def __init__(self, journal_id: int):
         super().__init__(f"Journal with ID {journal_id} not found", 404)
         self.journal_id = journal_id
+
+
+class JournalHasAnchoredTasksError(JournalDomainError):
+    """Exception raised when a journal cannot be deleted because tasks anchor to it.
+
+    A task is anchored to exactly two journals and can never exist without both,
+    so deleting either is refused — regardless of the task's status, because a
+    done task's link to the journal it was created in is part of the record.
+    Deleting a journal a task merely *mentions* stays permitted and never
+    reaches this error.
+
+    **The message is the point.** The database already refuses the delete on its
+    own through the anchors' ``ON DELETE RESTRICT``; what a user or an agent
+    cannot act on is a constraint name. So the message names each blocking task
+    and, for each, the journal to open in order to cancel, complete or retarget
+    it — and closes by pointing at cancelling the journal, which is what the
+    specification wants users steered toward anyway. The same blockers travel on
+    the exception as data, so a caller can build those links without re-reading
+    anything.
+
+    409 rather than 400 or 422: the request is well-formed and the journal
+    exists, but the current state of other rows forbids it. It matches the
+    journal domain's own precedents — ``RouteInUseError``, which is the same
+    "something depends on this" refusal, and ``JournalMergeConflictError``.
+    """
+
+    def __init__(self, journal_id: int, blocking_tasks: tuple[BlockingTask, ...]):
+        super().__init__(_describe_blockage(blocking_tasks), 409)
+        self.journal_id = journal_id
+        self.blocking_tasks = blocking_tasks
+
+
+def _describe_blockage(blocking_tasks: tuple[BlockingTask, ...]) -> str:
+    """Spell out what blocks the deletion and where to go to clear it."""
+    count = len(blocking_tasks)
+    plural = "task" if count == 1 else "tasks"
+    blockers = " ".join(
+        f'"{task.text}" ({describe_roles(task.blocking_roles)}) can be actioned from '
+        f'"{task.action_journal_title}" (journal {task.action_journal_id}).'
+        for task in blocking_tasks
+    )
+    return (
+        f"This journal cannot be deleted because {count} {plural} "
+        f"{'is' if count == 1 else 'are'} anchored to it. {blockers} "
+        "Cancel, complete or retarget them and try again — or cancel this "
+        "journal instead of deleting it, which keeps the tasks intact."
+    )
 
 
 class JournalTagNotFoundError(JournalDomainError):

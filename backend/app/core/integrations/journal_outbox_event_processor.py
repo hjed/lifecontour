@@ -18,6 +18,7 @@ from core_shared.models.journals import (
     EventDateRange,
     FitnessData,
     Journal,
+    JournalHasAnchoredTasksError,
 )
 from core_shared.models.journals.gear_maintenance_data import GearMaintenanceData
 from core_shared.models.journals.journal_contact_relationship import (
@@ -708,16 +709,34 @@ class JournalOutboxEventProcessor:
             and recurring_event_id
             and await self._should_delete_cancelled_instance(linked)
         ):
-            await self._delete_cancelled_instance(
-                linked, integration_source=payload.integration_source
-            )
-            return {
-                "status": "success",
-                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
-                "journal_id": existing_journal_id,
-                "external_event_id": external_event_id,
-                "action": "deleted",
-            }
+            # A task anchored to the instance refuses the deletion. Falling
+            # through to the marking below is the right answer and not a
+            # failure — it is what an instance the protection facts protect
+            # already gets, and failing here would retry the event forever over
+            # a state that is not going to change. The SAVEPOINT takes back the
+            # external links the attempt removed on its way.
+            deleted = True
+            try:
+                async with savepoint(self.connection):
+                    await self._delete_cancelled_instance(
+                        linked, integration_source=payload.integration_source
+                    )
+            except JournalHasAnchoredTasksError:
+                deleted = False
+                logger.info(
+                    "Cancelled instance kept: tasks are anchored to it",
+                    journal_id=existing_journal_id,
+                    external_event_id=external_event_id,
+                )
+
+            if deleted:
+                return {
+                    "status": "success",
+                    "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+                    "journal_id": existing_journal_id,
+                    "external_event_id": external_event_id,
+                    "action": "deleted",
+                }
 
         await self._mark_journal_cancelled(
             journal_id=existing_journal_id,
@@ -788,6 +807,24 @@ class JournalOutboxEventProcessor:
                             calendar_id=calendar_id,
                         )
                         cancelled += 1
+            except JournalHasAnchoredTasksError:
+                # A far-future instance is exactly the profile of a task's due
+                # journal, and a user's commitment outranks a sync tidy-up. The
+                # instance is marked cancelled instead — the same outcome as a
+                # journal the deletion heuristics protect, and the very escape
+                # hatch the delete guard steers users toward. The savepoint
+                # rolled the attempt back, so its external links are intact.
+                logger.info(
+                    "Series-cancelled instance kept: tasks are anchored to it",
+                    journal_id=linked.journal_id,
+                    recurring_event_id=payload.recurring_event_id,
+                )
+                async with savepoint(self.connection):
+                    await self._mark_journal_cancelled(
+                        journal_id=linked.journal_id,
+                        calendar_id=calendar_id,
+                    )
+                cancelled += 1
             except Exception:
                 errors += 1
                 logger.exception(

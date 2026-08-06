@@ -37,12 +37,26 @@ def mock_transaction():
     return AsyncMock()
 
 
+def _no_anchored_tasks() -> AsyncMock:
+    """An anchor repository that reports nothing blocking a journal delete.
+
+    The guard is a required collaborator, so every service built here has to
+    supply one; these tests are about other behaviour, so it always answers
+    "nothing is anchored". The delete guard has its own suite in
+    ``test_journal_delete_guard.py``.
+    """
+    repo = AsyncMock()
+    repo.find_tasks_anchored_to_journal.return_value = []
+    return repo
+
+
 @pytest.fixture
 def journal_service(mock_journal_repo, mock_event_publisher):
     """Create a JournalService instance with mocked dependencies."""
     return JournalService(
         journal_repo=mock_journal_repo,
         event_publisher=mock_event_publisher,
+        task_anchor_repo=_no_anchored_tasks(),
     )
 
 
@@ -447,6 +461,7 @@ class TestTagFilterExpansion:
             journal_repo=mock_journal_repo,
             event_publisher=mock_event_publisher,
             tag_hierarchy=mock_tag_hierarchy,
+            task_anchor_repo=_no_anchored_tasks(),
         )
 
     @staticmethod
@@ -592,6 +607,7 @@ class TestTagFilterExpansion:
         service = JournalService(
             journal_repo=mock_journal_repo,
             event_publisher=mock_event_publisher,
+            task_anchor_repo=_no_anchored_tasks(),
         )
         tag_id = uuid4()
         mock_journal_repo.get_all.return_value = []

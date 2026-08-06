@@ -45,7 +45,6 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS,
     COUNT_INTERMEDIATE_JOURNALS,
@@ -503,7 +502,7 @@ class TestUpdateTaskStatusEndpoint:
     async def test_each_permitted_transition_is_accepted(
         self,
         authenticated_client: AsyncClient,
-        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
         current: str,
         target: str,
@@ -511,7 +510,7 @@ class TestUpdateTaskStatusEndpoint:
         """Including done → not done: the specification calls done reversible."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=TaskStatus(current),
@@ -533,7 +532,6 @@ class TestUpdateTaskStatusEndpoint:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """The row is changed by the time the client is answered.
@@ -552,7 +550,7 @@ class TestUpdateTaskStatusEndpoint:
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         response = await authenticated_client.patch(
@@ -566,13 +564,12 @@ class TestUpdateTaskStatusEndpoint:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """Marking a task done or cancelled requires no journal and links none."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         for target in ("done", "not_done", "cancelled"):
@@ -587,13 +584,12 @@ class TestUpdateTaskStatusEndpoint:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """Idempotent, including on a cancelled task — that is not a reopening."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=TaskStatus.CANCELLED,
@@ -617,14 +613,13 @@ class TestRefusedTransitionsAnswer409:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
         target: str,
     ):
         """A refusal a client cannot act on is worse than no answer at all."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
             status=TaskStatus.CANCELLED,
@@ -649,7 +644,6 @@ class TestUnreachableTasksAnswer404:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         journal_repository: SqlJournalRepository,
     ):
         """Byte-identical once the ids are stripped, and the row is untouched.
@@ -664,7 +658,7 @@ class TestUnreachableTasksAnswer404:
             user_id=OTHER_USER_ID,
         )
         foreign_task = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=foreign_journal,
             due_journal_id=foreign_journal,
             user_id=OTHER_USER_ID,
@@ -704,14 +698,13 @@ class TestRejectedUpdateBodies:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
         attributes: dict[str, object],
     ):
         """Text belongs to its own phase; there is no fourth status and no ``now``."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         response = await authenticated_client.patch(
@@ -725,13 +718,12 @@ class TestRejectedUpdateBodies:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """All three nesting levels are guarded, as the create request learned."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         response = await authenticated_client.patch(
@@ -753,12 +745,11 @@ class TestRejectedUpdateBodies:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         creating_id, due_id = task_anchors
         task_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         response = await authenticated_client.patch(
@@ -779,7 +770,6 @@ class TestRejectedUpdateBodies:
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
-        task_repository: SqlTaskRepository,
         task_anchors: tuple[int, int],
     ):
         """Two ids naming different tasks is a request nobody can answer safely.
@@ -789,13 +779,13 @@ class TestRejectedUpdateBodies:
         """
         creating_id, due_id = task_anchors
         target_id = await create_task(
-            task_repository, creating_journal_id=creating_id, due_journal_id=due_id
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
         other_id = await create_task(
-            task_repository,
+            async_connection,
             creating_journal_id=creating_id,
             due_journal_id=due_id,
-            task_text="somebody else's problem",
+            text="somebody else's problem",
         )
 
         response = await authenticated_client.patch(

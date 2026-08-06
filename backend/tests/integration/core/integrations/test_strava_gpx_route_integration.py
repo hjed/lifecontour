@@ -22,6 +22,9 @@ from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import
 from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessor,
 )
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 
 # Must match _STRAVA_SYNTHETIC_CALENDAR_ID in strava_sync_service.py
 STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
@@ -114,6 +117,7 @@ async def _create_processor(
         journal_repo=journal_repo,
         event_publisher=event_publisher,
         contact_relationship_repo=contact_relationship_repo,
+        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     return JournalOutboxEventProcessor(
         journal_service=service,

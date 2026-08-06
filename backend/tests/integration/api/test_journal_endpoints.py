@@ -6,8 +6,15 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.main import create_app
+from tests.integration.tasks.task_seeding import (
+    OTHER_USER_ID,
+    create_journal,
+    create_task,
+)
 
 
 @pytest_asyncio.fixture
@@ -934,6 +941,44 @@ class TestJournalDeleteEndpoints:
         response = await integration_api_client.delete("/api/journals/99999")
 
         assert response.status_code == 404
+
+    async def test_deleting_someone_elses_journal_reports_it_missing(
+        self, integration_api_client, async_connection
+    ):
+        """Another user's journal is not deletable and not disclosed.
+
+        The refusal a journal's anchored tasks now produce names those tasks and
+        the journals they can be actioned from — which would be a disclosure if
+        it could be provoked against a journal that is not yours. It cannot: the
+        endpoint answers exactly as it does for an id that never existed, so
+        nothing in the response distinguishes the two, and the journal is still
+        there afterwards.
+        """
+        other_journal_id = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=other_journal_id,
+            due_journal_id=other_journal_id,
+            text="renew the permit",
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{other_journal_id}"
+        )
+
+        assert response.status_code == 404
+        assert "renew the permit" not in response.text
+        assert "Somebody Else's Trip" not in response.text
+        surviving = await async_connection.execute(
+            text("SELECT COUNT(*) FROM journals WHERE id = :id"),
+            {"id": other_journal_id},
+        )
+        assert surviving.scalar_one() == 1
 
 
 @pytest.mark.integration
