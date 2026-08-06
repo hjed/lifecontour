@@ -111,16 +111,19 @@ async def _committed_task(async_engine: AsyncEngine) -> AsyncIterator[tuple[str,
 
 
 def _service_on(
-    connection: AsyncConnection, user_settings_repository: SqlUserSettingsRepository
+    connection: AsyncConnection,
+    user_settings_repository: SqlUserSettingsRepository,
+    repo: type[SqlTaskRepository] = SqlTaskRepository,
 ) -> TaskService:
     """A service over real adapters on ``connection``.
 
     The ``service`` fixture is bound to the test's single savepoint connection;
-    the concurrency test needs one service per real connection, which is the
-    only way two units of work can overlap.
+    the concurrency tests need one service per real connection, which is the
+    only way two units of work can overlap. ``repo`` lets a test substitute a
+    repository subclass that observes or signals from inside the call.
     """
     return TaskService(
-        task_repo=SqlTaskRepository(connection),
+        task_repo=repo(connection),
         journal_repo=SqlJournalRepository(connection),
         contact_repo=SqlContactRepository(connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
@@ -135,7 +138,6 @@ class TestStatusChangesAgainstRealRows:
     async def test_the_new_status_is_committed(
         self,
         service: TaskService,
-        task_repository: SqlTaskRepository,
         async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
         current: TaskStatus,
@@ -167,7 +169,6 @@ class TestStatusChangesAgainstRealRows:
     async def test_a_lapsed_task_can_still_be_completed(
         self,
         service: TaskService,
-        task_repository: SqlTaskRepository,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
     ):
@@ -433,53 +434,100 @@ class TestOverlappingCallsCannotBypassTheMatrix:
                 assert unblocked is not None
                 assert unblocked.status == TaskStatus.CANCELLED
 
-    async def test_a_concurrent_cancel_is_never_overwritten_by_a_done(
+    async def test_a_done_that_overlaps_a_cancel_is_refused(
         self,
         async_engine: AsyncEngine,
         user_settings_repository: SqlUserSettingsRepository,
     ):
-        """The whole service path, racing. Fails *most* runs without the lock.
+        """The whole service path, overlapping — with one fixed outcome.
 
-        Kept alongside the deterministic test above rather than instead of it:
-        this one exercises the real thing end to end — two units of work, two
-        connections, one task — where the other proves only the lock primitive.
-        A race test cannot be made to fail on every run without a barrier that
-        the fix itself makes unreachable (the second caller cannot read early
-        once the first holds the row), so the deterministic guarantee lives
-        above and this one is the belt to its braces.
+        The two calls really do overlap: the *done* starts while the cancel's
+        unit of work is still open and holding the row, which is the only state
+        in which the bug can appear. What is not left to chance is which one
+        gets there first. An earlier version started both with ``gather`` and
+        accepted either result for the ``done`` call, since the scheduler
+        decided it — two outcomes for one test, which the repository's
+        determinism rule forbids and review rightly caught.
+
+        So the cancel signals once its read has the row, and only then is the
+        done started. Every outcome asserted here is now fixed: the cancel
+        succeeds, the done blocks on the read, sees ``cancelled``, and is
+        refused. Nothing in this test is left for the scheduler to decide.
+
+        **What it is not** is a reliable detector of the lock's absence, and the
+        claim that it is was wrong when first written here. Measured against the
+        unlocked read, it fails roughly one run in three: the done's read can
+        land *after* the cancel has committed, in which case it reads
+        ``cancelled`` and is refused for the right reason by accident. Making it
+        fail every time needs the done to have read *before* the cancel commits,
+        and a barrier for that deadlocks against the very lock it is testing.
+        The regression guarantee therefore lives in the two tests that do fail
+        every time: :meth:`test_the_read_holds_the_row_until_the_writer_commits`
+        above, and the unit test that ``set_status`` uses the locking read at
+        all. This one is here because it is the only test that exercises the
+        whole path — two units of work, two connections, one row.
+
+        The signal is sent from **both** read methods on purpose. Hanging it off
+        the locking read alone would mean that removing the lock stopped the
+        signal ever firing, and the test would hang on the wait instead of
+        failing — a regression that times CI out rather than reporting itself.
+        The wait is bounded for the same reason.
         """
         async with _committed_task(async_engine) as (user_id, task_id):
+            holds_the_row = asyncio.Event()
+
+            class _SignallingRepository(SqlTaskRepository):
+                async def find_by_id_for_update(
+                    self, task_id: int, user_id: str
+                ) -> Task | None:
+                    task = await super().find_by_id_for_update(task_id, user_id)
+                    holds_the_row.set()
+                    return task
+
+                async def find_by_id(self, task_id: int, user_id: str) -> Task | None:
+                    task = await super().find_by_id(task_id, user_id)
+                    holds_the_row.set()
+                    return task
+
             async with (
                 async_engine.connect() as first,
                 async_engine.connect() as second,
             ):
-                # The cancel is started *first* deliberately. Both calls read
-                # before either writes, so without the lock the second write
-                # lands last and wins — and it is the "done" that must not be
-                # allowed to win. Starting them the other way round would let
-                # the correct answer fall out of the ordering rather than out of
-                # the lock, and the test would pass against the bug.
-                results = await asyncio.gather(
-                    _service_on(first, user_settings_repository).set_status(
+
+                async def _cancel(connection: AsyncConnection = first) -> Task:
+                    return await _service_on(
+                        connection,
+                        user_settings_repository,
+                        repo=_SignallingRepository,
+                    ).set_status(
                         user_id=user_id,
                         task_id=task_id,
                         status=TaskStatus.CANCELLED,
-                        transaction=first,
-                    ),
-                    _service_on(second, user_settings_repository).set_status(
+                        transaction=connection,
+                    )
+
+                async def _done(connection: AsyncConnection = second) -> Task:
+                    return await _service_on(
+                        connection, user_settings_repository
+                    ).set_status(
                         user_id=user_id,
                         task_id=task_id,
                         status=TaskStatus.DONE,
-                        transaction=second,
-                    ),
-                    return_exceptions=True,
-                )
+                        transaction=connection,
+                    )
 
-            # Either the done was refused, or it landed before the cancel. Both
-            # are legal outcomes *for that call*; what is not legal is the row
-            # ending up done, which is the assertion below.
-            for result in results:
-                assert isinstance(result, Task | TaskStatusTransitionError), result
+                cancel = asyncio.create_task(_cancel())
+                await asyncio.wait_for(holds_the_row.wait(), timeout=10.0)
+
+                done = asyncio.create_task(_done())
+
+                cancelled = await cancel
+                with pytest.raises(TaskStatusTransitionError) as refused:
+                    await done
+
+            assert cancelled.status == TaskStatus.CANCELLED
+            assert refused.value.current_status == TaskStatus.CANCELLED
+            assert refused.value.target_status == TaskStatus.DONE
 
             async with async_engine.connect() as check:
                 assert await stored_status(check, task_id) == (
@@ -495,7 +543,6 @@ class TestRefusedTransitionsChangeNothing:
     async def test_the_stored_row_is_untouched(
         self,
         service: TaskService,
-        task_repository: SqlTaskRepository,
         async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
         current: TaskStatus,
@@ -527,7 +574,6 @@ class TestOwnershipIsEnforcedByTheQuery:
     async def test_another_users_task_is_not_found_and_not_changed(
         self,
         service: TaskService,
-        task_repository: SqlTaskRepository,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
     ):

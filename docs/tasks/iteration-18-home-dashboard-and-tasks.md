@@ -1513,9 +1513,15 @@ both surfaces against a real database, plus the cross-user 404. E2E deferred to 
   added because a review found the property they pin was unasserted: a repository that observes the
   connection while it writes proves the unit of work is open around it (the phase's only
   decorator-sensitive test), and a second reader-for-update proves the row lock blocks until the first
-  transaction commits. Alongside them, a **genuine two-connection race** — a cancel and a done started
-  together on one task — asserts the row can only end up *cancelled*; it commits outside the fixture's
-  rolled-back transaction under a one-off user id and deletes its rows in a `finally`.
+  transaction commits. Alongside them, an **overlapping two-connection call** — the done starts while
+  the cancel's unit of work still holds the row — pins every outcome: the cancel succeeds, the done is
+  refused, the row ends *cancelled*. It commits outside the fixture's rolled-back transaction under a
+  one-off user id and deletes its rows in a `finally`. **It is deliberately not the regression detector:**
+  measured against the unlocked read it fails only about one run in three, because the done's read can
+  land after the cancel commits and be refused for the right reason by accident. Making it fail every
+  time needs the done to read *before* the cancel commits, and a barrier for that deadlocks against the
+  lock under test — so the every-time guarantee is the reader-for-update test and the unit test that
+  `set_status` uses the locking read, and this one exists to exercise the whole path.
 - **Integration (34 tests, 17 new):** `backend/tests/integration/api/test_task_endpoints.py` (extended) — each
   permitted transition over HTTP; the row read back **after** the response (which shows the write
   happened before the client was answered — *not* that it committed; see the decision above); no link
