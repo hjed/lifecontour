@@ -2,10 +2,10 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–4 complete** (task tables + domain entity; task repository; journal-date resolution
-and the future-dated rule; the creation service and its core invariants); next is ITER18-001 Phase 5
-(create over REST and MCP) — after which ITER18-002 Phases 1–3 must merge immediately, per the
-Sequencing Strategy.
+**ITER18-001 Phases 1–5 complete** (task tables + domain entity; task repository; journal-date resolution
+and the future-dated rule; the creation service and its core invariants; create over REST and MCP).
+**ITER18-002 Phases 1–3 must merge next**, per the Sequencing Strategy — tasks are now creatable by a
+user, so journal delete and merge can hit the anchor foreign keys.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -77,6 +77,15 @@ and belong to the acting user, the due journal is future-dated at the moment it 
 due may be the same journal, and referenced contacts exist — raising `TaskAnchorJournalNotFoundError`
 (404) or `TaskDueJournalNotFutureError` (400). There is still no endpoint, MCP tool or frontend
 surface, and no status, retargeting or link operation beyond what creation writes.
+
+**Since ITER18-001 Phase 5:** tasks are creatable by a user. `POST /api/journals/{journal_id}/tasks`
+(`backend/app/api/tasks/`) and the MCP tool `create_task` (`backend/app/mcp/domains/tasks/tools.py`)
+both call the `@transactional` service and open no transaction of their own; the shared MCP error
+handler now renders `TaskDomainError`s rather than flattening them into "internal error". Neither
+surface accepts a date or the service's `now`. There is still **no way to read a task back** — no get,
+no list, no frontend surface — and no status, retargeting or link operation. Because tasks now hold
+`ON DELETE RESTRICT` references to journals, **journal delete and merge can fail at the database**
+until ITER18-002 Phases 1–3 land.
 
 ### The home page
 
@@ -337,6 +346,18 @@ rules below follow from that record and apply to every phase in this document:
     criteria read as a matrix**; ×4 remains right for phases that wire an existing rule to a new surface.
     ITER18-004 Phase 9 (important-date occurrence resolution) and Phase 10 (contact importance signals)
     are the next two this catches — both are estimated at ×4 today.
+15. **A phase exposing an existing rule on N surfaces costs ~one rejection matrix per surface** — added
+    after ITER18-001 Phase 5 came in at 2036 against a 600 estimate (3.4×) and **5.6× its own
+    production**, despite being exactly the "wires an existing rule to a new surface" case rule 14 says
+    ×4 still fits. It does not. The service was already written and tested, yet the endpoint and the MCP
+    tool each needed the *whole* rejection matrix — 17 and 12 near-identical tests — because the two
+    surfaces render errors through completely different machinery, and a shared service is no evidence
+    that both callers reach it. That is not defensive over-testing: the phase found a real defect on
+    exactly that seam (every task rejection reaching AI clients as "internal error"), invisible to the
+    service and endpoint tests alike. **Budget a capability triple's *surfaces* at roughly the same test
+    volume each, and take ×6-against-production as the working default for any phase with more than one
+    entry point.** ITER18-001 Phases 6, 8, 9, 10, 11, 13 and 14 are all REST+MCP pairs estimated at ×4
+    today.
 
 **Programme size:** 61 phases — and therefore 61 PRs — across the five iterations
 (ITER18-001: 22, ITER18-002: 5, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8). That count is the honest
@@ -1131,33 +1152,214 @@ journal (rejected) and a contact owned by another user (rejected). No e2e.
 
 **Prerequisites:** Phase 4.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — a capability triple, at the measured floor
-for service + REST + MCP (calibration rule 2)
+for service + REST + MCP (calibration rule 2) · **Overrun recorded before work started (delivery rule 3):
+~290 production → ~1300 tracked** · **Actual:** ~362 production → **~2036 tracked** (1968 insertions,
+68 deletions across 19 files: 362 production — MCP tool 120, REST schemas 121, controller 84, error
+handler 20, DI 6, registration 9, packages 2 — 1384 tests and fixtures, 290 docs; includes both
+review rounds)
+
+**Why the advance figure is higher than the estimate.** The ×4 assumes a capability triple where the
+service is the bulk of the production line count. Here the service already exists, so the phase is
+*two thin surfaces over one thick rule* — and the rule only means anything at its boundaries, which
+Phase 4 measured at 4× the production line count in tests alone. The same eleven-row rejection matrix
+has to be proved **twice**, once per surface, because "both surfaces inherit the invariants" is the
+phase's actual product and a shared service is not evidence that both callers reach it. Two entry
+points, two error-rendering conventions (JSON:API codes and the MCP response builder), and roughly
+900 lines of test against ~290 of production.
+
+**Splitting was declined.** The only available cut is "REST now, MCP later", which is a direct breach
+of delivery rule 5 — MCP parity lands in the same phase, never as a trailing task — and the second cut,
+separating the rejection matrix from the surfaces it is asserted against, splits tests from the code
+they pin.
+
+**The pre-recorded overrun undershot for the fourth phase running — 2036 against a 1300 advance figure
+and a 600 estimate — and the reasoning behind it was sound; only the arithmetic was optimistic.** The
+production estimate was nearly right (362 against ~290). What it under-counted, again, was the tests:
+1384 lines, **3.8× the production line count**, against the 900 predicted. Against production the
+total is **5.6×**, which lands inside the ×6 band Phases 2–4 established, so the *shape* of the rule
+holds. **The refinement this phase suggests to calibration rule 13** is that a phase which puts N
+surfaces over an existing rule costs roughly one full rejection matrix per surface, not one matrix plus
+a small delta: the 15 endpoint tests and the 12 tool tests are near-identical in structure and neither
+is redundant, because the two surfaces render errors through entirely different machinery (JSON:API
+codes; the MCP response builder). The phase found a real defect on exactly that seam — see the
+decisions — which the endpoint tests could never have caught.
 
 **Acceptance Criteria:**
 
-- [ ] `POST /api/journals/{journal_id}/tasks` (JSON:API) creates a task whose creating journal is the path
-      journal — never a body field.
-- [ ] MCP `create_task` in the same PR, taking creating journal, due journal, text and optional contacts,
-      with the same errors; documentation lives in the docstring/schema, not `mcp-setup.md`.
-- [ ] Both surfaces reject a non-existent, non-future or non-owned due journal with a message naming the
-      constraint, and neither offers a bare date nor creates a journal implicitly.
-- [ ] Controller and tool open no transactions; both call the `@transactional` service.
-- [ ] **Neither surface exposes `TaskService.create_task`'s `now` parameter.** It is the test seam the
-      future-dated invariant is judged against, so a request able to set it would make invariant 4
-      opt-out for any client. Added after Phase 4's review: the request schema must carry no such field
-      and must reject unknown fields, asserted by a test on each surface.
-- [ ] **Decide the status code for a rejected due journal deliberately.** Phase 4 raises
-      `TaskAnchorJournalNotFoundError` as a 404, consistent with `JournalNotFoundError` and
-      `ContactNotFoundError`. On `POST /api/journals/{journal_id}/tasks` that means an invalid *body*
-      field answers 404, which a client may read as "the path journal is missing". Confirm or override
-      it here — and if overridden, do it in the error's mapping rather than by catching in the
-      controller, so MCP inherits the same answer.
+- [x] `POST /api/journals/{journal_id}/tasks` (JSON:API) creates a task whose creating journal is the path
+      journal — never a body field. — `backend/app/api/tasks/controllers.py`, its own router rather than
+      an addition to the 139 KB `journals/controllers.py`, registered under `/api` after the journals
+      router (the paths do not overlap: nothing in that router matches `/{journal_id}/tasks`). The
+      request schema carries no `creating_journal_id` at all, and sending one is a 400, so the rule is
+      enforced by the contract rather than by the controller ignoring a field.
+- [x] MCP `create_task` in the same PR, taking creating journal, due journal, text and optional contacts,
+      with the same errors; documentation lives in the docstring/schema, not `mcp-setup.md`. —
+      `backend/app/mcp/domains/tasks/tools.py`. Both anchors are arguments here because an AI client has
+      no request path to take the first from. `mcp-setup.md` and `mcp-tools.md` are untouched.
+- [x] Both surfaces reject a non-existent, non-future or non-owned due journal with a message naming the
+      constraint, and neither offers a bare date nor creates a journal implicitly. — **this needed a
+      change to shared code to be true on the MCP side; see the decisions below.** Neither surface has a
+      date field: REST's schema has none and rejects `due_date` outright, and the tool declares no date
+      parameter.
+- [x] Controller and tool open no transactions; both call the `@transactional` service. — both pass the
+      request-scoped `AsyncConnection` straight through as `transaction=`. Pinned positively rather than
+      by inspection: `test_the_row_is_committed_before_the_response` reads the row back *after* the
+      response, which only succeeds if the service's unit of work committed.
+- [x] **Neither surface exposes `TaskService.create_task`'s `now` parameter.** — asserted four ways.
+      The REST attributes model has no such field, sets `extra="forbid"`, and a request carrying `now`
+      is a 400 with no task row written; the tool's *generated schema* (not merely its signature) has no
+      `now` property, and a call passing one is refused as an unexpected keyword before the service is
+      reached.
+- [x] **Decide the status code for a rejected due journal deliberately.** — **confirmed as 404, not
+      overridden**; the reasoning is recorded in full below, and nothing in the controller or the mapping
+      changed as a result.
 - [ ] **This is the phase after which journal delete and merge can hit the anchor FK.** ITER18-002
-      Phases 1–3 must merge immediately after it — see the Sequencing Strategy.
+      Phases 1–3 must merge immediately after it — see the Sequencing Strategy. — **unchanged and now
+      live.** Tasks are creatable by a user as of this phase, so `journals` rows can now be referenced by
+      `ON DELETE RESTRICT` anchors: a journal delete or merge that hits one currently fails at the
+      database rather than being handled. Left unticked deliberately — it is a handover, not something
+      this phase can complete.
+
+**Decision taken before work started (Phase 5) — the rejected due journal answers 404, confirmed
+rather than overridden:**
+
+The criterion asks for this to be settled deliberately either way, so here is the reasoning rather
+than the outcome alone.
+
+- **404 for a body-supplied reference to a missing row is already this codebase's convention, not an
+  accident of the tasks domain.** `POST /api/journals/{journal_id}/relationships/contacts` answers 404
+  through `ContactNotFoundError` for a body `contact_id` today. Overriding the tasks case would make
+  tasks the exception, and the next phase adding a body-supplied reference would have no rule to follow.
+- **Overriding only the due anchor would split one rule across two status codes.** Phase 4 deliberately
+  made *both anchors must exist and be yours* a single error carrying which anchor it is about. A
+  mapping that answered 400 for `due` and 404 for `creating` would re-separate at the boundary what the
+  domain joined, and — because the mapping is what MCP inherits — the two halves of one rule would be
+  reported to an AI client as two different kinds of failure.
+- **The ambiguity the criterion names is real, and it is answered in the payload rather than the status
+  line.** A client cannot tell *from 404 alone* whether the path journal or the body's due journal was
+  the problem. It does not have to: the JSON:API error carries `code: TASK_ANCHOR_JOURNAL_NOT_FOUND`
+  and a detail naming which anchor and which id. An integration test asserts that a rejected **due**
+  journal's payload names the due journal's id and not the path journal's, so a later "tidier" message
+  cannot collapse the distinction. What the payload still never reveals is *why* the anchor was
+  unreachable — absent or someone else's — which is Phase 4's indistinguishability guarantee, and it
+  survives unchanged.
+
+Nothing is caught in the controller and no mapping changes, which is the property the criterion
+actually protects: both surfaces get the same answer from the same place.
+
+**Decisions taken (Phase 5):**
+
+- **"Both surfaces reject with a message naming the constraint" was false on the MCP side until this
+  phase fixed shared code, and no test in the repository would have said so.**
+  `mcp_unified_error_handler` maps contact and journal domain errors by class; a `TaskDomainError` fell
+  through to the catch-all and came back as *"Internal error — an error occurred while create_task"*.
+  Every task rejection would have reached an AI client as an apparent server fault: unactionable, and
+  indistinguishable from a real bug. A `TaskDomainError` branch now mirrors the journal one (404 → "Not
+  found", otherwise "Task error", both carrying the domain's own message). This is the clearest
+  argument for the phase's insistence on proving the matrix **once per surface** — the service was
+  correct, the endpoint was correct, and the tool was still wrong. Two tests keep the branch honest at
+  both edges: an unrelated `DomainError` must still fall through, and a `RuntimeError` must still be an
+  internal error, so a genuine bug is never dressed up as an actionable rejection.
+- **The created resource carries no `self` link.** JSON:API convention wants one, but this phase ships
+  no endpoint to read a task back — that is Phase 13 — and a link that 404s is worse than an absent
+  one. It arrives with the read model.
+- **The response does not echo the contact links.** `create_task` returns a `Task`, which carries no
+  contacts; re-deriving the linked set in the controller would be a second definition of what got
+  linked, sitting next to a read model (Phase 11/13) that does not exist yet.
+- **Timezone sensitivity is asserted on the journal's *date*, not against a clock.** The phase
+  completion bar wants day-boundary coverage, and Phase 4 met it by injecting `now` — which is exactly
+  what neither surface may expose. Asserting "today" from out here would race real midnight. So the
+  assertion is on the *journal's* rendered date, which is a pure function of its start and the user's
+  timezone, under **Pacific/Kiritimati (+14) and Pacific/Midway (−11)**: 25 hours apart, so their local
+  dates differ at *every* instant, and a UTC reading fails one of the pair whenever the test runs.
+  Deterministic, clock-free, and it fails for the right reason.
+- **A new `app/api/tasks/` package rather than more of `journals/controllers.py`.** The endpoint hangs
+  off a journal path but belongs to the tasks domain, and that file is already 139 KB. The routers do
+  not overlap — nothing in the journals router matches `/{journal_id}/tasks` — so no ordering
+  constraint like the `/journals/series` one applies.
+- **`extra="forbid"` is on the create schemas, not on the shared JSON:API base.** Tightening
+  `JsonApiCreateRequest` would silently change every domain's tolerance for unknown fields, which is a
+  codebase-wide decision and not this phase's to make. **Follow-up:** worth asking whether the other
+  create surfaces should forbid unknown attributes too.
+- **`register_task_tools` also added a line to the MCP server's own instructions.** That is the
+  server-level description an AI client reads before choosing a tool, not a per-tool catalogue, so it
+  does not breach the "tools document themselves" convention. It states the two things a model cannot
+  infer from any single tool: there is no separate task list, and there is no due date.
+- **The JSON:API resource type is pinned, not merely defaulted** — raised by the PR's automated review.
+  `type` was a plain `str` with a `"tasks"` default, copying every other create schema in this
+  repository, so a body declaring `"contacts"` created a task and was answered with `"tasks"`. A
+  generic JSON:API client picks its request shape from the type it declares, which makes that a
+  mutation on a resource type the client never asked for. It is now `Literal["tasks"]`, so a mismatch
+  is a 400. **This diverges from the other create surfaces**, which all still accept any type; the
+  divergence is toward the specification and is recorded rather than propagated. It also sits oddly
+  next to `extra="forbid"` in the original: forbidding an unknown *attribute* while accepting the wrong
+  *resource* was the inconsistency the review found. JSON:API prescribes **409 Conflict** for a type
+  mismatch; **400 is used deliberately**, because reaching 409 needs the controller to catch and
+  re-raise, which breaks the "controller catches nothing" rule this phase is built on and would not be
+  inherited by MCP (which has no resource type at all). **Follow-up:** whether the other create
+  surfaces should pin their types too is a codebase-wide question, not this phase's to settle.
+- **`extra="forbid"` had a gap at the request envelope** — raised by the PR's automated review, second
+  round, and it is the same class of finding as the resource type above. Extras were forbidden on the
+  attributes and the data member but not on the request root, whose shared `JsonApiCreateRequest` base
+  ignores unknown members — so `now` *inside* `attributes` was refused while `now` beside `data` was
+  silently dropped. Nothing reads it, so nothing was exploitable; what was wrong is that the guard the
+  acceptance criterion asks for had a hole in it, and a guard with a hole is no guard to whoever finds
+  the hole. All three levels are closed now, asserted at both the schema and the endpoint. **The
+  lesson worth carrying forward:** "the schema forbids unknown fields" is a claim about a *nesting
+  depth*, not a model, and a JSON:API envelope has three of them.
+- **Three task test files had copy-pasted the same fixture block** — caught by the Sonar duplication
+  gate at 3.2% on new code, not by review. `journal_repository`, `user_settings_repository`, `anchors`
+  and the two row-count constants now live in `tests/integration/tasks/task_seeding.py`, which was
+  already the shared home for task seeding, and are imported where needed. They are exported from a
+  helper module rather than a `conftest.py` because their three consumers sit in different directories
+  (`tasks/`, `api/`, `mcp/`) whose only common conftest is the root integration one — where
+  task-specific fixtures do not belong. This also touched Phase 4's service integration test, which is
+  where the duplication started; deduplicating two of three copies would have left the gate failing and
+  the reuse rule half-applied.
 
 **Required Test Coverage:** unit — request/response schemas and the MCP tool schema. Integration — endpoint
 and tool against a real database, one test per rejected invariant on each surface, including cross-user
 attempts. E2E deferred to Phase 22.
+
+- **Unit (18 tests):** `backend/tests/unit/api/test_task_schemas.py` — the minimal body; contacts
+  optional; the defaulted resource type **and a mismatched one rejected** (added in review); text and
+  due journal required; **no `creating_journal_id` field and sending one rejected**; **no `now` field,
+  sending one rejected, unknown attributes rejected in general, and `now` refused at each of the three
+  nesting levels — inside `attributes`, beside them, and beside `data` itself** (the last added in
+  review); no date field and `due_date` rejected; the response resource's anchors, the status
+  rendering as `not_done`, and timestamps optional.
+- **Unit (7 tests):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` — asserted against the
+  **generated tool schema**, which is what a model actually reads, rather than the Python signature:
+  the three required arguments, contacts optional, the injected service and connection absent from the
+  contract, no `now`, no date parameter, a non-empty description, and the due-journal parameter stating
+  the future-dated constraint (a model that cannot see the rule keeps proposing past journals).
+- **Unit (7 tests):** `backend/tests/unit/mcp/shared/test_task_error_handling.py` — each task error's
+  rendering through the shared handler, plus the two "not too broad" guards. All five of the first kind
+  were red before the branch landed, which is how the gap above was found.
+- **Integration (17 tests):** `backend/tests/integration/api/test_task_endpoints.py` against real
+  PostgreSQL. *Creation (4):* the resource and its anchors; **the row read back after the response**
+  (the only way to tell a committed write from an open transaction); creating == due; contacts linked.
+  *Unreachable anchors (3):* an absent due journal naming the due anchor **and not the path journal's
+  id**; another user's due journal byte-identical to an absent one once the ids are stripped; another
+  user's *path* journal rejected as the creating anchor — each with no task row written.
+  *Future-dating (3):* a past due journal with both dates, and the Kiritimati/Midway pair.
+  *Rejected bodies (7):* unknown contact (nothing written, no link row), empty text, `now`, `due_date`,
+  `creating_journal_id`, **a body declaring another resource type**, and **`now` at the request root**
+  (the last two added in review).
+- **Integration (12 tests):** `backend/tests/integration/mcp/test_task_tools_mcp.py` — the same matrix
+  through `tools/call` over the mounted MCP HTTP transport, including the indistinguishability pair and
+  the timezone pair, and a call carrying `now` refused as an unexpected keyword with no row written.
+  The last one is asserted on the *rejection reason* rather than on `now` appearing in the body, which a
+  request echo would satisfy either way.
+- **E2E:** none — deferred as the phase states. The phase ships no frontend surface; ITER18-001's e2e
+  lands in Phase 22.
+- **Docs:** `docs/architecture/api-design.md` gained a *Task Endpoints* section (the route table and the
+  five conventions this surface pins down). `mcp-setup.md` and `mcp-tools.md` deliberately untouched.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (865 files) and
+  `core_shared` (128); `mypy` clean over 860 backend files and 126 in `core_shared`; the full
+  `tests/unit/` suite (2741 tests); and `tests/integration/tasks/`, `tests/integration/api/` and
+  `tests/integration/mcp/` together (841 tests). No frontend or e2e gates — the phase changes no
+  frontend file and ships no user-visible surface.
 
 #### Phase 6: Status Lifecycle — Service, REST and MCP
 

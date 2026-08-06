@@ -13,6 +13,7 @@ from typing import Any
 import pydantic
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.journals import JournalDomainError, JournalNotFoundError
+from core_shared.models.tasks import TaskDomainError
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
@@ -109,6 +110,25 @@ def mcp_unified_error_handler(
                     )
                 return MCPResponseBuilder.error_response(
                     error_type="Journal error",
+                    message=e.message,
+                )
+
+            except TaskDomainError as e:
+                # Every task rejection is actionable in its own way — pick
+                # another journal, pick a later one, say what the commitment is —
+                # so the domain's message is passed through rather than being
+                # flattened into the catch-all's "an error occurred", which an AI
+                # client cannot do anything with. Mirrors the journal handling
+                # above, and keeps the tool's answers identical to the REST
+                # surface's, where the same errors carry the same text.
+                MCPLogger.log_validation_error(operation_name, e.message)
+                if e.status_code == 404:
+                    return MCPResponseBuilder.error_response(
+                        error_type="Not found",
+                        message=e.message,
+                    )
+                return MCPResponseBuilder.error_response(
+                    error_type="Task error",
                     message=e.message,
                 )
 

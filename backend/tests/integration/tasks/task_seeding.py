@@ -1,12 +1,20 @@
-"""Shared seeding helpers for the task integration tests.
+"""Shared seeding helpers and fixtures for the task integration tests.
 
-Both the constraint tests and the repository tests need the same three things —
-a journal to anchor to, a contact to link, and a row count to assert against —
-so they live here rather than being copied per file.
+Every file that exercises task *creation* — the service, the endpoint and the
+MCP tool — needs the same starting position: a journal to anchor to, a
+future-dated journal to be due in, a contact to link, and a row count to assert
+against. They live here rather than being copied per file.
 
 Journals are created through ``SqlJournalRepository`` so the anchors are real
 journal rows; contacts are inserted directly because the contact domain's own
 creation path is irrelevant to what these tests assert.
+
+The matching *fixtures* — ``journal_repository``, ``user_settings_repository``
+and ``task_anchors`` — live in ``tests/integration/conftest.py`` instead. Their
+consumers sit in three different directories (``tasks/``, ``api/``, ``mcp/``)
+whose only shared conftest is that one, and pytest discovers fixtures by
+inheritance; importing them into each module instead trips ruff's F811 at every
+test that names one as a parameter.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -28,6 +36,16 @@ USER_ID = "test-user-123"
 # A second, unrelated owner. Owner scoping is only worth asserting against real
 # rows belonging to someone else, never against a merely absent id.
 OTHER_USER_ID = "other-user-456"
+
+COUNT_TASKS = "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id"
+COUNT_CONTACT_LINKS = "SELECT COUNT(*) FROM task_contacts"
+
+# Midday UTC on 1 January 2020 — long past in every timezone, and a *different
+# local date* in the two zones the surface tests use: 02:00 on the 2nd in
+# Kiritimati (+14), 01:00 on the 1st in Midway (-11). The pair is 25 hours
+# apart, so no instant is ever the same date in both, which is what lets a
+# timezone assertion be made without reading a clock.
+FIXED_PAST_INSTANT = datetime(2020, 1, 1, 12, 0, tzinfo=UTC)
 
 
 async def create_journal(

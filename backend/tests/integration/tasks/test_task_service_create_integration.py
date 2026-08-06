@@ -61,22 +61,8 @@ SYDNEY_EVENING = datetime(2026, 8, 6, 10, 0, tzinfo=UTC)
 
 
 @pytest_asyncio.fixture
-async def journal_repository(
-    async_connection: AsyncConnection,
-) -> SqlJournalRepository:
-    return SqlJournalRepository(async_connection)
-
-
-@pytest_asyncio.fixture
 async def task_repository(async_connection: AsyncConnection) -> SqlTaskRepository:
     return SqlTaskRepository(async_connection)
-
-
-@pytest_asyncio.fixture
-async def user_settings_repository(
-    async_connection: AsyncConnection,
-) -> SqlUserSettingsRepository:
-    return SqlUserSettingsRepository(async_connection)
 
 
 @pytest_asyncio.fixture
@@ -95,16 +81,6 @@ async def service(
     )
 
 
-@pytest_asyncio.fixture
-async def anchors(journal_repository: SqlJournalRepository) -> tuple[int, int]:
-    """A creating journal and a future-dated due journal, as ``(creating, due)``."""
-    creating_id = await create_journal(journal_repository, title="Where it arose")
-    due_id = await create_journal(
-        journal_repository, title="Where it matters", days_offset=7
-    )
-    return creating_id, due_id
-
-
 @pytest.mark.integration
 class TestCreateTaskAgainstRealJournals:
     """A created task is a real row anchored to real journals."""
@@ -114,10 +90,10 @@ class TestCreateTaskAgainstRealJournals:
         service: TaskService,
         task_repository: SqlTaskRepository,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """The row survives the round trip with both anchors and the default status."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         created = await service.create_task(
             user_id=USER_ID,
@@ -141,10 +117,10 @@ class TestCreateTaskAgainstRealJournals:
         service: TaskService,
         task_repository: SqlTaskRepository,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """The task and its links are both visible once the create returns."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
         sarah = await create_contact(async_connection, first_name="Sarah")
         tom = await create_contact(async_connection, first_name="Tom")
 
@@ -202,10 +178,10 @@ class TestTheWriteIsOneUnitOfWork:
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
         user_settings_repository: SqlUserSettingsRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """The task is inserted, the link raises, and the row is gone again."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
         sarah = await create_contact(async_connection, first_name="Sarah")
 
         class _FailingLinkRepository(SqlTaskRepository):
@@ -252,10 +228,10 @@ class TestAnAnchorThatVanishesMidCreate:
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
         user_settings_repository: SqlUserSettingsRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """The due anchor is named, not leaked as an integrity error."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         class _VanishingJournalRepository(SqlTaskRepository):
             async def save(self, task: Task) -> Task:
@@ -291,10 +267,10 @@ class TestAnAnchorThatVanishesMidCreate:
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
         user_settings_repository: SqlUserSettingsRepository,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """Each anchor is told apart by the column the violation names."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         class _VanishingJournalRepository(SqlTaskRepository):
             async def save(self, task: Task) -> Task:
@@ -533,10 +509,10 @@ class TestContactLinks:
         self,
         service: TaskService,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """An unknown contact id fails the create and writes nothing at all."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
 
         with pytest.raises(ContactNotFoundError) as exc_info:
             await service.create_task(
@@ -556,10 +532,10 @@ class TestContactLinks:
         self,
         service: TaskService,
         async_connection: AsyncConnection,
-        anchors: tuple[int, int],
+        task_anchors: tuple[int, int],
     ):
         """A valid contact alongside an invalid one does not get linked anyway."""
-        creating_id, due_id = anchors
+        creating_id, due_id = task_anchors
         sarah = await create_contact(async_connection, first_name="Sarah")
 
         with pytest.raises(ContactNotFoundError):

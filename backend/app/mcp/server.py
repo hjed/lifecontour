@@ -20,6 +20,7 @@ from app.mcp.domains.contacts.tools import register_contact_tools
 from app.mcp.domains.integrations.tools import register_integration_tools
 from app.mcp.domains.journals.series_tools import register_journal_series_tools
 from app.mcp.domains.journals.tools import register_journal_tools
+from app.mcp.domains.tasks.tools import register_task_tools
 
 logger = structlog.get_logger()
 
@@ -117,6 +118,7 @@ def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
         Available domains:
         - Contacts: Retrieve contact information, search contacts, manage relationships
         - Journals: Create, update, search, and manage journal entries with types, tags, and relationships
+        - Tasks: Create commitments anchored to journals — there is no separate task list and no due date
 
         All data is formatted for AI analysis and decision making. Use the tools to:
         - Get detailed contact information by ID
@@ -139,6 +141,9 @@ def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
     logger.info("MCP: Registering journal domain tools")
     register_journal_tools(mcp)
     register_journal_series_tools(mcp)
+
+    logger.info("MCP: Registering task domain tools")
+    register_task_tools(mcp)
 
     logger.info("MCP: Registering integration domain tools")
     register_integration_tools(mcp)

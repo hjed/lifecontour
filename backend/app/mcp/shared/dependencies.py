@@ -37,6 +37,7 @@ from app.core.journal.services.outdoor_dashboard_service import (
     OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
+from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.auth.token_user import session_user_from_claims
@@ -262,6 +263,11 @@ async def get_journal_tag_service() -> JournalTagService:
 async def get_gear_item_service() -> GearItemService:
     """Resolve the gear item service for the current MCP request."""
     return cast(GearItemService, await _resolve_dependency(GearItemService))
+
+
+async def get_task_service() -> TaskService:
+    """Resolve the task service for the current MCP request."""
+    return cast(TaskService, await _resolve_dependency(TaskService))
 
 
 async def get_integration_registry_service() -> Any:
