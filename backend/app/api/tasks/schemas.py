@@ -2,12 +2,17 @@
 
 Two shapes of the create request are load-bearing rather than incidental.
 
-**Unknown attributes are rejected.** ``TaskService.create_task`` takes a ``now``
-parameter that exists so a test can stand either side of a local midnight; a
-request able to set it would make the future-dated invariant opt-out for every
-client. Absence alone does not enforce that — a model that ignored unknown keys
-would start honouring ``now`` the moment somebody wired the attributes through
-with ``**model_dump()`` — so ``extra="forbid"`` makes the omission a contract.
+**Unknown fields are rejected at every level of the request.**
+``TaskService.create_task`` takes a ``now`` parameter that exists so a test can
+stand either side of a local midnight; a request able to set it would make the
+future-dated invariant opt-out for every client. Absence alone does not enforce
+that — a model that ignored unknown keys would start honouring ``now`` the moment
+somebody wired the attributes through with ``**model_dump()`` — so
+``extra="forbid"`` makes the omission a contract. It is set on all three models
+(the envelope, the data member and the attributes) rather than only the
+innermost, because a guard with a gap is the same as no guard to whoever finds
+the gap: review caught ``now`` beside ``data`` being silently dropped while the
+same key inside ``attributes`` was refused.
 
 **There is no date field.** A task is due *in a journal*, not on a day, so the
 only way to say when is to name a journal that already exists. Offering a date
@@ -97,9 +102,17 @@ class TaskCreateData(BaseModel):
 
 
 class TaskCreateRequest(JsonApiCreateRequest[TaskCreateData]):
-    """Request model for creating a task."""
+    """Request model for creating a task.
 
-    pass
+    Forbids extras in its own right rather than inheriting the shared base's
+    tolerance. Raised in review: guarding the attributes and the data member
+    while leaving the *envelope* permissive meant a ``now`` beside ``data`` was
+    silently dropped rather than refused — harmless while nothing reads it, and
+    precisely the omission the other two guards exist to prevent. All three
+    levels are now closed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class TaskResponse(JsonApiResponse[TaskResource]):

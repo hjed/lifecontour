@@ -133,6 +133,27 @@ class TestTheNowSeamIsNotReachableFromARequest:
                 }
             )
 
+    def test_unknown_fields_at_the_request_root_are_rejected(self) -> None:
+        """The outermost level needs its own guard, and did not have one.
+
+        Raised in review: forbidding extras on the attributes and data models
+        leaves the request envelope itself permissive, because the shared
+        ``JsonApiCreateRequest`` base ignores unknown members. ``now`` beside
+        ``data`` was silently dropped rather than refused — harmless while
+        nothing reads it, and exactly the shape of omission the other two
+        guards exist to prevent.
+        """
+        with pytest.raises(ValidationError):
+            TaskCreateRequest.model_validate(
+                {
+                    "data": {
+                        "type": "tasks",
+                        "attributes": {"text": "x", "due_journal_id": 1},
+                    },
+                    "now": "2020-01-01T00:00:00+00:00",
+                }
+            )
+
 
 class TestNoBareDateIsOffered:
     """A task is due in a journal; naming a date would imply creating one."""

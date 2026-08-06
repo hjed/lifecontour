@@ -410,6 +410,34 @@ class TestRejectedBodies:
 
         assert response.status_code == 400
 
+    async def test_a_body_carrying_now_beside_the_data_member_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The request envelope is guarded too, not just what is inside it.
+
+        Raised in review: the attributes and data models forbade extras while
+        the outermost level still ignored them, so ``now`` beside ``data`` was
+        dropped rather than refused.
+        """
+        creating_id, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json={
+                "data": {
+                    "type": "tasks",
+                    "attributes": {"text": "cheat the clock", "due_journal_id": due_id},
+                },
+                "now": "2020-01-01T00:00:00+00:00",
+            },
+        )
+
+        assert response.status_code == 400
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
     async def test_a_body_declaring_another_resource_type_is_rejected(
         self,
         authenticated_client: AsyncClient,
