@@ -40,10 +40,14 @@ from app.core.journal.adapters.sql.jogging_data_repository import (
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
     SqlOutdoorActivityDataRepository,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.core.tasks.adapters.sql.task_anchor_repository import (
+    SqlTaskAnchorRepository,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import (
     _fetch_journal_types_and_data,
@@ -53,6 +57,11 @@ from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
     initialize_mcp_session,
     mcp_headers,
+)
+from tests.integration.tasks.task_seeding import (
+    OTHER_USER_ID,
+    create_journal,
+    create_task,
 )
 
 
@@ -92,6 +101,7 @@ class JournalTestProvider(Provider):
             journal_repo=journal_repository,
             event_publisher=event_publisher,
             contact_relationship_repo=contact_relationship_repo,
+            task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
 
@@ -360,6 +370,57 @@ class TestJournalToolsIntegration:
             payload = extract_mcp_json_payload(response.text)
             assert payload["error"] == "CONFLICT"
             assert payload["message"] == "Calendar is in use by 1 journal(s)"
+
+    @pytest.mark.asyncio
+    async def test_delete_journal_tool_will_not_touch_another_users_journal(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """The agent surface answers as it does for a journal that never was.
+
+        A journal's anchored tasks are named in the refusal the guard now
+        produces, so provoking that refusal against somebody else's journal
+        would disclose their task text and journal titles. The tool reads the
+        journal owner-scoped first, exactly as ``get_journal`` does, so the
+        deletion and the explanation are both unreachable.
+        """
+        other_journal_id = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=other_journal_id,
+            due_journal_id=other_journal_id,
+            text="renew the permit",
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "delete_journal",
+                        "arguments": {"journal_id": other_journal_id},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        assert "renew the permit" not in response.text
+        assert "Somebody Else's Trip" not in response.text
+        surviving = await async_connection.execute(
+            text("SELECT COUNT(*) FROM journals WHERE id = :id"),
+            {"id": other_journal_id},
+        )
+        assert surviving.scalar_one() == 1
 
     @pytest.mark.asyncio
     async def test_delete_journal_integration_real_db(

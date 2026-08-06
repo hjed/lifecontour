@@ -20,6 +20,7 @@ test that names one as a parameter.
 from datetime import UTC, datetime, timedelta
 
 from core_shared.models.journals import EventDateRange, Journal
+from core_shared.models.tasks import TaskStatus
 from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -39,6 +40,18 @@ OTHER_USER_ID = "other-user-456"
 
 COUNT_TASKS = "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id"
 COUNT_CONTACT_LINKS = "SELECT COUNT(*) FROM task_contacts"
+
+# Built here rather than inside the seeding functions, whose ``text`` keyword
+# argument — the task's own text — would otherwise shadow ``sqlalchemy.text``.
+_INSERT_TASK = text("""
+    INSERT INTO tasks (user_id, text, status, creating_journal_id, due_journal_id)
+    VALUES (:user_id, :text, :status, :creating_journal_id, :due_journal_id)
+    RETURNING id
+""")
+_INSERT_INTERMEDIATE = text("""
+    INSERT INTO task_intermediate_journals (task_id, journal_id)
+    VALUES (:task_id, :journal_id)
+""")
 
 # Midday UTC on 1 January 2020 — long past in every timezone, and a *different
 # local date* in the two zones the surface tests use: 02:00 on the 2nd in
@@ -78,6 +91,47 @@ async def create_journal(
     )
     assert journal.id is not None
     return journal.id
+
+
+async def create_task(
+    conn: AsyncConnection,
+    *,
+    creating_journal_id: int,
+    due_journal_id: int,
+    text: str = "print the permit",
+    status: TaskStatus = TaskStatus.NOT_DONE,
+    user_id: str = USER_ID,
+) -> int:
+    """Insert a task directly and return its id.
+
+    Deliberately not routed through ``TaskService``: the creation path can only
+    produce a *not-done* task due in a *future* journal, and the anchor-integrity
+    tests need the states a task reaches later in its life — done, cancelled, or
+    due in a journal that has since passed. Those are legitimate rows the guard
+    must still refuse to delete around, so they are seeded as rows.
+    """
+    task_id = (
+        await conn.execute(
+            _INSERT_TASK,
+            {
+                "user_id": user_id,
+                "text": text,
+                "status": status.value,
+                "creating_journal_id": creating_journal_id,
+                "due_journal_id": due_journal_id,
+            },
+        )
+    ).scalar_one()
+    return int(task_id)
+
+
+async def link_intermediate_journal(
+    conn: AsyncConnection, *, task_id: int, journal_id: int
+) -> None:
+    """Link a journal to a task as an intermediate journal."""
+    await conn.execute(
+        _INSERT_INTERMEDIATE, {"task_id": task_id, "journal_id": journal_id}
+    )
 
 
 async def create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") -> int:

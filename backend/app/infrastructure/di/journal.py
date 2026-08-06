@@ -194,6 +194,8 @@ from app.core.journal.services.outdoor_dashboard_service import (
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.journal.services.route_service import RouteService
 from app.core.settings.models import UserSettingsRepository
+from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
@@ -478,12 +480,29 @@ class JournalProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def task_anchor_repository(
+        self, connection: AsyncConnection
+    ) -> TaskAnchorRepository:
+        """Provide a TaskAnchorRepository instance.
+
+        Provided here rather than by ``TaskProvider``, even though the port and
+        its adapter belong to the tasks domain, because its only consumer is the
+        journal delete guard. Dishka validates the whole graph at construction,
+        so making ``JournalProvider`` depend on something ``TaskProvider``
+        supplies would force every container that registers one to register the
+        other. It needs nothing but the connection, so there is no graph cost to
+        keeping ``JournalProvider`` self-sufficient.
+        """
+        return SqlTaskAnchorRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
     def journal_service(
         self,
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
         contact_relationship_repo: JournalContactRelationshipRepository,
         tag_hierarchy: JournalTagHierarchyService,
+        task_anchor_repo: TaskAnchorRepository,
     ) -> JournalService:
         """Provide a JournalService instance."""
         return JournalService(
@@ -491,6 +510,7 @@ class JournalProvider(Provider):
             event_publisher=event_publisher,
             contact_relationship_repo=contact_relationship_repo,
             tag_hierarchy=tag_hierarchy,
+            task_anchor_repo=task_anchor_repo,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -131,7 +131,10 @@ the *creating* journal where it arose and the *due* journal where it matters.
   - *Lapsed* is derived, never stored — a not-done task whose due journal has passed or been cancelled
 - **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
   `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
-  request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`)
+  request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`); and
+  `TaskAnchorRepository` in the same module, implemented by `SqlTaskAnchorRepository`
+  (`backend/app/core/tasks/adapters/sql/task_anchor_repository.py`) — see
+  *[The journal delete guard](#the-journal-delete-guard)* below
 - **Domain Services**: `TaskService`
   (`backend/app/core/tasks/services/task_service.py`), provided at request scope by `TaskProvider`.
   It is where the specification's *core invariants* are enforced, so REST and MCP both inherit them
@@ -455,6 +458,56 @@ user" is not enforceable at the data layer; the service enforces contact **exist
 as a divergence in [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md), matching the same
 finding in iteration 13's contact merge. If contacts ever gain ownership, `TaskService._resolve_contacts`
 is the single place the rule lands.
+
+### The journal delete guard
+
+A task can never exist without both of its journal anchors, so the
+[specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#deletion)
+**blocks** deleting a journal that is any task's creating or due journal — whatever that task's status,
+because a done task's link to the journal it was created in is part of the record. Deleting a journal a
+task merely *mentions* stays permitted; the intermediate link row cascades away with the journal.
+
+The database already refuses these deletes on its own (both anchors are `ON DELETE RESTRICT`). The guard
+exists because a constraint name is not something a user or an agent can act on:
+`JournalService.delete_journal` calls `TaskAnchorRepository.find_tasks_anchored_to_journal` and raises
+`JournalHasAnchoredTasksError` (409, matching the journal domain's `RouteInUseError`) naming each
+blocking task and the journal it can be actioned from.
+
+Four decisions are worth knowing before changing it:
+
+- **The rule is pure and lives in the journal domain**
+  (`core_shared/core_shared/models/journals/task_anchor.py`). Which roles block, and which anchor
+  supplies the *action journal* — the due journal, or the creating journal when the due journal is the
+  one being deleted — are decided there, not in SQL, so both are unit-testable. Keeping `BlockingTask`
+  in the journal package also keeps `core_shared.models.tasks` free of any journal import, so the task
+  read models still to come cannot create a cycle between two eagerly re-exporting packages.
+- **The query is not owner-scoped**, uniquely among task reads. It stands in for a foreign-key check, so
+  a row it filtered away would return as the raw `IntegrityError` the guard replaces. The delete path is
+  itself unscoped, so nothing new is exposed.
+- **`task_anchor_repo` is a required keyword-only argument** to `JournalService`, not another optional
+  collaborator: an absent guard would let a delete leave the model in a state the specification says is
+  impossible. Keyword-only so existing positional construction sites still compile while the type checker
+  names every one that must supply it.
+- **`SqlTaskAnchorRepository` is provided by `JournalProvider`**, not `TaskProvider`, even though the
+  port and adapter belong to the tasks domain. Dishka validates the whole graph at construction, so
+  taking the dependency the other way would force every container registering one provider to register
+  the other. The adapter needs only the connection, so `JournalProvider` stays self-sufficient.
+
+The guard is check-then-act, so `delete_journal` also wraps the delete **in a SAVEPOINT**: an
+`IntegrityError` re-runs the guard and raises the same explanatory error for a task inserted in the
+window, and re-raises untouched when the re-check comes back empty, so an unrelated constraint is never
+reported as a task conflict. The savepoint is load-bearing rather than defensive — a failed statement
+poisons its transaction, so without it PostgreSQL would refuse the re-read and the caller would get an
+aborted transaction instead of an explanation.
+
+`JournalOutboxEventProcessor` catches the error when a cancelled calendar series would delete a
+far-future instance — exactly the profile of a task's due journal — and marks the instance cancelled
+instead. Cancellation is the escape hatch the guard steers users toward, and a user's commitment outranks
+a sync tidy-up.
+
+Journal **merge** is deliberately not guarded: it deletes the absorbed journal through
+`JournalRepository.delete` directly, and blocking it would break the calendar-sync workflows the journals
+specification depends on. Re-pointing task links through a merge is ITER18-002 Phase 3.
 
 ### Incomplete Outdoor Activities Review (read projection)
 

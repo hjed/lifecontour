@@ -15,11 +15,25 @@ from core_shared.models.journals import EventDateRange, Journal
 from app.core.journal.services.journal_service import JournalService
 
 
+def _no_anchored_tasks() -> AsyncMock:
+    """An anchor repository that reports nothing blocking a journal delete.
+
+    The guard is a required collaborator, so every service built here has to
+    supply one; these tests are about other behaviour, so it always answers
+    "nothing is anchored". The delete guard has its own suite in
+    ``test_journal_delete_guard.py``.
+    """
+    repo = AsyncMock()
+    repo.find_tasks_anchored_to_journal.return_value = []
+    return repo
+
+
 @pytest.fixture
 def journal_service() -> JournalService:
     return JournalService(
         journal_repo=AsyncMock(),
         event_publisher=AsyncMock(),
+        task_anchor_repo=_no_anchored_tasks(),
     )
 
 

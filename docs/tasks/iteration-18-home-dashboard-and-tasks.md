@@ -4,8 +4,10 @@
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
 **ITER18-001 Phases 1–5 complete** (task tables + domain entity; task repository; journal-date resolution
 and the future-dated rule; the creation service and its core invariants; create over REST and MCP).
-**ITER18-002 Phases 1–3 must merge next**, per the Sequencing Strategy — tasks are now creatable by a
-user, so journal delete and merge can hit the anchor foreign keys.
+**ITER18-002 Phase 1 complete** (the delete guard: journal deletion is refused, explanatorily, for any
+journal anchoring a task). **ITER18-002 Phases 2–3 must merge next**, per the Sequencing Strategy —
+`POST /api/journals/{id}/merge` can still hit the anchor foreign keys, and the delete refusal is not yet
+shaped for REST and MCP callers.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -1747,10 +1749,12 @@ is impossible, so it should follow ITER18-001 closely.
 
 **Open decisions:**
 
-1. **HTTP status for the blocked delete** — settled in **Phase 1**. `409 Conflict` with a JSON:API error
-   listing the blockers is the natural fit, but check what the journal domain's existing error mapping
-   produces so the status is internally consistent (iteration 17 chose journal-domain consistency over
-   cross-domain parity).
+1. ~~**HTTP status for the blocked delete**~~ — ✅ **settled in Phase 1: `409 Conflict`.** The journal
+   domain has exactly two 409s and both are the right precedent: `RouteInUseError`, which is the same
+   "you cannot delete this, something depends on it" refusal, and `JournalMergeConflictError`. Journal-
+   domain consistency and cross-domain parity agree here, so iteration 17's tie-breaker never had to be
+   applied. `JournalHasAnchoredTasksError` carries the status; the JSON:API body listing the blockers is
+   Phase 2's.
 2. **Whether merge also collapses an intermediate link that duplicates a new anchor link** (a task whose
    intermediate journal is absorbed into its own due journal) — settled in **Phase 2**. The
    specification's "cannot be linked twice in the same role" leaves the cross-role case unstated;
@@ -1763,28 +1767,182 @@ is impossible, so it should follow ITER18-001 closely.
 > **immediately after** ITER18-001 Phase 5, ahead of the rest of ITER18-001, or delivery rule 9 is broken
 > for the intervening phases.
 
-#### Phase 1: Blocking Detection and the Delete Guard
+#### Phase 1: Blocking Detection and the Delete Guard ✅ COMPLETE
 
 **Prerequisites:** ITER18-001 Phase 5 (task creation exists). Deliberately **not** the read model — the
 action journal is the task's own due/creating id, which Phase 2 of ITER18-001 already provides.
-**Estimated diff:** ~120 production → **~480 tracked** (×4)
+**Estimated diff:** ~120 production → **~480 tracked** (×4) · **Actual:** ~458 production → **~1440
+tracked** (production: the rule 148, the port and adapter 130, the guard and its backstop 60, wiring and
+the sync fallback 120; tests: 980 across two new files, one new sync test and ~20 updated construction
+sites; docs 182 on top). **Roughly 3× the estimate, and about 2.8× the repository's 500-line PR
+standard** — recorded rather than smoothed over, because the cause is reusable calibration:
+
+- **The wiring was estimated as one edit and is twenty-four.** `JournalService` is constructed in four
+  production places and twenty test ones, so making the guard a required collaborator — the right call,
+  see below — cost more in mechanical updates than the guard itself did in logic.
+- **A "no unhandled error" criterion reaches further than the surface it names.** Two paths the phase
+  never mentions had to be handled: the concurrent-insert window, and the calendar-sync deleter.
+- **The ×4 test multiplier held for the *new* files but not for the phase.** The two new suites are ~2.1×
+  their production, in line with the rule being pure; what the estimate missed is that a phase touching a
+  widely-constructed service also drags a long tail of unrelated test edits behind it.
+
+**For the phases that follow:** a phase that changes a shared constructor should budget its construction
+sites explicitly, and one whose acceptance criterion says "no caller ever sees X" should enumerate the
+callers before estimating.
 
 **Acceptance Criteria:**
 
-- [ ] A repository query returns, for a journal, every task anchored to it as **creating or due**, with the
+- [x] A repository query returns, for a journal, every task anchored to it as **creating or due**, with the
       journal each blocking task can be actioned from (its due journal, or its creating journal when the
-      due journal is the one being deleted) — one query, not one per task.
-- [ ] `JournalService.delete_journal` refuses when that set is non-empty, raising a domain error carrying
+      due journal is the one being deleted) — one query, not one per task. —
+      `TaskAnchorRepository.find_tasks_anchored_to_journal` (`app/core/tasks/models/repositories.py`),
+      implemented by `SqlTaskAnchorRepository`: one statement matching both anchor columns, joined twice
+      to `journals` so both anchor titles arrive with the row, `ORDER BY t.id`. Pinned by counting the
+      statements PostgreSQL actually receives for three blockers.
+- [x] `JournalService.delete_journal` refuses when that set is non-empty, raising a domain error carrying
       the blocking tasks and their action journals — **regardless of task status**, since a done task's
-      creating link is part of the record.
-- [ ] A journal linked **only** as an intermediate journal still deletes; its link rows go with it and the
-      tasks are otherwise unaffected.
-- [ ] The guard replaces the raw FK violation: no caller ever sees an unhandled `IntegrityError`.
+      creating link is part of the record. — `JournalHasAnchoredTasksError` (409), raised before anything
+      else is read or written; asserted for `not_done`, `done` and `cancelled`.
+- [x] A journal linked **only** as an intermediate journal still deletes; its link rows go with it and the
+      tasks are otherwise unaffected. — asserted end to end: journal gone, `task_intermediate_journals`
+      row cascaded away, task row and both anchors unchanged.
+- [x] The guard replaces the raw FK violation: no caller ever sees an unhandled `IntegrityError`. — the
+      guard runs on the *only* path that reaches `JournalRepository.delete` through the service, the
+      delete itself is wrapped for the check-then-act window, and the background calendar-sync deleter
+      now cancels rather than fails. Merge is the stated exception — it deletes the absorbed journal
+      directly and is Phase 3's.
+
+**Decisions taken (Phase 1):**
+
+- **Open decision 1 — `409 Conflict`,** on the `RouteInUseError` precedent; see the struck decision above.
+- **The rule lives in the journal domain, the query in the tasks domain.** Which roles block and which
+  anchor supplies the action journal are pure functions in
+  `core_shared/core_shared/models/journals/task_anchor.py`, alongside the `BlockingTask` the error
+  carries; the SQL that finds the rows stays in the tasks domain, which owns the `tasks` table. Putting
+  `BlockingTask` in the journal package rather than the task one is deliberate: `core_shared.models.tasks`
+  now imports nothing from `models.journals`, so the task read models ITER18-001 still has to ship cannot
+  close an import cycle between two eagerly re-exporting packages.
+- **`task_anchor_repo` is a required keyword-only constructor argument.** `JournalService` already has
+  two optional collaborators, but both *degrade a feature* when absent (flat tag filtering, no contact
+  relationships) whereas a missing guard would let a delete leave the model in a state the specification
+  calls impossible. Keyword-only and last, so the one positional construction site still compiles and
+  mypy names the other twenty-three.
+- **`SqlTaskAnchorRepository` is provided by `JournalProvider`, not `TaskProvider`.** Dishka validates
+  the entire graph at construction, so a `JournalProvider.journal_service` depending on something
+  `TaskProvider` supplies would break every container that registers one without the other — about a
+  dozen test containers, including the one the whole API integration suite runs on. The adapter needs
+  only the connection, so provision follows the consumer while ownership stays with the tasks domain.
+- **The query is deliberately not owner-scoped** — the one task read that is not. It stands in for a
+  foreign-key check and has to see every row the `RESTRICT` anchors see; a row it filtered away would
+  come back as the raw `IntegrityError` the guard exists to replace. `delete_journal` and the journal
+  lookup before it are themselves unscoped, so nothing new is exposed. Recorded in the port docstring.
+- **The check-then-act window is closed by a backstop, not a lock.** Under READ COMMITTED a task can be
+  anchored to the journal between the guard and the `DELETE`. Locking every candidate row to prevent it
+  would cost more than the outcome is worth — the delete fails either way — so the `DELETE` is wrapped
+  instead: an `IntegrityError` re-runs the guard and raises the same explanatory error, and re-raises the
+  original untouched when the re-check is empty, so an unrelated constraint can never masquerade as a
+  task conflict. Same shape as ITER18-001 Phase 4's vanished-anchor handling.
+- **A blocker that vanishes mid-race is retried, not reported.** Raised by the PR's automated review: if
+  the racing task is cancelled, retargeted or deleted between the foreign key firing and the guard
+  looking, the re-check comes back empty and the original violation was re-raised — a 500 about a row
+  that no longer exists, which is exactly what the "no unhandled `IntegrityError`" criterion forbids.
+  Nothing blocks the journal by then, so the delete is retried **once**; a second failure is a constraint
+  the guard cannot explain and propagates untouched. Covered at both levels, and the integration test
+  stages the race by having the second look-up remove the task, as the racing writer would have.
+- **Deleting somebody else's journal now reports it missing, on both surfaces.** Also raised by the
+  review, as the highest-severity finding, and it was right: the delete path never compared the journal's
+  owner to the acting user, so the new refusal would have named *another user's* task text and journal
+  titles to any authenticated caller who guessed an id — a disclosure the previous foreign-key 500 did
+  not make. The REST controller and the MCP tool now read the journal owner-scoped first and raise
+  `JournalNotFoundError`, which is the MCP read tool's existing stance and says nothing about whether the
+  journal exists. **The wider hole is older and larger than this phase:** `GET /api/journals/{id}` and the
+  other journal endpoints still do not check ownership, and `JournalService` takes no user id at all.
+  Only the surface this phase changed is fixed here; the rest is recorded as **issue #1267**.
+- **And the backstop only works because the `DELETE` sits in a SAVEPOINT — which only a real database
+  showed.** A failed statement poisons its transaction, so the re-check query PostgreSQL would refuse
+  outright passed happily against a mocked connection. Wrapping the delete in `savepoint(transaction)`
+  confines the aborted statement, leaving the request's transaction usable for the re-read and for
+  whatever the caller does next. Pinned by an integration test that stages the race — the first look-up
+  misses, which is exactly what the window produces, while the row is really there for the foreign key
+  to refuse on — and mutation-checked by removing the savepoint, which fails it.
+- **A cancelled calendar event now cancels an anchored instance instead of failing — on both of its
+  paths.** `JournalOutboxEventProcessor` deletes far-future recurring instances, which is exactly the
+  profile of a task's due journal. Left alone, the guard would have turned a routine sync event into a
+  permanent retry loop over a journal that is never going to become deletable. Both the series fan-out
+  and the **single** `journal_event.cancelled` path now catch the refusal and mark the instance
+  cancelled — the same outcome an instance the existing deletion-protection facts protect already gets,
+  and the escape hatch the guard steers users toward. The second path was missed on the first pass and
+  found by the PR's automated review; the deletion attempt removes the instance's external links before
+  it reaches the journal, so both call sites wrap it in a savepoint and the refused attempt leaves no
+  trace. Mutation-checked at each site by removing its catch.
+- **`JournalWriteService.delete_journal` was not touched**: it delegates to `JournalService`, so a second
+  guard there would be duplicate enforcement, not defence in depth.
 
 **Required Test Coverage:** unit — blocking detection by role and the action-journal choice, including the
 delete-the-due-journal case. Integration — blocked delete raises the domain error (not an `IntegrityError`)
 for not-done, done and cancelled tasks; intermediate-only delete succeeds; a task-free journal still
 deletes; one query for many tasks. No e2e (Phase 5).
+
+- **Unit (19 tests):** `backend/tests/unit/journal/test_journal_delete_guard.py`. *The rule (7):* a task
+  created in the journal blocks and is actioned from its due journal; a task due in it is actioned from
+  its creating journal; creating == due blocks in both roles and is actioned from that same journal (the
+  delete was refused, so it is still there to open); a row anchored to neither blocks nothing — the rule
+  is total rather than trusting the query's filter; and each of the three statuses is carried through.
+  *The error (7):* it is a 409; it maps to its own response code rather than the catch-all; it names the
+  task and the action journal's title *and* id in one phrase, so a caller can build a link from the
+  message alone; it steers toward cancelling the journal; it names every blocker in order with the right
+  count; it renders each role's prose exactly; and a roleless task is refused rather than described.
+  *The guard (5):* it refuses before `delete` or any event; it asks the repository exactly once for the
+  journal being deleted; a journal nothing anchors still deletes and publishes; the `IntegrityError`
+  backstop explains a task inserted in the window; an unrelated violation is re-raised untouched.
+- **Integration (13 tests):** `backend/tests/integration/tasks/test_journal_delete_guard_integration.py`
+  (12) — the due journal refused for each of the three statuses with the creating journal as the action
+  journal and the journal row still present; the creating journal refused with the due journal as the
+  action journal; creating == due refused in both roles; the failure carries no constraint text; a task
+  that appears after the check still gets the explanation, on a connection still usable afterwards; an
+  intermediate-only journal deletes with its link row and leaves the task and anchors whole; a task-free
+  journal deletes; three blockers arrive in **one** statement in id order; a journal only mentioned by a
+  task has no blockers; and the container resolves both the adapter and a guard-carrying `JournalService`.
+  Plus `test_journal_series_sync_processor.py` (2) — a series cancellation whose instance a task is due
+  in reports `deleted=0, cancelled=1`, and a single instance cancellation of the same shape reports no
+  deletion; both leave the journal cancelled rather than gone, the task's anchor intact and, for the
+  single path, the external link the attempt had removed restored by the savepoint. Plus the two
+  ownership tests below.
+- **Ownership (2 tests):** `tests/integration/api/test_journal_endpoints.py` and
+  `tests/integration/mcp/test_journal_tools_integration.py` — deleting another user's journal, with a
+  task anchored to it, answers exactly as it does for an id that never existed and leaves the journal
+  standing. Both were mutation-checked, and without the check the other user's task text is right there
+  in the response: a 409 over REST, and the tool payload over MCP.
+- **Statement counting, not call counting.** `AsyncConnection.execute` cannot be patched (the attribute is
+  read-only), which turned out to be the better test: the "one query" assertion listens for
+  `before_cursor_execute` and counts round trips to PostgreSQL, so a repository that looped internally
+  would be caught however it issued its queries.
+- **Mutation checks, including two that did not say what was expected.** Removing the `except
+  IntegrityError` backstop fails the window test at both levels; removing the outbox processor's catch
+  fails the series-cancellation test. The other two are worth recording because they were *surprises*:
+  - **Removing the pre-check leaves every blocked-delete integration test green.** The backstop catches
+    the same violation and raises the same error, so the two mechanisms overlap by construction. What
+    discriminates the pre-check is the unit assertion that `journal_repo.delete` is never called and no
+    event is published — that fails, along with the window test. The pre-check is kept regardless: it is
+    what the acceptance criterion asks for, it refuses without issuing a doomed `DELETE` or dirtying the
+    transaction, and it is the only one of the two that can be reached without a failed statement.
+  - **Removing `ORDER BY t.id` fails nothing.** Three rows inserted in one transaction come back in
+    insertion order on a plan this small, so the assertion is a canary rather than a test. Kept because
+    the order is a real guarantee the error message depends on and the plan is not; recorded here rather
+    than left to look load-bearing.
+- **Seeding:** `tests/integration/tasks/task_seeding.py` gained `create_task` and
+  `link_intermediate_journal`, both raw inserts. `TaskService` can only produce a not-done task due in a
+  future journal, and the states worth guarding — done, cancelled, due in a journal that has since
+  passed — are ones a task reaches later in its life.
+- **E2E:** none — deferral taken as stated. No frontend file changes in this phase; the delete-failure
+  dialog and its e2e land in Phase 5.
+- **One line of Phase 2's surface is here, with its test.** `error_handlers.py` gained the
+  `JOURNAL_HAS_ANCHORED_TASKS` code entry, so a blocked `DELETE /api/journals/{id}` is already a clean 409
+  rather than the `DOMAIN_ERROR` catch-all, and the REST and MCP docstrings say the call can be refused.
+  The structured payload listing the blockers — what Phase 2 is actually for — is not here.
+- **Docs:** `docs/architecture/domain-architecture.md` gained a *The journal delete guard* section (the
+  rule's home, the unscoped query, the required collaborator, the provider placement, the savepoint-backed
+  backstop, the sync fallback, and why merge is deliberately unguarded).
 
 #### Phase 2: Delete Guard Surfaces — REST and MCP
 
