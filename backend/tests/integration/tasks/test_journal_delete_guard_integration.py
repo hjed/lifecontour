@@ -279,6 +279,41 @@ class TestConcurrentInsertBackstop:
             == 1
         )
 
+    @pytest.mark.asyncio
+    async def test_a_blocker_that_vanishes_in_the_window_lets_the_delete_through(
+        self,
+        clean_database: AsyncConnection,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """The racing task can lose the race twice.
+
+        It is anchored when the foreign key fires and gone by the time the guard
+        looks — cancelled, retargeted or deleted in its turn. Nothing blocks the
+        journal any more, so the delete is retried and the caller gets what they
+        asked for instead of a 500 about a row that no longer exists. Staged by
+        having the second look-up remove the task, which is what the racing
+        writer would have done.
+        """
+        creating_id = await create_journal(journal_repository)
+        due_id = await create_journal(journal_repository)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+        service = JournalService(
+            journal_repo=journal_repository,
+            event_publisher=OutboxEventPublisher(async_connection),
+            task_anchor_repo=BlockerVanishesOnSecondLook(async_connection, task_id),
+        )
+
+        await service.delete_journal(due_id, async_connection)
+
+        assert (
+            await count(async_connection, _COUNT_JOURNAL, {"journal_id": due_id}) == 0
+        )
+
 
 class BlindOnFirstLook(TaskAnchorRepository):
     """Reports nothing the first time it is asked, then tells the truth."""
@@ -294,6 +329,30 @@ class BlindOnFirstLook(TaskAnchorRepository):
         if self.looks == 1:
             return []
         return await self.inner.find_tasks_anchored_to_journal(journal_id)
+
+
+class BlockerVanishesOnSecondLook(TaskAnchorRepository):
+    """Reports nothing, and clears the real blocker before the second answer.
+
+    Stands in for the racing writer that anchors a task, loses the delete's
+    foreign-key check for it, and then removes the task before the guard can
+    name it.
+    """
+
+    def __init__(self, conn: AsyncConnection, task_id: int) -> None:
+        self.conn = conn
+        self.task_id = task_id
+        self.looks = 0
+
+    async def find_tasks_anchored_to_journal(
+        self, journal_id: int
+    ) -> list[BlockingTask]:
+        self.looks += 1
+        if self.looks > 1:
+            await self.conn.execute(
+                text("DELETE FROM tasks WHERE id = :task_id"), {"task_id": self.task_id}
+            )
+        return []
 
 
 @pytest.mark.integration

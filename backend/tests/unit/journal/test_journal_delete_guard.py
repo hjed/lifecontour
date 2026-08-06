@@ -342,16 +342,39 @@ class TestDeleteGuard:
         assert exc_info.value.blocking_tasks[0].text == "print the permit"
 
     @pytest.mark.asyncio
+    async def test_a_blocker_that_vanishes_lets_the_delete_through(
+        self,
+        journal_service,
+        mock_journal_repo,
+        mock_event_publisher,
+        mock_task_anchor_repo,
+        mock_transaction,
+    ):
+        """The racing task can lose the race twice: anchored when the foreign
+        key fires, gone by the time the guard looks. Nothing blocks the journal
+        any more, so the caller gets the deletion they asked for rather than a
+        500 about a row that no longer exists."""
+        mock_journal_repo.delete.side_effect = [integrity_error(), None]
+        mock_task_anchor_repo.find_tasks_anchored_to_journal.side_effect = [[], []]
+
+        await journal_service.delete_journal(DELETED, mock_transaction)
+
+        assert mock_journal_repo.delete.await_count == 2
+        mock_event_publisher.publish.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_an_unrelated_violation_is_re_raised_untouched(
         self,
         journal_service,
         mock_journal_repo,
+        mock_event_publisher,
         mock_task_anchor_repo,
         mock_transaction,
     ):
-        """Only a violation the guard can *explain* becomes a domain error. A
-        broken constraint that has nothing to do with tasks must not be
-        reported as a task conflict."""
+        """Only a violation the guard can *explain* becomes a domain error, and
+        only one that has *gone* is retried. A constraint that keeps failing
+        with no task in sight is neither: it surfaces as itself, and the journal
+        is not reported deleted."""
         original = integrity_error()
         mock_journal_repo.delete.side_effect = original
         mock_task_anchor_repo.find_tasks_anchored_to_journal.side_effect = [[], []]
@@ -360,3 +383,5 @@ class TestDeleteGuard:
             await journal_service.delete_journal(DELETED, mock_transaction)
 
         assert exc_info.value is original
+        assert mock_journal_repo.delete.await_count == 2
+        mock_event_publisher.publish.assert_not_called()

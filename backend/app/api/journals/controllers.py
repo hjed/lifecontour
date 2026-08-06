@@ -2610,9 +2610,13 @@ async def delete_journal(
     Refused with 409 when a task is anchored to this journal as its creating or
     due journal, whatever that task's status; cancel, complete or retarget those
     tasks first, or cancel the journal instead of deleting it.
+
+    Somebody else's journal is reported as missing rather than forbidden, so the
+    refusal cannot be used to discover that it exists — the stance the MCP read
+    already takes, and the one the task domain's ports document.
     """
     existing_journal = await journal_service.get_journal(journal_id)
-    if not existing_journal:
+    if not existing_journal or str(existing_journal.user_id) != str(user.id):
         raise JournalNotFoundError(journal_id)
 
     await journal_write_service.delete_journal(

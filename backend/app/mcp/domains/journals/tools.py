@@ -3469,6 +3469,15 @@ async def delete_journal(
     # Create repositories
     journal_repo = SqlJournalRepository(db_connection)
     contact_relationship_repo = SqlJournalContactRelationshipRepository(db_connection)
+
+    # Somebody else's journal is reported as missing rather than refused, so
+    # neither the deletion nor the explanation it can now return says anything
+    # about a journal that is not yours. Same check as the read tool above.
+    user_id = await get_current_user_id()
+    journal = await journal_repo.find_by_id(journal_id)
+    if not journal or str(journal.user_id) != str(user_id):
+        raise JournalNotFoundError(journal_id)
+
     journal_service = JournalService(
         journal_repo,
         event_publisher,

@@ -317,8 +317,16 @@ class JournalService:
             async with savepoint(transaction):
                 await self.journal_repo.delete(journal_id)
         except IntegrityError:
+            # Tasks anchored now? Then that is the explanation.
             await self._refuse_if_tasks_are_anchored(journal_id)
-            raise
+            # Nothing anchors it any more, so whatever blocked the delete has
+            # since gone — the racing task was cancelled, retargeted or deleted
+            # in its turn. Retrying once gives the caller the deletion they
+            # asked for instead of a 500 about a row that no longer exists.
+            # Once, not in a loop: a second failure is a constraint the guard
+            # cannot explain, and it propagates untouched.
+            async with savepoint(transaction):
+                await self.journal_repo.delete(journal_id)
 
         # Publish deletion event
         event = JournalDeleted(

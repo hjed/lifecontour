@@ -1842,6 +1842,22 @@ callers before estimating.
   instead: an `IntegrityError` re-runs the guard and raises the same explanatory error, and re-raises the
   original untouched when the re-check is empty, so an unrelated constraint can never masquerade as a
   task conflict. Same shape as ITER18-001 Phase 4's vanished-anchor handling.
+- **A blocker that vanishes mid-race is retried, not reported.** Raised by the PR's automated review: if
+  the racing task is cancelled, retargeted or deleted between the foreign key firing and the guard
+  looking, the re-check comes back empty and the original violation was re-raised — a 500 about a row
+  that no longer exists, which is exactly what the "no unhandled `IntegrityError`" criterion forbids.
+  Nothing blocks the journal by then, so the delete is retried **once**; a second failure is a constraint
+  the guard cannot explain and propagates untouched. Covered at both levels, and the integration test
+  stages the race by having the second look-up remove the task, as the racing writer would have.
+- **Deleting somebody else's journal now reports it missing, on both surfaces.** Also raised by the
+  review, as the highest-severity finding, and it was right: the delete path never compared the journal's
+  owner to the acting user, so the new refusal would have named *another user's* task text and journal
+  titles to any authenticated caller who guessed an id — a disclosure the previous foreign-key 500 did
+  not make. The REST controller and the MCP tool now read the journal owner-scoped first and raise
+  `JournalNotFoundError`, which is the MCP read tool's existing stance and says nothing about whether the
+  journal exists. **The wider hole is older and larger than this phase:** `GET /api/journals/{id}` and the
+  other journal endpoints still do not check ownership, and `JournalService` takes no user id at all.
+  Only the surface this phase changed is fixed here; the rest is recorded as **issue #1267**.
 - **And the backstop only works because the `DELETE` sits in a SAVEPOINT — which only a real database
   showed.** A failed statement poisons its transaction, so the re-check query PostgreSQL would refuse
   outright passed happily against a mocked connection. Wrapping the delete in `savepoint(transaction)`
