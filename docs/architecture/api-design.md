@@ -257,6 +257,42 @@ the *transaction* timestamp, so routes saved in one request tie on it, and falli
 through to the random `uuid` primary key would order them differently on every
 export.
 
+## Task Endpoints
+
+Tasks are commitments anchored to two journals — the one a task arose in and the
+future-dated one it is due in — so creation hangs off the journal path rather
+than a top-level collection. There is deliberately **no `/api/tasks` index**: a
+task is always reached through a journal.
+
+| Verb + path | Purpose | Status |
+|---|---|---|
+| `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
+
+Conventions this surface pins down:
+
+- **The path journal is the creating anchor**, never a body field, so a client
+  cannot anchor a task to a journal it did not come from. The request schema has
+  no `creating_journal_id`.
+- **No bare date, and no implicit journal creation.** A task is due *in a
+  journal*, so `due_journal_id` must name one that already exists. Offering a
+  date would make the surface create journals as a side effect.
+- **Unknown attributes are rejected** (`extra="forbid"`). The service's `now`
+  parameter is a test seam for the future-dated invariant; a request able to set
+  it would make that invariant opt-out, so its absence is enforced rather than
+  assumed.
+- **404 for an unreachable anchor, in the error mapping rather than the
+  controller.** A due journal that does not exist and one belonging to somebody
+  else raise the same `TaskAnchorJournalNotFoundError` with a byte-identical
+  message, so a rejected create cannot be used to probe for another user's
+  journals. The payload's `code` and `detail` name *which* anchor failed, which
+  is what disambiguates a body-field 404 from a path-journal one. Because the
+  answer lives in the mapping, the MCP tool inherits it unchanged.
+- **Transactions:** the controller passes the request-scoped `AsyncConnection`
+  into `TaskService.create_task`, which is `@transactional` and owns the commit.
+  The controller opens none and catches no domain error.
+- The matching MCP tool is `create_task` (documented in its docstring and
+  parameter schema, per the MCP documentation convention).
+
 ## Authentication Guidelines
 
 ### Session-Based Authentication

@@ -302,6 +302,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.search.controllers import router as search_router
     from app.api.settings.controllers import router as user_settings_router
     from app.api.tags.controllers import router as tags_router
+    from app.api.tasks.controllers import router as tasks_router
 
     # Session middleware (must be added before other middleware that uses sessions)
     # Using standard Starlette SessionMiddleware
@@ -345,6 +346,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # literal /journals/series paths win over /journals/{journal_id}.
     app.include_router(series_router, prefix="/api", tags=["journals"])
     app.include_router(journals_router, prefix="/api", tags=["journals"])
+    # Tasks hang off a journal path (/journals/{journal_id}/tasks) but are their
+    # own domain, so they get their own router rather than the journals one.
+    app.include_router(tasks_router, prefix="/api", tags=["tasks"])
     app.include_router(activity_template_router, prefix="/api")
     app.include_router(gear_item_router, prefix="/api")
     app.include_router(daily_summary_router, prefix="/api", tags=["journals"])
