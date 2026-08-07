@@ -484,6 +484,9 @@ MCP must support the ability to:
 - retrieve a single task with its journals and contacts
 - list the tasks linked to a given journal, by link role
 - list not-done tasks due within a forward window, defaulting to seven days
+- delete a task
+
+Deletion was absent from this list while every other operation appeared on it, which left it ambiguous rather than excluded. "There must be no meaningful UI-only behaviour in this work" settles it: an agent that can create a task by mistake must be able to undo that mistake, or the user is left cleaning up after their assistant by hand. The stance that cancelling is ordinary and deleting is the exception is preserved where it belongs — in what the tool's description tells the agent — not by withholding the tool.
 
 Every invariant in this specification applies identically to MCP. In particular, an agent must not be able to create a task without both anchors, must not be able to set a due journal that is not an existing future journal, and must receive a clear, actionable error when it tries.
 

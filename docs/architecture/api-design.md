@@ -268,7 +268,8 @@ do exist for operations that involve no journal at all.
 | Verb + path | Purpose | Status |
 |---|---|---|
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
-| `PATCH /api/tasks/{task_id}` | Change a task's status. Body attributes: `status` (`not_done`, `done`, `cancelled`) | 200; 400 unknown status, unknown attribute, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
+| `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
+| `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
 
 Conventions this surface pins down:
 
@@ -292,11 +293,12 @@ Conventions this surface pins down:
 - **Transactions:** the controller passes the request-scoped `AsyncConnection`
   into the `@transactional` service method, which owns the commit. The controller
   opens none and catches no domain error.
-- **A status change reaches the task by its own id, not through a journal.**
-  Marking a task done or cancelled requires no journal and creates no journal
-  link, and the due journal is not re-read — which is what keeps a *lapsed* task
-  (one whose due journal has passed) completable. Routing it through a journal
-  would imply a relationship the operation does not have.
+- **An update or a delete reaches the task by its own id, not through a
+  journal.** Marking a task done or cancelled requires no journal and creates no
+  journal link; rewording one infers no link either; and the due journal is not
+  re-read on any of these paths — which is what keeps a *lapsed* task (one whose
+  due journal has passed) both completable and editable. Routing them through a
+  journal would imply a relationship the operations do not have.
 - **409 for a refused transition.** Only two are refused, both leaving
   *cancelled*: a cancelled task is reopened by retargeting it onto a new future
   journal, which returns it to not done. The body is well formed and the status
@@ -307,8 +309,39 @@ Conventions this surface pins down:
   silently would let a client change a task it believes it is not touching. This
   is the one check the controller makes itself, because it is an envelope
   concern with no domain rule and no MCP counterpart behind it.
-- The matching MCP tools are `create_task` and `set_task_status` (documented in
-  their docstrings and parameter schemas, per the MCP documentation convention).
+- **A `PATCH` must name at least one change, and both attributes are otherwise
+  optional.** JSON:API sends the attributes that changed, so a client rewording a
+  task sends no `status` and one completing it sends no `text`. A body naming
+  neither is refused with 400: down in the service that is simply nothing to do,
+  but out here it is a client that built a request wrong, and answering 200 would
+  tell it an edit it thinks it made was applied. This also settles explicit
+  `null` — text is required on a task, so `{"text": null}` cannot mean "remove
+  it" and is read as "not sent".
+- **Text and status arriving together are one change, not two.** They are applied
+  by a single `TaskService.update_task` under one locking read and one write, so
+  a request can never be half-applied. `set_status` delegates to the same method
+  rather than reimplementing the transition matrix.
+- **204 and no body for a delete**, matching every other delete in this codebase:
+  there is no resource left to return. The task's intermediate-journal and
+  contact links go with it by cascade; the journals and contacts themselves are
+  untouched, including both anchors — deleting the task is the supported way to
+  unblock a journal deletion a task was holding up, not a reason to lose the
+  journal too. A repeat delete answers 404 rather than 204, because reporting
+  success for a task that was not there would tell a client a commitment is gone
+  when it may still be on a journal.
+- **Delete is the exception and both surfaces say so.** The specification keeps
+  hard deletion for genuine mistakes and puts cancelling in its place otherwise,
+  mirroring the journals specification's stance on event journals. Nothing in the
+  transport can enforce a preference, so it is carried by what the endpoint and
+  the tool *say* — and for the MCP tool that is load-bearing rather than
+  decorative, since the description is the only steer a model gets when choosing
+  between them.
+- The matching MCP tools are `create_task`, `set_task_status`, `update_task_text`
+  and `delete_task` (documented in their docstrings and parameter schemas, per
+  the MCP documentation convention). `update_task_text` offers no `status`
+  parameter and `set_task_status` no `text`: a model gets one tool per intent, so
+  it never has to reason about what leaving a field out will do. The combined
+  write exists for the `PATCH` body that genuinely carries both.
 
 ## Authentication Guidelines
 

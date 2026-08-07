@@ -1,10 +1,11 @@
 """Integration tests for the task endpoints.
 
 ``POST /api/journals/{journal_id}/tasks`` creates; ``PATCH /api/tasks/{task_id}``
-changes a status. The status endpoint is a *member* route with no collection
-beside it: the specification is explicit that no screen lists every task, and a
-status change involves no journal at all, so reaching a task through one would
-be a fiction.
+rewords a task, changes its status, or both; ``DELETE /api/tasks/{task_id}``
+destroys one. The last two are *member* routes with no collection beside them:
+the specification is explicit that no screen lists every task, and none of these
+operations involves a journal at all, so reaching a task through one would be a
+fiction.
 
 Phase 4 proved the invariants against the service. What this file proves is that
 the **endpoint inherits them** — which a shared service is not evidence of on its
@@ -56,7 +57,11 @@ from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
     create_task,
+    link_contact,
+    link_intermediate_journal,
     stored_status,
+    stored_text,
+    task_exists,
 )
 
 
@@ -681,6 +686,394 @@ class TestUnreachableTasksAnswer404:
 
 
 @pytest.mark.integration
+class TestUpdateTaskTextEndpoint:
+    """``PATCH /api/tasks/{task_id}``: rewording, in any status.
+
+    The same route as the status change, because JSON:API sends the attributes
+    that changed and a client may well have changed both. That is the reason the
+    two are applied by one service call rather than two: a request that reworded
+    and completed a task in two calls could have half of it applied.
+    """
+
+    @pytest.mark.parametrize("status", ["not_done", "done", "cancelled"])
+    async def test_the_text_is_editable_in_every_status(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        status: str,
+    ):
+        """Including cancelled: a retired commitment can still be reworded."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus(status),
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, text="reworded")
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["attributes"]["text"] == "reworded"
+        assert data["attributes"]["status"] == status
+        assert data["attributes"]["creating_journal_id"] == creating_id
+        assert data["attributes"]["due_journal_id"] == due_id
+
+    async def test_the_new_text_is_written_by_the_time_the_response_returns(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """As with the status endpoint, this shows the write happened before the
+        client was answered — not that it committed. See that test's docstring."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, text="reworded")
+        )
+        assert response.status_code == 200
+
+        assert await stored_text(async_connection, task_id) == "reworded"
+
+    async def test_text_and_status_can_arrive_together(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """One request, one row change — the reason a single method owns both."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(task_id, text="reworded", status="done"),
+        )
+
+        assert response.status_code == 200
+        assert await stored_text(async_connection, task_id) == "reworded"
+        assert await stored_status(async_connection, task_id) == "done"
+
+    async def test_a_refused_status_takes_the_text_edit_with_it(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """One request is one decision: a refused half refuses the whole.
+
+        This is the property the single-service-call design exists to give, so
+        it is asserted at the surface a client actually reaches rather than only
+        against the service. A controller that applied the text first and then
+        asked for the status would answer 409 having already reworded the
+        task — half the request applied, and no way for the client to know
+        which half.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+            status=TaskStatus.CANCELLED,
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(task_id, text="reworded", status="done"),
+        )
+
+        assert response.status_code == 409
+        assert _error(response.json())["code"] == "TASK_STATUS_TRANSITION_REFUSED"
+        assert await stored_text(async_connection, task_id) == "print the permit"
+        assert await stored_status(async_connection, task_id) == "cancelled"
+
+    async def test_blank_text_beside_a_valid_status_refuses_both(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The mirror of the above: the text is the invalid half this time."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(task_id, text="   ", status="done"),
+        )
+
+        assert response.status_code == 400
+        assert await stored_text(async_connection, task_id) == "print the permit"
+        assert await stored_status(async_connection, task_id) == "not_done"
+
+    async def test_a_lapsed_task_can_still_be_reworded(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """The due journal is never re-read, so its date cannot block a typo fix."""
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=past_id, due_journal_id=past_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, text="reworded")
+        )
+
+        assert response.status_code == 200
+        assert await stored_text(async_connection, task_id) == "reworded"
+
+    async def test_no_journal_link_is_created_by_an_edit(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Intermediate links are explicit only; editing infers none."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, text="reworded")
+        )
+        assert response.status_code == 200
+
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    async def test_blank_text_is_rejected_and_the_row_is_unchanged(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        blank: str,
+    ):
+        """The domain owns what an acceptable text is, and answers 400 for both
+        surfaces rather than the schema refusing it a second way."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, text=blank)
+        )
+
+        assert response.status_code == 400
+        assert _error(response.json())["code"] == "TASK_VALIDATION_ERROR"
+        assert await stored_text(async_connection, task_id) == "print the permit"
+
+    async def test_another_users_task_reads_as_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Byte-identical once the ids are stripped, and the text is untouched."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            async_connection,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            text="not yours",
+            user_id=OTHER_USER_ID,
+        )
+
+        foreign = await authenticated_client.patch(
+            f"/api/tasks/{foreign_task}",
+            json=_update_body(foreign_task, text="reworded"),
+        )
+        absent = await authenticated_client.patch(
+            "/api/tasks/999999", json=_update_body(999_999, text="reworded")
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        foreign_error, absent_error = _error(foreign.json()), _error(absent.json())
+        assert foreign_error["code"] == absent_error["code"] == "TASK_NOT_FOUND"
+        assert str(foreign_error["detail"]).replace(str(foreign_task), "X") == str(
+            absent_error["detail"]
+        ).replace("999999", "X")
+        assert await stored_text(async_connection, foreign_task) == "not yours"
+
+
+@pytest.mark.integration
+class TestDeleteTaskEndpoint:
+    """``DELETE /api/tasks/{task_id}``: the exception, not the ordinary action.
+
+    The specification's stance — cancel is normal, delete is for genuine
+    mistakes — is carried by what the surfaces *say*, since an endpoint cannot
+    refuse to be the exception. What it can guarantee is the blast radius: the
+    task and its link rows, and nothing else.
+    """
+
+    async def test_deleting_answers_204_and_removes_the_row(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """204 rather than a body: there is no resource left to return."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.delete(f"/api/tasks/{task_id}")
+
+        assert response.status_code == 204
+        assert response.content == b""
+        assert not await task_exists(async_connection, task_id)
+
+    async def test_the_link_rows_go_and_the_journals_and_contacts_stay(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The acceptance criterion, at the surface a client reaches.
+
+        Both anchors survive in particular: they are journals ITER18-002 refuses
+        to delete *because* a task points at them, and deleting the task is the
+        supported way to unblock that — not a reason to lose the journals too.
+        """
+        creating_id, due_id = task_anchors
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up", days_offset=3
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await create_contact(async_connection)
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned_id
+        )
+        await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
+
+        response = await authenticated_client.delete(f"/api/tasks/{task_id}")
+
+        assert response.status_code == 204
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+        assert await count(async_connection, COUNT_CONTACT_LINKS, {}) == 0
+        for journal_id in (creating_id, due_id, mentioned_id):
+            assert await journal_repository.find_by_id(journal_id) is not None
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM contacts WHERE id = :contact_id",
+                {"contact_id": contact_id},
+            )
+            == 1
+        )
+
+    async def test_other_tasks_are_untouched(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A sibling sharing both anchors is not collateral damage."""
+        creating_id, due_id = task_anchors
+        doomed = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        survivor = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="somebody else's problem",
+        )
+
+        response = await authenticated_client.delete(f"/api/tasks/{doomed}")
+
+        assert response.status_code == 204
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 1
+        assert (
+            await stored_text(async_connection, survivor) == "somebody else's problem"
+        )
+
+    async def test_deleting_twice_answers_404_the_second_time(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A 204 on a task that was not there would mislead a retrying client."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        first = await authenticated_client.delete(f"/api/tasks/{task_id}")
+        second = await authenticated_client.delete(f"/api/tasks/{task_id}")
+
+        assert first.status_code == 204
+        assert second.status_code == 404
+        assert _error(second.json())["code"] == "TASK_NOT_FOUND"
+
+    async def test_another_users_task_reads_as_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Indistinguishable, and — the half a 404 alone would not show — intact."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            async_connection,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        foreign = await authenticated_client.delete(f"/api/tasks/{foreign_task}")
+        absent = await authenticated_client.delete("/api/tasks/999999")
+
+        assert foreign.status_code == absent.status_code == 404
+        foreign_error, absent_error = _error(foreign.json()), _error(absent.json())
+        assert foreign_error["code"] == absent_error["code"] == "TASK_NOT_FOUND"
+        assert str(foreign_error["detail"]).replace(str(foreign_task), "X") == str(
+            absent_error["detail"]
+        ).replace("999999", "X")
+        assert await task_exists(async_connection, foreign_task)
+
+
+@pytest.mark.integration
 class TestRejectedUpdateBodies:
     """What a client may not send to the update endpoint."""
 
@@ -688,11 +1081,11 @@ class TestRejectedUpdateBodies:
         "attributes",
         [
             {"status": "in_progress"},
-            {"status": "done", "text": "rewritten"},
+            {"status": "done", "due_journal_id": 9},
             {"status": "done", "now": "2020-01-01T00:00:00+00:00"},
             {},
         ],
-        ids=["unknown status", "text", "now", "no status"],
+        ids=["unknown status", "due journal", "now", "no attributes"],
     )
     async def test_rejected_attributes_leave_the_status_alone(
         self,
@@ -701,7 +1094,8 @@ class TestRejectedUpdateBodies:
         task_anchors: tuple[int, int],
         attributes: dict[str, object],
     ):
-        """Text belongs to its own phase; there is no fourth status and no ``now``."""
+        """Retargeting belongs to its own phase; there is no fourth status, no
+        ``now``, and a body naming no change at all is a malformed request."""
         creating_id, due_id = task_anchors
         task_id = await create_task(
             async_connection, creating_journal_id=creating_id, due_journal_id=due_id
