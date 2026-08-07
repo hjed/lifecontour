@@ -182,3 +182,119 @@ class TestSetTaskStatusDocumentsItself:
 
         assert "cancelled" in description
         assert "retarget" in description
+
+
+@pytest.fixture
+async def link_contact_schema() -> dict[str, Any]:
+    """The ``link_task_to_contact`` tool as an MCP client actually sees it."""
+    return await _tool_schema("link_task_to_contact")
+
+
+@pytest.fixture
+async def unlink_contact_schema() -> dict[str, Any]:
+    """The ``unlink_task_from_contact`` tool as an MCP client actually sees it."""
+    return await _tool_schema("unlink_task_from_contact")
+
+
+class TestContactLinkToolParameters:
+    """What an AI client may send to link or unlink a contact."""
+
+    def test_linking_needs_a_task_and_a_contact(
+        self, link_contact_schema: dict[str, Any]
+    ) -> None:
+        required = set(link_contact_schema["input_schema"]["required"])
+
+        assert required == {"task_id", "contact_id"}
+
+    def test_unlinking_needs_a_task_and_a_contact(
+        self, unlink_contact_schema: dict[str, Any]
+    ) -> None:
+        required = set(unlink_contact_schema["input_schema"]["required"])
+
+        assert required == {"task_id", "contact_id"}
+
+    def test_injected_collaborators_are_not_part_of_the_link_contract(
+        self, link_contact_schema: dict[str, Any]
+    ) -> None:
+        properties = link_contact_schema["input_schema"]["properties"]
+
+        assert "task_service" not in properties
+        assert "db_connection" not in properties
+
+    def test_injected_collaborators_are_not_part_of_the_unlink_contract(
+        self, unlink_contact_schema: dict[str, Any]
+    ) -> None:
+        properties = unlink_contact_schema["input_schema"]["properties"]
+
+        assert "task_service" not in properties
+        assert "db_connection" not in properties
+
+
+class TestTheLinkCarriesNoRelationshipData:
+    """The specification's "plain reference", asserted where a model reads it.
+
+    ``link_journal_to_contact`` takes a relationship type, a status and a role.
+    A model that has seen that tool will reach for the same arguments here
+    unless the schema says there are none — and the transport refuses what the
+    schema does not offer, which is where the guarantee actually lives.
+    """
+
+    @pytest.mark.parametrize(
+        "unwanted", ["relationship_type", "role", "status", "attendance"]
+    )
+    def test_the_link_schema_offers_no_relationship_field(
+        self, link_contact_schema: dict[str, Any], unwanted: str
+    ) -> None:
+        assert unwanted not in link_contact_schema["input_schema"]["properties"]
+
+    @pytest.mark.parametrize(
+        "unwanted", ["relationship_type", "role", "status", "attendance"]
+    )
+    def test_the_unlink_schema_offers_no_relationship_field(
+        self, unlink_contact_schema: dict[str, Any], unwanted: str
+    ) -> None:
+        assert unwanted not in unlink_contact_schema["input_schema"]["properties"]
+
+    def test_neither_tool_offers_a_journal(
+        self,
+        link_contact_schema: dict[str, Any],
+        unlink_contact_schema: dict[str, Any],
+    ) -> None:
+        """A contact link is not a journal link, and needs no journal at all."""
+        for schema in (link_contact_schema, unlink_contact_schema):
+            properties = schema["input_schema"]["properties"]
+            assert not [name for name in properties if "journal" in name]
+
+
+class TestTheContactLinkToolsDocumentThemselves:
+    """The docstring and the schema are these tools' only documentation."""
+
+    def test_the_link_tool_has_a_description(
+        self, link_contact_schema: dict[str, Any]
+    ) -> None:
+        assert len(link_contact_schema["description"]) > 0
+
+    def test_the_unlink_tool_has_a_description(
+        self, unlink_contact_schema: dict[str, Any]
+    ) -> None:
+        assert len(unlink_contact_schema["description"]) > 0
+
+    def test_the_link_description_says_a_repeat_is_harmless(
+        self, link_contact_schema: dict[str, Any]
+    ) -> None:
+        """Otherwise an agent avoids a retry it is free to make, or fears a duplicate."""
+        description = link_contact_schema["description"].lower()
+
+        assert "already linked" in description
+
+    def test_the_link_description_says_no_role_is_recorded(
+        self, link_contact_schema: dict[str, Any]
+    ) -> None:
+        """The absent parameters are stated, not merely missing.
+
+        A model that notices ``link_journal_to_contact`` takes a role will
+        otherwise assume this tool is the wrong one for what it wants.
+        """
+        description = link_contact_schema["description"].lower()
+
+        assert "role" in description

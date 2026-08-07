@@ -129,6 +129,15 @@ the *creating* journal where it arose and the *due* journal where it matters.
     future-dated **at the moment it is set** needs journal data and the user's timezone, so it is
     enforced in the service layer where REST and MCP both inherit it
   - *Lapsed* is derived, never stored — a not-done task whose due journal has passed or been cancelled
+  - **Contact links are a plain reference.** They carry no relationship type, no role and no
+    attendance status — unlike journal-contact relationships, which carry all three — and nothing
+    parses contacts out of the task text. They are editable in **any** status, so no status is read
+    or written when one is added or removed, and both operations are idempotent. The enforceable
+    half of "the contact must be the acting user's" is **existence**: `contacts` has no owner column
+    in this system, a divergence recorded in
+    [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md) and inherited here rather than
+    faked. Unlinking deliberately does *not* require the contact to still exist, because
+    `task_contacts` cascades from the contact side and the row is already gone
 - **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
   `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
   request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`); and
@@ -151,6 +160,11 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `FOR KEY SHARE` so a concurrent delete cannot turn the promised `TaskNotFoundError` into a raw
   foreign-key violation. The repository is responsible for persistence and task ownership only; every
   other invariant is the service layer's.
+  **Contact links are written in batch.** `add_contacts(task_id, contact_ids, user_id)` takes the
+  ownership guard once and inserts every link in one statement, returning the ids for which a row was
+  actually created. The singular `add_contact` it replaced made the guard the expensive half — *N*
+  contacts cost *2N* statements — and the batch is what `TaskService.create_task` and the
+  single-contact link surface both use. `remove_contact` stays singular: nothing removes in bulk.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch

@@ -100,7 +100,11 @@ def mock_task_repo() -> AsyncMock:
         )
 
     repo.save.side_effect = save
-    repo.add_contact.return_value = True
+
+    async def add_contacts(_task_id: int, contact_ids: list[int], _user_id: str):
+        return list(contact_ids)
+
+    repo.add_contacts.side_effect = add_contacts
     return repo
 
 
@@ -229,7 +233,15 @@ class TestCreateTask:
         mock_contact_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Optional contacts become link rows against the id the save assigned."""
+        """Optional contacts become link rows against the id the save assigned.
+
+        **One call, not one per contact.** Phase 4 wrote them in a loop and each
+        ``add_contact`` re-proved task ownership with its own
+        ``SELECT … FOR KEY SHARE``, so N contacts cost 2N statements to link a
+        task the service had created three lines earlier. Phase 11 owns the
+        contact-link surface and batched it; asserting the *shape* of the call
+        here is what stops the loop coming back.
+        """
         mock_contact_repo.find_names_by_ids.return_value = {
             3: ("Sarah", None, None),
             5: ("Tom", None, None),
@@ -237,10 +249,7 @@ class TestCreateTask:
 
         await create(service, mock_transaction, contact_ids=[3, 5])
 
-        assert [c.args for c in mock_task_repo.add_contact.await_args_list] == [
-            (99, 3, USER_ID),
-            (99, 5, USER_ID),
-        ]
+        mock_task_repo.add_contacts.assert_awaited_once_with(99, [3, 5], USER_ID)
 
     @pytest.mark.asyncio
     async def test_creates_no_links_without_contacts(
@@ -253,7 +262,7 @@ class TestCreateTask:
         """Contacts are optional: no ids means no link rows and no contact read."""
         await create(service, mock_transaction, contact_ids=None)
 
-        mock_task_repo.add_contact.assert_not_awaited()
+        mock_task_repo.add_contacts.assert_not_awaited()
         mock_contact_repo.find_names_by_ids.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -272,7 +281,7 @@ class TestCreateTask:
 
         await create(service, mock_transaction, contact_ids=[5, 3, 5])
 
-        assert [c.args[1] for c in mock_task_repo.add_contact.await_args_list] == [5, 3]
+        assert mock_task_repo.add_contacts.await_args.args[1] == [5, 3]
 
     @pytest.mark.asyncio
     async def test_checks_every_contact_in_one_call(
@@ -820,9 +829,19 @@ class TestRowsThatVanishMidCreate:
         mock_contact_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """The same race one row over: the link's own violation keeps its 404."""
-        mock_contact_repo.find_names_by_ids.return_value = {3: ("Sarah", None, None)}
-        mock_task_repo.add_contact.side_effect = self.integrity_error(
+        """The same race one row over: the link's own violation keeps its 404.
+
+        The batched insert cannot say *which* contact vanished, so the service
+        re-reads the requested ids to find out. That read is only possible
+        because the insert runs inside a ``SAVEPOINT`` — a foreign-key violation
+        aborts the enclosing transaction otherwise, and the recovery lookup would
+        fail before it could answer.
+        """
+        mock_contact_repo.find_names_by_ids.side_effect = [
+            {3: ("Sarah", None, None)},
+            {},
+        ]
+        mock_task_repo.add_contacts.side_effect = self.integrity_error(
             "task_contacts_contact_id_fkey"
         )
 
@@ -867,4 +886,4 @@ class TestContactLinks:
             await create(service, mock_transaction, contact_ids=[404])
 
         mock_task_repo.save.assert_not_awaited()
-        mock_task_repo.add_contact.assert_not_awaited()
+        mock_task_repo.add_contacts.assert_not_awaited()

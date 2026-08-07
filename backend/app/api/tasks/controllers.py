@@ -16,6 +16,13 @@ same answers.
 It *raises* exactly one, and only on the update path: a body whose resource id
 disagrees with the path is a JSON:API envelope problem with no domain or MCP
 equivalent, so there is nowhere else for it to live.
+
+The contact-link routes answer **204** rather than the task. There is still no
+endpoint that reads a task's contacts back, so echoing the link would be a
+second definition of what got linked, sitting beside a read surface that does
+not exist. 204 is also what keeps idempotency invisible: a repeat of either call
+is indistinguishable from the first, which is the whole of what idempotent
+means to a client.
 """
 
 from core_shared.models.tasks import Task, TaskValidationError
@@ -26,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.tasks.schemas import (
     TaskAttributes,
+    TaskContactLinkRequest,
     TaskCreateRequest,
     TaskResource,
     TaskResponse,
@@ -137,3 +145,77 @@ async def update_task(
         transaction=connection,
     )
     return TaskResponse(data=_to_resource(updated))
+
+
+@router.post(
+    "/tasks/{task_id}/relationships/contacts",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+@inject
+async def link_task_contact(
+    task_id: int,
+    link_request: TaskContactLinkRequest,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """Link a contact to a task.
+
+    A task-contact link is a plain reference: it carries no relationship type,
+    no role and no attendance status, so the body names a contact and nothing
+    else. Contact links are editable in **any** status — a done or cancelled
+    task takes one exactly as an open one does.
+
+    Linking a contact that is already linked succeeds and changes nothing. The
+    answer is 204 either way, deliberately: an idempotent operation that looked
+    different on a retry would not be one.
+
+    Raises:
+        400: An unknown field, a relationship attribute, a body declaring
+             another resource type, or an id that is not an integer.
+        404: The task does not exist or is not yours — the two are the same
+             answer by design — or the contact does not exist.
+    """
+    await task_service.link_contact(
+        user_id=user.id,
+        task_id=task_id,
+        contact_id=link_request.data.contact_id,
+        transaction=connection,
+    )
+
+
+@router.delete(
+    "/tasks/{task_id}/relationships/contacts/{contact_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+@inject
+async def unlink_task_contact(
+    task_id: int,
+    contact_id: int,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """Remove a contact link from a task.
+
+    Idempotent, and deliberately **not** conditional on the contact still
+    existing: ``task_contacts`` cascades from the contact side, so a deleted
+    contact's links are already gone, and 404-ing here would fail the one call a
+    user reaches for while tidying up.
+
+    Note the asymmetry with the link route, which is FastAPI's rather than this
+    surface's: a non-integer contact id is a **422** here, because it is a path
+    parameter, where the same value in the link *body* is a 400 from the schema.
+    Every path-parameter id in this application behaves that way; it is recorded
+    rather than special-cased, because diverging here alone would be worse.
+
+    Raises:
+        404: The task does not exist or is not yours.
+        422: The path ids are not integers.
+    """
+    await task_service.unlink_contact(
+        user_id=user.id,
+        task_id=task_id,
+        contact_id=contact_id,
+        transaction=connection,
+    )

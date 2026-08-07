@@ -37,6 +37,25 @@ from app.mcp.shared.dependencies import (
 )
 
 
+def _link_to_dict(
+    task_id: int, contact_id: int, *, linked: bool, changed: bool
+) -> dict[str, Any]:
+    """The answer both link tools give.
+
+    ``linked`` is the *resulting state* and ``changed`` says whether this call
+    moved a row. Both are needed because the operations are idempotent: without
+    ``changed`` an agent could not tell a fresh link from a no-op, and without
+    ``linked`` it would have to infer the state from which tool it called. There
+    is no read tool yet to ask instead.
+    """
+    return {
+        "task_id": task_id,
+        "contact_id": contact_id,
+        "linked": linked,
+        "changed": changed,
+    }
+
+
 def _task_to_dict(task: Task) -> dict[str, Any]:
     return {
         "id": task.id,
@@ -160,7 +179,89 @@ async def set_task_status(
     return json.dumps(_task_to_dict(updated), indent=2)
 
 
+@mcp_unified_error_handler("link_task_to_contact", "task")
+async def link_task_to_contact(
+    task_id: Annotated[int, Field(description="The id of the task to link.")],
+    contact_id: Annotated[
+        int,
+        Field(
+            description=(
+                "The id of the contact the task involves. Must be an existing contact."
+            )
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Reference a contact from a task.
+
+    The link is a **plain reference** and nothing more: unlike a journal-contact
+    link, it records no relationship type, no role and no attendance status, so
+    there is nothing to send but the two ids. Contacts are never inferred from
+    the task text — a person is on a task only because somebody linked them.
+
+    Contact links can be changed in any status, including on a task that is
+    already done or cancelled. Linking a contact that is already linked is
+    accepted and changes nothing, so a retry is safe.
+
+    Returns:
+        JSON string with task_id, contact_id, linked (the resulting state, and
+        true here) and changed (whether this call created the link, false when
+        it was already there).
+    """
+    user_id = await get_current_user_id()
+
+    changed = await task_service.link_contact(
+        user_id=user_id,
+        task_id=task_id,
+        contact_id=contact_id,
+        transaction=db_connection,
+    )
+    return json.dumps(
+        _link_to_dict(task_id, contact_id, linked=True, changed=changed), indent=2
+    )
+
+
+@mcp_unified_error_handler("unlink_task_from_contact", "task")
+async def unlink_task_from_contact(
+    task_id: Annotated[int, Field(description="The id of the task to unlink.")],
+    contact_id: Annotated[
+        int, Field(description="The id of the contact to stop referencing.")
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Stop referencing a contact from a task.
+
+    Removes the link only — the contact and the task are both left alone, and no
+    journal is involved. Works in any status, and unlinking a contact that is
+    not linked is accepted rather than refused, so a retry is safe. Deleting the
+    contact itself removes its task links automatically, so this is not needed
+    for that.
+
+    Returns:
+        JSON string with task_id, contact_id, linked (the resulting state, and
+        false here) and changed (whether this call removed a link, false when
+        there was none).
+    """
+    user_id = await get_current_user_id()
+
+    changed = await task_service.unlink_contact(
+        user_id=user_id,
+        task_id=task_id,
+        contact_id=contact_id,
+        transaction=db_connection,
+    )
+    return json.dumps(
+        _link_to_dict(task_id, contact_id, linked=False, changed=changed), indent=2
+    )
+
+
 def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
     mcp.add_tool(set_task_status)
+    mcp.add_tool(link_task_to_contact)
+    mcp.add_tool(unlink_task_from_contact)

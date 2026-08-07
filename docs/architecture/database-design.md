@@ -374,6 +374,17 @@ no-op that reports "no change" rather than an integrity error. The link tables c
 their own, so every link operation first proves the task belongs to the acting user; owner scoping
 therefore holds across the link tables as well as `tasks` itself.
 
+Contact links are inserted **in batch**, over a multi-row `VALUES` list with the same
+`ON CONFLICT (task_id, contact_id) DO NOTHING RETURNING contact_id`, so *N* contacts cost one
+ownership guard and one statement instead of *2N*. When a contact is deleted between the service's
+existence check and that insert, the foreign key catches it and the caller must still get the
+promised 404 — so the service re-reads the ids it was given to find out which one went, rather than
+parsing the id out of the violation's `DETAIL` text (PostgreSQL does put it there, but it is
+localised prose and driver-dependent, and this domain already has a bug on record from matching the
+wrong rendering of an error). **That recovery read is why the insert runs inside a `SAVEPOINT`**:
+PostgreSQL puts the transaction into a failed state on a constraint violation, so the lookup would
+raise `InFailedSQLTransactionError` before it could answer and a promised 404 would surface as a 500.
+
 `ck_tasks_status CHECK (status IN ('not_done', 'done', 'cancelled'))` mirrors the three-value
 `TaskStatus` domain enum (`core_shared.models.tasks.TaskStatus`) exactly; a migration test asserts
 every enum member is accepted and nothing else is, so the column and the enum cannot drift apart.

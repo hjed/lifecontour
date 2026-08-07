@@ -162,9 +162,9 @@ class TestTheWriteIsOneUnitOfWork:
         sarah = await create_contact(async_connection, first_name="Sarah")
 
         class _FailingLinkRepository(SqlTaskRepository):
-            async def add_contact(
-                self, task_id: int, contact_id: int, user_id: str
-            ) -> bool:
+            async def add_contacts(
+                self, task_id: int, contact_ids: list[int], user_id: str
+            ) -> list[int]:
                 raise RuntimeError("the link write failed")
 
         service = TaskService(
