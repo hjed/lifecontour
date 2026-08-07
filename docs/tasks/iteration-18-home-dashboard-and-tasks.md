@@ -1888,6 +1888,27 @@ items were acted on (an acceptance criterion whose write-up asserted more than i
 anchors are now checked; a redundant assertion) and one was recorded rather than closed (the theoretical
 deadlock below).
 
+**What the pull request's automated review found — a real 500, and it was not this phase's.** Every id
+column in this schema is a PostgreSQL `INTEGER` and Python's `int` is unbounded, so `2147483648` parsed
+cleanly out of a path or a body, reached the repository, and died in asyncpg's *parameter binding*:
+`DataError: value out of int32 range`, rendered to the caller as an internal error for an id no row
+could ever have. Probed before fixing, it reproduced on **five** routes — including `PATCH /api/tasks/{id}`
+(Phase 6) and `create_task`'s `contact_ids` (Phase 5), neither of which this phase added.
+
+The fix is `backend/app/api/common/identifiers.py` (`DatabaseId`, `DatabaseIdPath`, `INT32_MAX`), applied
+to **every id the tasks API and the tasks MCP tools accept**, with eight tests pinning the 400. Fixing
+only the two new routes was rejected: leaving `PATCH` broken beside a fixed neighbour in the same module
+is a worse outcome than fixing both. Extending it further was also rejected — every other domain's
+endpoints have the same 500 waiting in them, and that sweep deserves its own review rather than riding
+along inside a phase that ships contact links. **Raised as issue #1272**, with the two open questions it
+should settle (whether the lower bound is 1 everywhere, and whether a defensive `DataError` handler
+belongs in `error_handlers.py` for whatever the sweep misses).
+
+The review's second finding was a docstring claiming a **422** for a non-integer path id. The
+application-wide `validation_error_handler` renders every `RequestValidationError` as **400**, so the
+docstring described behaviour no client of this application can observe — the same class of wrong claim
+the pre-merge review round caught, and worth noting that it recurred immediately after.
+
 **Acceptance Criteria:**
 
 - [x] Link and unlink a contact over REST and MCP in the same PR; linking is idempotent. —
@@ -2041,8 +2062,9 @@ deletion behaviour, cross-user rejection, both surfaces. E2E deferred to Phase 2
   whole-project run, not the narrower `mypy app tests`, which reports 864 — the review found this entry
   quoting the narrower number as though it were the wider one); the full `tests/unit/` suite
   (2,870 tests); and `tests/integration/tasks/`, `tests/integration/api/` and `tests/integration/mcp/`
-  together (969 tests). Re-run after merging Phase 7 from `main`: **2,922** and **990**, both green. No
-  frontend or e2e gates — the phase changes no frontend file and ships no user-visible surface.
+  together (969 tests). Re-run after merging Phase 7 from `main` and adding the id bounds: **2,922** and
+  **998**, both green. No frontend or e2e gates — the phase changes no frontend file and ships no
+  user-visible surface.
 
 #### Phase 12: Read Model and Lapsed Derivation
 

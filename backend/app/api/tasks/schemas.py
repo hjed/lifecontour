@@ -34,6 +34,7 @@ from typing import Literal
 from core_shared.models.tasks import TaskStatus
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.api.common.identifiers import INT32_MAX, DatabaseId
 from app.api.common.schemas import (
     JsonApiCreateRequest,
     JsonApiLinks,
@@ -81,14 +82,14 @@ class TaskCreateAttributes(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(..., description="The commitment, as plain text")
-    due_journal_id: int = Field(
+    due_journal_id: DatabaseId = Field(
         ...,
         description=(
             "The future-dated journal this task is due in. Must be an existing "
             "journal of yours, dated after today in your timezone."
         ),
     )
-    contact_ids: list[int] | None = Field(
+    contact_ids: list[DatabaseId] | None = Field(
         default=None,
         description="Optional contacts this task references; duplicates are ignored",
     )
@@ -200,17 +201,29 @@ class TaskContactLinkData(BaseModel):
 
     @field_validator("id")
     @classmethod
-    def _must_name_an_integer(cls, value: str) -> str:
+    def _must_name_a_row(cls, value: str) -> str:
         """JSON:API carries ids as strings; this system's contact ids are integers.
 
         Checked here rather than in the controller so a malformed id is a 400
         from the schema like every other bad field, instead of a ``ValueError``
         escaping a cast as a 500.
+
+        **The range matters as much as the type**, which review caught. Python's
+        ``int`` is unbounded and ``contacts.id`` is a PostgreSQL ``INTEGER``, so
+        ``2147483648`` parsed cleanly, reached the repository and died in the
+        driver — asyncpg refuses to *bind* an out-of-range value, so the caller
+        got a 500 for what is plainly a bad request. See
+        :mod:`app.api.common.identifiers`.
         """
         try:
-            int(value)
+            contact_id = int(value)
         except ValueError as error:
             raise ValueError("The contact id must be an integer") from error
+        if not 1 <= contact_id <= INT32_MAX:
+            raise ValueError(
+                f"The contact id must be between 1 and {INT32_MAX}; no row can "
+                f"have the id {contact_id}"
+            )
         return value
 
     @property

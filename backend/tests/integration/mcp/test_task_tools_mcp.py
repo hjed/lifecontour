@@ -904,3 +904,55 @@ class TestContactLinkToolRejections:
 
         assert '"isError":true' in response.text
         assert await linked_contact_ids(clean_database, task_id) == []
+
+
+@pytest.mark.integration
+class TestIdsOutsideTheColumnsRange:
+    """The transport refuses an id no row could have, before the service runs.
+
+    The same defect the endpoint tests describe: an out-of-range id used to
+    reach the driver and come back as an internal error, which is the least
+    actionable answer an agent can get. The bound is in the generated schema, so
+    the call is refused rather than attempted.
+    """
+
+    async def test_a_task_id_beyond_int32_is_refused(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ):
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "link_task_to_contact",
+                {"task_id": 2_147_483_648, "contact_id": sarah},
+            )
+
+        assert '"isError":true' in response.text
+
+    async def test_a_contact_id_beyond_int32_is_refused(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "unlink_task_from_contact",
+                {"task_id": task_id, "contact_id": 2_147_483_648},
+            )
+
+        assert '"isError":true' in response.text
+        assert await linked_contact_ids(clean_database, task_id) == []

@@ -27,6 +27,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.api.common.identifiers import INT32_MAX
 from app.core.tasks.services.task_service import TaskService
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
@@ -73,28 +74,32 @@ async def create_task(
     creating_journal_id: Annotated[
         int,
         Field(
+            ge=1,
+            le=INT32_MAX,
             description=(
                 "The journal the commitment arose in — the entry you were "
                 "reading or writing when it came up. Never changes."
-            )
+            ),
         ),
     ],
     due_journal_id: Annotated[
         int,
         Field(
+            ge=1,
+            le=INT32_MAX,
             description=(
                 "The journal the task is due in. Must be an existing journal of "
                 "yours dated in the future: today is not the future, and a "
                 "multi-day journal already under way is dated by the day it "
                 "started. Create the journal first if the day you want has none."
-            )
+            ),
         ),
     ],
     text: Annotated[
         str, Field(description="The commitment, as plain text. Required and non-empty.")
     ],
     contact_ids: Annotated[
-        list[int] | None,
+        list[Annotated[int, Field(ge=1, le=INT32_MAX)]] | None,
         Field(
             description=(
                 "Optional ids of contacts this task involves. Duplicates are "
@@ -137,7 +142,9 @@ async def create_task(
 
 @mcp_unified_error_handler("set_task_status", "task")
 async def set_task_status(
-    task_id: Annotated[int, Field(description="The id of the task to change.")],
+    task_id: Annotated[
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to change.")
+    ],
     status: Annotated[
         TaskStatus,
         Field(
@@ -181,13 +188,17 @@ async def set_task_status(
 
 @mcp_unified_error_handler("link_task_to_contact", "task")
 async def link_task_to_contact(
-    task_id: Annotated[int, Field(description="The id of the task to link.")],
+    task_id: Annotated[
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to link.")
+    ],
     contact_id: Annotated[
         int,
         Field(
+            ge=1,
+            le=INT32_MAX,
             description=(
                 "The id of the contact the task involves. Must be an existing contact."
-            )
+            ),
         ),
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -225,9 +236,16 @@ async def link_task_to_contact(
 
 @mcp_unified_error_handler("unlink_task_from_contact", "task")
 async def unlink_task_from_contact(
-    task_id: Annotated[int, Field(description="The id of the task to unlink.")],
+    task_id: Annotated[
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to unlink.")
+    ],
     contact_id: Annotated[
-        int, Field(description="The id of the contact to stop referencing.")
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description="The id of the contact to stop referencing.",
+        ),
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),

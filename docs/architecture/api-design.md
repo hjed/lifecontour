@@ -330,6 +330,15 @@ Conventions this surface pins down:
   404-ing there would fail exactly the call a user reaches for while tidying up.
   Task ownership is still enforced, so another user's task answers 404 on both
   verbs, byte-identically to an absent one.
+- **Ids are bounded to what the column can hold.** Every id column here is a
+  PostgreSQL `INTEGER`, and Python's `int` is not, so `2147483648` used to parse
+  cleanly, reach the repository and die in asyncpg's *parameter binding* — a 500
+  for an id no row could ever have. `app/api/common/identifiers.py` bounds them
+  to `1..2147483647` on every id the tasks API and its MCP tools accept, path
+  and body alike, so the answer is the 400 the client deserves. The lower bound
+  is `1` because serial columns start there: 404 would suggest the row might
+  have existed once. **Other domains' endpoints are still unbounded** — issue
+  #1272 tracks the sweep, which is deliberately not done inside a feature phase.
 - The matching MCP tools are `create_task`, `set_task_status`,
   `link_task_to_contact` and `unlink_task_from_contact` (documented in their
   docstrings and parameter schemas, per the MCP documentation convention). The

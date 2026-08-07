@@ -1129,3 +1129,128 @@ class TestContactLinkRejections:
 
         assert response.status_code == 400
         assert await linked_contact_ids(async_connection, task_id) == []
+
+
+@pytest.mark.integration
+class TestIdsOutsideTheColumnsRange:
+    """An id no row could have is a client error, not a server one.
+
+    Python's ``int`` is unbounded and every id column here is a PostgreSQL
+    ``INTEGER``, so ``2147483648`` used to parse cleanly, reach the repository
+    and die in the driver — asyncpg refuses to *bind* an out-of-range value, so
+    the caller got a 500 for what is plainly a bad request. Found by the pull
+    request's automated review, and reproduced on five routes before it was
+    fixed, including two this phase did not add.
+
+    The bound belongs at the surface because it is a fact about the column's
+    width rather than a domain rule: no service could enforce it without first
+    doing the query that fails.
+    """
+
+    async def test_a_body_contact_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts",
+            json=_link_body(2_147_483_648),
+        )
+
+        assert response.status_code == 400
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+    async def test_a_path_task_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+    ):
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        response = await authenticated_client.post(
+            "/api/tasks/2147483648/relationships/contacts", json=_link_body(sarah)
+        )
+
+        assert response.status_code == 400
+
+    async def test_a_path_contact_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/contacts/2147483648"
+        )
+
+        assert response.status_code == 400
+
+    async def test_a_zero_id_is_rejected_rather_than_reported_as_missing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Serial columns start at 1, so zero identifies nothing.
+
+        Answering 404 would suggest the row might have existed once; the id is
+        simply not one this system can ever issue.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(0)
+        )
+
+        assert response.status_code == 400
+
+    async def test_the_status_route_is_bounded_too(
+        self,
+        authenticated_client: AsyncClient,
+    ):
+        """A route this phase did not add, fixed with it.
+
+        Leaving `PATCH` broken beside a fixed neighbour in the same module would
+        be a worse outcome than either fixing both or fixing neither.
+        """
+        response = await authenticated_client.patch(
+            "/api/tasks/2147483648",
+            json=_update_body(2_147_483_648, status="done"),
+        )
+
+        assert response.status_code == 400
+
+    async def test_create_rejects_a_contact_id_beyond_int32(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The same, on the create path's contact list."""
+        creating_id, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json=_body(
+                text="print the permit",
+                due_journal_id=due_id,
+                contact_ids=[2_147_483_648],
+            ),
+        )
+
+        assert response.status_code == 400
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
