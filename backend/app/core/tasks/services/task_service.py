@@ -300,6 +300,20 @@ class TaskService:
         not done would go on to reopen a task somebody has since marked done,
         with no acknowledgement at all.
 
+        **Known: this ordering deadlocks against a concurrent journal merge.**
+        The task row is locked first and the journals only afterwards, through
+        the link insert's and the anchor update's foreign keys;
+        :meth:`~app.core.tasks.models.repositories.TaskAnchorRepository.repoint_journal_links`
+        takes the journals first and the task rows after. Retargeting a task
+        while a merge absorbs the journal it is due in therefore aborts one of
+        the two. Neither half-applies, so nothing is corrupted — but one caller
+        sees a database error. Closing it means taking the journal locks first,
+        in the merge's ascending-id order, which needs a locking read on the
+        journal domain's port and a way to know the *previous* due journal before
+        the task has been read. That is **ITER18-002 Phase 6**, whose subject is
+        this pair; it is deliberately not done here, where the merge contract is
+        not in scope.
+
         Args:
             user_id: The acting user; the task and the journal must be theirs
             task_id: The task to retarget

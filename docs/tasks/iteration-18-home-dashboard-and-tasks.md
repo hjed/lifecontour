@@ -1,6 +1,6 @@
 # Iteration 18: Home Dashboard and Tasks
 
-**Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
+**Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **62 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
 **ITER18-001 Phases 1–7 complete** (task tables + domain entity; task repository; journal-date resolution
 and the future-dated rule; the creation service and its core invariants; create over REST and MCP; the
@@ -383,8 +383,9 @@ rules below follow from that record and apply to every phase in this document:
     entry point.** ITER18-001 Phases 6, 8, 9, 10, 11, 13 and 14 are all REST+MCP pairs estimated at ×4
     today.
 
-**Programme size:** 61 phases — and therefore 61 PRs — across the five iterations
-(ITER18-001: 22, ITER18-002: 5, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8). That count is the honest
+**Programme size:** 62 phases — and therefore 62 PRs — across the five iterations
+(ITER18-001: 22, ITER18-002: 6, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8).
+ITER18-002 gained its sixth phase during ITER18-001 Phase 7's review — the retarget/merge lock order. That count is the honest
 consequence of a 500-line PR standard over a new core entity plus a new page; the alternative is fewer,
 larger PRs that review badly. **Expected landing zone:** most phases 400–600 tracked lines, capability
 triples 600–700, and the flagged exceptions up to ~750.
@@ -414,7 +415,7 @@ ITER18-001 (tasks core) ──┬── ITER18-002 (anchor integrity)
                           └──────────────────────────────────┘
 ```
 
-Phase counts: ITER18-001 → 22, ITER18-002 → 5, ITER18-003 → 9, ITER18-004 → 17, ITER18-005 → 8.
+Phase counts: ITER18-001 → 22, ITER18-002 → 6, ITER18-003 → 9, ITER18-004 → 17, ITER18-005 → 8.
 
 0. **A hard ordering constraint cuts across iterations 001 and 002.** ITER18-001 Phase 1 gives the task
    anchors `ON DELETE RESTRICT` foreign keys, and ITER18-001 Phase 5 makes tasks creatable. From that
@@ -1742,6 +1743,20 @@ revalidation. Integration — retarget round-trip with real journals. No e2e.
   seeding module this phase changed. No frontend or e2e gates — the phase changes no frontend file and
   ships no user-visible surface.
 
+**Raised in review, deferred to ITER18-002 Phase 6: the retarget/merge lock order.** The automated review
+on the pull request found that this method locks the **task** row first and the **journals** afterwards
+(through the link insert's and the anchor update's foreign keys), while `repoint_journal_links` and its
+caller take the **journals** first and the task rows after — opposite orders on the same two kinds of row,
+so retargeting a task while a merge absorbs the journal it is due in deadlocks and PostgreSQL aborts one
+side. The finding was confirmed against both lock sequences rather than taken at face value. It is **not**
+the residual deadlock `repoint_journal_links` already documents against task *creation*: that one cannot
+be closed by any lock order, because an insert takes its foreign-key locks in declaration order, whereas a
+retarget chooses when it takes each lock. It is therefore a fix rather than an acceptance — but the fix
+changes the merge side's counterpart and needs a locking read on the journal domain's port, neither of
+which is this phase's subject, so it became **ITER18-002 Phase 6** with its own acceptance criteria. Both
+docstrings now carry the ordering so the next reader does not have to rediscover it. Nothing half-applies
+in the meantime: the failure mode is an aborted transaction, not a corrupt one.
+
 **Carried forward to Phase 8.** `TaskReopenNotAcknowledgedError` is not yet in the JSON:API error-code
 table in `backend/app/api/error_handlers.py`, so a REST surface would render it as the generic
 `DOMAIN_ERROR`. That is correct today — no endpoint raises it — but it is exactly what Phase 8's
@@ -2543,6 +2558,50 @@ No unit work beyond what Phase 12 covers. No e2e (Phase 5).
 
 **Required Test Coverage:** unit (RTL) — the failure dialog rendered from the error payload, with one
 blocker and with several. E2E as above, on both e2e projects.
+
+#### Phase 6: Lock Order — Retargeting Against Merge
+
+**Prerequisites:** ITER18-001 Phase 7, ITER18-002 Phase 3. Independent of Phases 2, 4 and 5.
+**Estimated diff:** ~110 production → **~440 tracked** (×4)
+
+**Why this exists.** Raised by the automated review on ITER18-001 Phase 7's pull request, confirmed
+against the two lock sequences, and deferred to here rather than fixed in that phase because the fix
+changes the *merge* contract's counterpart and needs a locking read on the journal domain's port — both
+of which are this iteration's subject, not that one's.
+
+The two operations acquire the same two kinds of row in **opposite orders**:
+
+| | first | then |
+|---|---|---|
+| `TaskService.retarget_due_journal` | the **task** row, `FOR NO KEY UPDATE` | the **journal** rows, `FOR KEY SHARE`, via the link insert's and the anchor update's foreign keys |
+| `TaskAnchorRepository.repoint_journal_links` and its caller | the **journal** rows, `FOR UPDATE` | the **task** rows, via `UPDATE tasks` |
+
+So retargeting a task while a merge absorbs the journal it is due in deadlocks: PostgreSQL aborts one
+side and that caller sees an unhandled database error. It is reachable whenever a merge's source is a
+task's current or incoming due journal, which is exactly the pair a retarget touches.
+
+This is **not** the residual deadlock `repoint_journal_links` already documents against task *creation*.
+That one cannot be closed by any lock order, because an insert takes its foreign-key locks in
+declaration order rather than by id. This one **can** be closed, because the retarget chooses when it
+takes each lock — which is why it is a phase rather than a documented acceptance.
+
+**Acceptance Criteria:**
+
+- [ ] `retarget_due_journal` acquires its journal locks **before** the task lock, in the same ascending-id
+      order `repoint_journal_links` uses, so the two operations queue instead of deadlocking.
+- [ ] The previous due journal — which is not known until the task has been read — is handled without
+      reopening the window: state the chosen approach (a non-locking peek followed by a locking read that
+      re-verifies, or a locking read on the journal domain's port that covers both journals).
+- [ ] The acknowledgement rule and the status the retarget decides from are still read under the row lock;
+      the fix must not reintroduce the lost-*decision* hazard ITER18-001 Phase 6 closed.
+- [ ] The same-journal no-op still reads no journal and takes no journal lock.
+- [ ] `repoint_journal_links`'s lock-order docstring is updated to name retargeting as ordered *with* it
+      rather than against it.
+
+**Required Test Coverage:** unit — the order in which the locks are requested, asserted on the calls, so
+a refactor cannot silently invert it again; the no-op still touching no journal. Integration — a retarget
+overlapping a merge of its due journal completes rather than deadlocking, over two real connections and a
+committed fixture, in **both** interleavings. No e2e.
 
 ### ITER18-003: Task Events, Field History, and Activity Records
 
