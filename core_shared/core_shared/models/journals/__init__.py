@@ -170,6 +170,7 @@ from .task_anchor import (
     action_anchor_for,
     blocking_roles,
     blocking_task_from_anchors,
+    blocking_task_payload,
     describe_roles,
 )
 from .template_pitch import TemplatePitch
@@ -306,6 +307,7 @@ __all__ = [
     "action_anchor_for",
     "blocking_roles",
     "blocking_task_from_anchors",
+    "blocking_task_payload",
     "describe_roles",
     # Exceptions
     "JournalDomainError",

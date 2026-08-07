@@ -5,15 +5,19 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from core_shared.models.tasks import TaskStatus
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from app.api.journals.schemas import JournalHasAnchoredTasksErrorResponse
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.main import create_app
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
+    count,
     create_journal,
     create_task,
+    link_intermediate_journal,
 )
 
 
@@ -979,6 +983,202 @@ class TestJournalDeleteEndpoints:
             {"id": other_journal_id},
         )
         assert surviving.scalar_one() == 1
+
+    async def test_a_blocked_delete_names_every_task_and_where_to_action_it(
+        self, integration_api_client, async_connection
+    ):
+        """The refusal is data, not just prose.
+
+        Three tasks block in three different ways — created here, due here, and
+        both — and each has a different journal it can be actioned from. The
+        specification asks that the failure "identify the blocking tasks and the
+        journals that surface them, so an agent can resolve them without going
+        through the UI", so all three arrive with their roles and their action
+        journal rather than the caller having to parse the sentence.
+        """
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Trip Planning")
+        elsewhere = await create_journal(journal_repo, title="Permit Meeting")
+        earlier = await create_journal(journal_repo, title="Monday Planning")
+
+        created_here = await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=elsewhere,
+            text="print the permit",
+        )
+        due_here = await create_task(
+            async_connection,
+            creating_journal_id=earlier,
+            due_journal_id=target,
+            text="book the hut",
+        )
+        both = await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=target,
+            text="pack the ropes",
+        )
+
+        response = await integration_api_client.delete(f"/api/journals/{target}")
+
+        assert response.status_code == 409
+        error = response.json()["errors"][0]
+        assert error["code"] == "JOURNAL_HAS_ANCHORED_TASKS"
+        assert error["meta"]["journal_id"] == target
+        # In id order, which is the order the message lists them in.
+        assert error["meta"]["blocking_tasks"] == [
+            {
+                "task_id": created_here,
+                "text": "print the permit",
+                "status": "not_done",
+                "blocking_roles": ["creating"],
+                # The task lives on in the journal it is due in.
+                "action_journal_id": elsewhere,
+                "action_journal_title": "Permit Meeting",
+            },
+            {
+                "task_id": due_here,
+                "text": "book the hut",
+                "status": "not_done",
+                "blocking_roles": ["due"],
+                # The due journal is the one going away, so the creating
+                # journal is the anchor that is left.
+                "action_journal_id": earlier,
+                "action_journal_title": "Monday Planning",
+            },
+            {
+                "task_id": both,
+                "text": "pack the ropes",
+                "status": "not_done",
+                "blocking_roles": ["creating", "due"],
+                # Both anchors are the journal being deleted — which is still
+                # there to be opened, because the deletion was refused.
+                "action_journal_id": target,
+                "action_journal_title": "Trip Planning",
+            },
+        ]
+        # Prose *and* ids: the explanation is not replaced by the payload.
+        assert "print the permit" in error["detail"]
+        assert "cancel" in error["detail"].lower()
+        # The body the route *documents* is the body it actually returns. The
+        # OpenAPI model is hand-written while the payload is built by
+        # ``blocking_task_payload``, so without this they could drift and the
+        # published contract would quietly become fiction.
+        JournalHasAnchoredTasksErrorResponse.model_validate(response.json())
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM journals WHERE id = :id",
+                {"id": target},
+            )
+            == 1
+        )
+
+    async def test_a_done_task_still_blocks_and_says_so(
+        self, integration_api_client, async_connection
+    ):
+        """A done task's link to the journal it was created in is part of the
+        record, so it blocks like any other — and the payload reports the status
+        rather than hiding it, because "this one is already done" is exactly the
+        context a user needs to decide the deletion is safe to force by other
+        means."""
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Finished Trip")
+        elsewhere = await create_journal(journal_repo, title="Permit Meeting")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=elsewhere,
+            text="print the permit",
+            status=TaskStatus.DONE,
+        )
+
+        response = await integration_api_client.delete(f"/api/journals/{target}")
+
+        assert response.status_code == 409
+        blockers = response.json()["errors"][0]["meta"]["blocking_tasks"]
+        assert len(blockers) == 1
+        assert blockers[0]["task_id"] == task_id
+        assert blockers[0]["status"] == "done"
+
+    async def test_a_journal_a_task_only_mentions_still_deletes(
+        self, integration_api_client, async_connection
+    ):
+        """An intermediate link is not an anchor. Deleting the journal removes
+        the mention and leaves the task and both its anchors exactly as they
+        were — no refusal, and no payload."""
+        journal_repo = SqlJournalRepository(async_connection)
+        mentioned = await create_journal(journal_repo, title="Mentioned In Passing")
+        creating = await create_journal(journal_repo, title="Monday Planning")
+        due = await create_journal(journal_repo, title="Permit Meeting")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating,
+            due_journal_id=due,
+            text="print the permit",
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned
+        )
+
+        response = await integration_api_client.delete(f"/api/journals/{mentioned}")
+
+        assert response.status_code == 204
+        # Scoped to this task: a global count would pass just as happily if an
+        # unrelated task's mention had been destroyed instead.
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM task_intermediate_journals "
+                "WHERE task_id = :task_id",
+                {"task_id": task_id},
+            )
+            == 0
+        )
+        anchors = (
+            await async_connection.execute(
+                text(
+                    "SELECT creating_journal_id, due_journal_id, status, text "
+                    "FROM tasks WHERE id = :id"
+                ),
+                {"id": task_id},
+            )
+        ).one()
+        assert anchors == (creating, due, "not_done", "print the permit")
+
+    async def test_the_action_journal_id_is_enough_to_follow_the_link(
+        self, integration_api_client, async_connection
+    ):
+        """The third acceptance criterion, tested as a behaviour.
+
+        A caller reads ``action_journal_id`` out of the refusal and fetches that
+        journal directly — no search, no second lookup to turn a title into an
+        id. If the payload carried only prose, or only a title, this could not
+        be written.
+        """
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Trip Planning")
+        elsewhere = await create_journal(journal_repo, title="Permit Meeting")
+        await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=elsewhere,
+            text="print the permit",
+        )
+
+        refusal = await integration_api_client.delete(f"/api/journals/{target}")
+        blocker = refusal.json()["errors"][0]["meta"]["blocking_tasks"][0]
+
+        followed = await integration_api_client.get(
+            f"/api/journals/{blocker['action_journal_id']}"
+        )
+
+        assert followed.status_code == 200
+        assert (
+            followed.json()["data"]["attributes"]["title"]
+            == blocker["action_journal_title"]
+        )
 
 
 @pytest.mark.integration

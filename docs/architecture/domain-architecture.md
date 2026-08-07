@@ -493,6 +493,29 @@ Four decisions are worth knowing before changing it:
   taking the dependency the other way would force every container registering one provider to register
   the other. The adapter needs only the connection, so `JournalProvider` stays self-sufficient.
 
+**The refusal reaches both surfaces as data, from one builder.** The specification requires the same
+failure over REST and MCP, "so an agent can resolve them without going through the UI" — which means
+ids rather than a sentence to parse. `JournalHasAnchoredTasksError` therefore overrides
+`DomainError.error_meta()` (see [API Design → Structured Error
+Detail](api-design.md#structured-error-detail-errorsmeta)), serialising each blocker through
+`blocking_task_payload` in `task_anchor.py`:
+
+| Surface | Where it lands |
+|---|---|
+| `DELETE /api/journals/{id}` | 409, JSON:API `errors[0].meta` — `journal_id` plus `blocking_tasks` |
+| MCP `delete_journal` | tool payload with `code: "JOURNAL_HAS_ANCHORED_TASKS"` and the same two keys |
+
+Each blocker carries `task_id`, `text`, `status`, `blocking_roles` (`creating` and/or `due`) and the
+`action_journal_id` **and** `action_journal_title` — id *and* title, so a client renders the link and
+follows it without a second request. The prose message stays in `detail`/`message` alongside it: the
+payload is for the client, the sentence is for the person.
+
+Two placements are load-bearing and each has a test that fails without it. The serialiser is
+**one function** rather than one per surface, because two surfaces disagreeing about the same failure
+is the failure mode worth designing out; and the MCP decorator's `except JournalHasAnchoredTasksError`
+sits **above** its `JournalDomainError` catch-all, which would otherwise flatten the refusal back to
+its message.
+
 The guard is check-then-act, so `delete_journal` also wraps the delete **in a SAVEPOINT**: an
 `IntegrityError` re-runs the guard and raises the same explanatory error for a task inserted in the
 window, and re-raises untouched when the re-check comes back empty, so an unrelated constraint is never

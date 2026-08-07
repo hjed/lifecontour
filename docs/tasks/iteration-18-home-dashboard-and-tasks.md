@@ -6,11 +6,14 @@ acceptance criteria and diff estimates calibrated against iteration 17's recorde
 and the future-dated rule; the creation service and its core invariants; create over REST and MCP; the
 status lifecycle over service, REST and MCP; and retargeting semantics in the service — the model's one
 automatic link, and its only way back out of a terminal status).
-**ITER18-002 Phases 1 and 3 complete** (the delete guard: journal deletion is refused, explanatorily, for
-any journal anchoring a task; and merge, which is never refused — it re-points task links onto the
+**ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
+for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
+blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
 survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw integrity
-error). **ITER18-002 Phase 2 must merge next**, per the Sequencing Strategy — the delete refusal is not
-yet shaped for REST and MCP callers.
+error). Delivery rule 9 is satisfied for both shipped journal operations; **the rest of ITER18-001 is
+next**, per the Sequencing Strategy. ITER18-002's remaining phases (4: cancellation as a lapse reason,
+5: the delete-failure UI and its e2e, 6: the retarget/merge lock order) depend on later ITER18-001
+phases.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -2325,23 +2328,178 @@ deletes; one query for many tasks. No e2e (Phase 5).
   rule's home, the unscoped query, the required collaborator, the provider placement, the savepoint-backed
   backstop, the sync fallback, and why merge is deliberately unguarded).
 
-#### Phase 2: Delete Guard Surfaces — REST and MCP
+#### Phase 2: Delete Guard Surfaces — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Estimated diff:** ~130 production → **~520 tracked** (×4) · **Actual:** ~228 production → **~1105
+tracked** across 15 files (production 228 — the payload builder and the `error_meta` hook 55, the two
+wirings 29, the published OpenAPI model 80, the `responses=` block and two docstrings 34, package
+exports 2, imports and comments 28; tests 826 across four files; docs 51 on top of the iteration doc).
+
+**The production estimate was right until review, and the tests were 3.6× it throughout.** The first
+pass came in at 146 against an estimated 130 — as close as rule 13 gets. The remaining 82 is one
+review finding: the 409 was declared with a description but **no schema**, so the acceptance
+criterion's "discoverable from the OpenAPI document" was not true, and a typed model plus its tests
+had to be written (see the decisions below).
+
+What ran over on tests is the same thing Phase 3 recorded, and it is worth sharpening rather than
+repeating: **a phase whose deliverable is "two surfaces must agree" pays its test cost per surface,
+not per rule.** The payload builder is one function with one behaviour, but proving it arrives needs
+the shape asserted at the REST wiring, at the MCP wiring, and then a third time comparing the two —
+and the integration halves cannot be shared, because REST resolves `JournalService` from Dishka while
+the MCP tool constructs it by hand. Phase 3 hit this and called it "the test count is set by the
+number of ways the data can be corrupted". The parity variant is: **for a phase whose acceptance
+criteria name more than one surface, multiply the test estimate by the number of surfaces before
+applying rule 13's multiplier — and count the contract's published form as one of the surfaces.**
 
 **Acceptance Criteria:**
 
-- [ ] `DELETE /api/journals/{id}` returns the structured error (status per open decision 1), naming each
-      blocking task and its action journal.
-- [ ] MCP `delete_journal` returns the equivalent in the same PR, so an agent can resolve the blockage
-      without the UI.
-- [ ] The payload is explanatory prose **plus** machine-readable ids — not an opaque constraint message —
-      and the ids are enough to build a link without a further lookup.
+- [x] `DELETE /api/journals/{id}` returns the structured error (status per open decision 1), naming each
+      blocking task and its action journal. — 409 with code `JOURNAL_HAS_ANCHORED_TASKS` and
+      `errors[0].meta` carrying `journal_id` plus a `blocking_tasks` list; each blocker gives
+      `task_id`, `text`, `status`, `blocking_roles` and the action journal's id **and** title. The
+      route declares the 409 in `responses=` with a **typed model**
+      (`JournalHasAnchoredTasksErrorResponse`), so the payload is discoverable from the OpenAPI
+      schema rather than only from a failing call — which is what Phase 5's dialog will be typed
+      against.
+- [x] MCP `delete_journal` returns the equivalent in the same PR, so an agent can resolve the blockage
+      without the UI. — a new `except JournalHasAnchoredTasksError` branch in
+      `mcp_unified_error_handler`, returning the same two keys plus `code`; the tool docstring says
+      what comes back and what to do with it.
+- [x] The payload is explanatory prose **plus** machine-readable ids — not an opaque constraint message —
+      and the ids are enough to build a link without a further lookup. — `detail`/`message` still carry
+      Phase 1's sentence unchanged; the ids sit beside it. Tested as a behaviour rather than a shape:
+      one integration test reads `action_journal_id` out of the refusal and `GET`s that journal, and
+      asserts the title it gets back is the `action_journal_title` the payload promised.
+
+**Decisions taken (Phase 2):**
+
+- **One builder, not one per surface.** `blocking_task_payload` lives in
+  `core_shared/core_shared/models/journals/task_anchor.py`, next to the rule that builds a
+  `BlockingTask`, and both surfaces call it. The specification asks for "the same failure" over REST
+  and MCP; two serialisers agreeing today is a thing to re-test forever, one serialiser is a property
+  of the code. Pinned at both levels anyway — a unit test compares the two mappings of one error
+  instance, and an integration test refuses the *same seeded journal* over both surfaces and compares
+  field for field, because the unit test cannot show that both surfaces are *wired* to the builder.
+- **The seam is `DomainError.error_meta()`, not a special case in the handler.** A typed hook on the
+  base class returning `None` by default, so `create_domain_error_response` stayed a one-line change
+  and no `getattr` sniffing was needed. `exclude_none=True` drops the key for every other error, so
+  the other ~40 error responses are byte-for-byte unchanged — asserted directly, on the dumped body.
+- **`status` is emitted as `.value`.** `TaskStatus` is a `StrEnum`, so an encoder would have accepted
+  the member and nothing would have failed; a caller reading the dict directly should still get a
+  plain `str` rather than something that merely compares equal to one. Pinned with `type(...) is str`
+  and a `json.dumps` round-trip, which is the assertion that would catch a future non-`StrEnum` field.
+- **The MCP branch sits above the `JournalDomainError` catch-all**, which would otherwise flatten the
+  refusal back to its message — this is the whole phase, silently undone. Mutation-checked: moving the
+  branch below the catch-all fails five tests. Two tests keep it honest in the other direction, that
+  `JournalValidationError` still reaches the catch-all and `JournalNotFoundError` still reports as
+  missing, so the branch cannot be widened by accident.
+- **`mcp-setup.md` gained nothing**, per the repo convention that per-tool MCP documentation lives in
+  the docstring. The `delete_journal` docstring now describes the refusal payload field by field.
+- **No frontend file and no e2e**, as the phase specifies. The delete-failure dialog and its coverage
+  are Phase 5, whose prerequisite this is.
+- **A payload nobody can find is not a surface — and both places it is published were, at first,
+  untestable prose.** Raised by the phase's own review, and it was the most useful thing it found.
+  The 409 `responses=` entry originally carried only a description, so the *OpenAPI document* said
+  "this can 409" and nothing about the shape; and the MCP docstring — which by repo convention is the
+  only per-tool documentation there is — was nine lines that could be deleted with zero failures.
+  Both are now pinned by `tests/unit/journal/test_journal_delete_guard_documentation.py`, and both
+  mutation-checked: removing the `model=` fails the schema test, removing the docstring paragraph
+  fails three. **The rule worth carrying: when a phase's deliverable is a contract, the document that
+  publishes the contract needs a test, or the deliverable is only half shipped.** The typed model is
+  hand-written while the body is built by `blocking_task_payload`, so the blocked-delete integration
+  test also validates the real 409 body against it — the drift the two-sources arrangement invites is
+  closed where it would appear.
+- **And publishing the model was not the same as publishing the *contract*.** The PR's automated
+  review caught the follow-on mistake: `status` and `code` were declared as `Field("409", ...)` and
+  `Field("JOURNAL_HAS_ANCHORED_TASKS", ...)`, which reads like pinning the values and does the
+  opposite — a default makes a Pydantic field **optional**, so both landed outside `required` and
+  typed as a bare `str`. The document therefore advertised a `code` that a generated client could
+  not rely on being present, let alone discriminate on, which is precisely what the model was added
+  for. Both are now `Literal`, which makes them required *and* emits a `const`. **The lesson pairs
+  with the one above: a published contract needs a test that reads the published form, not the model
+  source — the mistake was invisible in the class definition and obvious in the generated schema.**
+  The new test asserts both fields are in `required` with the right `const`, and fails if either
+  default returns; and because the blocked-delete integration test validates a real body against
+  this model, the literals are checked against what the endpoint actually emits rather than merely
+  declared.
+- **The third finding was in the test, not the code — and the fix is the reusable part.** Review
+  round 2 spotted that the MCP docstring documented `code`, `message` and every blocker field but
+  **not the top-level `journal_id`** the handler returns. The docstring test was supposed to prevent
+  exactly that and did not, because its expected field names were a **hand-written list** — as
+  complete as whoever typed it, which is to say not. It now derives them from a real error's
+  `error_meta()`, so any field the refusal grows must be documented or the test fails.
+  **And tightening it exposed a second, sneakier hole:** the check was a substring search, and
+  `journal_id` is a substring of `action_journal_id` — so the missing field looked documented by the
+  field that had displaced it, and the naive version of this fix still passed. The test now matches
+  each name in its marked-up ` ``field`` ` form, and mutation-checking it by deleting `journal_id`
+  from the docstring reports precisely that field. **Carry-forward: a test that enumerates what a
+  contract should contain must derive the list from the thing itself, and match on a delimited form
+  — a hand-written substring check fails in both directions at once.**
+- **The guard's query is still not owner-scoped, and Phase 2 makes that worth restating.** Phase 1
+  documented the exemption and it stands: the query substitutes for a foreign-key check, so a row an
+  owner filter hid would come back as the raw `IntegrityError`. What Phase 2 adds is *ids* on top of
+  Phase 1's task text, so a caller reaching `JournalService.delete_journal` without the ownership
+  check would hand out directly addressable references to another user's rows. Nothing reaches it
+  that way today — both surfaces check, `TaskService` cannot create a cross-user anchor, and both
+  ownership tests still pass — but the protection is conventional rather than structural, which is
+  exactly the shape of **issue #1267** (`JournalService` takes no user id at all). Recorded here so
+  #1267 is read as covering this too.
 
 **Required Test Coverage:** unit — error-to-response mapping and payload schema. Integration — both
 surfaces with several blocking tasks, with a done-only blocker, and with intermediate-only links (succeeds).
 No e2e (Phase 5).
+
+**Delivered: 25 unit tests and 8 integration tests.**
+
+- **Unit (17):** `backend/tests/unit/journal/test_journal_delete_guard_surfaces.py`, a new file rather
+  than more classes in Phase 1's — that file tests the rule, the error and the guard, and the surfaces
+  are a fourth concern with different collaborators. *The payload (6):* all six fields present; each of
+  the three statuses as its string value; roles as an ordered list including `["creating", "due"]`; and
+  a `json.dumps` round-trip. *The error's hook (3):* journal id and every blocker; order preserved;
+  and `JournalNotFoundError` offering nothing. *REST (4):* the meta lands on `errors[0].meta`; the
+  prose survives beside it with the 409 and the code; the dumped body still carries the blockers; and
+  another domain error gains no `meta` key at all. *MCP (3):* the code, the message and the same
+  blockers; `JournalValidationError` still reaching the catch-all; `JournalNotFoundError` still
+  reported missing. *Parity (1):* one error, both mappings, equal blocker lists.
+- **Unit — documentation (8):** `tests/unit/journal/test_journal_delete_guard_documentation.py`. The
+  route's generated OpenAPI declares the 409 *and* a `$ref`'d schema rather than only a description,
+  the published model lists exactly the six blocker fields, `status` and `code` are **required with
+  a `const`** rather than optional defaults, and the 404 is declared too; the MCP tool's description
+  names the code, every payload field, and what to do next. Both halves are the only place the
+  contract is published, so both are asserted rather than assumed. The field list is **derived from a
+  real error's payload**, not hand-written, and matched on its marked-up form — see the third review
+  finding below for why both halves of that matter.
+- **Integration (8):** four in `tests/integration/api/test_journal_endpoints.py` — three blockers in
+  three roles with three different action journals, asserted as one exact list in id order with the
+  journal still standing (and the body validated against the published schema, which is what stops
+  the hand-written model drifting from the builder); a done-only blocker reporting `status: "done"`;
+  an intermediate-only journal deleting with its link row and leaving both anchors whole; and the
+  follow-the-link test above. Four in `tests/integration/mcp/test_journal_tools_integration.py` — the
+  same three, plus the cross-surface parity test that refuses one seeded journal over both surfaces
+  in one client and compares `blocking_tasks`, `journal_id`, `detail`/`message` and the code.
+- **Mutation checks, all four verified rather than assumed.** Removing `meta=domain_error.error_meta()`
+  fails three of the four REST integration tests — not the intermediate-only one, correctly, since a
+  successful delete has no payload to lose. Moving the MCP branch below the catch-all fails five tests
+  across both levels. Removing the 409's `model=` fails the schema test; removing the MCP docstring's
+  payload paragraph fails three; returning `status`/`code` to defaulted strings fails the
+  discriminator test; and dropping `journal_id` from the docstring fails the field-coverage test by
+  name.
+- **Two test-quality fixes the review also caught**, both worth naming because each would have passed
+  for the wrong reason: an `assert response.status_code in (200, 204)` on the intermediate-only delete
+  — a multi-outcome assertion of exactly the kind `CLAUDE.md` forbids, on a route whose status code is
+  declared — now asserts `204`; and both intermediate-only tests counted `task_intermediate_journals`
+  **globally**, so they would have been satisfied by an unrelated task losing its mention. Both are now
+  scoped to the task under test.
+- **Gates run locally:** ruff format and lint clean over `backend/` and `core_shared/`; mypy clean
+  (864 backend + 94 `core_shared` source files); **2851 unit tests** and **1369 integration tests**
+  (`api`, `mcp`, `tasks`, `journal`) passing against Docker PostgreSQL, zero failures. No frontend
+  gates and no e2e — no file under `frontend/` changes.
+- **Docs:** `docs/architecture/api-design.md` gained a *Structured Error Detail (`errors[].meta`)*
+  section under Error Handling Guidelines — the `error_meta()` contract, that it is opt-in, and the
+  four conventions (prose alongside not instead, plain JSON only, id *and* label for anything
+  linkable). `docs/architecture/domain-architecture.md`'s *The journal delete guard* gained the
+  per-surface payload table and the two load-bearing placements.
 
 #### Phase 3: Merge — Re-pointing and De-duplication ✅ COMPLETE
 

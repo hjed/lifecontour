@@ -6,13 +6,15 @@ the JSON API specification.
 """
 
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, Literal
 
 from core_shared.models.journals import (
     FitnessMergeMode,
     IncompletenessReason,
     OutdoorActivitySubtype,
+    TaskAnchorRole,
 )
+from core_shared.models.tasks import TaskStatus
 from pydantic import BaseModel, Field, StrictStr, model_validator
 
 from app.api.common.schemas import (
@@ -1726,3 +1728,88 @@ class GearItemListResponse(JsonApiCollectionResponse[GearItemResource]):
     """Response containing multiple gear items."""
 
     pass
+
+
+class BlockingTaskAttributes(BaseModel):
+    """One task standing in the way of a journal deletion.
+
+    Mirrors ``blocking_task_payload`` in
+    ``core_shared/core_shared/models/journals/task_anchor.py``, which is what
+    actually builds the body. This model exists so the shape is **discoverable
+    from the OpenAPI document** rather than only from provoking the failure —
+    Phase 5's delete-failure dialog and any generated client read it from there.
+    An integration test validates a real refusal against it, so the two cannot
+    drift apart in silence.
+    """
+
+    task_id: int = Field(..., description="The blocking task's identifier")
+    text: str = Field(..., description="The commitment, as the user wrote it")
+    status: TaskStatus = Field(
+        ..., description="The task's status; the deletion is refused whatever it is"
+    )
+    blocking_roles: list[TaskAnchorRole] = Field(
+        ...,
+        description=(
+            "Why this task blocks: it is anchored to the journal as its "
+            "creating journal, its due journal, or both"
+        ),
+    )
+    action_journal_id: int = Field(
+        ...,
+        description=(
+            "The journal to open in order to cancel, complete or retarget this "
+            "task — its due journal, or its creating journal when the due "
+            "journal is the one being deleted"
+        ),
+    )
+    action_journal_title: str = Field(
+        ..., description="That journal's title, so a link can be labelled"
+    )
+
+
+class JournalHasAnchoredTasksMeta(BaseModel):
+    """The ``meta`` object on a refused journal deletion."""
+
+    journal_id: int = Field(..., description="The journal that could not be deleted")
+    blocking_tasks: list[BlockingTaskAttributes] = Field(
+        ...,
+        description="Every task anchored to it, in id order — the order the "
+        "explanatory message lists them in",
+    )
+
+
+class JournalHasAnchoredTasksErrorObject(BaseModel):
+    """The JSON:API error object a blocked journal deletion returns."""
+
+    id: str = Field(..., description="Unique error identifier")
+    # Required and pinned to their one value rather than defaulted strings. A
+    # default would leave both *optional* in the generated schema and typed as
+    # a bare ``str``, so a generated client could not treat ``code`` as the
+    # required discriminator for this response — which is the whole reason the
+    # 409 is published as a model. This endpoint only ever emits these two
+    # values, and the blocked-delete integration test validates a real body
+    # against this model, so the constraint is checked rather than asserted.
+    status: Literal["409"] = Field(..., description="HTTP status code as string")
+    code: Literal["JOURNAL_HAS_ANCHORED_TASKS"] = Field(
+        ...,
+        description="Application-specific error code",
+    )
+    title: str = Field(..., description="Short, human-readable summary")
+    detail: str = Field(
+        ...,
+        description=(
+            "The explanation, naming each blocking task and where to action it, "
+            "and steering toward cancelling the journal instead of deleting it"
+        ),
+    )
+    meta: JournalHasAnchoredTasksMeta = Field(
+        ..., description="The same blockers as machine-readable data"
+    )
+
+
+class JournalHasAnchoredTasksErrorResponse(BaseModel):
+    """409 body for ``DELETE /api/journals/{journal_id}``."""
+
+    errors: list[JournalHasAnchoredTasksErrorObject] = Field(
+        ..., description="Array of error objects"
+    )

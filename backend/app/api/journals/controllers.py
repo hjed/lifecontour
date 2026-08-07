@@ -52,6 +52,7 @@ from app.api.journals.schemas import (
     JournalContactAddRequest,
     JournalContactRelationshipUpdateRequest,
     JournalCreateRequest,
+    JournalHasAnchoredTasksErrorResponse,
     JournalListResponse,
     JournalResource,
     JournalResponse,
@@ -2593,7 +2594,24 @@ async def partial_update_journal(
     return await _build_journal_response(journal_resource, contact_repo)
 
 
-@router.delete("/{journal_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{journal_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"description": "No such journal, or it belongs to somebody else"},
+        409: {
+            "model": JournalHasAnchoredTasksErrorResponse,
+            "description": (
+                "A task is anchored to this journal as its creating or due "
+                "journal. The JSON:API error carries code "
+                "`JOURNAL_HAS_ANCHORED_TASKS`, an explanatory `detail`, and a "
+                "`meta` object listing each blocking task — its id, text, "
+                "status and blocking roles — with the id and title of the "
+                "journal it can be actioned from."
+            ),
+        },
+    },
+)
 @inject
 async def delete_journal(
     journal_id: int,
@@ -2609,7 +2627,10 @@ async def delete_journal(
 
     Refused with 409 when a task is anchored to this journal as its creating or
     due journal, whatever that task's status; cancel, complete or retarget those
-    tasks first, or cancel the journal instead of deleting it.
+    tasks first, or cancel the journal instead of deleting it. The refusal names
+    each blocking task and the journal it can be actioned from, both in prose
+    and as data under the error's ``meta``, so a client can render a working
+    link without a further lookup.
 
     Somebody else's journal is reported as missing rather than forbidden, so the
     refusal cannot be used to discover that it exists — the stance the MCP read
