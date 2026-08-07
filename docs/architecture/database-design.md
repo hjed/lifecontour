@@ -331,10 +331,41 @@ timezone, so they live in the service layer where REST and MCP both inherit them
 
 | From | To | Action | Why |
 |---|---|---|---|
-| `tasks.creating_journal_id` / `due_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal that anchors a task is *blocked*, not cascaded. The explanatory failure that names the blocking tasks arrives with ITER18-002; until then the database refuses on its own rather than silently destroying tasks. |
+| `tasks.creating_journal_id` / `due_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal that anchors a task is *blocked*, not cascaded. The explanatory failure that names the blocking tasks arrives with ITER18-002; until then the database refuses on its own rather than silently destroying tasks. **Merge is the exception** — it re-points the anchors onto the survivor first, so it is never blocked (see below). |
 | `task_intermediate_journals.journal_id` | `journals.id` | `CASCADE` | Deleting a journal that is only an intermediate link is permitted; the link goes and the task is unaffected. |
 | `task_contacts.contact_id` | `contacts.id` | `CASCADE` | Deleting a contact drops its task links without touching tasks. |
 | both link tables' `task_id` | `tasks.id` | `CASCADE` | Deleting a task takes its links with it. |
+
+**A journal merge re-points task links rather than being blocked by them** (ITER18-002 Phase 3).
+Merge is core to making calendar sync usable, so unlike delete it is never refused. `JournalMergeService`
+calls `TaskAnchorRepository.repoint_journal_links(source_journal_id=…, target_journal_id=…)` as its
+second-to-last step, **before** it deletes the absorbed journal — the `RESTRICT` anchors would
+otherwise refuse the delete, and the `CASCADE` intermediate links would be destroyed rather than
+moved. The repository runs four statements whose order is the design:
+
+1. delete the source-side intermediate link where the task already holds one for the target, so the
+   re-point cannot violate `PRIMARY KEY (task_id, journal_id)` — `ON CONFLICT` is unavailable on an
+   `UPDATE`, the same lesson `JournalTagRepository.merge_into` records;
+2. re-point the surviving intermediate links;
+3. re-point both anchors in one `UPDATE`, leaving `status` and `text` alone — a survivor that becomes
+   both the creating *and* the due journal of a task is a permitted outcome;
+4. drop the intermediate link that has become redundant with one of the task's own anchors, which
+   must run after step 3 because it reads the anchors that step has just moved.
+
+Before the affected tasks are read, **both** journals are taken `FOR UPDATE`, in ascending id order. The
+re-point is therefore the merge's *first* write: the ordering only prevents two merges from deadlocking
+if nothing in the transaction has already locked one of the pair, and `journal_repo.save(target)` would. The absorbed journal, because inserting a
+task takes `FOR KEY SHARE` on each anchor journal to hold its own foreign key and `FOR UPDATE` is the
+weakest mode conflicting with it — otherwise a concurrent `create_task` could anchor to the absorbed
+journal after the re-point and before the delete, and `RESTRICT` would block the merge. The survivor,
+because two merges absorbing different journals into the same target could both clear the de-duplication
+step before either wrote its `(task_id, target)` link, colliding on the composite primary key.
+
+It sits on `TaskAnchorRepository` — the port the delete guard uses — rather than on `TaskRepository`, so
+the journal domain can move task links without also being able to change a task's text, status or
+contacts. Like everything on that port it is **journal-scoped rather than owner-scoped**: it is data
+integrity for a journal about to be deleted, and a row skipped by an owner filter would fail the merge.
+The merge has already established that both journals share an owner.
 
 The link tables' **composite primary keys** are what make link adds idempotent at the repository
 level — a retry cannot create a duplicate row. `SqlTaskRepository` cashes that in with

@@ -3926,7 +3926,11 @@ async def merge_journals(
     if not source or source.user_id != user_id:
         raise JournalNotFoundError(merge_request.source_journal_id)
 
-    merge_service = JournalMergeService(repos.journal_repo, event_publisher)
+    # The anchor repository is built here rather than added to the shared journal
+    # tool repositories: merge is the only journal tool that touches task links.
+    merge_service = JournalMergeService(
+        repos.journal_repo, event_publisher, SqlTaskAnchorRepository(db_connection)
+    )
 
     merged_journal = await merge_service.merge_journals(
         target_id=target_journal_id,

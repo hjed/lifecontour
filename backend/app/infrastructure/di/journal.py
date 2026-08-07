@@ -518,11 +518,18 @@ class JournalProvider(Provider):
         self,
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
+        task_anchor_repo: TaskAnchorRepository,
     ) -> JournalMergeService:
-        """Provide a JournalMergeService instance."""
+        """Provide a JournalMergeService instance.
+
+        The anchor repository is the same one the delete guard uses: a merge
+        moves task links onto the survivor before deleting the absorbed journal,
+        whose anchors would otherwise refuse the delete.
+        """
         return JournalMergeService(
             journal_repo=journal_repo,
             event_publisher=event_publisher,
+            task_anchor_repo=task_anchor_repo,
         )
 
     @provide(scope=Scope.REQUEST)

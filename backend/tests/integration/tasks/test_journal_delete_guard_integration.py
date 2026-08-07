@@ -315,7 +315,22 @@ class TestConcurrentInsertBackstop:
         )
 
 
-class BlindOnFirstLook(TaskAnchorRepository):
+class _DeleteGuardDouble(TaskAnchorRepository):
+    """Base for the doubles below, which stage a delete and never a merge.
+
+    The port also carries the merge re-point, so a double has to answer for it.
+    Refusing loudly is the honest answer: if the delete guard ever reached this,
+    a test that looks like it is about deletion would quietly be exercising the
+    merge path instead.
+    """
+
+    async def repoint_journal_links(
+        self, *, source_journal_id: int, target_journal_id: int
+    ) -> None:
+        raise AssertionError("the delete guard must not re-point task links")
+
+
+class BlindOnFirstLook(_DeleteGuardDouble):
     """Reports nothing the first time it is asked, then tells the truth."""
 
     def __init__(self, inner: TaskAnchorRepository) -> None:
@@ -331,7 +346,7 @@ class BlindOnFirstLook(TaskAnchorRepository):
         return await self.inner.find_tasks_anchored_to_journal(journal_id)
 
 
-class BlockerVanishesOnSecondLook(TaskAnchorRepository):
+class BlockerVanishesOnSecondLook(_DeleteGuardDouble):
     """Reports nothing, and clears the real blocker before the second answer.
 
     Stands in for the racing writer that anchors a task, loses the delete's

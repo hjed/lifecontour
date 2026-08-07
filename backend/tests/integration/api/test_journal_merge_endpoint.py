@@ -4,7 +4,79 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+@pytest.mark.asyncio
+async def test_merge_journal_endpoint_repoints_an_anchored_task(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    task_anchors: tuple[int, int],
+) -> None:
+    """Merging a journal a task is anchored to succeeds over REST.
+
+    The anchors are ``ON DELETE RESTRICT``, so before the re-point this request
+    answered with a raw integrity error. It is asserted at the endpoint rather
+    than only at the service because the service reaches its task repository
+    through the container, and only a real request proves that wiring.
+    """
+    creating_id, due_id = task_anchors
+
+    target_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Survivor",
+                    "content": "",
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T01:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert target_res.status_code == 201
+    target_id = int(target_res.json()["data"]["id"])
+
+    task_res = await authenticated_client.post(
+        f"/api/journals/{creating_id}/tasks",
+        json={
+            "data": {
+                "type": "tasks",
+                "attributes": {"text": "print the permit", "due_journal_id": due_id},
+            }
+        },
+    )
+    assert task_res.status_code == 201
+    task_id = int(task_res.json()["data"]["id"])
+
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": creating_id},
+            }
+        },
+    )
+
+    assert merge_res.status_code == 200
+    anchors = await async_connection.execute(
+        text(
+            "SELECT creating_journal_id, due_journal_id, status "
+            "FROM tasks WHERE id = :task_id"
+        ),
+        {"task_id": task_id},
+    )
+    row = anchors.fetchone()
+    assert row is not None
+    assert row.creating_journal_id == target_id
+    assert row.due_journal_id == due_id
+    assert row.status == "not_done"
 
 
 @pytest.mark.asyncio

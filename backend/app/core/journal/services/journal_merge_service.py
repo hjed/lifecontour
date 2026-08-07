@@ -21,6 +21,7 @@ from app.core.journal.models.events import (
     JournalUpdated,
 )
 from app.core.journal.models.repositories import JournalRepository
+from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
@@ -48,9 +49,11 @@ class JournalMergeService:
         self,
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
+        task_anchor_repo: TaskAnchorRepository,
     ):
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
+        self.task_anchor_repo = task_anchor_repo
 
     def has_base_conflicts(self, target: Journal, source: Journal) -> bool:
         """Check whether two journals have conflicting base fields.
@@ -120,6 +123,26 @@ class JournalMergeService:
 
         changed_fields: dict[str, Any] = {}
         overrides = overrides or {}
+
+        # 0. Re-point task links, before any other write.
+        #
+        # It has to happen before the source is deleted: a task's two anchors are
+        # ON DELETE RESTRICT, so a task left pointing at the source would fail
+        # the merge outright, and its intermediate links cascade, so they would
+        # be destroyed rather than moved. Merge is deliberately never blocked by
+        # a task.
+        #
+        # It happens *first* because of what it locks. The repository takes
+        # ``FOR UPDATE`` on both journals in ascending id order, and every write
+        # below — starting with ``journal_repo.save(target)`` — locks a journal
+        # row too. Re-pointing later would mean this transaction had already
+        # taken the target's lock out of that order, so two merges in opposite
+        # directions (A into B, B into A) could hold each other's target and
+        # deadlock. Taking both locks up front, in one order, is what makes the
+        # ordering claim true rather than merely intended.
+        await self.task_anchor_repo.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
 
         # Determine default base survivor based on manual journal precedence
         default_survivor, default_loser = await self._determine_precedence(
