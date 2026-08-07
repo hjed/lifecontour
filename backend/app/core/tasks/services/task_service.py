@@ -497,6 +497,28 @@ class TaskService:
         here rather than comparing dates inline keeps the rule itself in
         :func:`~app.core.journal.services.journal_date_resolver.is_future_dated`,
         which is the module that owns what "future-dated" means.
+
+        **The journal is read without a lock, and that is not a hole.** A
+        concurrent ``update_journal`` can move the journal's date into the past
+        between this check and the caller's write, so a task can be committed
+        against a due journal that is *already* past. Raised in review on
+        ITER18-001 Phase 7 as an invariant-4 violation; it is not one. The
+        specification makes invariant 4 a rule about the moment a due journal is
+        **set** — "checked when a due journal is *set*, not continuously. A task
+        whose due journal has since moved into the past is **lapsed, not
+        invalid**" — and a lapsed task is a first-class state the product is
+        built around: it leaves the dashboard silently and the user resurrects it
+        by retargeting. The check passed at the moment of setting; a journal
+        edited a millisecond later and one edited a week later produce the
+        identical, supported state, so a lock would narrow a window onto an
+        outcome that is legitimate either side of it.
+
+        Two further reasons not to take one. It would have to be a locking read
+        on the **journal** domain's port, which this service reaches for only
+        deliberately (see :meth:`_save`). And it would be taken *after* the task
+        row lock on the retarget path, deepening the lock-order inversion against
+        journal merge that ITER18-002 Phase 6 exists to remove — buying nothing
+        observable at the cost of more deadlocks.
         """
         tz = await self.date_resolver.timezone_for(user_id)
         moment = now if now is not None else datetime.datetime.now(tz)

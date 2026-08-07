@@ -1757,6 +1757,21 @@ which is this phase's subject, so it became **ITER18-002 Phase 6** with its own 
 docstrings now carry the ordering so the next reader does not have to rediscover it. Nothing half-applies
 in the meantime: the failure mode is an aborted transaction, not a corrupt one.
 
+**Raised in review and declined: the unlocked journal read.** A later review round argued that because
+the due journal is read without a lock, a concurrent `update_journal` can move its date into the past
+between the check and the write, committing a task against an already-past due journal and violating
+invariant 4. The mechanism is real; the conclusion is not. The specification makes invariant 4 a rule
+about the moment a due journal is **set** — *"checked when a due journal is set, not continuously. A task
+whose due journal has since moved into the past is lapsed, not invalid"* — and **lapsed** is a first-class
+state the product is built around, reached with no concurrency at all whenever a user edits a journal a
+task is due in. A journal edited a millisecond after the write and one edited a week later produce the
+identical, supported state, so a lock would narrow a window onto an outcome that is legitimate either
+side of it. `create_task` has had the same shape since Phase 4, so changing one without the other would
+also split the rule in two. Declining it is additionally the safer choice: the lock would be a locking
+read on the journal domain's port, taken *after* the task row lock on the retarget path, which deepens
+exactly the inversion ITER18-002 Phase 6 exists to remove. Recorded in `_require_future_dated`'s docstring
+so it is not re-raised.
+
 **Carried forward to Phase 8.** `TaskReopenNotAcknowledgedError` is not yet in the JSON:API error-code
 table in `backend/app/api/error_handlers.py`, so a REST surface would render it as the generic
 `DOMAIN_ERROR`. That is correct today — no endpoint raises it — but it is exactly what Phase 8's
