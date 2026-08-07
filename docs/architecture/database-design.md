@@ -374,9 +374,12 @@ no-op that reports "no change" rather than an integrity error. The link tables c
 their own, so every link operation first proves the task belongs to the acting user; owner scoping
 therefore holds across the link tables as well as `tasks` itself.
 
-Contact links are inserted **in batch**, over a multi-row `VALUES` list with the same
+Contact links are inserted **in batch**, with the same
 `ON CONFLICT (task_id, contact_id) DO NOTHING RETURNING contact_id`, so *N* contacts cost one
-ownership guard and one statement instead of *2N*. When a contact is deleted between the service's
+ownership guard and one statement instead of *2N*. The ids arrive as a single `integer[]` and are
+`unnest`ed rather than expanded into a multi-row `VALUES` list: one bind parameter per contact is
+correct until there are 32,767 of them, which is asyncpg's hard limit on query arguments, and the
+specification says a task may reference *any number* of contacts. Two parameters whatever *N* is. When a contact is deleted between the service's
 existence check and that insert, the foreign key catches it and the caller must still get the
 promised 404 — so the service re-reads the ids it was given to find out which one went, rather than
 parsing the id out of the violation's `DETAIL` text (PostgreSQL does put it there, but it is

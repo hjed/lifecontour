@@ -1975,9 +1975,19 @@ the pre-merge review round caught, and worth noting that it recurred immediately
   `InFailedSQLTransactionError`, which is precisely the 500 the mapping exists to prevent. If the re-read
   finds every contact present the violation is re-raised untouched, because naming an arbitrary id would
   send the caller looking for a contact that exists.
-- **A deadlock is theoretically reachable through the batch and is recorded rather than closed.** A
-  multi-row `ON CONFLICT DO NOTHING` takes speculative-insert locks in `VALUES` order, so two
-  transactions linking overlapping contact sets to the **same** task in opposite orders could deadlock.
+- **The batched insert passes its ids as one array, after review found the obvious form has a ceiling.**
+  It began as a multi-row `VALUES` list with a bind parameter per contact — correct until there are
+  32,767 of them, which is asyncpg's hard limit on query arguments, past which a wholly valid create
+  raises `InterfaceError` and the caller sees a 500. Capping the surface was the tempting fix and the
+  wrong one: the specification says a task may reference *any number* of contacts, so the mechanism has
+  to mean it rather than the schema quietly deciding otherwise. `unnest` over a single `integer[]` costs
+  two parameters whatever *N* is. **Mutation-checked** with a 33,000-contact test that fails on the old
+  form with exactly that `InterfaceError`, because a bug with a threshold needs a regression test on the
+  far side of it.
+- **A deadlock is theoretically reachable through the batch and is recorded rather than closed.**
+  `ON CONFLICT DO NOTHING` takes speculative-insert locks in row order, which `unnest` takes from the
+  array, so two transactions linking overlapping contact sets to the **same** task in opposite orders
+  could deadlock.
   It is unreachable today — the only batched caller is `create_task`, whose task id was assigned a
   statement earlier and cannot be the subject of a concurrent call — and the obvious fix (sorting the
   ids) would break the first-mention-order property `create_task` asserts. Raised by this phase's
@@ -2063,7 +2073,7 @@ deletion behaviour, cross-user rejection, both surfaces. E2E deferred to Phase 2
   quoting the narrower number as though it were the wider one); the full `tests/unit/` suite
   (2,870 tests); and `tests/integration/tasks/`, `tests/integration/api/` and `tests/integration/mcp/`
   together (969 tests). Re-run after merging Phase 7 from `main` and adding the id bounds: **2,922** and
-  **998**, both green. No frontend or e2e gates — the phase changes no frontend file and ships no
+  **999**, both green. No frontend or e2e gates — the phase changes no frontend file and ships no
   user-visible surface.
 
 #### Phase 12: Read Model and Lapsed Derivation

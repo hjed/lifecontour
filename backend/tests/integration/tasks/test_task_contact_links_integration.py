@@ -25,6 +25,7 @@ return nothing for an id that never existed.
 
 import pytest
 from core_shared.models.tasks import TaskNotFoundError, TaskStatus
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
@@ -710,3 +711,54 @@ class TestTheWritesAreUnitsOfWork:
         )
 
         assert observed == [True]
+
+
+class TestAVeryLargeContactSet:
+    """*"A task may reference any number of contacts"* — meant literally.
+
+    The first version of the batched insert emitted one bind parameter per
+    contact, which is correct until there are 32,767 of them: asyncpg's hard
+    limit on query arguments. Past it a wholly valid create raised an
+    ``InterfaceError`` the caller saw as a 500. Raised by the pull request's
+    automated review.
+
+    The fix passes the ids as a single ``integer[]`` and ``unnest``es them, so
+    the parameter count no longer depends on *N*. This test exists because a
+    smaller one proves nothing: the bug had a threshold, so the regression test
+    has to stand on the far side of it.
+    """
+
+    async def test_more_contacts_than_asyncpg_allows_parameters(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        # Seeded in one statement: 33k round trips would make the test's own
+        # setup the slowest thing in the suite.
+        contact_ids = [
+            int(row[0])
+            for row in (
+                await async_connection.execute(
+                    sa_text(
+                        "INSERT INTO contacts (first_name) "
+                        "SELECT 'Contact ' || g FROM generate_series(1, 33000) g "
+                        "RETURNING id"
+                    )
+                )
+            ).fetchall()
+        ]
+        assert len(contact_ids) > 32_767, "the fixture must exceed the old limit"
+
+        created = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="invite everybody",
+            contact_ids=contact_ids,
+            transaction=async_connection,
+        )
+
+        assert created.id is not None
+        assert await _links_for(async_connection, created.id) == len(contact_ids)
