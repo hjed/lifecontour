@@ -25,9 +25,6 @@ under test.
 """
 
 import asyncio
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from uuid import uuid4
 
 import pytest
 from core_shared.models.tasks import (
@@ -52,9 +49,11 @@ from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     backdate_updated_at,
+    committed_task,
     count,
     create_journal,
     create_task,
+    service_on,
     stored_status,
 )
 
@@ -69,66 +68,6 @@ REFUSED_TRANSITIONS = [
     (TaskStatus.CANCELLED, TaskStatus.NOT_DONE),
     (TaskStatus.CANCELLED, TaskStatus.DONE),
 ]
-
-
-@asynccontextmanager
-async def _committed_task(async_engine: AsyncEngine) -> AsyncIterator[tuple[str, int]]:
-    """A task that really is committed, under an owner nobody else will see.
-
-    The concurrency tests need two connections to see the same row, which the
-    savepoint fixture cannot give them: its outer transaction is invisible to
-    everyone else and is rolled back at teardown. So these rows are committed
-    for real, scoped to a one-off user id, and deleted again whatever happens.
-    """
-    user_id = f"race-{uuid4()}"
-    async with async_engine.connect() as setup:
-        journal_id = await create_journal(
-            SqlJournalRepository(setup),
-            title="Where it arose",
-            days_offset=7,
-            user_id=user_id,
-        )
-        task_id = await create_task(
-            setup,
-            creating_journal_id=journal_id,
-            due_journal_id=journal_id,
-            user_id=user_id,
-        )
-        await setup.commit()
-
-    try:
-        yield user_id, task_id
-    finally:
-        async with async_engine.connect() as cleanup:
-            await cleanup.execute(
-                text("DELETE FROM tasks WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            )
-            await cleanup.execute(
-                text("DELETE FROM journals WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            )
-            await cleanup.commit()
-
-
-def _service_on(
-    connection: AsyncConnection,
-    user_settings_repository: SqlUserSettingsRepository,
-    repo: type[SqlTaskRepository] = SqlTaskRepository,
-) -> TaskService:
-    """A service over real adapters on ``connection``.
-
-    The ``service`` fixture is bound to the test's single savepoint connection;
-    the concurrency tests need one service per real connection, which is the
-    only way two units of work can overlap. ``repo`` lets a test substitute a
-    repository subclass that observes or signals from inside the call.
-    """
-    return TaskService(
-        task_repo=repo(connection),
-        journal_repo=SqlJournalRepository(connection),
-        contact_repo=SqlContactRepository(connection),
-        date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
-    )
 
 
 @pytest.mark.integration
@@ -444,7 +383,7 @@ class TestOverlappingCallsCannotBypassTheMatrix:
         ``FOR NO KEY UPDATE`` and the blocked read returns immediately, so this
         test fails every time rather than most times.
         """
-        async with _committed_task(async_engine) as (user_id, task_id):
+        async with committed_task(async_engine) as (user_id, task_id, _):
             async with (
                 async_engine.connect() as holder,
                 async_engine.connect() as waiter,
@@ -515,7 +454,7 @@ class TestOverlappingCallsCannotBypassTheMatrix:
         failing — a regression that times CI out rather than reporting itself.
         The wait is bounded for the same reason.
         """
-        async with _committed_task(async_engine) as (user_id, task_id):
+        async with committed_task(async_engine) as (user_id, task_id, _):
             holds_the_row = asyncio.Event()
 
             class _SignallingRepository(SqlTaskRepository):
@@ -537,7 +476,7 @@ class TestOverlappingCallsCannotBypassTheMatrix:
             ):
 
                 async def _cancel(connection: AsyncConnection = first) -> Task:
-                    return await _service_on(
+                    return await service_on(
                         connection,
                         user_settings_repository,
                         repo=_SignallingRepository,
@@ -549,7 +488,7 @@ class TestOverlappingCallsCannotBypassTheMatrix:
                     )
 
                 async def _done(connection: AsyncConnection = second) -> Task:
-                    return await _service_on(
+                    return await service_on(
                         connection, user_settings_repository
                     ).set_status(
                         user_id=user_id,

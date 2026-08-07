@@ -247,6 +247,21 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         concurrent creation anchoring to the absorbed journal made the merge
         fail — but it is not zero, and calling it impossible would be wrong.
 
+        **A deadlock against task *retargeting* is also possible, and unlike the
+        one above it can be closed.** ``TaskService.retarget_due_journal`` locks
+        the **task** row first and only then takes ``FOR KEY SHARE`` on the
+        journals, through the link insert's and the anchor update's foreign
+        keys; this method and its caller take the **journals** first and then
+        write the task rows. Two operations, the same two kinds of row, opposite
+        orders — so retargeting a task while a merge absorbs the journal it is
+        due in deadlocks. The difference from creation is that a retarget
+        *chooses* when it takes each lock, so an ordering exists that removes
+        the inversion. Doing so changes both sides and needs a locking read on
+        the journal domain's port, which is why it is **ITER18-002 Phase 6**
+        rather than a note here. Until it lands, this is a known intermittent
+        failure of one of the two callers, not a correctness hole: neither
+        operation half-applies.
+
         As with the deleted-task cases in the task repository's own tests, none
         of the concurrent forms can be staged against the integration fixture —
         one savepoint-bound transaction means a second connection cannot see the

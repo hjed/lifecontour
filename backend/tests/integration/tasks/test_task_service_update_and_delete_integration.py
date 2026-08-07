@@ -37,9 +37,7 @@ from core_shared.models.tasks import (
 )
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
@@ -58,6 +56,7 @@ from tests.integration.tasks.task_seeding import (
     create_task,
     link_contact,
     link_intermediate_journal,
+    service_on,
     stored_status,
     stored_text,
     task_exists,
@@ -650,7 +649,6 @@ class TestTheWritesAreUnitsOfWork:
     async def test_the_edit_is_written_inside_an_open_unit_of_work(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
         user_settings_repository: SqlUserSettingsRepository,
         task_anchors: tuple[int, int],
     ):
@@ -665,13 +663,8 @@ class TestTheWritesAreUnitsOfWork:
                 observed.append(async_connection.get_nested_transaction() is not None)
                 return await super().save(task)
 
-        service = TaskService(
-            task_repo=_ObservingRepository(async_connection),
-            journal_repo=journal_repository,
-            contact_repo=SqlContactRepository(async_connection),
-            date_resolver=JournalDateResolver(
-                user_settings_repo=user_settings_repository
-            ),
+        service = service_on(
+            async_connection, user_settings_repository, repo=_ObservingRepository
         )
 
         await service.update_task(
@@ -686,7 +679,6 @@ class TestTheWritesAreUnitsOfWork:
     async def test_the_delete_is_issued_inside_an_open_unit_of_work(
         self,
         async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
         user_settings_repository: SqlUserSettingsRepository,
         task_anchors: tuple[int, int],
     ):
@@ -701,13 +693,8 @@ class TestTheWritesAreUnitsOfWork:
                 observed.append(async_connection.get_nested_transaction() is not None)
                 await super().delete(task_id, user_id)
 
-        service = TaskService(
-            task_repo=_ObservingRepository(async_connection),
-            journal_repo=journal_repository,
-            contact_repo=SqlContactRepository(async_connection),
-            date_resolver=JournalDateResolver(
-                user_settings_repo=user_settings_repository
-            ),
+        service = service_on(
+            async_connection, user_settings_repository, repo=_ObservingRepository
         )
 
         await service.delete_task(
