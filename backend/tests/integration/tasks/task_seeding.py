@@ -40,6 +40,7 @@ OTHER_USER_ID = "other-user-456"
 
 COUNT_TASKS = "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id"
 COUNT_CONTACT_LINKS = "SELECT COUNT(*) FROM task_contacts"
+COUNT_INTERMEDIATE_JOURNALS = "SELECT COUNT(*) FROM task_intermediate_journals"
 
 # Built here rather than inside the seeding functions, whose ``text`` keyword
 # argument — the task's own text — would otherwise shadow ``sqlalchemy.text``.
@@ -148,6 +149,18 @@ async def create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") ->
 async def count(conn: AsyncConnection, sql: str, params: dict[str, int | str]) -> int:
     """Run a counting query and return the count."""
     return int((await conn.execute(text(sql), params)).scalar_one())
+
+
+async def stored_status(conn: AsyncConnection, task_id: int) -> str:
+    """The status column as the database holds it, bypassing every layer above."""
+    return str(
+        (
+            await conn.execute(
+                text("SELECT status FROM tasks WHERE id = :task_id"),
+                {"task_id": task_id},
+            )
+        ).scalar_one()
+    )
 
 
 def make_task_container(connection: AsyncConnection) -> AsyncContainer:

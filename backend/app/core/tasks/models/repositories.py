@@ -69,6 +69,32 @@ class TaskRepository(ABC):
         """
 
     @abstractmethod
+    async def find_by_id_for_update(self, task_id: int, user_id: str) -> Task | None:
+        """Find one of the user's tasks, holding it against concurrent writers.
+
+        Same result as :meth:`find_by_id`, with one addition that is the whole
+        point of it: the row is **locked until the calling transaction ends**,
+        so a caller that reads a task, decides something from its current state
+        and then writes it back cannot have another writer slip in between.
+
+        Any rule of the form *"a task in state X may not become Y"* needs this.
+        Without it two overlapping calls both read the old state, both decide
+        the transition is allowed, and the later write wins — so a task that was
+        cancelled in between can be answered ``200`` and left ``done``, which is
+        exactly the transition the rule refuses.
+
+        Use :meth:`find_by_id` for reads that only display or return the task;
+        a lock nobody needs is a lock somebody else waits on.
+
+        Args:
+            task_id: The task id to look up
+            user_id: The acting user; a task owned by anyone else is not found
+
+        Returns:
+            The task, or ``None`` when it does not exist or is not the user's.
+        """
+
+    @abstractmethod
     async def delete(self, task_id: int, user_id: str) -> None:
         """Hard-delete one of the user's tasks.
 

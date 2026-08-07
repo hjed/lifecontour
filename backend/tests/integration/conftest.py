@@ -1048,6 +1048,21 @@ async def user_settings_repository(async_connection: AsyncConnection) -> Any:
 
 
 @pytest_asyncio.fixture
+async def task_repository(async_connection: AsyncConnection) -> Any:
+    """The task repository on the test's single savepoint connection.
+
+    Here rather than in ``task_seeding`` for the reason ``task_anchors`` gives
+    below: its consumers sit in ``tasks/``, ``api/`` and ``mcp/``, and the
+    surface tests need it to *seed* a task in a given status — reaching
+    ``cancelled`` through the surface under test would make the arrange step
+    depend on the behaviour being asserted.
+    """
+    from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+
+    return SqlTaskRepository(async_connection)
+
+
+@pytest_asyncio.fixture
 async def task_anchors(journal_repository: Any) -> tuple[int, int]:
     """A creating journal and a future-dated due journal, as ``(creating, due)``.
 

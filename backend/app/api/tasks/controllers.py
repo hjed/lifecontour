@@ -7,12 +7,18 @@ due, and who it involves.
 The controller is deliberately thin. Every invariant — both anchors exist and
 belong to the acting user, the due journal is future-dated, referenced contacts
 exist — lives in ``TaskService.create_task``, which is a ``@transactional`` unit
-of work. This module therefore opens **no** transaction and catches **no** domain
-error: the registered ``DomainError`` handler renders each one with its own
-status and JSON:API code, so the MCP tool inherits exactly the same answers.
+of work; the status transition matrix likewise lives in
+``TaskService.set_status``. This module therefore opens **no** transaction and
+catches **no** domain error: the registered ``DomainError`` handler renders each
+one with its own status and JSON:API code, so the MCP tool inherits exactly the
+same answers.
+
+It *raises* exactly one, and only on the update path: a body whose resource id
+disagrees with the path is a JSON:API envelope problem with no domain or MCP
+equivalent, so there is nowhere else for it to live.
 """
 
-from core_shared.models.tasks import Task
+from core_shared.models.tasks import Task, TaskValidationError
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, status
@@ -23,6 +29,7 @@ from app.api.tasks.schemas import (
     TaskCreateRequest,
     TaskResource,
     TaskResponse,
+    TaskUpdateRequest,
 )
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.auth.models import SessionUser
@@ -31,11 +38,11 @@ router = APIRouter(tags=["tasks"])
 
 
 def _to_resource(task: Task) -> TaskResource:
-    """Render a created task as a JSON:API resource.
+    """Render a task as a JSON:API resource.
 
-    No ``self`` link is emitted: this phase ships no endpoint to read a task
-    back, and a link that 404s is worse than an absent one. It arrives with the
-    read model.
+    No ``self`` link is emitted: there is still no endpoint to *read* a task
+    back — a ``PATCH`` target is not a ``GET`` target — and a link that 404s is
+    worse than an absent one. It arrives with the read model.
     """
     return TaskResource(
         id=str(task.id),
@@ -82,3 +89,51 @@ async def create_task(
         contact_ids=attributes.contact_ids,
     )
     return TaskResponse(data=_to_resource(created))
+
+
+@router.patch("/tasks/{task_id}")
+@inject
+async def update_task(
+    task_id: int,
+    task_request: TaskUpdateRequest,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskResponse:
+    """Change a task's status.
+
+    A task is reached by its own id here rather than through a journal, because
+    changing a status involves no journal at all: marking a task done or
+    cancelled creates no journal link and does not re-check the due journal, so
+    a *lapsed* task is completable from wherever the user found it. There is
+    still no task **collection** — the specification is explicit that no screen
+    lists every task — only this member route.
+
+    Raises:
+        400: An unknown status, an unknown attribute, or a body id that
+             disagrees with the path.
+        404: The task does not exist or is not yours; the two are the same
+             answer by design.
+        409: The transition is refused. Only leaving *cancelled* is: a cancelled
+             task is reopened by retargeting it onto a new future journal, which
+             returns it to not done, and the message says so.
+    """
+    # The only thing this controller decides. It is a transport concern — which
+    # of two places names the resource — rather than a domain rule, so it has no
+    # MCP counterpart (a tool takes the id once) and no place in the service.
+    # Preferring the path silently would let a client PATCH a task it believes
+    # it is not touching.
+    if task_request.data.id != str(task_id):
+        raise TaskValidationError(
+            "id",
+            f"The body's task id ({task_request.data.id}) must match the path "
+            f"({task_id})",
+        )
+
+    updated = await task_service.set_status(
+        user_id=user.id,
+        task_id=task_id,
+        status=task_request.data.attributes.status,
+        transaction=connection,
+    )
+    return TaskResponse(data=_to_resource(updated))

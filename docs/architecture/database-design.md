@@ -830,6 +830,17 @@ Writes are therefore committed **before the response is sent**.
     and continue.
 - **Reads** use no transaction helper. Their autobegun transaction is rolled back
   when the connection closes (a harmless no-op).
+- **A read whose value decides a write must lock the row it read** — a locking
+  read (`SELECT … FOR NO KEY UPDATE`, e.g. `TaskRepository.find_by_id_for_update`)
+  inside the unit of work, not the plain finder. Without it two overlapping
+  requests both read the old state, both conclude their change is allowed, and
+  the later write wins: the rule the check exists to enforce is bypassed by
+  timing rather than by request. This is not only about losing a *field* — a
+  read-decide-write sequence can lose a *rule* even when the row has exactly one
+  mutable column. Prefer `FOR NO KEY UPDATE` over `FOR UPDATE` so foreign-key
+  checks from child inserts (`FOR KEY SHARE`) are not made to queue behind it.
+  Ordinary reads that only display or return a row take no lock — a lock nobody
+  needs is a lock somebody else waits on.
 - **Controllers never open transactions** — that is a smell; transaction
   boundaries belong in the service layer.
 - **MCP tools** are controller-equivalent and must **not** open transactions:

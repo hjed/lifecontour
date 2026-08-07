@@ -26,6 +26,8 @@ from app.api.tasks.schemas import (
     TaskCreateRequest,
     TaskResource,
     TaskResponse,
+    TaskUpdateAttributes,
+    TaskUpdateRequest,
 )
 
 
@@ -37,6 +39,13 @@ def _valid_body(**overrides: object) -> dict[str, object]:
     }
     attributes.update(overrides)
     return {"data": {"type": "tasks", "attributes": attributes}}
+
+
+def _valid_update_body(**overrides: object) -> dict[str, object]:
+    """A minimal valid status-update body, with attribute-level overrides."""
+    attributes: dict[str, object] = {"status": "done"}
+    attributes.update(overrides)
+    return {"data": {"type": "tasks", "id": "5", "attributes": attributes}}
 
 
 class TestTaskCreateRequest:
@@ -168,6 +177,105 @@ class TestNoBareDateIsOffered:
     def test_sending_a_due_date_is_rejected(self) -> None:
         with pytest.raises(ValidationError):
             TaskCreateRequest.model_validate(_valid_body(due_date="2026-09-01"))
+
+
+class TestTaskUpdateRequest:
+    """What a client may send to change a task's status."""
+
+    @pytest.mark.parametrize("value", ["not_done", "done", "cancelled"])
+    def test_each_domain_status_is_accepted(self, value: str) -> None:
+        request = TaskUpdateRequest.model_validate(_valid_update_body(status=value))
+
+        assert request.data.attributes.status == TaskStatus(value)
+
+    def test_an_unknown_status_is_rejected(self) -> None:
+        """The three values are the whole vocabulary; there is no in-progress."""
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_valid_update_body(status="in_progress"))
+
+    def test_status_is_required(self) -> None:
+        """It is the only thing this endpoint changes, so an empty body says nothing."""
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(
+                {"data": {"type": "tasks", "id": "5", "attributes": {}}}
+            )
+
+    def test_the_resource_id_is_required(self) -> None:
+        """JSON:API identifies the resource in the body as well as the path."""
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(
+                {"data": {"type": "tasks", "attributes": {"status": "done"}}}
+            )
+
+    def test_a_mismatched_resource_type_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(
+                {
+                    "data": {
+                        "type": "contacts",
+                        "id": "5",
+                        "attributes": {"status": "done"},
+                    }
+                }
+            )
+
+
+class TestTheUpdateRequestChangesNothingElse:
+    """This phase's PATCH sets a status and refuses everything else.
+
+    Text (Phase 9) and the due journal (Phase 8) are edited through their own
+    work; accepting either here now would ship a half-implemented field that
+    silently did nothing.
+    """
+
+    @pytest.mark.parametrize(
+        "field", ["text", "due_journal_id", "creating_journal_id", "contact_ids"]
+    )
+    def test_no_other_attribute_exists(self, field: str) -> None:
+        assert field not in TaskUpdateAttributes.model_fields
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("text", "rewritten"),
+            ("due_journal_id", 9),
+            ("creating_journal_id", 9),
+            ("now", "2020-01-01T00:00:00+00:00"),
+            ("nonsense", "x"),
+        ],
+    )
+    def test_sending_another_attribute_is_rejected(
+        self, field: str, value: object
+    ) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_valid_update_body(**{field: value}))
+
+    def test_unknown_fields_alongside_the_attributes_are_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(
+                {
+                    "data": {
+                        "type": "tasks",
+                        "id": "5",
+                        "attributes": {"status": "done"},
+                        "now": "2020-01-01T00:00:00+00:00",
+                    }
+                }
+            )
+
+    def test_unknown_fields_at_the_request_root_are_rejected(self) -> None:
+        """All three nesting levels, as the create request had to learn."""
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(
+                {
+                    "data": {
+                        "type": "tasks",
+                        "id": "5",
+                        "attributes": {"status": "done"},
+                    },
+                    "now": "2020-01-01T00:00:00+00:00",
+                }
+            )
 
 
 class TestTaskResponse:

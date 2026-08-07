@@ -118,7 +118,7 @@ def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
         Available domains:
         - Contacts: Retrieve contact information, search contacts, manage relationships
         - Journals: Create, update, search, and manage journal entries with types, tags, and relationships
-        - Tasks: Create commitments anchored to journals — there is no separate task list and no due date
+        - Tasks: Create commitments anchored to journals and mark them done, not done, or cancelled — there is no separate task list and no due date
 
         All data is formatted for AI analysis and decision making. Use the tools to:
         - Get detailed contact information by ID

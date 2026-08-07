@@ -42,6 +42,7 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskNotFoundError,
+    TaskStatusTransitionError,
     TaskValidationError,
 )
 from fastapi import HTTPException, Request, status
@@ -157,6 +158,7 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         TaskValidationError: "TASK_VALIDATION_ERROR",
         TaskAnchorJournalNotFoundError: "TASK_ANCHOR_JOURNAL_NOT_FOUND",
         TaskDueJournalNotFutureError: "TASK_DUE_JOURNAL_NOT_FUTURE",
+        TaskStatusTransitionError: "TASK_STATUS_TRANSITION_REFUSED",
         # Calendar errors
         CalendarNotFoundError: "CALENDAR_NOT_FOUND",
         CalendarValidationError: "CALENDAR_VALIDATION_ERROR",
