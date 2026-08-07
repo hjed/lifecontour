@@ -7,6 +7,7 @@ from .exceptions import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
     TaskNotFoundError,
+    TaskReopenNotAcknowledgedError,
     TaskStatusTransitionError,
     TaskValidationError,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "TaskDueJournalNotFutureError",
     "TaskJournalAnchor",
     "TaskNotFoundError",
+    "TaskReopenNotAcknowledgedError",
     "TaskStatus",
     "TaskStatusTransitionError",
     "TaskValidationError",

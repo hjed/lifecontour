@@ -19,9 +19,10 @@ anchor ids present) stay on :class:`~core_shared.models.tasks.Task`, and task
 ownership stays in the owner-scoped repository.
 
 **Invariant 4 is a write-time rule.** The future-dated check happens at the
-moment a due journal is set and at no other time. Nothing re-validates it on
-read, which is exactly what makes a *lapsed* task — one whose due journal has
-since passed — reachable rather than unloadable.
+moment a due journal is set — on creation *and* on every retarget — and at no
+other time. Nothing re-validates it on read, which is exactly what makes a
+*lapsed* task — one whose due journal has since passed — reachable rather than
+unloadable, and retargeting the way it is brought back.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
     TaskNotFoundError,
+    TaskReopenNotAcknowledgedError,
     TaskStatus,
     TaskStatusTransitionError,
     is_status_transition_allowed,
@@ -98,11 +100,12 @@ def _violated_anchor(error: IntegrityError) -> TaskJournalAnchor | None:
 
 
 class TaskService:
-    """Creates tasks and moves them through their lifecycle.
+    """Creates tasks, moves them through their lifecycle, and retargets them.
 
-    Both operations enforce the specification's rules here rather than at a
-    surface: the core invariants on creation, and the status transition matrix
-    on a status change. REST and MCP are thin callers of each.
+    Every operation enforces the specification's rules here rather than at a
+    surface: the core invariants on creation, the status transition matrix on a
+    status change, and — on a retarget — the invariants again, because a due
+    journal is being set for a second time. REST and MCP are thin callers of each.
     """
 
     def __init__(
@@ -243,17 +246,138 @@ class TaskService:
 
         return await self.task_repo.save(replace(task, status=status))
 
+    @transactional
+    async def retarget_due_journal(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        due_journal_id: int,
+        transaction: AsyncConnection,
+        acknowledge_reopen: bool = False,
+        now: datetime.datetime | None = None,
+    ) -> Task:
+        """Move one of the user's tasks onto a new due journal.
+
+        This is how a deadline is extended, and it is the **only** way a
+        cancelled or a done task is reopened: retargeting always leaves the task
+        *not done*. It is also the operation
+        :class:`~core_shared.models.tasks.TaskStatusTransitionError` names when
+        it refuses to let a status call leave *cancelled*.
+
+        Two things happen together, in one unit of work:
+
+        - the new journal becomes the due journal, and the task becomes *not
+          done* whatever it was before;
+        - the **previous due journal is retained as an intermediate journal**.
+          This is the model's one automatic link, and it exists so the trail of a
+          repeatedly-deferred task stays visible on the journals it passed
+          through. De-duplication is
+          :meth:`~app.core.tasks.models.repositories.TaskRepository.add_intermediate_journal`'s
+          idempotence rather than a read-then-add, which would leave a window for
+          a concurrent add between the question and the answer.
+
+        **The rules are revalidated here, whatever the task's status.** A due
+        journal is being *set*, so invariant 4 applies exactly as it does on
+        creation: the journal must exist, be the acting user's, and be dated
+        after today in their timezone. The journal the task is *leaving* is not
+        judged — which is what makes a lapsed task resurrectable.
+
+        **The creating journal cannot be reached from here.** There is no
+        parameter for it, which is how the specification's "set once and never
+        changes" is enforced: not by a check that could be forgotten, but by
+        there being nothing to pass.
+
+        Asking for the journal the task is already due in is a **no-op**: nothing
+        is being set, so nothing is validated, nothing is written, ``updated_at``
+        does not move and no acknowledgement is needed. This mirrors
+        :meth:`set_status`'s same-status no-op.
+
+        **The read takes a row lock**, for the reason Phase 6 found on
+        :meth:`set_status` and this method inherits: it decides from the status
+        it read — whether an acknowledgement was required — and writes that
+        decision back. Without the lock, a retarget that began while the task was
+        not done would go on to reopen a task somebody has since marked done,
+        with no acknowledgement at all.
+
+        Args:
+            user_id: The acting user; the task and the journal must be theirs
+            task_id: The task to retarget
+            due_journal_id: The future-dated journal it should now be due in
+            transaction: The request connection; the unit of work commits here
+            acknowledge_reopen: The caller's confirmation that reopening a *done*
+                task is intended. Ignored for any other status, which needs no
+                confirmation — reopening a cancelled task is the documented way
+                out of cancelled.
+            now: The instant "today" is derived from, defaulting to the real
+                clock. **Never bind this from client input**, for the reason
+                :meth:`create_task` gives: a request that could set it would make
+                invariant 4 opt-out for any caller.
+
+        Returns:
+            The task on its new due journal and not done — or unchanged, when it
+            was already due in that journal.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's. The two are indistinguishable by design.
+            TaskAnchorJournalNotFoundError: When the new due journal does not
+                exist or is not the acting user's.
+            TaskDueJournalNotFutureError: When the new due journal's date is not
+                after today in the user's timezone.
+            TaskReopenNotAcknowledgedError: When the task is *done* and the
+                caller has not acknowledged that retargeting reopens it.
+        """
+        task = await self.task_repo.find_by_id_for_update(task_id, user_id)
+        if task is None:
+            raise TaskNotFoundError(task_id)
+
+        previous_due_journal_id = task.due_journal_id
+        if previous_due_journal_id == due_journal_id:
+            return task
+
+        due_journal = await self._resolve_due_journal(user_id, due_journal_id)
+        await self._require_future_dated(user_id, due_journal_id, due_journal, now)
+
+        # Last, and deliberately: the acknowledgement is a confirmation rather
+        # than a validation, so a caller who confirms should not then be told
+        # that the journal they picked was in the past.
+        if task.status == TaskStatus.DONE and not acknowledge_reopen:
+            raise TaskReopenNotAcknowledgedError(task_id)
+
+        await self.task_repo.add_intermediate_journal(
+            task_id, previous_due_journal_id, user_id
+        )
+        # Through ``_save`` rather than straight to the repository, for the race
+        # its docstring describes. The window is wider here than on creation: the
+        # journal-delete guard refuses to delete a journal that *already* anchors
+        # a task, and the new due journal does not anchor this one until the
+        # statement below runs — so a delete landing between the read above and
+        # this write is permitted, and would otherwise surface as a raw
+        # ``IntegrityError`` in place of the 404 this method promises.
+        return await self._save(
+            replace(
+                task,
+                due_journal_id=due_journal_id,
+                status=TaskStatus.NOT_DONE,
+            ),
+            task.creating_journal_id,
+            due_journal_id,
+        )
+
     async def _save(
         self, task: Task, creating_journal_id: int, due_journal_id: int
     ) -> Task:
-        """Insert the task, keeping the promised error if an anchor just vanished.
+        """Write the task, keeping the promised error if an anchor just vanished.
 
-        The anchor checks are a plain read, so a journal deleted between that read
-        and this insert would fail the foreign key and surface a raw
-        ``IntegrityError`` — a 500 in place of the 404 the caller was promised.
-        The window is narrow and the database is never wrong here (the anchors are
-        ``ON DELETE RESTRICT``, so nothing is corrupted); what is at stake is only
-        which error the caller sees, so it is mapped back rather than locked out.
+        Used by both writers of an anchor column — the insert on creation and the
+        update on a retarget. The anchor checks are a plain read, so a journal
+        deleted between that read and this write would fail the foreign key and
+        surface a raw ``IntegrityError`` — a 500 in place of the 404 the caller
+        was promised. The window is narrow and the database is never wrong here
+        (the anchors are ``ON DELETE RESTRICT``, so nothing is corrupted); what
+        is at stake is only which error the caller sees, so it is mapped back
+        rather than locked out.
 
         Locking the journal rows for the duration would close the window, but it
         needs an owner-scoped *locking* read on ``JournalRepository`` — another
@@ -284,23 +408,35 @@ class TaskService:
                 raise
             raise ContactNotFoundError(contact_id) from error
 
+    async def _journals_by_id(
+        self, user_id: str, journal_ids: Sequence[int]
+    ) -> dict[int, Journal]:
+        """The user's journals among ``journal_ids``, keyed by id.
+
+        Ownership is enforced *by the query*, not by comparing a ``user_id``
+        afterwards: a journal belonging to somebody else simply is not in the
+        result, so it is indistinguishable from one that never existed and any
+        error built on this can leak nothing. Both anchor resolutions go through
+        here so that property has one place to hold.
+        """
+        return {
+            journal.id: journal
+            for journal in await self.journal_repo.find_by_ids_for_user(
+                user_id, list(journal_ids)
+            )
+            if journal.id is not None
+        }
+
     async def _resolve_anchors(
         self, user_id: str, creating_journal_id: int, due_journal_id: int
     ) -> Journal:
         """Load both anchors in one owner-scoped read and return the due journal.
 
-        Ownership is enforced *by the query*, not by comparing a ``user_id``
-        afterwards: a journal belonging to somebody else simply is not in the
-        result, so it is indistinguishable from one that never existed and the
-        error can leak nothing. One call covers both anchors — and the
-        same-journal case collapses to a single id — so an extra journal never
-        costs an extra round trip.
+        One call covers both anchors — and the same-journal case collapses to a
+        single id — so an extra journal never costs an extra round trip.
         """
         wanted = _ordered_unique([creating_journal_id, due_journal_id])
-        found = {
-            journal.id: journal
-            for journal in await self.journal_repo.find_by_ids_for_user(user_id, wanted)
-        }
+        found = await self._journals_by_id(user_id, wanted)
 
         anchors: tuple[tuple[TaskJournalAnchor, int], ...] = (
             ("creating", creating_journal_id),
@@ -310,6 +446,17 @@ class TaskService:
             if journal_id not in found:
                 raise TaskAnchorJournalNotFoundError(anchor, journal_id)
 
+        return found[due_journal_id]
+
+    async def _resolve_due_journal(self, user_id: str, due_journal_id: int) -> Journal:
+        """Load the due anchor alone, for a retarget, on the same terms.
+
+        The creating anchor is not re-read: it cannot change, and reading it
+        would invite a rule about it that the specification does not have.
+        """
+        found = await self._journals_by_id(user_id, [due_journal_id])
+        if due_journal_id not in found:
+            raise TaskAnchorJournalNotFoundError("due", due_journal_id)
         return found[due_journal_id]
 
     async def _require_future_dated(

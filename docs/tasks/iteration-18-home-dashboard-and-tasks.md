@@ -2,8 +2,10 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **61 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–5 complete** (task tables + domain entity; task repository; journal-date resolution
-and the future-dated rule; the creation service and its core invariants; create over REST and MCP).
+**ITER18-001 Phases 1–7 complete** (task tables + domain entity; task repository; journal-date resolution
+and the future-dated rule; the creation service and its core invariants; create over REST and MCP; the
+status lifecycle over service, REST and MCP; and retargeting semantics in the service — the model's one
+automatic link, and its only way back out of a terminal status).
 **ITER18-002 Phases 1 and 3 complete** (the delete guard: journal deletion is refused, explanatorily, for
 any journal anchoring a task; and merge, which is never refused — it re-points task links onto the
 survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw integrity
@@ -89,6 +91,25 @@ surface accepts a date or the service's `now`. There is still **no way to read a
 no list, no frontend surface — and no status, retargeting or link operation. Because tasks now hold
 `ON DELETE RESTRICT` references to journals, **journal delete and merge can fail at the database**
 until ITER18-002 Phases 1–3 land.
+
+**Since ITER18-001 Phase 6:** the status lifecycle exists on all three levels. The transition matrix is a
+pure predicate (`is_status_transition_allowed` in `core_shared/models/tasks/task_status.py`), applied by
+`TaskService.set_status` over a **locking** read (`TaskRepository.find_by_id_for_update`), and exposed as
+`PATCH /api/tasks/{id}` and the MCP tool `set_task_status`. Only the two transitions that would *leave*
+cancelled are refused, with `TaskStatusTransitionError` (409) naming retargeting as the way out; setting
+the status a task already has is a no-op; and no path touches a journal, which is what keeps a lapsed
+task completable.
+
+**Since ITER18-001 Phase 7:** the due journal is retargetable in the domain, and with it the lifecycle
+closes. `TaskService.retarget_due_journal` moves a task onto a new due journal as one `@transactional`
+unit of work: it revalidates existence, ownership and the future-dated rule whatever the task's status,
+retains the previous due journal as an intermediate journal (the model's one automatic link,
+de-duplicated by the repository's idempotent add), and always lands the task on *not done* — which makes
+it the only way out of *cancelled* and, behind a required acknowledgement, out of *done*. Asking for the
+journal a task is already due in is a no-op. The new refusal is `TaskReopenNotAcknowledgedError` (409).
+The creating journal remains unreachable: no service method other than `create_task` accepts one. There
+is still **no retarget surface** — no endpoint and no MCP tool until Phase 8 — and still no way to read a
+task back.
 
 ### The home page
 
@@ -1547,26 +1568,185 @@ both surfaces against a real database, plus the cross-user 404. E2E deferred to 
   `tests/integration/mcp/` together (882 tests). No frontend or e2e gates — the phase changes no frontend
   file and ships no user-visible surface.
 
-#### Phase 7: Retargeting Semantics — Service
+#### Phase 7: Retargeting Semantics — Service ✅ COMPLETE
 
 **Prerequisites:** Phase 6.
 **Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Actual:** **206 production → 2,077 tracked** (2,077 insertions, 92 deletions, excluding this document:
+206 production — the service method, its shared journal-resolution helper and the reused anchor-race
+mapping 171, the `core_shared` error 33, the export 2 — 1,871 tests and shared seeding). Production
+landed at 1.6× the estimate; the tests at **9.1× the production line count**, the highest ratio in the
+iteration so far. The figures include the review round (the anchor-race mapping and six tests).
+
+**Why the test ratio rose again, and what that says about the calibration rule.** Phase 6 refined the
+rule to *"for a phase whose subject is a matrix rather than a path, estimate tests from cells ×
+surfaces"*. Phase 7 has **one** surface, so that refinement predicts a *smaller* ratio and got a larger
+one. The reason is that retargeting is not a matrix at all: it is a **path with five independent gates**
+(existence, ownership, future-dating, the acknowledgement, the automatic link), and almost every gate has
+to be asserted *once per starting status*, because "whatever the current status" is itself an acceptance
+criterion. So the multiplier is gates × statuses, and it applies to a single surface.
+**Calibration refinement:** count the *conditions the phase promises to hold regardless of state*, and
+multiply by the number of states — a service-only phase with three statuses and five gates costs about
+what a three-surface phase with one gate does. Delivery rule 3 was **not** breached: the overrun is
+recorded here, and the phase was still a single reviewable PR because it ships one method.
 
 **Acceptance Criteria:**
 
-- [ ] `TaskService.retarget_due_journal` revalidates the future-dated and ownership rules at set time,
-      whatever the current status.
-- [ ] The **previous due journal is automatically retained as an intermediate journal** — the model's one
-      automatic link — without duplicating an existing intermediate link for the same journal.
-- [ ] Retargeting always leaves the task **not done**: not done stays not done; cancelled is reopened; done
-      is reopened.
-- [ ] Reopening a **done** task requires an explicit acknowledgement argument; without it the service
-      refuses with an error the UI and an agent can act on.
-- [ ] The creating journal is immutable — no code path can change it.
+- [x] `TaskService.retarget_due_journal` revalidates the future-dated and ownership rules at set time,
+      whatever the current status. — both are re-run through the same owner-scoped read and the same
+      `is_future_dated` predicate creation uses. Each is asserted against all three starting statuses in
+      the unit tests; the integration tests parametrise the future-dated refusal over all three and assert
+      the ownership refusal once, since ownership is decided by the query rather than by the status. A
+      journal that exists, is future-dated and belongs to somebody else is refused byte-identically to one
+      that never existed.
+- [x] The **previous due journal is automatically retained as an intermediate journal** — the model's one
+      automatic link — without duplicating an existing intermediate link for the same journal. — the link
+      is written through the repository's already-idempotent `add_intermediate_journal`, so
+      de-duplication needs no read-then-add and no new port method; the integration test drives a
+      three-hop deferral that lands back on an already-linked journal and still finds one row per journal,
+      against the live composite primary key.
+- [x] Retargeting always leaves the task **not done**: not done stays not done; cancelled is reopened; done
+      is reopened. — parametrised over all three statuses at both levels, read back from the `tasks` row.
+- [x] Reopening a **done** task requires an explicit acknowledgement argument; without it the service
+      refuses with an error the UI and an agent can act on. — `TaskReopenNotAcknowledgedError`, 409, its
+      own type rather than a validation failure, and its message names the acknowledgement as the way
+      through. The refusal writes nothing — not the status, not the anchor, not the automatic link.
+- [x] The creating journal is immutable — no code path can change it. — enforced by **absence**: the
+      method has no parameter that could set one, asserted by signature inspection, and a second test
+      asserts `create_task` is still the only `TaskService` method that accepts a creating journal at all.
+
+**Decisions taken (Phase 7):**
+
+- **Retargeting onto the journal a task is already due in is a no-op**, mirroring Phase 6's same-status
+  no-op. Nothing is written, `updated_at` does not move, no link appears, and no acknowledgement is
+  required even for a *done* task. The argument is that nothing is being **set**, and every rule here is a
+  set-time rule — which is also what keeps invariant 4 from becoming a continuous one. The case that makes
+  this concrete is a **lapsed** task: were the no-op instead a re-validation, asking for the journal the
+  task already has would be refused because that journal has passed, which is a refusal of nothing.
+- **The acknowledgement gate is checked last, immediately before the write.** It is a confirmation, not a
+  validation: a caller who has just confirmed a reopen should not then be told the journal they picked was
+  in the past. Existence, ownership and future-dating are all decided first, so the confirmation is the
+  final thing standing between a well-formed request and the write. **Review caught that this ordering was
+  documented but unasserted** — every acknowledgement test used a valid journal and every journal test
+  supplied the acknowledgement, so moving the gate to the top of the method passed the whole suite. Two
+  tests now pin it: a *done* task, unacknowledged, retargeted onto a past-dated journal must answer
+  `TaskDueJournalNotFutureError`, and onto an unknown one `TaskAnchorJournalNotFoundError`. Verified by
+  moving the gate and watching exactly those two fail.
+- **Acknowledgement is required only for `done`, never for `cancelled`.** The specification asks the UI to
+  say so before reopening a *completed* task; it says the opposite about a cancelled one — retargeting is
+  the documented, and only, way out of cancelled, and it is what `TaskStatusTransitionError` tells a
+  caller to do. Gating it would be asking the user to confirm the remedy they were just sent to.
+- **The refusal is a distinct 409 type, not a validation error.** Phase 8's criterion is that it be
+  *distinguishable*, and the reason is behavioural: a surface that can tell it apart can offer "reopen it
+  anyway", while one that cannot has only "invalid" to show. 409 for the same reason as
+  `TaskStatusTransitionError` — the body is well formed and the journal is real; what it conflicts with is
+  the state the task is in. It is deliberately **not** a `TaskStatusTransitionError` subclass, whose
+  message tells a caller to retarget and would be circular here.
+- **The previous due journal is linked even when it is also the creating journal.** This looks redundant —
+  the task is already anchored to that journal — and the merge path drops exactly this shape as redundant.
+  It is kept because `TaskAnchorRepository.repoint_journal_links` already documents it as a shape a task
+  reaches *without any merge*: "retargeting keeps the previous due journal as an intermediate link". The
+  rule was written down in ITER18-002 Phase 3 before this phase existed, and inventing a different one
+  here would have made the merge docstring false.
+- **The write goes through `_save`, so the anchor race keeps its 404.** Review caught that the retarget
+  wrote straight to the repository while creation deliberately routes through `_save`, which maps a
+  foreign-key violation on an anchor column back to `TaskAnchorJournalNotFoundError`. The window is
+  **wider** here than on creation, which is what makes it worth closing: ITER18-002's delete guard refuses
+  to delete a journal that *already* anchors a task, and the new due journal does not anchor this one
+  until the update lands — so a concurrent journal delete between the read and the write is permitted, and
+  the caller would have received a raw `IntegrityError` (500) in place of the 404 this method's `Raises:`
+  block promises. `_save` is now shared by both writers of an anchor column, and two tests cover it: the
+  vanished due journal reported as its anchor, and an unrelated integrity error re-raised untouched.
+- **Nothing is ever unlinked, including a link that has become redundant.** Retargeting *back* onto a
+  journal a task already passed through leaves that journal as both the due anchor and an intermediate
+  link. The link is not removed, for two reasons: it is still true — the journal *was* previously due, and
+  the specification defines intermediate journals as exactly "discussed, revisited, or previously due" —
+  and the specification says intermediate links are removed **deliberately, by the user**, which is a
+  different operation with its own phase. The merge path drops redundant links only for tasks it re-points
+  itself, and says so precisely because retargeting can produce this shape legitimately. A test asserts
+  `remove_intermediate_journal` is never called on any path.
+- **The locking read is inherited, not rediscovered.** Phase 6 recorded that a read-decide-write sequence
+  can lose a *rule* rather than a field, and that Phases 7–9 inherit the locking read. It matters here for
+  a concrete reason worth naming: `retarget_due_journal` decides *whether an acknowledgement was required*
+  from the status it read. Without the lock, a retarget that began while a task was not done would go on
+  to reopen a task somebody has since marked done, with no acknowledgement at all — the rule this phase
+  exists to enforce, bypassed by interleaving.
+- **The overlapping-call test is honest about what it does not prove**, following the correction Phase 6
+  had to make about its own. Measured against the unlocked read the overlapping test still passes, because
+  the retarget's read lands after the other call commits anyway and is refused for the right reason by
+  accident; making it fail every time needs a barrier that deadlocks on the lock under test. The
+  every-time guarantee is the **unit** test that the locking read is the one used — 37 of the 52 unit
+  tests fail when `find_by_id_for_update` is swapped for `find_by_id` — plus Phase 6's repository-level
+  lock test. Both substitutions were run rather than argued.
+- **The unit-of-work test observes both writes, not one.** A retarget writes twice — the link row and the
+  task row — and the two must land together, or a task can end up on a new journal with no record of the
+  old one. The observing repository therefore notes *both* calls and the test asserts both were made
+  inside an open nested transaction; removing `@transactional` makes it, alone, fail (verified).
+- **Two Phase 6 helpers were moved into shared seeding rather than copied**, following the Phase 5
+  duplication lesson: `committed_task` — now parameterised by the journals a test needs, since a retarget
+  needs somewhere to retarget *to* — and `service_on` now live in
+  `tests/integration/tasks/task_seeding.py`, and the Phase 6 file calls them. `stored_anchors` and
+  `intermediate_journal_ids` joined them, both reading the raw columns rather than going back through the
+  port the service wrote through.
+- **The two anchor resolutions share one read.** `_resolve_anchors` (both anchors, for creation) and
+  `_resolve_due_journal` (one anchor, for a retarget) both go through `_journals_by_id`, so the property
+  that ownership is enforced *by the query* — and therefore that another user's journal is
+  indistinguishable from an absent one — has a single place to hold rather than two.
 
 **Required Test Coverage:** unit — each status's outcome, the automatic intermediate link and its
 de-duplication, the acknowledgement requirement, creating-journal immutability, future-date and ownership
 revalidation. Integration — retarget round-trip with real journals. No e2e.
+
+- **Unit (52 tests):** `backend/tests/unit/tasks/test_task_service_retarget.py` — every status's outcome
+  and the persisted due journal; the creating journal accepted as a legitimate target (invariant 6 holds
+  on a retarget as it does on creation); text, owner, `created_at` and the creating journal untouched; the
+  automatic link written once with the acting user's id, the new due journal never linked, the link still
+  written when the previous due journal is also the creating journal, and an already-existing link left to
+  the repository's idempotence (the service never lists the links first); the acknowledgement refused,
+  accepted, and not required for the other two statuses, its position **after** both journal rules pinned
+  by two tests, plus the error's shape (409, a `TaskDomainError` that is not a
+  `TaskStatusTransitionError`, `task_id` on the object, *acknowledge* in the message); existence and
+  ownership revalidated for all three statuses with the read proved owner-scoped; the future-dated rule
+  refused for both *yesterday* and *today* across all three statuses, judged in the user's timezone (a
+  Sydney instant that is a different local day) and against the supplied `now` rather than the clock; the
+  journal being **left** never read at all, which is what makes a lapsed task resurrectable and is
+  asserted on the ids requested rather than on the outcome (an outcome assertion would pass for an
+  implementation that reads it and ignores it); a due journal that vanishes before the write still
+  reported as its anchor, and an unrelated integrity error re-raised untouched; unknown and other-user
+  tasks giving byte-identical `TaskNotFoundError`s; the locking read used and the plain read never; the
+  same-journal no-op across all three statuses, reading **no** journal and **no** timezone at all
+  (asserted on `mock_calls`, so a method added to either port later cannot slip through); contacts never
+  touched, and no link removed on **any** of the four paths — success, no-op, and both refusals; and
+  creating-journal immutability by signature.
+- **Integration (21 tests):** `backend/tests/integration/tasks/test_task_service_retarget_integration.py`
+  — the round trip for all three statuses read back from the `tasks` row; the automatic link as a real row
+  and as the only row; de-duplication against the live primary key, both from a pre-seeded link and from a
+  three-hop deferral that returns to an already-linked journal; a lapsed task resurrected with the passed
+  journal kept in the trail; a cancelled task reopened with no acknowledgement, a done task refused
+  without one (status, both anchors and the link table all unchanged) and reopened with one; the creating
+  anchor, text and `created_at` unmoved; a past-dated journal refused for every starting status; another
+  user's journal refused byte-identically to an absent one; another user's task and an absent id both
+  unreachable and unchanged; the same-journal no-op on a **lapsed** task leaving `updated_at` alone; both
+  writes proved to run inside one open unit of work (the phase's decorator-sensitive test) with none left
+  open; and an overlapping `set_status(done)` proving a retarget cannot reopen without the
+  acknowledgement.
+- **E2E:** none — deferred as the phase states. The phase ships no frontend surface; ITER18-001's e2e
+  lands in Phase 22.
+- **Docs:** this document only. `api-design.md` is deliberately untouched — the phase adds no endpoint,
+  and Phase 8 is where the retarget surface and its conventions are written down. `mcp-setup.md` and
+  `mcp-tools.md` likewise untouched.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (875 files) and
+  `core_shared` (129); `mypy` clean over 870 backend files and 127 in `core_shared`; the full
+  `tests/unit/` suite (2,878 tests); and `tests/integration/tasks/`, `tests/integration/api/` and
+  `tests/integration/mcp/` together (937 tests) — the last two included because they import the shared
+  seeding module this phase changed. No frontend or e2e gates — the phase changes no frontend file and
+  ships no user-visible surface.
+
+**Carried forward to Phase 8.** `TaskReopenNotAcknowledgedError` is not yet in the JSON:API error-code
+table in `backend/app/api/error_handlers.py`, so a REST surface would render it as the generic
+`DOMAIN_ERROR`. That is correct today — no endpoint raises it — but it is exactly what Phase 8's
+"returns a distinguishable error, not a generic validation failure" criterion depends on, and what makes
+a *"reopen it anyway"* affordance possible. It must be given its own code in the same PR as the surface.
 
 #### Phase 8: Retargeting — REST and MCP
 
