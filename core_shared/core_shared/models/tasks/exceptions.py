@@ -70,6 +70,39 @@ class TaskStatusTransitionError(TaskDomainError):
         self.target_status = target_status
 
 
+class TaskReopenNotAcknowledgedError(TaskDomainError):
+    """Exception raised when a *done* task would be reopened without being asked for.
+
+    Retargeting always leaves a task **not done**, so moving the due journal of a
+    completed task reopens it. The specification says the product must say so
+    before that happens, because moving a date is rarely how a user means to undo
+    a completion — an extension of a deadline they had forgotten was already met.
+    The acknowledgement is the caller's way of saying the reopening is intended.
+
+    **A cancelled task carries no such gate.** Retargeting is the documented — and
+    only — way out of cancelled, and it is what ``TaskStatusTransitionError``
+    tells a caller to do, so asking them to confirm it would be asking them to
+    confirm the remedy they were just sent to.
+
+    **409 rather than 400**, and its own type rather than a validation error. The
+    request is well formed and the journal it names is a real, future, owned one;
+    what it conflicts with is the state the task is in. A surface that can tell
+    this apart from a validation failure can offer *"reopen it anyway"*; one that
+    cannot has only *"invalid"* to show, which is not a choice the user can act
+    on. It is deliberately **not** a ``TaskStatusTransitionError``, whose message
+    tells a caller to retarget and would be circular here.
+    """
+
+    def __init__(self, task_id: int):
+        super().__init__(
+            f"Task {task_id} is done. Retargeting it onto a new due journal would "
+            f"reopen it as not done. Acknowledge the reopen and re-send the "
+            f"request if that is what you intend.",
+            409,
+        )
+        self.task_id = task_id
+
+
 class TaskAnchorJournalNotFoundError(TaskDomainError):
     """Exception raised when one of a task's journal anchors is unreachable.
 

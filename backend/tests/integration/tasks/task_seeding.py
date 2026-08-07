@@ -17,15 +17,25 @@ inheritance; importing them into each module instead trips ruff's F811 at every
 test that names one as a parameter.
 """
 
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.tasks import TaskStatus
 from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.settings.adapters.sql.user_settings_repository import (
+    SqlUserSettingsRepository,
+)
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.di.contacts import ContactProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
 from app.infrastructure.di.integrations import IntegrationProvider
@@ -161,6 +171,120 @@ async def stored_status(conn: AsyncConnection, task_id: int) -> str:
             )
         ).scalar_one()
     )
+
+
+async def stored_anchors(conn: AsyncConnection, task_id: int) -> tuple[int, int]:
+    """The task's two anchor columns as ``(creating, due)``, straight from the row.
+
+    Read from the database rather than from a returned entity, so a test can
+    tell a persisted anchor change from one that only exists in memory — and,
+    for the creating anchor, prove that nothing wrote to it at all.
+    """
+    row = (
+        await conn.execute(
+            text(
+                "SELECT creating_journal_id, due_journal_id "
+                "FROM tasks WHERE id = :task_id"
+            ),
+            {"task_id": task_id},
+        )
+    ).one()
+    return int(row.creating_journal_id), int(row.due_journal_id)
+
+
+async def intermediate_journal_ids(conn: AsyncConnection, task_id: int) -> list[int]:
+    """The task's intermediate-journal links, oldest first, straight from the table.
+
+    The repository has a method for this, but a test asserting that the *service*
+    wrote a link should not read it back through the same port it wrote through.
+    """
+    rows = await conn.execute(
+        text(
+            "SELECT journal_id FROM task_intermediate_journals "
+            "WHERE task_id = :task_id ORDER BY created_at, journal_id"
+        ),
+        {"task_id": task_id},
+    )
+    return [int(row.journal_id) for row in rows]
+
+
+def service_on(
+    connection: AsyncConnection,
+    user_settings_repository: SqlUserSettingsRepository,
+    repo: type[SqlTaskRepository] = SqlTaskRepository,
+) -> TaskService:
+    """A ``TaskService`` over real adapters on ``connection``.
+
+    The ``service`` fixture is bound to the test's single savepoint connection;
+    the concurrency tests need one service per real connection, which is the
+    only way two units of work can overlap. ``repo`` lets a test substitute a
+    repository subclass that observes or signals from inside the call.
+    """
+    return TaskService(
+        task_repo=repo(connection),
+        journal_repo=SqlJournalRepository(connection),
+        contact_repo=SqlContactRepository(connection),
+        date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
+    )
+
+
+@asynccontextmanager
+async def committed_task(
+    async_engine: AsyncEngine,
+    *,
+    journal_offsets: Sequence[int] = (7,),
+    status: TaskStatus = TaskStatus.NOT_DONE,
+) -> AsyncIterator[tuple[str, int, list[int]]]:
+    """A task that really is committed, under an owner nobody else will see.
+
+    The concurrency tests need two connections to see the same row, which the
+    savepoint fixture cannot give them: its outer transaction is invisible to
+    everyone else and is rolled back at teardown. So these rows are committed
+    for real, scoped to a one-off user id, and deleted again whatever happens.
+
+    ``journal_offsets`` says how many journals to create and where to put them
+    relative to now; the task is anchored to the first one as both its creating
+    and its due journal, and the rest are there for a test that needs somewhere
+    to retarget *to*.
+
+    Yields:
+        ``(user_id, task_id, journal_ids)``.
+    """
+    user_id = f"race-{uuid4()}"
+    async with async_engine.connect() as setup:
+        journal_ids = [
+            await create_journal(
+                SqlJournalRepository(setup),
+                title=f"Journal at {offset:+d}d",
+                days_offset=offset,
+                user_id=user_id,
+            )
+            for offset in journal_offsets
+        ]
+        task_id = await create_task(
+            setup,
+            creating_journal_id=journal_ids[0],
+            due_journal_id=journal_ids[0],
+            status=status,
+            user_id=user_id,
+        )
+        await setup.commit()
+
+    try:
+        yield user_id, task_id, journal_ids
+    finally:
+        async with async_engine.connect() as cleanup:
+            # The link rows cascade with the task, so the two deletes below are
+            # the whole of the clean-up.
+            await cleanup.execute(
+                text("DELETE FROM tasks WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+            await cleanup.execute(
+                text("DELETE FROM journals WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+            await cleanup.commit()
 
 
 def make_task_container(connection: AsyncConnection) -> AsyncContainer:
