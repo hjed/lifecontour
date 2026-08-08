@@ -545,12 +545,22 @@ class TestRetargetingOntoTheCurrentDueJournal:
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
     ):
-        """``updated_at`` must not move for a change that did not happen.
+        """Nothing is written for a change that did not happen.
 
         The task here is **lapsed**, which is the case that shows the no-op is a
         no-op rather than a re-validation: were the due journal re-judged, a
         journal already in the past would be refused even though the caller
         asked for the one the task already has.
+
+        **The evidence is the status, not ``updated_at``.** This test previously
+        compared timestamps, and that assertion could not fail: the row is
+        stamped with ``now()``, which in PostgreSQL is the *transaction*
+        timestamp, and the savepoint fixture runs the whole test inside one — so
+        a rewrite lands exactly the value the insert did. Found in ITER18-001
+        Phase 8 by probing rather than by reading: a test asserting the timestamp
+        **does** move on a real retarget fails. A *cancelled* task is used
+        instead, because every path but the no-op would have written *not done*
+        over it, which is an assertion that can fail.
         """
         past_id = await create_journal(
             journal_repository, title="Last week", days_offset=-7
@@ -559,9 +569,8 @@ class TestRetargetingOntoTheCurrentDueJournal:
             async_connection,
             creating_journal_id=past_id,
             due_journal_id=past_id,
+            status=TaskStatus.CANCELLED,
         )
-        before = await task_repository.find_by_id(task_id, USER_ID)
-        assert before is not None
 
         result = await retarget(
             service, async_connection, task_id=task_id, due_journal_id=past_id
@@ -569,8 +578,10 @@ class TestRetargetingOntoTheCurrentDueJournal:
 
         after = await task_repository.find_by_id(task_id, USER_ID)
         assert after is not None
-        assert after.updated_at == before.updated_at
+        assert after.status == TaskStatus.CANCELLED
+        assert (after.creating_journal_id, after.due_journal_id) == (past_id, past_id)
         assert result.due_journal_id == past_id
+        assert result.status == TaskStatus.CANCELLED
         assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
 
 
