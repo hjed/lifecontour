@@ -168,6 +168,30 @@ the *creating* journal where it arose and the *due* journal where it matters.
   actually created. The singular `add_contact` it replaced made the guard the expensive half — *N*
   contacts cost *2N* statements — and the batch is what `TaskService.create_task` and the
   single-contact link surface both use. `remove_contact` stays singular: nothing removes in bulk.
+- **Domain Events**: `TaskCreated` and `TaskDeleted`
+  (`backend/app/core/tasks/models/events.py`), published by `TaskService` through
+  `OutboxEventPublisher` **inside the same unit of work as the write**, so an event can never exist
+  for a write that rolled back and a rejected write publishes nothing — the activity-history
+  specification's *integrity by construction*. Each carries `source` (`Provenance`) and `changed_by`,
+  threaded from the caller: `Provenance.UI` from the REST controller, `Provenance.MCP` from the MCP
+  tools, defaulting to `SYSTEM` so a caller that says nothing is never mistaken for a user. The
+  aggregate id is the **task id**.
+  `TaskDeleted` is deliberately a marker — task id, owner and provenance, no text or anchors —
+  because `delete_task` reads nothing before deleting and enriching the payload would have bought
+  exactly that read; it carries `user_id` because once the row is hard-deleted there is nothing else
+  left to scope its history by. The payloads are plain dictionaries rather than models in
+  `core_shared/models/outbox_events.py`: that dispatch map is for **inbound integration-sync**
+  payloads, and no core domain event appears in it.
+  The remaining event types the specification names — text updated, status changed, due journal
+  retargeted, journal and contact linked/unlinked — and the history projection that consumes all of
+  them arrive in later phases of
+  [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md). Until then **no consumer group
+  subscribes to a task event**: `SearchIndexerConsumer` and `HistoryProjectionConsumer` match event
+  types exactly and list none, `InboundEventConsumer`'s patterns are all prefixes of other domains,
+  and `SummaryConsumer` is contact-scoped. `StreamConsumer` acknowledges an unmatched event
+  immediately, so a task event is discarded rather than left pending, and nothing dead-letters. For
+  search this is permanent — the specification's *Tasks and search* requires that tasks never be
+  indexed and that the indexer ignore their events rather than fail on them.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch

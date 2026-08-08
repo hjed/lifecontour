@@ -24,10 +24,16 @@ it, is a property of the schema and is asserted against a real database in
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskNotFoundError
 
 from app.core.tasks.services.task_service import TaskService
-from tests.unit.tasks.task_doubles import OTHER_USER_ID, TASK_ID, USER_ID
+from tests.unit.tasks.task_doubles import (
+    OTHER_USER_ID,
+    TASK_ID,
+    USER_ID,
+    published_events,
+)
 
 
 @pytest.mark.unit
@@ -167,3 +173,198 @@ class TestUnreachableTasks:
 
         assert str(exc_info.value) == str(TaskNotFoundError(TASK_ID))
         mock_task_repo.delete.assert_awaited_once_with(TASK_ID, OTHER_USER_ID)
+
+
+@pytest.mark.unit
+class TestDeletionPublishesAnEvent:
+    """A deletion is the one change with no row left to read it from.
+
+    Everything else about a task can be recovered by looking at the task. Once
+    it is hard-deleted the event is the only record that it ever existed, which
+    is why the history projection needs it and why these assertions are about
+    the event rather than about the row.
+    """
+
+    @pytest.mark.asyncio
+    async def test_publishes_exactly_one_task_deleted_event(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await service.delete_task(
+            user_id=USER_ID, task_id=TASK_ID, transaction=mock_transaction
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskDeleted"
+
+    @pytest.mark.asyncio
+    async def test_the_event_names_the_task_and_its_owner(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Ownership travels on the event because the row that carried it is gone.
+
+        A task-scoped history read has to answer "is this yours?" for a task
+        that no longer exists, and the only place left to ask is here.
+        """
+        await service.delete_task(
+            user_id=USER_ID, task_id=TASK_ID, transaction=mock_transaction
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.aggregate_id == TASK_ID
+        assert event.event_data["task_id"] == TASK_ID
+        assert event.event_data["user_id"] == USER_ID
+
+    @pytest.mark.asyncio
+    async def test_the_event_is_built_with_the_callers_connection(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Protocol conformance only — see the create-side test of the same name.
+
+        The publisher does not read this field; the outbox row shares the task's
+        transaction because DI gives both the same connection, which is asserted
+        against a live one in ``test_task_events_integration.py``.
+        """
+        await service.delete_task(
+            user_id=USER_ID, task_id=TASK_ID, transaction=mock_transaction
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.transaction is mock_transaction
+
+    @pytest.mark.asyncio
+    async def test_publishing_still_reads_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The event did not buy itself a read.
+
+        Enriching the payload with the task's text would have needed one, and
+        this method's whole point is that it decides nothing from what it read.
+        The payload is therefore a marker: task, owner, provenance.
+        """
+        await service.delete_task(
+            user_id=USER_ID, task_id=TASK_ID, transaction=mock_transaction
+        )
+
+        mock_task_repo.find_by_id.assert_not_awaited()
+        mock_task_repo.find_by_id_for_update.assert_not_awaited()
+
+        (event,) = published_events(mock_event_publisher)
+        assert set(event.event_data) == {
+            "task_id",
+            "user_id",
+            "source",
+            "changed_by",
+        }
+
+
+@pytest.mark.unit
+class TestDeletionProvenance:
+    """Who deleted it is as much of the record as that it was deleted."""
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_system(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await service.delete_task(
+            user_id=USER_ID, task_id=TASK_ID, transaction=mock_transaction
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_records_the_ui_as_the_origin(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await service.delete_task(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            transaction=mock_transaction,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_records_an_ai_agent_as_the_origin(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """An agent deleting a task is exactly the case the user needs to see."""
+        await service.delete_task(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            transaction=mock_transaction,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+
+@pytest.mark.unit
+class TestRefusedDeletesAnnounceNothing:
+    """A delete that removed no row is not a deletion."""
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_task_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Otherwise a repeated delete would write a second deletion to history."""
+        mock_task_repo.delete.side_effect = TaskNotFoundError(TASK_ID)
+
+        with pytest.raises(TaskNotFoundError):
+            await service.delete_task(
+                user_id=USER_ID, task_id=TASK_ID, transaction=mock_transaction
+            )
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_another_users_task_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """A refused delete must not leak the task's existence into an event either."""
+        mock_task_repo.delete.side_effect = TaskNotFoundError(TASK_ID)
+
+        with pytest.raises(TaskNotFoundError):
+            await service.delete_task(
+                user_id=OTHER_USER_ID, task_id=TASK_ID, transaction=mock_transaction
+            )
+
+        assert published_events(mock_event_publisher) == []

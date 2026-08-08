@@ -16,7 +16,11 @@ Creation loads journals and resolves contacts, so its repositories are
 produce a fixture whose default no test actually wants.
 """
 
+from unittest.mock import AsyncMock
+
 from core_shared.models.tasks import Task, TaskStatus
+
+from app.core.tasks.models.events import DomainEvent
 
 USER_ID = "test-user-123"
 # A second, unrelated owner. Owner scoping is only worth asserting against a
@@ -42,3 +46,14 @@ def make_task(
         due_journal_id=DUE_JOURNAL_ID,
         status=status,
     )
+
+
+def published_events(publisher: AsyncMock) -> list[DomainEvent]:
+    """Every event the service handed to its publisher, in order.
+
+    Shared by the create and delete tests because both ask the same question of
+    it — *what was published, and only that* — and both need the count as much
+    as the contents: an operation that published twice would satisfy any
+    assertion written as "a ``TaskCreated`` is among them".
+    """
+    return [call.args[0] for call in publisher.publish.await_args_list]

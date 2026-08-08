@@ -21,6 +21,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 )
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_service import TaskService
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
 @pytest_asyncio.fixture
@@ -30,10 +31,17 @@ async def service(
     journal_repository: SqlJournalRepository,
     user_settings_repository: SqlUserSettingsRepository,
 ) -> TaskService:
-    """The service over real adapters on the test's single connection."""
+    """The service over real adapters on the test's single connection.
+
+    The publisher is the **real** ``OutboxEventPublisher`` on that same
+    connection, because that is the whole point of it here: the outbox row and
+    the task row have to be written by one transaction, and a double would prove
+    nothing about whether they are.
+    """
     return TaskService(
         task_repo=task_repository,
         journal_repo=journal_repository,
         contact_repo=SqlContactRepository(async_connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
+        event_publisher=OutboxEventPublisher(async_connection),
     )
