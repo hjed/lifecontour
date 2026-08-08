@@ -22,6 +22,7 @@ argument.
 import json
 from typing import Annotated, Any
 
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import Task, TaskStatus
 from fastmcp import FastMCP
 from pydantic import Field
@@ -149,6 +150,11 @@ async def create_task(
     """
     user_id = await get_current_user_id()
 
+    # A task an assistant created has to read as one an assistant created. The
+    # service defaults to ``SYSTEM``, so saying nothing here would make an
+    # agent's work indistinguishable from an internal one in the user's own
+    # history — the distinction the activity-history specification asks for by
+    # name.
     created = await task_service.create_task(
         user_id=user_id,
         creating_journal_id=creating_journal_id,
@@ -156,6 +162,8 @@ async def create_task(
         text=text,
         transaction=db_connection,
         contact_ids=contact_ids,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(_task_to_dict(created), indent=2)
 
@@ -376,7 +384,11 @@ async def delete_task(
     user_id = await get_current_user_id()
 
     await task_service.delete_task(
-        user_id=user_id, task_id=task_id, transaction=db_connection
+        user_id=user_id,
+        task_id=task_id,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps({"deleted": True, "task_id": task_id}, indent=2)
 

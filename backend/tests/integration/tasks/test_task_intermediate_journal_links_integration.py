@@ -40,6 +40,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 )
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_service import TaskService
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.tasks.task_seeding import (
     COUNT_INTERMEDIATE_JOURNALS,
     OTHER_USER_ID,
@@ -863,6 +864,7 @@ class TestAJournalThatVanishesMidWrite:
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),
+            event_publisher=OutboxEventPublisher(async_connection),
         )
 
         with pytest.raises(JournalNotFoundError) as exc_info:
@@ -924,6 +926,7 @@ class TestTheWritesAreUnitsOfWork:
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),
+            event_publisher=OutboxEventPublisher(async_connection),
         )
 
         await service.attach_intermediate_journal(
@@ -969,6 +972,7 @@ class TestTheWritesAreUnitsOfWork:
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),
+            event_publisher=OutboxEventPublisher(async_connection),
         )
 
         await service.detach_intermediate_journal(

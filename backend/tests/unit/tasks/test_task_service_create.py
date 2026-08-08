@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.tasks import (
     Task,
@@ -34,6 +35,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_service import TaskService
+from tests.unit.tasks.task_doubles import published_events
 
 USER_ID = "test-user-123"
 
@@ -139,6 +141,12 @@ def date_resolver(mock_settings_repo: AsyncMock) -> JournalDateResolver:
 
 
 @pytest.fixture
+def mock_event_publisher() -> AsyncMock:
+    """The outbox publisher, recording what the creation announced."""
+    return AsyncMock()
+
+
+@pytest.fixture
 def mock_transaction() -> AsyncMock:
     """A stand-in connection; ``@transactional`` runs unwrapped for a non-real one."""
     return AsyncMock()
@@ -150,6 +158,7 @@ def service(
     mock_journal_repo: AsyncMock,
     mock_contact_repo: AsyncMock,
     date_resolver: JournalDateResolver,
+    mock_event_publisher: AsyncMock,
 ) -> TaskService:
     """The service under test."""
     return TaskService(
@@ -157,6 +166,7 @@ def service(
         journal_repo=mock_journal_repo,
         contact_repo=mock_contact_repo,
         date_resolver=date_resolver,
+        event_publisher=mock_event_publisher,
     )
 
 
@@ -169,6 +179,8 @@ async def create(
     due_journal_id: int = DUE_JOURNAL_ID,
     contact_ids: list[int] | None = None,
     now: datetime.datetime | None = NOW,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
 ) -> Task:
     """Call ``create_task`` with the ordinary arguments, overriding as needed."""
     return await service.create_task(
@@ -179,6 +191,8 @@ async def create(
         contact_ids=contact_ids,
         transaction=transaction,
         now=now,
+        source=source,
+        changed_by=changed_by,
     )
 
 
@@ -887,3 +901,247 @@ class TestContactLinks:
 
         mock_task_repo.save.assert_not_awaited()
         mock_task_repo.add_contacts.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestCreationPublishesAnEvent:
+    """A create announces itself, once, with the id it was actually given."""
+
+    @pytest.mark.asyncio
+    async def test_publishes_exactly_one_task_created_event(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """One write, one event.
+
+        Counted rather than searched for: a second event would still satisfy
+        "a ``TaskCreated`` was published", and would put two entries in the
+        history feed for one thing that happened.
+        """
+        await create(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskCreated"
+
+    @pytest.mark.asyncio
+    async def test_the_event_carries_the_persisted_id(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Published after the save, which is the only place the id comes from.
+
+        An event built before persistence would carry ``None``, and the history
+        projection keys its rows on this id — so the trail would belong to no
+        task at all.
+        """
+        created = await create(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.aggregate_id == created.id
+        assert event.event_data["task_id"] == created.id
+
+    @pytest.mark.asyncio
+    async def test_the_event_describes_the_task_that_was_saved(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The payload is read off the persisted task, not the request."""
+        created = await create(service, mock_transaction, text="print the permit")
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["user_id"] == USER_ID
+        assert event.event_data["text"] == "print the permit"
+        assert event.event_data["status"] == TaskStatus.NOT_DONE.value
+        assert event.event_data["creating_journal_id"] == created.creating_journal_id
+        assert event.event_data["due_journal_id"] == created.due_journal_id
+
+    @pytest.mark.asyncio
+    async def test_the_event_is_built_with_the_callers_connection(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Protocol conformance, not the mechanism that makes the two atomic.
+
+        ``OutboxEventPublisher`` never reads ``event.transaction``; it writes on
+        the connection it was constructed with. This asserts only that the
+        service passes the connection it was handed, the way every other domain
+        does. That the outbox row really shares the task's transaction is a
+        property of a live connection, and is asserted against one in
+        ``test_task_events_integration.py``.
+        """
+        await create(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.transaction is mock_transaction
+
+    @pytest.mark.asyncio
+    async def test_publishing_follows_the_contact_links(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_contact_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The event names a create that finished, links included.
+
+        Shown by breaking the link write: if publishing came first, the event
+        would already have been handed over by the time the failure surfaced.
+        The ordering matters because the event is the announcement of a
+        completed create, and half a create is not one.
+        """
+        mock_contact_repo.find_names_by_ids.return_value = {5: ("Sarah", None, None)}
+        mock_task_repo.add_contacts.side_effect = RuntimeError("link write failed")
+
+        with pytest.raises(RuntimeError):
+            await create(service, mock_transaction, contact_ids=[5])
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_the_payload_says_nothing_about_contacts(
+        self,
+        service: TaskService,
+        mock_contact_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Contact links get their own event type in a later phase.
+
+        Carrying the ids here would answer that phase's question — whether a
+        create with contacts publishes one event or two — in the wrong place and
+        without the tests that decision needs.
+        """
+        mock_contact_repo.find_names_by_ids.return_value = {5: ("Sarah", None, None)}
+
+        await create(service, mock_transaction, contact_ids=[5])
+
+        (event,) = published_events(mock_event_publisher)
+        assert "contact_ids" not in event.event_data
+
+
+@pytest.mark.unit
+class TestCreationProvenance:
+    """Where the create came from travels with it."""
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_system(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """A caller that names no origin is a system one, never a silent UI one."""
+        await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=CREATING_JOURNAL_ID,
+            due_journal_id=DUE_JOURNAL_ID,
+            text="return Sarah's book",
+            transaction=mock_transaction,
+            now=NOW,
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_records_the_ui_as_the_origin(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await create(service, mock_transaction, source=Provenance.UI, changed_by="ui")
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_records_an_ai_agent_as_the_origin(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The distinction the activity-history specification asks for."""
+        await create(service, mock_transaction, source=Provenance.MCP, changed_by="mcp")
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+
+@pytest.mark.unit
+class TestRejectedCreatesAnnounceNothing:
+    """Integrity by construction: no event for a change that did not happen."""
+
+    @pytest.mark.asyncio
+    async def test_empty_text_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        with pytest.raises(TaskValidationError):
+            await create(service, mock_transaction, text="   ")
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_anchor_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_journal_repo.find_by_ids_for_user.return_value = []
+
+        with pytest.raises(TaskAnchorJournalNotFoundError):
+            await create(service, mock_transaction)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_a_due_journal_in_the_past_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        creating_journal: Journal,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_journal_repo.find_by_ids_for_user.return_value = [
+            creating_journal,
+            make_journal(DUE_JOURNAL_ID, at(YESTERDAY)),
+        ]
+
+        with pytest.raises(TaskDueJournalNotFutureError):
+            await create(service, mock_transaction)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_contact_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_contact_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_contact_repo.find_names_by_ids.return_value = {}
+
+        with pytest.raises(ContactNotFoundError):
+            await create(service, mock_transaction, contact_ids=[404])
+
+        assert published_events(mock_event_publisher) == []

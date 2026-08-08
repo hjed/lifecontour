@@ -132,30 +132,17 @@ def mock_task_repo() -> AsyncMock:
 
 @pytest.fixture
 def mock_journal_repo() -> AsyncMock:
-    """A journal repository holding the journal under test, owner-scoped."""
+    """A journal repository holding the journal under test, owner-scoped.
+
+    Shadows the conftest's, which is a bare double for member-route operations
+    that touch no journal at all. Attaching does touch one, so this is the only
+    other fixture (besides the task repository) worth specialising here —
+    ``mock_contact_repo``, ``mock_settings_repo``, ``mock_event_publisher`` and
+    ``mock_transaction`` are taken from the conftest unchanged.
+    """
     repo = AsyncMock()
     repo.find_by_ids_for_user.return_value = [make_journal()]
     return repo
-
-
-@pytest.fixture
-def mock_contact_repo() -> AsyncMock:
-    """A contact repository no journal link may touch."""
-    return AsyncMock()
-
-
-@pytest.fixture
-def mock_settings_repo() -> AsyncMock:
-    """A settings repository; an intermediate link never needs a timezone."""
-    repo = AsyncMock()
-    repo.get_timezone.return_value = "UTC"
-    return repo
-
-
-@pytest.fixture
-def mock_transaction() -> AsyncMock:
-    """A stand-in connection; ``@transactional`` runs unwrapped for a non-real one."""
-    return AsyncMock()
 
 
 @pytest.fixture
@@ -164,13 +151,21 @@ def service(
     mock_journal_repo: AsyncMock,
     mock_contact_repo: AsyncMock,
     mock_settings_repo: AsyncMock,
+    mock_event_publisher: AsyncMock,
 ) -> TaskService:
-    """The service under test."""
+    """The service under test.
+
+    ``mock_event_publisher`` comes from ``conftest.py``, on the same terms the
+    contact links take it: journal links get their own event type in a later
+    ITER18-003 phase, and until then the service needs a publisher it never
+    reaches. That it is never reached is asserted rather than assumed.
+    """
     return TaskService(
         task_repo=mock_task_repo,
         journal_repo=mock_journal_repo,
         contact_repo=mock_contact_repo,
         date_resolver=JournalDateResolver(mock_settings_repo),
+        event_publisher=mock_event_publisher,
     )
 
 
@@ -460,6 +455,27 @@ class TestAttachingAnIntermediateJournal:
         assert mock_contact_repo.mock_calls == []
         assert mock_settings_repo.mock_calls == []
 
+    @pytest.mark.asyncio
+    async def test_no_domain_event_is_published(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """This phase announces nothing, and the silence is deliberate.
+
+        ITER18-003 Phase 1 gave tasks *created* and *deleted* events while this
+        phase was in flight, and the specification lists "journal linked or
+        unlinked" among the events tasks should eventually emit — but that type
+        belongs to the ITER18-003 phase that adds it, budgeted there at two event
+        types per phase. Publishing one here would ship an event with no
+        projection behind it. Asserted so the absence is a decision on record
+        rather than an oversight the next phase has to guess at.
+        """
+        await attach(service, mock_transaction)
+
+        assert mock_event_publisher.mock_calls == []
+
 
 @pytest.mark.unit
 class TestDetachingAnIntermediateJournal:
@@ -604,6 +620,18 @@ class TestDetachingAnIntermediateJournal:
 
         assert mock_contact_repo.mock_calls == []
         assert mock_settings_repo.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_no_domain_event_is_published(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The same deliberate silence the attach path keeps."""
+        await detach(service, mock_transaction)
+
+        assert mock_event_publisher.mock_calls == []
 
 
 @pytest.mark.unit

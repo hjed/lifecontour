@@ -37,6 +37,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 )
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_service import TaskService
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS_FOR_TASK,
     COUNT_TASKS,
@@ -530,6 +531,7 @@ class TestTheBatchedWrite:
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),
+            event_publisher=OutboxEventPublisher(async_connection),
         )
 
         created = await service.create_task(
@@ -600,6 +602,7 @@ class TestAContactThatVanishesMidWrite:
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),
+            event_publisher=OutboxEventPublisher(async_connection),
         )
 
         with pytest.raises(ContactNotFoundError) as exc_info:
@@ -662,6 +665,7 @@ class TestTheWritesAreUnitsOfWork:
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),
+            event_publisher=OutboxEventPublisher(async_connection),
         )
 
         await service.unlink_contact(
@@ -701,6 +705,7 @@ class TestTheWritesAreUnitsOfWork:
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),
+            event_publisher=OutboxEventPublisher(async_connection),
         )
 
         await service.link_contact(

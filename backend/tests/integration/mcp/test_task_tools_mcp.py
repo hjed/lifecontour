@@ -17,6 +17,7 @@ differ at every instant.
 from typing import Any
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -48,6 +49,7 @@ from tests.integration.tasks.task_seeding import (
     linked_contact_ids,
     stored_status,
     stored_text,
+    task_events,
     task_exists,
 )
 
@@ -1294,6 +1296,93 @@ class TestDeleteTaskTool:
         assert "error" not in payload
         assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 1
         assert await stored_text(clean_database, survivor) == "somebody else's problem"
+
+
+@pytest.mark.integration
+class TestTheToolsRecordMcpProvenance:
+    """A change an assistant made must not look like one the user made.
+
+    This is the distinction the activity-history specification asks for by name,
+    and it is the case the user most needs: a task appearing or disappearing
+    because an agent did it is only comprehensible if the history says so. The
+    service defaults to ``SYSTEM``, so a tool that omitted its provenance would
+    pass every other test in this file while quietly mislabelling every change.
+    """
+
+    async def test_a_created_task_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _create_task(
+                client,
+                session_id,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text="print the permit",
+            )
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database)
+        assert event.event_type == "TaskCreated"
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_a_deleted_task_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _delete_task(client, session_id, task_id=task_id)
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskDeleted"
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_a_refused_delete_records_nothing(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """An agent asking twice must not write two deletions into the record."""
+        creating_id = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        due_id = await create_journal(
+            journal_repository,
+            title="Theirs, later",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _delete_task(client, session_id, task_id=foreign_task_id)
+
+        assert "error" in payload
+        assert await task_events(clean_database) == []
 
 
 async def _attach_journal(
