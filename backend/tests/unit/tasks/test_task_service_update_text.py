@@ -27,9 +27,11 @@ Repositories are mocked: none of this needs a database, and the SQL is covered
 by ``test_task_service_update_and_delete_integration.py``.
 """
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     Task,
     TaskNotFoundError,
@@ -45,11 +47,11 @@ from tests.unit.tasks.task_doubles import (
     ORIGINAL_TEXT,
     OTHER_USER_ID,
     TASK_ID,
+    UPDATED_TEXT,
     USER_ID,
     make_task,
+    published_events,
 )
-
-NEW_TEXT = "return Sarah's book and the DVD"
 
 
 async def update(
@@ -60,14 +62,27 @@ async def update(
     status: TaskStatus | None = None,
     user_id: str = USER_ID,
     task_id: int = TASK_ID,
+    source: Provenance | None = None,
+    changed_by: str | None = None,
 ) -> Task:
-    """Call ``update_task`` with the ordinary arguments, overriding as needed."""
+    """Call ``update_task`` with the ordinary arguments, overriding as needed.
+
+    ``source`` and ``changed_by`` are omitted entirely unless a test names one,
+    so the service's own defaults are exercised by every test that does not care
+    where the change came from — and asserted by the one that does.
+    """
+    provenance: dict[str, Any] = {}
+    if source is not None:
+        provenance["source"] = source
+    if changed_by is not None:
+        provenance["changed_by"] = changed_by
     return await service.update_task(
         user_id=user_id,
         task_id=task_id,
         text=text,
         status=status,
         transaction=transaction,
+        **provenance,
     )
 
 
@@ -87,11 +102,11 @@ class TestTextIsEditableInAnyStatus:
         """Including cancelled: a retired commitment can still be reworded."""
         mock_task_repo.find_by_id_for_update.return_value = make_task(status)
 
-        result = await update(service, mock_transaction, text=NEW_TEXT)
+        result = await update(service, mock_transaction, text=UPDATED_TEXT)
 
         saved = mock_task_repo.save.await_args.args[0]
-        assert saved.text == NEW_TEXT
-        assert result.text == NEW_TEXT
+        assert saved.text == UPDATED_TEXT
+        assert result.text == UPDATED_TEXT
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status", list(TaskStatus))
@@ -110,7 +125,7 @@ class TestTextIsEditableInAnyStatus:
         """
         mock_task_repo.find_by_id_for_update.return_value = make_task(status)
 
-        result = await update(service, mock_transaction, text=NEW_TEXT)
+        result = await update(service, mock_transaction, text=UPDATED_TEXT)
 
         saved = mock_task_repo.save.await_args.args[0]
         assert saved.status == status
@@ -125,7 +140,7 @@ class TestTextIsEditableInAnyStatus:
     ) -> None:
         """The creating journal is immutable and the due journal is retargeted
         elsewhere; neither moves because somebody fixed a typo."""
-        await update(service, mock_transaction, text=NEW_TEXT)
+        await update(service, mock_transaction, text=UPDATED_TEXT)
 
         saved = mock_task_repo.save.await_args.args[0]
         assert saved.creating_journal_id == CREATING_JOURNAL_ID
@@ -159,7 +174,7 @@ class TestNoJournalIsInvolved:
         named-method assertion passes for any method added to the port later,
         which is the opposite of what "no journal is involved" guarantees.
         """
-        await update(service, mock_transaction, text=NEW_TEXT)
+        await update(service, mock_transaction, text=UPDATED_TEXT)
 
         assert mock_journal_repo.mock_calls == []
         assert mock_contact_repo.mock_calls == []
@@ -173,7 +188,7 @@ class TestNoJournalIsInvolved:
         mock_transaction: AsyncMock,
     ) -> None:
         """Intermediate links are explicit only; nothing is inferred from an edit."""
-        await update(service, mock_transaction, text=NEW_TEXT)
+        await update(service, mock_transaction, text=UPDATED_TEXT)
 
         mock_task_repo.add_intermediate_journal.assert_not_awaited()
         mock_task_repo.add_contact.assert_not_awaited()
@@ -197,7 +212,7 @@ class TestTheReadIsOwnerScopedAndLocked:
         two calls overlap. A refactor that "simplified" this back to the plain
         read would reopen the hole Phase 6 closed, silently.
         """
-        await update(service, mock_transaction, text=NEW_TEXT)
+        await update(service, mock_transaction, text=UPDATED_TEXT)
 
         mock_task_repo.find_by_id_for_update.assert_awaited_once_with(TASK_ID, USER_ID)
         mock_task_repo.find_by_id.assert_not_awaited()
@@ -274,7 +289,7 @@ class TestUnreachableTasks:
         mock_task_repo.find_by_id_for_update.return_value = None
 
         with pytest.raises(TaskNotFoundError) as exc_info:
-            await update(service, mock_transaction, text=NEW_TEXT)
+            await update(service, mock_transaction, text=UPDATED_TEXT)
 
         assert exc_info.value.task_id == TASK_ID
         mock_task_repo.save.assert_not_awaited()
@@ -295,7 +310,7 @@ class TestUnreachableTasks:
 
         with pytest.raises(TaskNotFoundError) as exc_info:
             await update(
-                service, mock_transaction, text=NEW_TEXT, user_id=OTHER_USER_ID
+                service, mock_transaction, text=UPDATED_TEXT, user_id=OTHER_USER_ID
             )
 
         assert str(exc_info.value) == str(TaskNotFoundError(TASK_ID))
@@ -365,14 +380,14 @@ class TestTextAndStatusTogether:
         could have half of it applied.
         """
         result = await update(
-            service, mock_transaction, text=NEW_TEXT, status=TaskStatus.DONE
+            service, mock_transaction, text=UPDATED_TEXT, status=TaskStatus.DONE
         )
 
         assert mock_task_repo.save.await_count == 1
         saved = mock_task_repo.save.await_args.args[0]
-        assert saved.text == NEW_TEXT
+        assert saved.text == UPDATED_TEXT
         assert saved.status == TaskStatus.DONE
-        assert result.text == NEW_TEXT
+        assert result.text == UPDATED_TEXT
         assert result.status == TaskStatus.DONE
 
     @pytest.mark.asyncio
@@ -389,7 +404,7 @@ class TestTextAndStatusTogether:
 
         with pytest.raises(TaskStatusTransitionError):
             await update(
-                service, mock_transaction, text=NEW_TEXT, status=TaskStatus.DONE
+                service, mock_transaction, text=UPDATED_TEXT, status=TaskStatus.DONE
             )
 
         mock_task_repo.save.assert_not_awaited()
@@ -425,8 +440,290 @@ class TestTextAndStatusTogether:
     ) -> None:
         """The no-op rule is about the *request*, not about either field alone."""
         result = await update(
-            service, mock_transaction, text=NEW_TEXT, status=TaskStatus.NOT_DONE
+            service, mock_transaction, text=UPDATED_TEXT, status=TaskStatus.NOT_DONE
         )
 
         assert mock_task_repo.save.await_count == 1
-        assert result.text == NEW_TEXT
+        assert result.text == UPDATED_TEXT
+
+
+@pytest.mark.unit
+class TestTheChangeIsAnnounced:
+    """One write, one ``TaskUpdated`` — carrying only what actually moved.
+
+    The specification makes tasks first-class domain entities emitting events
+    "through the same transactional outbox and stream that contacts and journals
+    use", covering task text updated and task status changed. Both live on this
+    method, so both are asserted here; the status path's own event rules — the
+    refusal, the delegation from ``set_status`` — are in
+    ``test_task_service_set_status.py``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_reword_publishes_exactly_one_task_updated_event(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskUpdated"
+        assert event.aggregate_id == TASK_ID
+
+    @pytest.mark.asyncio
+    async def test_the_reword_is_carried_as_an_old_new_pair(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The old text comes from the read; it exists nowhere else.
+
+        Once the row is saved the previous wording is gone, so an event that
+        carried only the new text would leave the history unable to say what the
+        task used to say — which is most of what a change record is for.
+        """
+        await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["changed_fields"]["text"] == (
+            ORIGINAL_TEXT,
+            UPDATED_TEXT,
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_reword_says_nothing_about_the_status(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Only what moved is named.
+
+        A ``status`` key here — even one whose two halves are equal — would
+        project a history row claiming the user changed a status they never
+        touched.
+        """
+        await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        (event,) = published_events(mock_event_publisher)
+        assert list(event.event_data["changed_fields"]) == ["text"]
+
+    @pytest.mark.asyncio
+    async def test_text_and_status_together_publish_one_event_with_both_fields(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The decision this phase turns on: one write is one event.
+
+        A ``PATCH`` that rewords a task and completes it is a single unit of
+        work, and publishing two events for it would announce two changes where
+        one happened — and would make "every task write path publishes exactly
+        one event" false for this path alone. Asserted through the whole
+        published list rather than "a ``TaskUpdated`` is among them", because
+        the count is the claim.
+        """
+        await update(
+            service, mock_transaction, text=UPDATED_TEXT, status=TaskStatus.DONE
+        )
+
+        events = published_events(mock_event_publisher)
+        assert [event.event_type for event in events] == ["TaskUpdated"]
+        assert events[0].event_data["changed_fields"] == {
+            "text": (ORIGINAL_TEXT, UPDATED_TEXT),
+            "status": (TaskStatus.NOT_DONE.value, TaskStatus.DONE.value),
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_field_that_was_sent_but_did_not_move_is_left_out(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """A client resending the current text is not a text change.
+
+        Both surfaces send whole resources, so the text a caller "changed" is
+        routinely the text it already had. What the event names is what the
+        service *decided*, not what it was handed.
+        """
+        await update(
+            service, mock_transaction, text=ORIGINAL_TEXT, status=TaskStatus.DONE
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert list(event.event_data["changed_fields"]) == ["status"]
+
+    @pytest.mark.asyncio
+    async def test_an_update_that_changes_nothing_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """No write, no event.
+
+        A no-op that still published would put a change into the user's history
+        that never happened — and, unlike a spurious ``updated_at``, one they
+        would actually read.
+        """
+        await update(service, mock_transaction, text=ORIGINAL_TEXT)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_an_empty_update_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await update(service, mock_transaction)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_task_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.find_by_id_for_update.return_value = None
+
+        with pytest.raises(TaskNotFoundError):
+            await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_blank_text_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        with pytest.raises(TaskValidationError):
+            await update(service, mock_transaction, text="")
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_the_event_follows_the_save_rather_than_preceding_it(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The event announces a change that finished.
+
+        Ordering cannot be asserted by reading the code and is invisible in a
+        passing test that only checks *what* was published, so it is proved by
+        breaking the write: with ``save`` failing, a service that published
+        first would still have announced the change.
+        """
+        mock_task_repo.save.side_effect = RuntimeError("write failed")
+
+        with pytest.raises(RuntimeError):
+            await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_the_event_carries_the_owner(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Phase 8 scopes a task-scoped history read by this, not by the row."""
+        await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["user_id"] == USER_ID
+        assert event.event_data["task_id"] == TASK_ID
+
+    @pytest.mark.asyncio
+    async def test_a_caller_that_names_no_origin_is_recorded_as_the_system(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The default is deliberately the honest one, not "ui".
+
+        A surface that forgets to say where it is calling from files a person's
+        edit under "system" rather than mislabelling it as somebody's click —
+        wrong, but wrong in the direction that does not invent an actor. The
+        surfaces are each asserted to remember, in their own integration tests.
+        """
+        await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_a_person_editing_in_the_browser_is_recorded_as_ui(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await update(
+            service,
+            mock_transaction,
+            text=UPDATED_TEXT,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_an_ai_agent_rewording_a_task_is_recorded_as_mcp(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The case the activity-history specification exists to make visible."""
+        await update(
+            service,
+            mock_transaction,
+            text=UPDATED_TEXT,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_the_event_is_handed_the_calling_transaction(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Protocol conformance, not the atomicity guarantee.
+
+        ``OutboxEventPublisher`` never reads this field — it inserts on the
+        connection DI handed it, which is the same request connection the
+        repositories got, and *that* is what makes the outbox row live or die
+        with the task row. The evidence for it is in
+        ``test_task_events_integration.py``, against a real database.
+        """
+        await update(service, mock_transaction, text=UPDATED_TEXT)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.transaction is mock_transaction

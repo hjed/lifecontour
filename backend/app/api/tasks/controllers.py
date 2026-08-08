@@ -194,6 +194,8 @@ async def update_task(
         text=attributes.text,
         status=attributes.status,
         transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
     )
     return TaskResponse(data=_to_resource(updated, trail))
 

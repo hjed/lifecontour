@@ -29,6 +29,7 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskNotFoundError,
     TaskStatus,
+    TaskStatusTransitionError,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -46,6 +47,29 @@ from tests.integration.tasks.task_seeding import (
 )
 
 TASK_TEXT = "print the permit before the meeting"
+UPDATED_TEXT = "print the permit and the map before the meeting"
+
+
+async def _update(
+    service: TaskService,
+    connection: AsyncConnection,
+    task_id: int,
+    *,
+    text: str | None = None,
+    status: TaskStatus | None = None,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+) -> None:
+    """Change a task through the service, naming whichever fields a test needs."""
+    await service.update_task(
+        user_id=USER_ID,
+        task_id=task_id,
+        text=text,
+        status=status,
+        transaction=connection,
+        source=source,
+        changed_by=changed_by,
+    )
 
 
 async def _create(
@@ -157,6 +181,253 @@ class TestCreationLeavesAnOutboxRow:
 
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 1
         assert len(await task_events(async_connection, task_id=task_id)) == 1
+
+
+@pytest.mark.integration
+class TestAnUpdateLeavesOneOutboxRow:
+    """One ``PATCH`` is one row, however many fields it moved.
+
+    The unit tests own the decision — what goes in ``changed_fields`` — and this
+    owns the two things only a database shows: that the decision reaches
+    ``outbox_events`` as a single row, and what the projection will actually read
+    back out of the JSON column. That second one is the phase's own criterion:
+    ``[old, new]`` **after** the round trip, not the tuple that went in.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_reword_appends_exactly_one_task_updated_row(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == ["TaskCreated", "TaskUpdated"]
+        assert events[-1].aggregate_id == task_id
+
+    @pytest.mark.asyncio
+    async def test_a_status_change_appends_exactly_one_task_updated_row(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == ["TaskCreated", "TaskUpdated"]
+
+    @pytest.mark.asyncio
+    async def test_rewording_and_completing_together_still_appends_one_row(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The one-event-per-write decision, asserted against the outbox itself.
+
+        The service tests make this claim against a mock. Here it is the row
+        count in a real table, which is what a consumer would actually see — and
+        what a regression to per-field events would double.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _update(
+            service,
+            async_connection,
+            task_id,
+            text=UPDATED_TEXT,
+            status=TaskStatus.DONE,
+        )
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == ["TaskCreated", "TaskUpdated"]
+        assert set(events[-1].payload["changed_fields"]) == {"text", "status"}
+
+    @pytest.mark.asyncio
+    async def test_the_payload_describes_the_row_that_was_saved(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Whole-key, and the new text compared against the ``tasks`` row.
+
+        A service that published one wording while saving another would satisfy
+        an assertion written against the argument the test passed in.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+
+        updated = (await task_events(async_connection, task_id=task_id))[-1]
+        assert updated.payload == {
+            "task_id": task_id,
+            "user_id": USER_ID,
+            "changed_fields": {
+                "text": [TASK_TEXT, await stored_text(async_connection, task_id)]
+            },
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_status_pair_reads_back_as_an_indexable_two_element_list(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The criterion, against a real round trip rather than an in-memory one.
+
+        ``changed_fields`` is written as a tuple and stored as JSON, so what the
+        history projection eventually receives is a ``list``. It reads that list
+        by index, after guarding ``len(change) == 2`` — a payload shaped any
+        other way would not raise there, it would silently project no rows at
+        all. So the assertion is made in the form the guard applies.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.CANCELLED,
+            transaction=async_connection,
+        )
+
+        updated = (await task_events(async_connection, task_id=task_id))[-1]
+        change = updated.payload["changed_fields"]["status"]
+        assert isinstance(change, list)
+        assert len(change) == 2
+        assert change[0] == TaskStatus.NOT_DONE.value
+        assert change[1] == TaskStatus.CANCELLED.value
+
+    @pytest.mark.asyncio
+    async def test_the_row_records_when_the_change_happened(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Bracketed around the update alone, so the create's clock cannot pass it."""
+        task_id = await _create(service, async_connection, task_anchors)
+
+        before = datetime.now(UTC).replace(tzinfo=None)
+        await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+        after = datetime.now(UTC).replace(tzinfo=None)
+
+        updated = (await task_events(async_connection, task_id=task_id))[-1]
+        assert before <= updated.occurred_at <= after
+
+    @pytest.mark.asyncio
+    async def test_a_create_reword_and_status_change_read_as_a_trail(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Three writes, three distinctly identified rows, in order.
+
+        ``event_id`` is what the projection's ``ON CONFLICT DO NOTHING`` keys on,
+        so two updates to one task sharing an id would let the second be dropped
+        as a redelivery of the first — losing a change the user made.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        created, reworded, completed = await task_events(
+            async_connection, task_id=task_id
+        )
+        assert [event.event_type for event in (created, reworded, completed)] == [
+            "TaskCreated",
+            "TaskUpdated",
+            "TaskUpdated",
+        ]
+        assert created.occurred_at <= reworded.occurred_at <= completed.occurred_at
+        assert len({reworded.event_id, completed.event_id}) == 2
+        assert list(reworded.payload["changed_fields"]) == ["text"]
+        assert list(completed.payload["changed_fields"]) == ["status"]
+
+
+@pytest.mark.integration
+class TestAnUpdateThatChangedNothingLeavesNoRow:
+    """No write, no row — the half a "publishes an event" test cannot show."""
+
+    @pytest.mark.asyncio
+    async def test_resending_the_current_values_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _update(
+            service,
+            async_connection,
+            task_id,
+            text=TASK_TEXT,
+            status=TaskStatus.NOT_DONE,
+        )
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_refused_transition_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Leaving cancelled is refused, and a refusal is not a change."""
+        task_id = await _create(service, async_connection, task_anchors)
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.CANCELLED,
+            transaction=async_connection,
+        )
+
+        with pytest.raises(TaskStatusTransitionError):
+            await service.set_status(
+                user_id=USER_ID,
+                task_id=task_id,
+                status=TaskStatus.DONE,
+                transaction=async_connection,
+            )
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == ["TaskCreated", "TaskUpdated"]
+
+    @pytest.mark.asyncio
+    async def test_an_update_to_an_unknown_task_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+    ) -> None:
+        with pytest.raises(TaskNotFoundError):
+            await _update(service, async_connection, 999_999, text=UPDATED_TEXT)
+
+        assert await task_events(async_connection) == []
 
 
 @pytest.mark.integration
@@ -307,6 +578,51 @@ class TestProvenanceReachesTheRow:
         assert deleted.payload["source"] == "mcp"
         assert deleted.payload["changed_by"] == "mcp"
 
+    @pytest.mark.asyncio
+    async def test_a_ui_reword_is_recorded_as_ui(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _update(
+            service,
+            async_connection,
+            task_id,
+            text=UPDATED_TEXT,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        updated = (await task_events(async_connection, task_id=task_id))[-1]
+        assert updated.payload["source"] == "ui"
+        assert updated.payload["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_an_mcp_status_change_is_recorded_as_mcp(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Through ``set_status``, so the delegation is exercised against the row."""
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        updated = (await task_events(async_connection, task_id=task_id))[-1]
+        assert updated.payload["source"] == "mcp"
+        assert updated.payload["changed_by"] == "mcp"
+
 
 @pytest.mark.integration
 class TestTheEventAndTheWriteAreOneUnitOfWork:
@@ -357,6 +673,62 @@ class TestTheEventAndTheWriteAreOneUnitOfWork:
         assert [event.event_type for event in await task_events(async_connection)] == [
             "TaskCreated"
         ]
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_reword_leaves_the_old_text_and_no_event(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The task keeps its old wording, so no reword may be recorded.
+
+        Both halves matter: an event surviving a rolled-back write would tell the
+        user their task was reworded to something it does not say.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+                raise RuntimeError("the caller failed after the task was reworded")
+
+        assert await stored_text(async_connection, task_id) == TASK_TEXT
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_status_change_leaves_the_old_status_and_no_event(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await service.set_status(
+                    user_id=USER_ID,
+                    task_id=task_id,
+                    status=TaskStatus.DONE,
+                    transaction=async_connection,
+                )
+                raise RuntimeError("the caller failed after the task was completed")
+
+        stored_status = (
+            await async_connection.execute(
+                text("SELECT status FROM tasks WHERE id = :task_id"),
+                {"task_id": task_id},
+            )
+        ).scalar_one()
+        assert stored_status == TaskStatus.NOT_DONE.value
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
 
     @pytest.mark.asyncio
     async def test_a_rejected_create_writes_neither(
@@ -421,6 +793,39 @@ class TestNoOtherDomainIsDisturbed:
         await _create(service, async_connection, task_anchors)
 
         assert len(await task_events(async_connection)) == 1
+        after = (
+            await async_connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbox_events WHERE event_type NOT LIKE 'Task%'"
+                )
+            )
+        ).scalar_one()
+        assert after == before
+
+    @pytest.mark.asyncio
+    async def test_an_update_publishes_for_the_task_and_nothing_else(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A reword must not cascade into the journals the task is anchored to.
+
+        Both halves again: the foreign count is unchanged **and** the task's own
+        row appeared, so a service that published nothing cannot pass.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        before = (
+            await async_connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbox_events WHERE event_type NOT LIKE 'Task%'"
+                )
+            )
+        ).scalar_one()
+
+        await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+
+        assert len(await task_events(async_connection, task_id=task_id)) == 2
         after = (
             await async_connection.execute(
                 text(

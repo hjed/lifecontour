@@ -5,10 +5,20 @@ events through the same transactional outbox and stream that contacts and
 journals use, and those events project into field history exactly as contact and
 journal events do", each carrying provenance and the actor.
 
-This module holds the first two of that set — creation and hard deletion. The
-rest (text updated, status changed, due journal retargeted, journal and contact
-linked/unlinked) land in later phases, and the history projection that reads
-these payloads lands after them.
+This module holds creation, change and hard deletion. The rest (due journal
+retargeted, journal and contact linked/unlinked) land in later phases, and the
+history projection that reads these payloads lands after them.
+
+**A task's text and status changes share one event**, ``TaskUpdated``, carrying
+``changed_fields`` — not one event type per field. The phase that added it was
+worded as though there would be two, and this is the deliberate divergence: a
+single ``PATCH`` may reword a task *and* complete it, which is one write in one
+unit of work, and two events would announce two things where one happened.
+``JournalUpdated``, ``ContactUpdated``, ``RouteUpdated`` and ``GearItemUpdated``
+all take this shape, and ``HistoryService._rows_from_changed_fields`` fans a
+``changed_fields`` dict out into one ``field_history`` row per field — so the
+user still reads a distinct "text" line and a distinct "status" line in their
+history, which is the whole of what per-field event types would have bought.
 
 **Payloads are plain dictionaries, deliberately.** There are typed payload
 models in :mod:`core_shared.models.outbox_events`, but that dispatch map exists
@@ -99,6 +109,59 @@ class TaskCreated(DomainEvent):
                 "status": status.value,
                 "creating_journal_id": creating_journal_id,
                 "due_journal_id": due_journal_id,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TaskUpdated(DomainEvent):
+    """Event raised when a task's text, status, or both change.
+
+    **One event for one write**, carrying ``changed_fields`` in the
+    ``{field: (old, new)}`` shape every other updated-event in this codebase
+    uses. ``TaskService.update_task`` owns both fields precisely because a
+    ``PATCH`` may carry both and JSON:API says a request is one change; the
+    event follows that, rather than splitting a single unit of work into two
+    announcements. See the module docstring for why this diverges from the
+    phase's "event classes" wording.
+
+    **Only what actually moved is named.** Setting a task's text to the text it
+    already has puts no ``text`` key here, so a subscriber never has to tell a
+    real change from a resent value, and "every write publishes exactly one
+    event" stays true without "…except when nothing changed" attached to it.
+
+    **The pairs are ``(old, new)``, positionally.**
+    ``HistoryService._rows_from_changed_fields`` guards
+    ``len(change) == 2`` and then reads ``change[0]`` as the old value and
+    ``change[1]`` as the new one — it never looks at a key name — so the order
+    is the contract. Values must be JSON-serialisable scalars, because they
+    reach that projection through ``outbox_events.event_data`` and a Redis
+    stream: the caller passes ``TaskStatus.value``, not the enum member. The
+    tuples arrive there as lists, which is what the guard already expects.
+    """
+
+    def __init__(
+        self,
+        task_id: int,
+        user_id: str,
+        changed_fields: dict[str, Any],
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"task_updated_{task_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=task_id,
+            event_type="TaskUpdated",
+            event_data={
+                "task_id": task_id,
+                "user_id": user_id,
+                "changed_fields": changed_fields,
                 "source": source.value,
                 "changed_by": changed_by,
             },

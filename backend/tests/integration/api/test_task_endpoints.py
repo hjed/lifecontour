@@ -2519,6 +2519,124 @@ class TestTheEndpointRecordsUiProvenance:
         assert event.payload["source"] == Provenance.UI.value
         assert event.payload["changed_by"] == "ui"
 
+    async def test_a_reworded_task_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(task_id, text="print the permit and the map"),
+        )
+        assert response.status_code == 200
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_a_status_change_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The same endpoint, the other field — and the same threading.
+
+        Both halves are asserted because the endpoint passes provenance once,
+        for the whole call: a test that only ever reworded would keep passing if
+        the status path grew its own service call that forgot to.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(task_id, status=TaskStatus.DONE.value),
+        )
+        assert response.status_code == 200
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {"status": ["not_done", "done"]}
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_rewording_and_completing_in_one_request_records_one_change(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """One ``PATCH`` is one change, through the surface a person uses.
+
+        JSON:API says a request is one change and the service publishes one
+        event for it; this asserts that end to end, so a future split into
+        per-field events would have to change a test written from the user's
+        side rather than only a service one.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(
+                task_id,
+                text="print the permit and the map",
+                status=TaskStatus.DONE.value,
+            ),
+        )
+        assert response.status_code == 200
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.payload["changed_fields"] == {
+            "text": ["print the permit", "print the permit and the map"],
+            "status": ["not_done", "done"],
+        }
+
+    async def test_a_patch_that_changes_nothing_records_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Resending the current values is what a form submit routinely does."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(
+                task_id, text="print the permit", status=TaskStatus.NOT_DONE.value
+            ),
+        )
+        assert response.status_code == 200
+
+        assert await task_events(async_connection, task_id=task_id) == []
+
     async def test_a_refused_delete_records_nothing(
         self,
         authenticated_client: AsyncClient,

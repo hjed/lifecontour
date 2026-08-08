@@ -25,15 +25,29 @@ import inspect
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
 
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_service import TaskService
+from tests.unit.tasks.task_doubles import published_events
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
 
 TASK_ID = 7
+
+
+def _task(status: TaskStatus = TaskStatus.NOT_DONE) -> Task:
+    """A persisted task for the wrapper tests to change."""
+    return Task(
+        id=TASK_ID,
+        user_id=USER_ID,
+        text="return Sarah's book",
+        creating_journal_id=1,
+        due_journal_id=3,
+        status=status,
+    )
 
 
 @pytest.fixture
@@ -192,6 +206,90 @@ class TestTheTrailIsReadInsideTheWritesUnitOfWork:
         # rules — those have their own file.
         assert retargeted is task
         assert trail == [11, 22]
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "create_task_with_trail",
+            "update_task_with_trail",
+            "set_status_with_trail",
+        ],
+    )
+    def test_each_wrapper_over_a_publishing_write_takes_provenance(
+        self, method: str
+    ) -> None:
+        """A wrapper that swallowed these would relabel every change ``SYSTEM``.
+
+        The surfaces call the wrappers, not the writes beneath them, so the
+        wrapper is now the hop where provenance is lost — and losing it is a
+        *silent success*: the task still changes, an event is still published,
+        and the only symptom is that a person's edit and an assistant's edit
+        become indistinguishable in the user's own history.
+
+        ``retarget_due_journal_with_trail`` is deliberately absent: retargeting
+        publishes no event yet, so it has nothing to carry provenance *for*. The
+        phase that gives it one adds it here.
+        """
+        parameters = inspect.signature(
+            inspect.unwrap(getattr(TaskService, method))
+        ).parameters
+
+        assert "source" in parameters
+        assert "changed_by" in parameters
+
+    async def test_the_update_wrapper_carries_provenance_to_the_event(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """The signature is necessary but not sufficient — this is the behaviour.
+
+        A wrapper could take both arguments and forward neither, which the
+        signature test above would not catch.
+        """
+        mock_task_repo.find_by_id_for_update.return_value = _task()
+        mock_task_repo.save.side_effect = lambda task: task
+
+        await service.update_task_with_trail(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            text="return Sarah's book and the DVD",
+            transaction=AsyncMock(),
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    async def test_the_status_wrapper_carries_provenance_across_both_hops(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """Wrapper → ``set_status`` → ``update_task``, which is what publishes.
+
+        Three methods, two hops, and either one dropping the pair is invisible
+        from everywhere except the stored event.
+        """
+        mock_task_repo.find_by_id_for_update.return_value = _task()
+        mock_task_repo.save.side_effect = lambda task: task
+
+        await service.set_status_with_trail(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            status=TaskStatus.DONE,
+            transaction=AsyncMock(),
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
 
     async def test_the_wrapper_reads_the_trail_owner_scoped(
         self, service: TaskService, mock_task_repo: AsyncMock
