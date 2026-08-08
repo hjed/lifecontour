@@ -15,6 +15,9 @@ from core_shared.models.tasks import (
     TaskDomainError,
     TaskDueJournalNotFutureError,
     TaskNotFoundError,
+    TaskReopenNotAcknowledgedError,
+    TaskStatus,
+    TaskStatusTransitionError,
     TaskValidationError,
 )
 
@@ -79,3 +82,73 @@ class TestTaskErrorMapping:
         response = create_domain_error_response(TaskDomainError("something", 400))
 
         assert response.errors[0].code == "DOMAIN_ERROR"
+
+
+@pytest.mark.unit
+class TestTheUnacknowledgedReopenIsTellableApart:
+    """A refusal a surface can act on, rather than one it can only display.
+
+    Retargeting a *done* task reopens it, and the specification says the product
+    must say so before it happens. That is only buildable if the refusal is
+    distinguishable: a surface that can tell this apart from a validation
+    failure can offer *"reopen it anyway"*, while one that cannot has only
+    *"invalid"* to show — which is not a choice a user can act on.
+
+    This is the item Phase 7 carried forward. Until the code existed, a REST
+    caller saw the generic ``DOMAIN_ERROR``, which is exactly the outcome the
+    phase's third acceptance criterion rules out.
+    """
+
+    def test_it_has_its_own_code(self) -> None:
+        response = create_domain_error_response(TaskReopenNotAcknowledgedError(7))
+
+        assert response.errors[0].code == "TASK_REOPEN_NOT_ACKNOWLEDGED"
+
+    def test_it_is_a_conflict_rather_than_a_bad_request(self) -> None:
+        """The body is well formed and the journal is real, future and owned.
+
+        What it conflicts with is the state the task is in, which is 409 for the
+        same reason a refused status transition is.
+        """
+        response = create_domain_error_response(TaskReopenNotAcknowledgedError(7))
+
+        assert response.errors[0].status == "409"
+
+    def test_it_does_not_fall_through_to_the_generic_domain_error(self) -> None:
+        """The failure Phase 7 carried forward, pinned where it happened.
+
+        An unmapped ``TaskDomainError`` renders as ``DOMAIN_ERROR``, which is
+        precisely what this error did before it was given a code — correct while
+        no endpoint raised it, and useless to the endpoint that now does.
+        """
+        reopen = create_domain_error_response(TaskReopenNotAcknowledgedError(7))
+        unmapped = create_domain_error_response(TaskDomainError("something", 409))
+
+        assert unmapped.errors[0].code == "DOMAIN_ERROR"
+        assert reopen.errors[0].code != unmapped.errors[0].code
+
+    def test_it_is_told_apart_from_a_refused_status_transition(self) -> None:
+        """Both are 409s about a task's state, and they are not the same refusal.
+
+        A refused transition tells the caller to retarget; this one *is* the
+        retarget, and tells them to confirm. Sharing a code would send a client
+        round in a circle.
+        """
+        reopen = create_domain_error_response(TaskReopenNotAcknowledgedError(7))
+        transition = create_domain_error_response(
+            TaskStatusTransitionError(TaskStatus.CANCELLED, TaskStatus.DONE)
+        )
+
+        assert reopen.errors[0].status == transition.errors[0].status == "409"
+        assert reopen.errors[0].code != transition.errors[0].code
+
+    def test_the_detail_names_the_task_and_the_way_through(self) -> None:
+        """An actionable error says what to do, not merely what went wrong."""
+        detail = (
+            create_domain_error_response(TaskReopenNotAcknowledgedError(7))
+            .errors[0]
+            .detail
+        )
+
+        assert "7" in (detail or "")
+        assert "acknowledge" in (detail or "").lower()

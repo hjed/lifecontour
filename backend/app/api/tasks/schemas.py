@@ -45,6 +45,10 @@ from app.api.common.schemas import (
 RESOURCE_TYPE_DESC = "Resource type"
 TASK_RESOURCE_TYPE: Literal["tasks"] = "tasks"
 CONTACT_RESOURCE_TYPE: Literal["contacts"] = "contacts"
+# An operation rather than a resource, named the way ``journal-merge`` is: the
+# retarget body is an instruction with its own preconditions, not a task's
+# attributes.
+TASK_RETARGET_RESOURCE_TYPE: Literal["task-retarget"] = "task-retarget"
 
 
 class TaskAttributes(BaseModel):
@@ -57,6 +61,14 @@ class TaskAttributes(BaseModel):
     )
     due_journal_id: int = Field(
         ..., description="The journal the commitment is due in; may be retargeted"
+    )
+    intermediate_journal_ids: list[int] = Field(
+        default_factory=list,
+        description=(
+            "The journals this task has passed through — discussed, revisited, "
+            "or previously due — oldest link first. Neither anchor appears here, "
+            "though a journal may be both an anchor and an intermediate link."
+        ),
     )
     created_at: datetime | None = Field(default=None, description="Creation timestamp")
     updated_at: datetime | None = Field(default=None, description="Last update")
@@ -178,6 +190,79 @@ class TaskUpdateRequest(JsonApiUpdateRequest[TaskUpdateData]):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+
+class TaskRetargetAttributes(BaseModel):
+    """What a client may send to move a task onto a new due journal.
+
+    Two fields, and the reasoning for what is *not* here is the same reasoning
+    that keeps this off the status ``PATCH`` altogether. A retarget is not a
+    field assignment: it forces the status to *not done* and writes an
+    intermediate link, so a ``status`` alongside a ``due_journal_id`` would be a
+    second answer to a question the operation has already settled. There is no
+    ``creating_journal_id`` for the reason the create attributes have none —
+    *"set once and never changes"* is enforced by there being nothing to send —
+    and no date, because a task is due in a journal that already exists.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    due_journal_id: DatabaseId = Field(
+        ...,
+        description=(
+            "The future-dated journal this task should now be due in. Must be an "
+            "existing journal of yours, dated after today in your timezone — the "
+            "rule is re-checked here, whatever the task's current status."
+        ),
+    )
+    acknowledge_reopen: bool = Field(
+        default=False,
+        description=(
+            "Confirms that reopening a *done* task is intended. Retargeting "
+            "always leaves a task not done, so moving a completed task's due "
+            "journal reopens it; without this the request is refused with "
+            "TASK_REOPEN_NOT_ACKNOWLEDGED. Ignored for any other status — "
+            "retargeting is the documented way out of cancelled and needs no "
+            "confirmation."
+        ),
+    )
+
+
+class TaskRetargetData(BaseModel):
+    """Data for retargeting a task.
+
+    The type names the **operation**, as ``journal-merge`` does, rather than the
+    ``tasks`` resource: the body is an instruction with its own preconditions,
+    not the task's own attributes. There is no ``id`` member for the same
+    reason — the request does not describe a task, so there is nothing here for
+    a task id to identify, and the path already says which one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["task-retarget"] = Field(
+        default=TASK_RETARGET_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    attributes: TaskRetargetAttributes = Field(
+        ...,
+        description="Where the task should now be due, and whether a reopen "
+        "is intended",
+    )
+
+
+class TaskRetargetRequest(BaseModel):
+    """Request model for retargeting a task's due journal.
+
+    Forbids extras at all three levels, as the create and update requests
+    ended up doing. It matters more here than anywhere else on this surface: a
+    misspelled ``acknowledge_reopen`` that was silently dropped would leave a
+    caller believing it had confirmed a reopen, and the request would be refused
+    for a reason the caller thought it had already answered.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: TaskRetargetData = Field(..., description="The retarget to perform")
 
 
 class TaskContactLinkData(BaseModel):

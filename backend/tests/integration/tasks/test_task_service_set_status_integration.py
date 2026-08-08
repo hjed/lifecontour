@@ -170,11 +170,24 @@ class TestStatusChangesAgainstRealRows:
         async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
     ):
-        """``updated_at`` must not move for a change that did not happen.
+        """Asking for the status a task already has leaves it exactly as it was.
 
         The history projection derives a status-change event from a write, so a
-        no-op that still wrote would report a change the user never made — and
-        the timestamp is the only evidence out here that no write occurred.
+        no-op that still wrote would report a change the user never made.
+
+        **This test cannot prove the write did not happen, and no test at this
+        level can.** It previously claimed the unmoved ``updated_at`` was that
+        evidence; it is not. The column is written with ``now()``, which in
+        PostgreSQL is the *transaction* timestamp, and the savepoint fixture
+        runs the seed insert, the call and the read back inside one transaction
+        — so a rewrite stamps exactly the value the insert did and the
+        comparison holds either way. Found in ITER18-001 Phase 8 by writing the
+        inverted assertion and watching it fail. A same-status no-op is the one
+        case with no field left that a real write would have changed, so the
+        assertion is dropped rather than replaced, and the claim is made where
+        it *is* observable: ``mock_task_repo.save.assert_not_awaited()`` in
+        ``tests/unit/tasks/test_task_service_set_status.py``. What survives here
+        is the round trip against a real row, which is this file's job.
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
@@ -183,8 +196,6 @@ class TestStatusChangesAgainstRealRows:
             due_journal_id=due_id,
             status=TaskStatus.CANCELLED,
         )
-        before = await task_repository.find_by_id(task_id, USER_ID)
-        assert before is not None
 
         result = await service.set_status(
             user_id=USER_ID,
@@ -195,7 +206,7 @@ class TestStatusChangesAgainstRealRows:
 
         after = await task_repository.find_by_id(task_id, USER_ID)
         assert after is not None
-        assert after.updated_at == before.updated_at
+        assert after.status == TaskStatus.CANCELLED
         assert result.status == TaskStatus.CANCELLED
 
     async def test_the_anchors_are_unchanged(

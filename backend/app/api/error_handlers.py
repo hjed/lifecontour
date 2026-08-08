@@ -42,6 +42,7 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskNotFoundError,
+    TaskReopenNotAcknowledgedError,
     TaskStatusTransitionError,
     TaskValidationError,
 )
@@ -159,6 +160,12 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         TaskAnchorJournalNotFoundError: "TASK_ANCHOR_JOURNAL_NOT_FOUND",
         TaskDueJournalNotFutureError: "TASK_DUE_JOURNAL_NOT_FUTURE",
         TaskStatusTransitionError: "TASK_STATUS_TRANSITION_REFUSED",
+        # Its own code rather than the generic fallback, because the surface has to
+        # be able to tell it apart to offer *"reopen it anyway"*. Carried forward
+        # from the phase that introduced the error with no endpoint able to raise
+        # it: until the retarget route existed this rendered as ``DOMAIN_ERROR``,
+        # which is correct for an unreachable error and useless to a reachable one.
+        TaskReopenNotAcknowledgedError: "TASK_REOPEN_NOT_ACKNOWLEDGED",
         # Calendar errors
         CalendarNotFoundError: "CALENDAR_NOT_FOUND",
         CalendarValidationError: "CALENDAR_VALIDATION_ERROR",

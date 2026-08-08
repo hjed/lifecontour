@@ -42,8 +42,11 @@ from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
     create_task,
+    intermediate_journal_ids,
     link_contact,
+    link_intermediate_journal,
     linked_contact_ids,
+    stored_anchors,
     stored_status,
 )
 
@@ -956,3 +959,607 @@ class TestIdsOutsideTheColumnsRange:
 
         assert '"isError":true' in response.text
         assert await linked_contact_ids(clean_database, task_id) == []
+
+
+async def _retarget_task(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "retarget_task", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+@pytest.mark.integration
+class TestRetargetTaskTool:
+    """The retarget over ``tools/call``: the same answers an HTTP client gets.
+
+    Asserted separately from the endpoint rather than inferred from the shared
+    service, for the reason this file exists: a tool can validate too little,
+    flatten an actionable refusal into something a model cannot act on, or open
+    a transaction the service already owns.
+
+    Trails of more than one journal are compared **sorted**, for the reason the
+    endpoint tests give: the port orders by ``created_at``, which ties when
+    several links are written inside one fixture transaction, so the tie-break's
+    order is an artefact of the fixture rather than a property of the surface.
+    """
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_a_retarget_lands_the_task_not_done_on_the_new_journal(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """*"Retargeting always leaves the task not done"*, per starting status."""
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client,
+                session_id,
+                task_id=task_id,
+                due_journal_id=later_id,
+                acknowledge_reopen=True,
+            )
+
+        assert "error" not in payload
+        assert payload["status"] == "not_done"
+        assert payload["due_journal_id"] == later_id
+        assert payload["creating_journal_id"] == creating_id
+        assert await stored_status(clean_database, task_id) == "not_done"
+        assert await stored_anchors(clean_database, task_id) == (creating_id, later_id)
+
+    async def test_the_answer_carries_the_journal_the_task_just_left(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The trail, in the same call — an agent has no read tool to ask with.
+
+        This is the phase's second criterion on the surface where it matters
+        most: there is still no way to read a task back over MCP, so a trail
+        left out of this answer would be unreachable rather than merely
+        inconvenient.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=later_id
+            )
+
+        assert payload["intermediate_journal_ids"] == [due_id]
+
+    async def test_a_repeatedly_deferred_task_accumulates_its_trail(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Three hops, two of them returning to a journal already in the trail."""
+        creating_id, due_id = task_anchors
+        second = await create_journal(
+            journal_repository, title="Two weeks out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            for target in (second, due_id):
+                await _retarget_task(
+                    client, session_id, task_id=task_id, due_journal_id=target
+                )
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=second
+            )
+
+        assert sorted(payload["intermediate_journal_ids"]) == sorted([due_id, second])
+        assert sorted(await intermediate_journal_ids(clean_database, task_id)) == (
+            sorted([due_id, second])
+        )
+
+    async def test_a_lapsed_task_is_resurrected_and_keeps_the_passed_journal(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The journal being left is never judged, so a lapsed task is reachable."""
+        creating_id, _ = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        future_id = await create_journal(
+            journal_repository, title="Next week", days_offset=7
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=passed_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=future_id
+            )
+
+        assert payload["due_journal_id"] == future_id
+        assert payload["intermediate_journal_ids"] == [passed_id]
+
+    async def test_retargeting_onto_the_current_due_journal_writes_nothing(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A no-op, needing no acknowledgement even on a *done* task.
+
+        The *done* status is the evidence rather than ``updated_at``: any path
+        other than the no-op would either have refused the call for want of an
+        acknowledgement or written *not done* over it. Comparing timestamps
+        cannot fail here — the row is stamped with ``now()``, which is the
+        transaction timestamp, and the fixture runs the whole test in one.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=due_id
+            )
+
+        assert "error" not in payload
+        assert payload["status"] == "done"
+        assert await stored_status(clean_database, task_id) == "done"
+        assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+
+@pytest.mark.integration
+class TestEveryTaskReturningToolAnswersTheSameShape:
+    """One task shape, whichever tool produced it.
+
+    The retarget tests above prove the trail on the *retarget*. This proves the
+    other two, and it is asserted here rather than inferred from the shared
+    ``_task_to_dict`` for the reason the whole file exists: a shared helper is
+    no evidence that both callers pass it the right thing, and a tool that
+    dropped the argument would still return a perfectly valid-looking task.
+    """
+
+    async def test_a_created_task_reports_an_empty_trail(
+        self,
+        authenticated_lifespan_client,
+        task_anchors: tuple[int, int],
+    ):
+        """Creation writes no intermediate link, and says so rather than omitting it."""
+        creating_id, due_id = task_anchors
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _create_task(
+                client,
+                session_id,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text="print the permit",
+            )
+
+        assert payload["intermediate_journal_ids"] == []
+
+    async def test_a_status_change_reports_the_trail_the_task_already_had(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Answering ``[]`` here would be a lie rather than an omission.
+
+        It matters more over MCP than over HTTP: no tool reads a task back, so
+        this answer is the only place an agent could learn the trail.
+        """
+        creating_id, due_id = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Where it used to be due", days_offset=-7
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await link_intermediate_journal(
+            clean_database, task_id=task_id, journal_id=passed_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _set_task_status(
+                client, session_id, task_id=task_id, status="done"
+            )
+
+        assert payload["intermediate_journal_ids"] == [passed_id]
+
+
+@pytest.mark.integration
+class TestTheReopenGateReachesAnAgent:
+    """An agent must be told *why*, and how to proceed, not merely refused.
+
+    The specification says the product must say a done task is being reopened
+    before it happens. Over MCP the model is the one being told, so the message
+    has to name the acknowledgement — a refusal a model cannot act on becomes a
+    retry loop.
+    """
+
+    async def test_an_unacknowledged_reopen_is_refused_with_an_actionable_message(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=later_id
+            )
+
+        assert payload["error"] == "Task error"
+        assert "acknowledge" in payload["message"].lower()
+
+    async def test_the_refusal_writes_nothing_at_all(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Not the status, not the anchor, and not the automatic link."""
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=later_id
+            )
+
+        assert await stored_status(clean_database, task_id) == "done"
+        assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_the_same_call_acknowledged_reopens_the_task(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client,
+                session_id,
+                task_id=task_id,
+                due_journal_id=later_id,
+                acknowledge_reopen=True,
+            )
+
+        assert "error" not in payload
+        assert payload["status"] == "not_done"
+        assert await stored_status(clean_database, task_id) == "not_done"
+
+    async def test_a_cancelled_task_is_reopened_without_any_acknowledgement(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """This is where ``set_task_status``'s refusal sends a model.
+
+        Gating it would send the model back and forth between two refusals, each
+        naming the other.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=later_id
+            )
+
+        assert "error" not in payload
+        assert payload["status"] == "not_done"
+
+    async def test_the_gate_is_checked_after_the_journal_rules(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A done task onto a *past* journal hears about the journal, not the gate.
+
+        The acknowledgement is a confirmation rather than a validation, so a
+        caller is never asked to confirm a request that was never going to
+        succeed. Pinned here as well as on the endpoint because the tool could
+        reorder it independently: every other test in this file either supplies
+        the acknowledgement or names a valid journal, so moving the gate to the
+        top of the tool would leave them all green.
+        """
+        creating_id, due_id = task_anchors
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=past_id
+            )
+
+        assert payload["error"] == "Task error"
+        assert "not after today" in payload["message"]
+        assert "acknowledge" not in payload["message"].lower()
+        assert await stored_status(clean_database, task_id) == "done"
+
+
+@pytest.mark.integration
+class TestTheRetargetToolRevalidatesTheJournalRules:
+    """Invariant 4 and ownership, re-run for an AI caller too."""
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_a_past_dated_journal_is_refused_with_both_dates(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """A model given only "refused" will propose the same journal again."""
+        creating_id, due_id = task_anchors
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client,
+                session_id,
+                task_id=task_id,
+                due_journal_id=past_id,
+                acknowledge_reopen=True,
+            )
+
+        assert payload["error"] == "Task error"
+        assert "not after today" in payload["message"]
+        assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_another_users_journal_reads_as_an_absent_one(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Otherwise the tool becomes a way to probe another user's journals."""
+        creating_id, due_id = task_anchors
+        foreign_id = await create_journal(
+            journal_repository,
+            title="Somebody else's trip",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=foreign_id
+            )
+            absent = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=999_999
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(foreign_id), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
+
+    async def test_another_users_task_is_reported_as_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """And is left exactly where it was."""
+        _, due_id = task_anchors
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _retarget_task(
+                client, session_id, task_id=foreign_task, due_journal_id=due_id
+            )
+            absent = await _retarget_task(
+                client, session_id, task_id=999_999, due_journal_id=due_id
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(foreign_task), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await stored_anchors(clean_database, foreign_task) == (
+            foreign_journal,
+            foreign_journal,
+        )
+
+
+@pytest.mark.integration
+class TestRejectedRetargetArguments:
+    """What the transport refuses before the service is ever reached."""
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"now": "2020-01-01T00:00:00+00:00"},
+            {"creating_journal_id": 1},
+            {"status": "done"},
+            {"due_date": "2026-09-01"},
+        ],
+        ids=["now", "the creating journal", "a status", "a bare date"],
+    )
+    async def test_an_argument_the_schema_does_not_offer_is_rejected(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        extra: dict[str, Any],
+    ):
+        """The schema's absences are enforced by the transport, not merely stated.
+
+        ``now`` is the seam invariant 4 is judged against; the creating journal
+        is immutable; a retarget's status is not the caller's to choose; and a
+        task is due in a journal rather than on a date.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "retarget_task",
+                {"task_id": task_id, "due_journal_id": later_id, **extra},
+            )
+
+        assert '"isError":true' in response.text
+        assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
+
+    @pytest.mark.parametrize("field", ["task_id", "due_journal_id"])
+    async def test_an_id_beyond_int32_is_refused_before_the_driver_sees_it(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        field: str,
+    ):
+        """Bounded in the schema, so it is a rejection rather than an internal error."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        arguments: dict[str, Any] = {"task_id": task_id, "due_journal_id": due_id}
+        arguments[field] = 2_147_483_648
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(client, session_id, "retarget_task", arguments)
+
+        assert '"isError":true' in response.text
+        assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)

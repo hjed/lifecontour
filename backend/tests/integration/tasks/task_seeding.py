@@ -207,6 +207,19 @@ async def stored_status(conn: AsyncConnection, task_id: int) -> str:
     )
 
 
+# There is deliberately **no** ``stored_updated_at`` helper, and this note is
+# here so it is not added again. A no-op looks like it should be provable by the
+# timestamp not moving, but it is not provable that way under these fixtures:
+# ``tasks.updated_at`` is written with ``now()``, which in PostgreSQL is the
+# *transaction* timestamp, and every statement in a test — the seed insert, the
+# write under test, the read back — shares the fixture's single transaction. So
+# a rewrite stamps exactly the value the insert did, and an assertion that the
+# timestamp is unchanged holds whether or not anything was written. Probed
+# rather than reasoned about: a test asserting the timestamp *does* move on a
+# real write fails. Prove a no-op with a field the operation would have changed
+# — the status, an anchor, or a link row — each of which can fail.
+
+
 async def stored_anchors(conn: AsyncConnection, task_id: int) -> tuple[int, int]:
     """The task's two anchor columns as ``(creating, due)``, straight from the row.
 

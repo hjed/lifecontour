@@ -185,6 +185,141 @@ class TestSetTaskStatusDocumentsItself:
 
 
 @pytest.fixture
+async def retarget_task_schema() -> dict[str, Any]:
+    """The ``retarget_task`` tool as an MCP client actually sees it."""
+    return await _tool_schema("retarget_task")
+
+
+class TestRetargetTaskToolParameters:
+    """What an AI client may send to move a task onto a new due journal."""
+
+    def test_the_task_and_the_new_due_journal_are_required(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        required = set(retarget_task_schema["input_schema"]["required"])
+
+        assert required == {"task_id", "due_journal_id"}
+
+    def test_the_acknowledgement_is_optional_and_defaults_to_not_given(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """An agent that has not been asked to reopen a done task must not.
+
+        The default is the whole point of the gate: a model reaching for this
+        tool to extend a deadline should be stopped and told, rather than
+        quietly undoing a completion.
+        """
+        schema = retarget_task_schema["input_schema"]
+
+        assert "acknowledge_reopen" not in schema["required"]
+        assert schema["properties"]["acknowledge_reopen"]["default"] is False
+
+    @pytest.mark.parametrize("parameter", ["task_id", "due_journal_id"])
+    def test_every_id_is_bounded_to_what_a_column_can_hold(
+        self, retarget_task_schema: dict[str, Any], parameter: str
+    ) -> None:
+        """Python's ``int`` is unbounded; ``INTEGER`` is not.
+
+        Without the bound, ``2147483648`` reaches asyncpg's parameter binding
+        and dies there — a 500 for an id no row could ever have.
+        """
+        schema = retarget_task_schema["input_schema"]["properties"][parameter]
+
+        assert schema["minimum"] == 1
+        assert schema["maximum"] == 2_147_483_647
+
+    def test_injected_collaborators_are_not_part_of_the_contract(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        properties = retarget_task_schema["input_schema"]["properties"]
+
+        assert "task_service" not in properties
+        assert "db_connection" not in properties
+
+
+class TestTheRetargetReachesNeitherTheNowSeamNorTheCreatingJournal:
+    """Two absences, each enforcing a rule the tool must not be able to break."""
+
+    def test_the_schema_has_no_now_parameter(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """Invariant 4 is revalidated on a retarget, and stays non-optional."""
+        assert "now" not in retarget_task_schema["input_schema"]["properties"]
+
+    def test_the_schema_offers_no_creating_journal(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """*"Set once and never changes"*, enforced by there being nothing to send.
+
+        The service has no parameter for it either; this asserts the tool did
+        not invent one on the way past.
+        """
+        properties = retarget_task_schema["input_schema"]["properties"]
+
+        assert "creating_journal_id" not in properties
+
+    def test_the_schema_offers_no_bare_date(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """The new due journal must be a journal that already exists."""
+        properties = retarget_task_schema["input_schema"]["properties"]
+
+        assert not [name for name in properties if "date" in name]
+
+    def test_the_schema_offers_no_status(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """A retarget always lands on *not done*; there is nothing to choose."""
+        assert "status" not in retarget_task_schema["input_schema"]["properties"]
+
+
+class TestTheRetargetToolDocumentsItself:
+    """A model only learns these rules from the schema it is given."""
+
+    def test_the_tool_has_a_description(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        assert len(retarget_task_schema["description"]) > 0
+
+    def test_the_description_says_a_done_task_is_reopened(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """Otherwise the refusal is the first the model hears of the rule."""
+        description = retarget_task_schema["description"].lower()
+
+        assert "done" in description
+        assert "reopen" in description
+
+    def test_the_description_says_this_is_the_way_out_of_cancelled(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """``set_task_status`` sends a model here; this is where it arrives."""
+        description = retarget_task_schema["description"].lower()
+
+        assert "cancelled" in description
+
+    def test_the_due_journal_parameter_states_the_constraint(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """The future-dated rule is revalidated here, so it is stated here."""
+        description = retarget_task_schema["input_schema"]["properties"][
+            "due_journal_id"
+        ]["description"]
+
+        assert "future" in description.lower()
+
+    def test_the_acknowledgement_parameter_says_what_it_confirms(
+        self, retarget_task_schema: dict[str, Any]
+    ) -> None:
+        """A bare boolean is not a thing a model can decide to send."""
+        description = retarget_task_schema["input_schema"]["properties"][
+            "acknowledge_reopen"
+        ]["description"].lower()
+
+        assert "done" in description
+
+
+@pytest.fixture
 async def link_contact_schema() -> dict[str, Any]:
     """The ``link_task_to_contact`` tool as an MCP client actually sees it."""
     return await _tool_schema("link_task_to_contact")

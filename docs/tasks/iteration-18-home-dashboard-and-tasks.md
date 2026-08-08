@@ -2,10 +2,12 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **62 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–7 complete** (task tables + domain entity; task repository; journal-date resolution
-and the future-dated rule; the creation service and its core invariants; create over REST and MCP; the
-status lifecycle over service, REST and MCP; and retargeting semantics in the service — the model's one
-automatic link, and its only way back out of a terminal status).
+**ITER18-001 Phases 1–8 and 11 complete** (task tables + domain entity; task repository; journal-date
+resolution and the future-dated rule; the creation service and its core invariants; create over REST and
+MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
+one automatic link, and its only way back out of a terminal status — and then retargeting over REST and
+MCP, which also makes a task's journal trail visible in every task response; and contact links over
+service, REST and MCP).
 **ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
 for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
 blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
@@ -110,9 +112,20 @@ retains the previous due journal as an intermediate journal (the model's one aut
 de-duplicated by the repository's idempotent add), and always lands the task on *not done* — which makes
 it the only way out of *cancelled* and, behind a required acknowledgement, out of *done*. Asking for the
 journal a task is already due in is a no-op. The new refusal is `TaskReopenNotAcknowledgedError` (409).
-The creating journal remains unreachable: no service method other than `create_task` accepts one. There
-is still **no retarget surface** — no endpoint and no MCP tool until Phase 8 — and still no way to read a
-task back.
+The creating journal remains unreachable: no service method other than `create_task` accepts one.
+
+**Since ITER18-001 Phase 8:** the due journal is retargetable by a user and by an agent.
+`POST /api/tasks/{task_id}/retarget` (an action sub-resource, the shape
+`POST /api/journals/{id}/merge` uses, rather than a field on the status `PATCH`) and the MCP tool
+`retarget_task` both call the `@transactional` service and open no transaction of their own, both carry
+the `acknowledge_reopen` confirmation, and both refuse an unacknowledged reopen with
+`TASK_REOPEN_NOT_ACKNOWLEDGED` — the error code Phase 7 carried forward, now in
+`app/api/error_handlers.py`, which is what lets a surface offer *"reopen it anyway"* instead of showing
+a generic failure. **Every task response now carries `intermediate_journal_ids`** — create, status
+`PATCH` and retarget alike — read through the new non-transactional
+`TaskService.list_intermediate_journal_ids`, so a caller sees the journal a task has just left without a
+second request. There is still no way to **read** a task back: no get, no list, no frontend surface, and
+no text edit, delete or explicit intermediate-journal link.
 
 **Since ITER18-001 Phase 11:** a task's contacts are editable.
 `POST`/`DELETE /api/tasks/{task_id}/relationships/contacts[/{contact_id}]` and the MCP tools
@@ -1740,7 +1753,9 @@ revalidation. Integration — retarget round-trip with real journals. No e2e.
   without one (status, both anchors and the link table all unchanged) and reopened with one; the creating
   anchor, text and `created_at` unmoved; a past-dated journal refused for every starting status; another
   user's journal refused byte-identically to an absent one; another user's task and an absent id both
-  unreachable and unchanged; the same-journal no-op on a **lapsed** task leaving `updated_at` alone; both
+  unreachable and unchanged; the same-journal no-op on a **lapsed** task (originally asserted by
+  `updated_at` not moving, which Phase 8 found could not fail under these fixtures and replaced with the
+  status and anchors — see that phase's decisions); both
   writes proved to run inside one open unit of work (the phase's decorator-sensitive test) with none left
   open; and an overlapping `set_status(done)` proving a retarget cannot reopen without the
   acknowledgement.
@@ -1785,28 +1800,224 @@ read on the journal domain's port, taken *after* the task row lock on the retarg
 exactly the inversion ITER18-002 Phase 6 exists to remove. Recorded in `_require_future_dated`'s docstring
 so it is not re-raised.
 
-**Carried forward to Phase 8.** `TaskReopenNotAcknowledgedError` is not yet in the JSON:API error-code
-table in `backend/app/api/error_handlers.py`, so a REST surface would render it as the generic
-`DOMAIN_ERROR`. That is correct today — no endpoint raises it — but it is exactly what Phase 8's
-"returns a distinguishable error, not a generic validation failure" criterion depends on, and what makes
-a *"reopen it anyway"* affordance possible. It must be given its own code in the same PR as the surface.
+**Carried forward to Phase 8 — now closed there.** `TaskReopenNotAcknowledgedError` was not in the
+JSON:API error-code table in `backend/app/api/error_handlers.py`, so a REST surface would have rendered
+it as the generic `DOMAIN_ERROR`. That was correct while no endpoint raised it — but it is exactly what
+Phase 8's "returns a distinguishable error, not a generic validation failure" criterion depends on, and
+what makes a *"reopen it anyway"* affordance possible. **Phase 8 gave it `TASK_REOPEN_NOT_ACKNOWLEDGED`
+in the same PR as the surface**, with a unit test pinning that it no longer falls through to
+`DOMAIN_ERROR`.
 
-#### Phase 8: Retargeting — REST and MCP
+#### Phase 8: Retargeting — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 7.
-**Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Actual:** **375 production →
+2,303 tracked** (2,303 insertions, 25 deletions across 16 files, excluding this document).
+375 production **insertions**: MCP tools 121, controller 113, REST schemas 85, service 49, error
+map 7. 1,893 tests and fixtures (1,858 tracked plus the 137-line new unit file, less its overlap
+in neither — the new file is untracked, so `git diff` alone undercounts it); 35 docs
+(`api-design.md`).
+
+**Counted as insertions only, and every file included — both of which the phase's own review had
+to correct.** The first draft of this entry reported 344 production by summing insertions+deletions
+per file against an insertions-only total (exactly the mistake Phase 11 recorded and thought it
+had retired), omitted the untracked new unit-test file entirely because `git diff` cannot see it,
+and silently excluded `api-design.md`. The lesson generalises: **`git diff --stat` is not a
+complete measure of a phase whose diff includes new files** — check `git status` for untracked
+paths before quoting a total.
+
+**The advance estimate undershot again — the sixth phase running — but Phase 11's suggested
+refinement to rule 15 held.** 2,303 against the doc's 560 is 4.1×; against this phase's own
+production it is **6.1×**, which is rule 15's multiplier almost exactly, for the second phase in a
+row. Phase 11 proposed that *"the ×6 multiplier is reliable; what has been wrong every time is the
+production estimate it multiplies — enumerate the artefacts first, then apply ×6."* That is now
+confirmed twice. What the ~140 figure missed was not the multiplier but three artefacts: a
+service read method, a response-shape change reaching the **two** existing task-returning routes
+and the **two** existing task-returning tools (the contact-link routes answer 204 and were
+untouched), and a rejection matrix that has to be paid for twice because there are two entry
+points.
 
 **Acceptance Criteria:**
 
-- [ ] A retarget endpoint (`PATCH /api/tasks/{id}` due journal, or a dedicated sub-resource — state the
-      choice) and MCP `retarget_task` in the same PR, both carrying the reopen acknowledgement.
-- [ ] Both return the resulting task including its new intermediate link, so a caller sees the trail
-      without a second read.
-- [ ] Reopening a done task without acknowledgement returns a distinguishable error, not a generic
-      validation failure.
+- [x] A retarget endpoint and MCP `retarget_task` in the same PR, both carrying the reopen
+      acknowledgement. — **The choice is `POST /api/tasks/{task_id}/retarget`, a dedicated action
+      sub-resource**, following `POST /api/journals/{id}/merge`. It is not a field on
+      `PATCH /api/tasks/{id}` because a retarget is not a field assignment: it forces the status to
+      *not done* and writes a link row, so a body able to carry a `status` beside a
+      `due_journal_id` would have two answers and no rule for choosing between them — a collision
+      Phase 9's `text` field makes concrete rather than hypothetical, and one that would also mean
+      relaxing `TaskUpdateAttributes`' required `status`. JSON:API's canonical to-one relationship
+      route was considered and rejected: `PATCH .../relationships/due-journal` must return the
+      *relationship*, which contradicts the next criterion. The body's `type` names the operation
+      (`task-retarget`) and carries no `id` — it is an instruction, not the task's attributes.
+- [x] Both return the resulting task including its new intermediate link, so a caller sees the
+      trail without a second read. — `intermediate_journal_ids` on the REST attributes and in the
+      tool's JSON, asserted **on the response** rather than on the database at both surfaces.
+      Populated on **every** task-returning route and tool, not only the retarget: a `tasks`
+      resource whose attribute set varied by route would be a worse contract than the one extra
+      indexed read it saves, and a `PATCH` on a previously-retargeted task answering `[]` would be
+      wrong rather than merely terse. It is an *attribute* rather than a `relationships` member
+      because the resource already carries both anchors as attributes. The *uniformity* half is
+      asserted on both surfaces — create returning an empty trail and a status change returning the
+      trail the task already had, over REST **and** over MCP; review caught that only the REST pair
+      was pinned, which left the tool free to drop the argument and still answer a valid-looking
+      task.
+- [x] Reopening a done task without acknowledgement returns a distinguishable error, not a generic
+      validation failure. — **This closes the item Phase 7 carried forward.**
+      `TaskReopenNotAcknowledgedError` now maps to `TASK_REOPEN_NOT_ACKNOWLEDGED`; until this PR it
+      rendered as the generic `DOMAIN_ERROR`, which is correct for an error no endpoint can raise
+      and useless to the endpoint that now does. Pinned three ways at the unit level — it has its
+      own code, it does **not** fall through to `DOMAIN_ERROR`, and it is told apart from
+      `TaskStatusTransitionError` (two 409s about a task's state, distinct codes, because a refused
+      transition tells the caller to retarget and this one *is* the retarget) — and at both
+      surfaces the refusal writes nothing: not the status, not the anchor, not the link.
+
+**Decisions taken (Phase 8):**
+
+- **The acknowledgement is a body attribute defaulting to `false`, not a query parameter or a
+  header.** It is part of what the caller is asking for; it must be *refused* when misspelled,
+  which `extra="forbid"` cannot do for a query string; and MCP has no concept of either. A
+  silently-dropped acknowledgement is the worst outcome available here — the caller would believe
+  it had confirmed a reopen and be refused for a reason it thought it had answered — so both outer
+  nesting levels reject one, each with its own test.
+- **The trail is read through a new `TaskService.list_intermediate_journal_ids`, which is not
+  `@transactional`.** It is a read: it has nothing to commit, and a unit of work here would commit
+  whatever the caller happened to have open. The absence is asserted rather than described — the
+  signature is pinned to exactly `{self, user_id, task_id}` and the method is checked for the
+  decorator's `functools.wraps` marker — so adding `@transactional` later fails a test rather than
+  changing behaviour quietly. It exists because controllers and MCP tools resolve `TaskService`
+  and never reach past it into a repository.
+- **A test that could not fail was found by probing, not by reading.** The no-op tests originally
+  asserted `updated_at` had not moved. That assertion holds whether or not anything was written:
+  `tasks.updated_at` is set with `now()`, which in PostgreSQL is the **transaction** timestamp, and
+  every statement in a test — the seed insert, the call under test, the read back — shares the
+  savepoint fixture's single transaction, so a rewrite stamps exactly the value the insert did.
+  Confirmed by writing the opposite test (assert it *does* move on a real retarget) and watching it
+  fail. The no-op is now proved with a *cancelled* or *done* task, where any path but the no-op
+  would have written *not done* over it, plus the anchors and the empty link table.
+  **Phase 7's `test_does_not_touch_the_row` carried the identical vacuous assertion** and is fixed
+  here rather than noted, since it is the very claim this phase's surfaces rely on. A comment in
+  `task_seeding.py` records why there is no `stored_updated_at` helper, so it is not added again.
+- **`create_task`'s response reads the trail rather than hardcoding `[]`.** Creation writes no
+  intermediate link, so the answer is always empty today — but a renderer that assumed it here
+  while querying on the other two routes would be two definitions of one field, and the first to
+  drift would be the assumption.
+- **The rejection matrix is asserted twice, once per surface**, as Phase 11 recorded: a shared
+  service is no evidence that both callers reach it. That includes both indistinguishability pairs
+  (another user's journal ≡ an absent one; another user's task ≡ an absent one), the past-dated
+  refusal for all three starting statuses, and the four arguments neither surface offers — `now`,
+  the creating journal, a status, and a bare date.
+- **The acknowledgement gate's position is asserted at both surfaces.** A *done* task retargeted
+  onto a *past* journal answers `TASK_DUE_JOURNAL_NOT_FUTURE`, not the reopen refusal — the
+  confirmation is checked last, so a caller is never asked to confirm a request that was never
+  going to succeed. Phase 7 pinned this in the service; these pin that neither caller reordered it.
+  The MCP half was added in review: every other tool test either supplied the acknowledgement or
+  named a valid journal, so moving the gate to the top of the tool would have left them all green.
 
 **Required Test Coverage:** unit — schemas and tool schema. Integration — both surfaces, the
 unacknowledged-reopen rejection, and the intermediate link in the response. E2E deferred to Phase 22.
+
+**Test counts are stated as *added by this phase*, with the whole-file total beside them.** Phase 7
+quoted file totals, which coincided with its own contribution because its files were new; three of
+this phase's four unit files and both integration files already existed, so a file total here would
+claim 283 tests for a phase that wrote 105. The distinction was raised in review.
+
+- **Unit (49 added; 132 in the four files):** `tests/unit/api/test_task_schemas.py` — the retarget
+  request's required due journal, the acknowledgement's default, its rejection when non-boolean,
+  the pinned `task-retarget` type, `extra="forbid"` at all three levels, the six attributes it
+  refuses (creating journal, status, text, `now`, a bare date, an unknown key), the id bounded to
+  `1..INT32_MAX` at both ends, and the trail attribute including that each default is its own list.
+  `tests/unit/api/test_task_error_mapping.py` — the new code, its 409, its distinctness from both
+  the generic fallback and a refused transition, and a detail naming the task and the way through.
+  `tests/unit/mcp/domains/test_task_tools_schema.py` — the tool registered, its required and
+  optional parameters, both ids bounded, the four absences, and a description that says a done task
+  is reopened and that this is the way out of cancelled.
+  `tests/unit/tasks/test_task_service_intermediate_journals.py` — the read delegated owner-scoped,
+  order left to the port, empty for an untravelled task, `TaskNotFoundError` propagated, and the
+  two assertions that it opens no unit of work.
+- **Integration (56 added; 151 in the two surface files):**
+  `tests/integration/api/test_task_endpoints.py` and
+  `tests/integration/mcp/test_task_tools_mcp.py` — the round trip per starting status read back
+  from the `tasks` row; the trail on the response; a three-hop deferral returning to an
+  already-linked journal, de-duplicated against the live composite primary key; a lapsed task
+  resurrected with the passed journal kept; the creating journal accepted as a target (invariant 6
+  on a retarget); the no-op; the unacknowledged refusal writing nothing, the acknowledged reopen,
+  and the cancelled reopen needing none; the gate's position; the past-dated refusal per status;
+  both indistinguishability pairs; ids beyond `INT32_MAX` on body and path; eight rejected REST
+  bodies and four rejected tool arguments; and the create and `PATCH` responses carrying the trail.
+- **Trails of more than one journal are compared sorted, and the tests say why.** The port orders
+  by `created_at`, which *ties* when several links are written inside one fixture transaction, so
+  the tie-break's order is an artefact of the fixture rather than a property of the surface. The
+  de-duplication claim is about membership and count, and that is what is asserted.
+- **E2E:** none — the phase changes no frontend file and ships no user-visible surface.
+  ITER18-001's e2e lands in Phase 22, as the phase states.
+- **Docs:** `api-design.md` gains the route and four conventions (the action sub-resource and why
+  the two alternatives were rejected; the acknowledgement's shape and its distinct 409; the uniform
+  task attribute set; and `retarget_task` in the tool list). `mcp-setup.md` and `mcp-tools.md` are
+  deliberately untouched — the tool's docstring and parameter descriptions are its documentation.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (881 files) and
+  `core_shared` (129); `mypy` clean — **870 files for `mypy app tests`, 876 for `mypy .`**, the
+  difference being the repo root's own modules, and both stated because a review round flagged one
+  as stale when the two commands simply count different things; 127 in `core_shared`; the full
+  `tests/unit/` suite (**2,996 tests**); and
+  `tests/integration/tasks/`, `tests/integration/api/` and `tests/integration/mcp/` together
+  (**1,063 tests, exit 0**). No frontend or e2e gates — the phase changes no frontend file.
+
+**What the review round found, and it was a different list again.** Phases 4–6 were reviewed into
+*more* tests; Phase 11 into fewer, and into corrected *claims*. This one was reviewed into both,
+plus a race:
+
+- **A post-commit read could have turned a committed write into a 404.** The trail is read after
+  the service's unit of work commits, and the repository raises `TaskNotFoundError` if the task has
+  gone in that window — so a successful create, status change or retarget would have answered 404
+  (REST) or *"Not found"* (MCP) for a write that persisted. Unreachable today, because no delete
+  surface exists; **Phase 9 ships `DELETE /api/tasks/{id}` and opens it.** Both surfaces now answer
+  an empty trail instead, which is not a fallback but the literal truth:
+  `task_intermediate_journals` cascades from `task_id`, so a task that is gone has no links left to
+  list. This is the same class of defect `_save` exists to prevent on the write side, and the
+  window is wider here because it straddles a commit.
+- **The trail read takes a `FOR KEY SHARE` lock and holds it to the end of the request**, because
+  the adapter reaches the links through `_require_task_owned`. Recorded rather than removed: the
+  link tables carry no `user_id`, so that guard is the *only* thing making the read owner-scoped,
+  and `FOR KEY SHARE` blocks nothing but a delete of that row. The cost — one extra round trip and
+  a tail-of-request lock on every task write — is now stated in the method's docstring rather than
+  discovered later.
+- **Two gaps in this phase's own claim that the answer is uniform across surfaces.** Nothing
+  asserted that the `create_task` and `set_task_status` *tools* carried the trail (only the REST
+  equivalents were pinned), and the acknowledgement gate's *position* was pinned on the endpoint
+  but not the tool — every MCP test either supplied the acknowledgement or named a valid journal,
+  so the tool could have reordered the gate and stayed green. Three tests added. The phase had
+  written down the principle ("a shared service is no evidence that both callers reach it") and
+  then not applied it to itself.
+- **Two more assertions that could not fail, in neighbouring files**, both the same `now()` trap:
+  Phase 6's `test_asking_for_the_current_status_does_not_touch_the_row` and the repository's
+  `test_save_updates_text_and_status`. The first is the one case where the new comment's remedy
+  does not apply — a same-status no-op leaves *no* field a real write would have changed — so the
+  assertion is dropped and the docstring now points at the unit test that does prove it
+  (`save.assert_not_awaited()`). The second's docstring claimed to prove the column was re-stamped;
+  it proved only that the returned entity agrees with the stored row, and now says so.
+- **Two wrong numbers in this entry**, corrected above: a production total that summed
+  insertions+deletions against an insertions-only figure while omitting the untracked new test
+  file, and test counts quoted as whole-file totals for files that mostly predate the phase. The
+  pattern Phase 11 identified holds: once the tests are thorough, review starts catching *claims*.
+- **One review finding was checked and declined.** It reported the `mypy` file count as stale at
+  870 against an actual 876. Both numbers are real: `mypy app tests` — the gate this project
+  runs — sees 870, and `mypy .` sees 876. Verified by running both rather than taking the finding
+  at face value; the entry now names the command instead of the bare number.
+
+**Recorded because it cost most of the phase's debugging time: the local integration stack is
+shared between colliding worktrees.** `scripts/workspace_env.py` hashes the workspace path to derive
+`CONTAINER_PREFIX` and the test ports, and two worktrees hashed to the same `pms_test_75` /
+port 6183. Every pytest session's `_reset_test_database` drops and re-migrates
+`personal_management_test`, so a session starting while another runs destroys the other's schema
+mid-run. The symptoms are broad and misleading — `relation "journals" does not exist`, connection
+refused, `InternalClientError: cannot switch to state 15`, or a hundred setup errors in files the
+change never touched — and they land on tests unrelated to the diff. **A stash-and-rerun proved it
+environmental**: the clean tree failed the same way in the same window, and the branch passed
+1,060/1,060 once the other worktree went idle. Diagnose with
+`ps -eo args | grep venv/bin/pytest` before suspecting the diff, and note that a *waiter* shell
+polling for the other worktree matches a naive `pgrep -f bin/pytest`, so two agents can wait on
+each other indefinitely.
 
 #### Phase 9: Text Update and Delete — REST and MCP
 

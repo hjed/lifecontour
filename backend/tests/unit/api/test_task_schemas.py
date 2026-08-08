@@ -20,6 +20,7 @@ import pytest
 from core_shared.models.tasks import Task, TaskStatus
 from pydantic import ValidationError
 
+from app.api.common.identifiers import INT32_MAX
 from app.api.tasks.schemas import (
     TaskAttributes,
     TaskContactLinkData,
@@ -28,6 +29,7 @@ from app.api.tasks.schemas import (
     TaskCreateRequest,
     TaskResource,
     TaskResponse,
+    TaskRetargetRequest,
     TaskUpdateAttributes,
     TaskUpdateRequest,
 )
@@ -55,6 +57,13 @@ def _valid_update_body(**overrides: object) -> dict[str, object]:
     attributes: dict[str, object] = {"status": "done"}
     attributes.update(overrides)
     return {"data": {"type": "tasks", "id": "5", "attributes": attributes}}
+
+
+def _valid_retarget_body(**overrides: object) -> dict[str, object]:
+    """A minimal valid retarget body, with attribute-level overrides applied."""
+    attributes: dict[str, object] = {"due_journal_id": 42}
+    attributes.update(overrides)
+    return {"data": {"type": "task-retarget", "attributes": attributes}}
 
 
 class TestTaskCreateRequest:
@@ -287,6 +296,168 @@ class TestTheUpdateRequestChangesNothingElse:
             )
 
 
+class TestTaskRetargetRequest:
+    """What a client may send to move a task onto a new due journal.
+
+    The retarget is its own request rather than a field on the status ``PATCH``
+    because it is not a field assignment: it forces the status to *not done* and
+    writes an intermediate link. A body able to carry both a ``status`` and a
+    ``due_journal_id`` would have two answers and no rule for choosing one.
+    """
+
+    def test_a_minimal_body_needs_only_the_new_due_journal(self) -> None:
+        request = TaskRetargetRequest.model_validate(_valid_retarget_body())
+
+        assert request.data.attributes.due_journal_id == 42
+
+    def test_the_acknowledgement_defaults_to_not_given(self) -> None:
+        """An unaware caller must get the refusal, not the reopen.
+
+        The gate exists because moving a date is rarely how a user means to undo
+        a completion, so the *absence* of a confirmation has to read as "no".
+        """
+        request = TaskRetargetRequest.model_validate(_valid_retarget_body())
+
+        assert request.data.attributes.acknowledge_reopen is False
+
+    def test_the_acknowledgement_is_accepted_when_given(self) -> None:
+        request = TaskRetargetRequest.model_validate(
+            _valid_retarget_body(acknowledge_reopen=True)
+        )
+
+        assert request.data.attributes.acknowledge_reopen is True
+
+    def test_a_non_boolean_acknowledgement_is_rejected(self) -> None:
+        """A confirmation coerced from prose would be a confirmation nobody gave."""
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(
+                _valid_retarget_body(acknowledge_reopen="maybe")
+            )
+
+    def test_the_due_journal_is_required(self) -> None:
+        """There is nothing else this request could be asking for."""
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(
+                {"data": {"type": "task-retarget", "attributes": {}}}
+            )
+
+    def test_the_resource_type_defaults_to_the_operation(self) -> None:
+        request = TaskRetargetRequest.model_validate(
+            {"data": {"attributes": {"due_journal_id": 42}}}
+        )
+
+        assert request.data.type == "task-retarget"
+
+    def test_a_mismatched_resource_type_is_rejected(self) -> None:
+        """The body describes an operation, not the task resource itself.
+
+        Typing it ``tasks`` would say a client was sending the task's own
+        attributes, when what it is sending is an instruction with its own
+        preconditions — the shape ``journal-merge`` already uses.
+        """
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(_valid_retarget_body(type="tasks"))
+
+    def test_the_data_member_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate({})
+
+
+class TestTheRetargetIdIsBoundedToWhatAColumnCanHold:
+    """Every id column in this schema is a PostgreSQL ``INTEGER``.
+
+    Python's ``int`` is unbounded, so ``2147483648`` parses cleanly, reaches the
+    repository and dies in asyncpg's parameter binding — a 500 for an id no row
+    could ever have. Found on five routes by the Phase 11 review; the bound
+    belongs on this one from the start.
+    """
+
+    def test_the_largest_id_a_row_can_have_is_accepted(self) -> None:
+        request = TaskRetargetRequest.model_validate(
+            _valid_retarget_body(due_journal_id=INT32_MAX)
+        )
+
+        assert request.data.attributes.due_journal_id == INT32_MAX
+
+    def test_an_id_beyond_the_column_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(
+                _valid_retarget_body(due_journal_id=INT32_MAX + 1)
+            )
+
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_an_id_no_serial_column_issues_is_rejected(self, value: int) -> None:
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(
+                _valid_retarget_body(due_journal_id=value)
+            )
+
+
+class TestTheRetargetChangesNothingButTheDueJournal:
+    """The creating journal stays unreachable, and there is still no bare date.
+
+    Only the *rejection* is asserted, not also the field's absence from
+    ``model_fields``. The two said the same thing and the rejection is the
+    stronger claim — a field that existed but was ignored would pass a
+    membership check's inverse and fail this one.
+    """
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            # Immutable by absence: the specification's "set once and never
+            # changes" is enforced by there being nothing to send, and the
+            # service has no parameter for it either.
+            ("creating_journal_id", 9),
+            # A retarget always lands on *not done*. A status here would be a
+            # second answer to a question the operation has already settled.
+            ("status", "done"),
+            ("text", "rewritten"),
+            # ``now`` is the seam invariant 4 is judged against.
+            ("now", "2020-01-01T00:00:00+00:00"),
+            # A task is due *in a journal*; a date would invite one to be
+            # created implicitly, which invariant 5 forbids.
+            ("due_date", "2026-09-01"),
+            ("nonsense", "x"),
+        ],
+    )
+    def test_sending_another_attribute_is_rejected(
+        self, field: str, value: object
+    ) -> None:
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(_valid_retarget_body(**{field: value}))
+
+    def test_unknown_fields_alongside_the_attributes_are_rejected(self) -> None:
+        """The middle of the three nesting levels the create request had to close."""
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(
+                {
+                    "data": {
+                        "type": "task-retarget",
+                        "attributes": {"due_journal_id": 42},
+                        "now": "2020-01-01T00:00:00+00:00",
+                    }
+                }
+            )
+
+    def test_unknown_fields_at_the_request_root_are_rejected(self) -> None:
+        """And the outermost, where the shared base is permissive by default.
+
+        A misspelled ``acknowledge_reopen`` silently dropped here would be worse
+        than one refused: the caller would believe it had confirmed a reopen.
+        """
+        with pytest.raises(ValidationError):
+            TaskRetargetRequest.model_validate(
+                {
+                    "data": {
+                        "type": "task-retarget",
+                        "attributes": {"due_journal_id": 42},
+                    },
+                    "acknowledge_reopen": True,
+                }
+            )
+
+
 class TestTaskResponse:
     """What a created task looks like coming back."""
 
@@ -346,6 +517,79 @@ class TestTaskResponse:
 
         assert attributes.created_at is None
         assert attributes.updated_at is None
+
+
+class TestTheTaskResourceCarriesItsJournalTrail:
+    """A retarget's answer includes the journal it just left.
+
+    The specification's third success criterion is that a user can *"extend a
+    deadline by moving a task to a later journal, and still see the trail of
+    journals it passed through"*, and the phase's criterion is that the caller
+    sees it without a second read.
+
+    It is an **attribute** rather than a JSON:API ``relationships`` member
+    because this resource already carries ``creating_journal_id`` and
+    ``due_journal_id`` as attributes. One convention, not two.
+    """
+
+    def test_the_trail_is_part_of_the_resource(self) -> None:
+        attributes = TaskAttributes(
+            text="book the campsite",
+            status=TaskStatus.NOT_DONE,
+            creating_journal_id=1,
+            due_journal_id=2,
+            intermediate_journal_ids=[7, 8],
+        )
+
+        assert attributes.intermediate_journal_ids == [7, 8]
+
+    def test_a_task_that_has_passed_through_nothing_renders_an_empty_trail(
+        self,
+    ) -> None:
+        """Empty rather than absent: the field means "these, and no others"."""
+        attributes = TaskAttributes(
+            text="book the campsite",
+            status=TaskStatus.NOT_DONE,
+            creating_journal_id=1,
+            due_journal_id=2,
+        )
+
+        assert attributes.intermediate_journal_ids == []
+
+    def test_the_trail_survives_serialisation(self) -> None:
+        response = TaskResponse(
+            data=TaskResource(
+                id="5",
+                attributes=TaskAttributes(
+                    text="book the campsite",
+                    status=TaskStatus.NOT_DONE,
+                    creating_journal_id=1,
+                    due_journal_id=2,
+                    intermediate_journal_ids=[7],
+                ),
+            )
+        )
+
+        rendered = response.model_dump(mode="json")["data"]["attributes"]
+        assert rendered["intermediate_journal_ids"] == [7]
+
+    def test_each_default_trail_is_its_own_list(self) -> None:
+        """A shared mutable default would leak one task's trail into another's."""
+        first = TaskAttributes(
+            text="a",
+            status=TaskStatus.NOT_DONE,
+            creating_journal_id=1,
+            due_journal_id=2,
+        )
+        second = TaskAttributes(
+            text="b",
+            status=TaskStatus.NOT_DONE,
+            creating_journal_id=1,
+            due_journal_id=2,
+        )
+        first.intermediate_journal_ids.append(99)
+
+        assert second.intermediate_journal_ids == []
 
 
 class TestTaskContactLinkRequest:

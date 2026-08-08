@@ -169,9 +169,14 @@ class TestSaveAndFind:
 
         ``updated_at`` is not asserted to have *advanced*: PostgreSQL's ``now()``
         is transaction-scoped, and the test fixture holds one transaction open,
-        so the insert and the update stamp the same instant. That the column is
-        re-stamped at all is asserted below by comparing it against the value the
-        statement itself wrote.
+        so the insert and the update stamp the same instant.
+
+        **Nor is it asserted to have been re-stamped**, which an earlier version
+        of this docstring claimed. The comparison below reads the column back and
+        checks it against the value ``RETURNING`` gave — which proves the entity
+        agrees with the stored row, and would hold just as well if the ``UPDATE``
+        had left the column alone. Under this fixture there is no assertion that
+        can tell those apart; the corrected claim is the narrower one.
         """
         assert saved_task.id is not None
         original_created_at = saved_task.created_at

@@ -461,6 +461,55 @@ class TaskService:
             due_journal_id,
         )
 
+    async def list_intermediate_journal_ids(
+        self, *, user_id: str, task_id: int
+    ) -> list[int]:
+        """List the journals one of the user's tasks has passed through.
+
+        These are the task's **intermediate** journals: the ones it was
+        discussed, revisited, or previously due in. Retargeting adds the
+        previous due journal automatically — the model's one automatic link —
+        and everything else that lands here is put there deliberately.
+
+        Neither anchor appears: the creating and due journals are columns on the
+        task, and a caller already has both. A journal *can* be in this list and
+        be an anchor at the same time, which is a legitimate shape rather than a
+        bug — retargeting back onto a journal a task already passed through
+        leaves it as both.
+
+        **This is a read**, so it takes no ``transaction`` and is not
+        ``@transactional``. There is nothing to commit, and a unit of work here
+        would commit whatever the caller happened to have open. It exists so a
+        controller or an MCP tool can answer with the trail without reaching
+        past the service into a repository.
+
+        **It is not free, and the cost is deliberate.** The adapter reaches the
+        links through ``_require_task_owned``, which is a ``FOR KEY SHARE``
+        read of the task row — so every caller pays an extra round trip and
+        leaves the weakest of row locks held until the request's connection is
+        released. That guard cannot simply be skipped: the link tables carry no
+        ``user_id``, so it is the *only* thing making this read owner-scoped,
+        and dropping it would let a caller list another user's trail. ``FOR KEY
+        SHARE`` blocks nothing but a delete of that row, and the request is
+        ending anyway, so the exposure is a request's tail rather than a
+        contended lock.
+
+        Args:
+            user_id: The acting user; the task must be theirs
+            task_id: The task to read
+
+        Returns:
+            The linked journal ids, oldest link first. Empty for a task that has
+            passed through nothing, which is a fact about that task rather than
+            an absent answer.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's. The two are indistinguishable by design, exactly as they
+                are on every other task read.
+        """
+        return await self.task_repo.list_intermediate_journal_ids(task_id, user_id)
+
     async def _save(
         self, task: Task, creating_journal_id: int, due_journal_id: int
     ) -> Task:
