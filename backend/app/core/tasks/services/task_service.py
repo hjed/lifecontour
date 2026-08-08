@@ -50,7 +50,7 @@ from app.core.journal.services.journal_date_resolver import (
     journal_date,
     today_in,
 )
-from app.infrastructure.unit_of_work import transactional
+from app.infrastructure.unit_of_work import savepoint, transactional
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -100,12 +100,13 @@ def _violated_anchor(error: IntegrityError) -> TaskJournalAnchor | None:
 
 
 class TaskService:
-    """Creates tasks, moves them through their lifecycle, and retargets them.
+    """Creates tasks, moves and retargets them, and links their people.
 
     Every operation enforces the specification's rules here rather than at a
     surface: the core invariants on creation, the status transition matrix on a
-    status change, and — on a retarget — the invariants again, because a due
-    journal is being set for a second time. REST and MCP are thin callers of each.
+    status change, the invariants again on a retarget — because a due journal is
+    being set for a second time — and contact existence on a link. REST and MCP
+    are thin callers of each.
     """
 
     def __init__(
@@ -185,9 +186,90 @@ class TaskService:
 
         created = await self._save(task, creating_journal_id, due_journal_id)
         assert created.id is not None, "Task ID must be set after save"
-        for contact_id in contacts:
-            await self._link_contact(created.id, contact_id, user_id)
+        await self._link_contacts(created.id, contacts, user_id, transaction)
         return created
+
+    @transactional
+    async def link_contact(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        contact_id: int,
+        transaction: AsyncConnection,
+    ) -> bool:
+        """Link a contact to one of the user's tasks.
+
+        A task-contact link is a **plain reference**: the specification is
+        explicit that it carries no relationship type, no role and no attendance
+        status, and nothing anywhere parses contacts out of the task text. There
+        is correspondingly nothing to pass but the two ids.
+
+        **Editable in any status.** No status is read and none is written, so a
+        done or cancelled task takes a link exactly as an open one does — which
+        is what the specification means by *"task text and contact links can be
+        edited at any time, in any status"*.
+
+        **Idempotent.** Linking a contact that is already linked succeeds and
+        writes nothing; the return value is the only way to tell the two apart,
+        and a surface is free to ignore it.
+
+        Args:
+            user_id: The acting user; the task must be theirs
+            task_id: The task to link
+            contact_id: The contact to reference
+            transaction: The request connection; the unit of work commits here
+
+        Returns:
+            ``True`` when a link row was created, ``False`` when it was already
+            there.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's. The two are indistinguishable by design.
+            ContactNotFoundError: When the contact does not exist. Existence is
+                the whole check — ``contacts`` carries no owner column in this
+                system, so there is no ownership to enforce (recorded as a
+                divergence in the iteration document).
+        """
+        contacts = await self._resolve_contacts([contact_id])
+        created = await self._link_contacts(task_id, contacts, user_id, transaction)
+        return contact_id in created
+
+    @transactional
+    async def unlink_contact(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        contact_id: int,
+        transaction: AsyncConnection,
+    ) -> bool:
+        """Remove a contact link from one of the user's tasks.
+
+        **The contact is not required to still exist**, which is the deliberate
+        asymmetry with :meth:`link_contact`. ``task_contacts.contact_id``
+        cascades, so a deleted contact's links are already gone; demanding the
+        contact here would make the one call a user might reach for while
+        tidying up fail on exactly the contact they had just removed.
+
+        Idempotent for the same reason ``DELETE`` is: unlinking a contact that
+        is not linked changes nothing and says so.
+
+        Args:
+            user_id: The acting user; the task must be theirs
+            task_id: The task to unlink
+            contact_id: The contact to stop referencing
+            transaction: The request connection; the unit of work commits here
+
+        Returns:
+            ``True`` when a link row was removed, ``False`` when there was none.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's.
+        """
+        return await self.task_repo.remove_contact(task_id, contact_id, user_id)
 
     @transactional
     async def set_status(
@@ -408,19 +490,61 @@ class TaskService:
             journal_id = creating_journal_id if anchor == "creating" else due_journal_id
             raise TaskAnchorJournalNotFoundError(anchor, journal_id) from error
 
-    async def _link_contact(self, task_id: int, contact_id: int, user_id: str) -> None:
-        """Link one contact, keeping the promised error if it just vanished.
+    async def _link_contacts(
+        self,
+        task_id: int,
+        contact_ids: Sequence[int],
+        user_id: str,
+        transaction: AsyncConnection,
+    ) -> list[int]:
+        """Link every contact in one write, keeping the promised error.
 
-        The same race as :meth:`_save`, one row over: the contact was proved to
-        exist a few statements ago, and a delete since then must still read as
-        ``ContactNotFoundError`` rather than as a raw integrity error.
+        The same race as :meth:`_save`, one row over: the contacts were proved
+        to exist a few statements ago, and a delete since then must still read
+        as ``ContactNotFoundError`` rather than as a raw integrity error.
+
+        With one insert per contact the vanished id was whichever one was being
+        written. A batched insert has to work it out, and **the id is found by
+        re-reading rather than by parsing the error.** PostgreSQL does put it in
+        the violation's ``DETAIL`` (``Key (contact_id)=(999) is not present…``),
+        but that is prose: it is localised by ``lc_messages``, it is a driver's
+        choice whether to surface it separately from the primary message, and
+        this module already learned in Phase 4 that matching against the wrong
+        rendering of an error passes every test built on a hand-written one. A
+        second ``SELECT`` on the ids the caller named answers the same question
+        from data.
+
+        **That re-read is what the savepoint is for.** PostgreSQL puts the whole
+        transaction into a failed state on a constraint violation, so the lookup
+        would itself raise ``InFailedSQLTransactionError``; wrapping the insert
+        in a ``SAVEPOINT`` rolls back only the failed statement and leaves the
+        connection usable. The integration test was mutation-checked against
+        exactly that.
+
+        If the re-read finds every contact still present, the violation is about
+        something else and is re-raised untouched: naming an arbitrary id would
+        send the caller looking for a contact that exists.
         """
+        if not contact_ids:
+            # Nothing to link, so the repository is not called at all — not even
+            # for its ownership guard, which would otherwise cost a locking read
+            # on every create that names no contacts. The guard still runs
+            # whenever the method *is* called, empty list included; this is a
+            # caller declining to make the call.
+            return []
+
+        wanted = list(contact_ids)
         try:
-            await self.task_repo.add_contact(task_id, contact_id, user_id)
+            async with savepoint(transaction):
+                return await self.task_repo.add_contacts(task_id, wanted, user_id)
         except IntegrityError as error:
             if "contact_id" not in _driver_message(error):
                 raise
-            raise ContactNotFoundError(contact_id) from error
+            known = await self.contact_repo.find_names_by_ids(wanted)
+            missing = [cid for cid in wanted if cid not in known]
+            if not missing:
+                raise
+            raise ContactNotFoundError(missing[0]) from error
 
     async def _journals_by_id(
         self, user_id: str, journal_ids: Sequence[int]

@@ -171,21 +171,36 @@ class TaskRepository(ABC):
         """
 
     @abstractmethod
-    async def add_contact(self, task_id: int, contact_id: int, user_id: str) -> bool:
-        """Link a contact to the task.
+    async def add_contacts(
+        self, task_id: int, contact_ids: list[int], user_id: str
+    ) -> list[int]:
+        """Link one or more contacts to the task, in one statement.
 
         Contact links are a plain reference — no relationship type, role or
         attendance status. Idempotent, on the same terms as
-        :meth:`add_intermediate_journal`.
+        :meth:`add_intermediate_journal`: linking a contact that is already
+        linked is accepted and creates nothing.
+
+        **Batched rather than singular**, because the ownership guard is the
+        expensive half. A per-contact method re-proved ownership with its own
+        ``SELECT … FOR KEY SHARE`` for every id, so linking *N* contacts to one
+        task cost *2N* statements. One call, one guard, one insert.
+
+        The ownership guard runs on every call, an empty ``contact_ids``
+        included — asking to link nothing to somebody else's task is still a
+        claim of ownership, and a method that answered it differently would be
+        a hole in the contract. A caller with nothing to link is of course free
+        not to call at all, and ``TaskService`` does exactly that.
 
         Args:
             task_id: The task to link
-            contact_id: The contact to reference
+            contact_ids: The contacts to reference; an empty list writes nothing
             user_id: The acting user
 
         Returns:
-            ``True`` when the link was created, ``False`` when it already
-            existed.
+            The ids for which a link row was created, so the caller can tell a
+            fresh link from one that was already there. Ids that were already
+            linked are absent.
 
         Raises:
             TaskNotFoundError: When no such task belongs to the user.

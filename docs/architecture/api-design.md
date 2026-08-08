@@ -297,6 +297,8 @@ do exist for operations that involve no journal at all.
 |---|---|---|
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
 | `PATCH /api/tasks/{task_id}` | Change a task's status. Body attributes: `status` (`not_done`, `done`, `cancelled`) | 200; 400 unknown status, unknown attribute, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
+| `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown |
+| `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned |
 
 Conventions this surface pins down:
 
@@ -335,8 +337,41 @@ Conventions this surface pins down:
   silently would let a client change a task it believes it is not touching. This
   is the one check the controller makes itself, because it is an envelope
   concern with no domain rule and no MCP counterpart behind it.
-- The matching MCP tools are `create_task` and `set_task_status` (documented in
-  their docstrings and parameter schemas, per the MCP documentation convention).
+- **A contact link is a relationship route, and it answers 204.** The link
+  carries no relationship type, no role and no attendance status — the
+  specification calls it a plain reference — so there is no resource to return
+  and nothing to put in an `attributes` member. 204 is also what keeps the
+  operation's *idempotency invisible*: linking a contact that is already linked,
+  or unlinking one that is not, answers exactly as the first call did. Returning
+  the task instead would mean re-deriving its linked set in the controller,
+  which would be a second definition of what got linked sitting beside a read
+  model that does not exist yet.
+- **The link body is a single resource identifier, not a to-many array.** JSON:API
+  models a to-many relationship update as an array; this surface takes one
+  contact per call, because that keeps "was anything created" unambiguous and
+  matches the shape `POST /api/contacts/{id}/tags` already uses. Recorded as a
+  knowing narrowing rather than an oversight. Unknown members are forbidden at
+  both nesting levels and the `contacts` type is pinned, as on the other task
+  request models.
+- **Unlinking does not require the contact to still exist.** `task_contacts`
+  cascades from the contact side, so a deleted contact's links are already gone;
+  404-ing there would fail exactly the call a user reaches for while tidying up.
+  Task ownership is still enforced, so another user's task answers 404 on both
+  verbs, byte-identically to an absent one.
+- **Ids are bounded to what the column can hold.** Every id column here is a
+  PostgreSQL `INTEGER`, and Python's `int` is not, so `2147483648` used to parse
+  cleanly, reach the repository and die in asyncpg's *parameter binding* — a 500
+  for an id no row could ever have. `app/api/common/identifiers.py` bounds them
+  to `1..2147483647` on every id the tasks API and its MCP tools accept, path
+  and body alike, so the answer is the 400 the client deserves. The lower bound
+  is `1` because serial columns start there: 404 would suggest the row might
+  have existed once. **Other domains' endpoints are still unbounded** — issue
+  #1272 tracks the sweep, which is deliberately not done inside a feature phase.
+- The matching MCP tools are `create_task`, `set_task_status`,
+  `link_task_to_contact` and `unlink_task_from_contact` (documented in their
+  docstrings and parameter schemas, per the MCP documentation convention). The
+  two link tools return `linked` (the resulting state) and `changed` (whether a
+  row moved), which is the one thing the 204 withholds and an agent may want.
 
 ## Authentication Guidelines
 

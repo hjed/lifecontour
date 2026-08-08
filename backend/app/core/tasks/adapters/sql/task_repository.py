@@ -219,15 +219,17 @@ class SqlTaskRepository(TaskRepository):
             table="task_intermediate_journals", column="journal_id", task_id=task_id
         )
 
-    async def add_contact(self, task_id: int, contact_id: int, user_id: str) -> bool:
-        """Link a contact to the task."""
+    async def add_contacts(
+        self, task_id: int, contact_ids: list[int], user_id: str
+    ) -> list[int]:
+        """Link contacts to the task, with one guard and one insert.
+
+        The guard runs even for an empty list: the port promises
+        ``TaskNotFoundError`` for a task that is not the caller's, and an empty
+        request is still a claim of ownership.
+        """
         await self._require_task_owned(task_id, user_id)
-        return await self._add_link(
-            table="task_contacts",
-            column="contact_id",
-            task_id=task_id,
-            linked_id=contact_id,
-        )
+        return await self._add_contact_links(task_id, contact_ids)
 
     async def remove_contact(self, task_id: int, contact_id: int, user_id: str) -> bool:
         """Remove a contact link."""
@@ -302,6 +304,61 @@ class SqlTaskRepository(TaskRepository):
             query, {"task_id": task_id, "linked_id": linked_id}
         )
         return result.fetchone() is not None
+
+    async def _add_contact_links(
+        self, task_id: int, contact_ids: list[int]
+    ) -> list[int]:
+        """Insert every contact link in one statement, idempotently.
+
+        The same ``ON CONFLICT (task_id, contact_id) DO NOTHING`` the singular
+        insert used, so *N* contacts cost one round trip instead of *N*, and
+        ``RETURNING`` reports which rows were actually created — how a caller
+        tells a fresh link from one that was already there.
+
+        **The ids travel as one array parameter, not one placeholder each.**
+        The first version of this built a multi-row ``VALUES`` list with a bind
+        parameter per contact, which is correct right up until there are 32,767
+        of them: that is asyncpg's hard limit on query arguments, and exceeding
+        it raises an ``InterfaceError`` the caller sees as a 500 — for a request
+        that was entirely valid. The specification says a task may reference
+        *any number* of contacts, so the mechanism has to mean it rather than
+        the surface quietly capping it. ``unnest`` over a single ``integer[]``
+        costs two parameters whatever *N* is. Raised by the pull request's
+        automated review.
+
+        Duplicate ids are collapsed first: they would be harmless under
+        ``DO NOTHING`` but would make the returned list depend on how many times
+        an id was named.
+
+        **The ids are inserted in the order given, and that is not an accident
+        waiting to happen — yet.** ``ON CONFLICT DO NOTHING`` takes its
+        speculative-insert locks in row order, which ``unnest`` takes from the
+        array, so two transactions linking overlapping contact sets to the
+        *same* task in opposite orders could deadlock. Unreachable today: the
+        only batched caller is ``TaskService.create_task``, whose task id was
+        assigned a statement earlier and so cannot be the subject of a
+        concurrent call, and the single-contact link surface sends one id.
+        Sorting would close it and would also break the first-mention order
+        ``create_task`` promises, so the trade is left to whichever phase adds a
+        second batched caller.
+        """
+        wanted = list(dict.fromkeys(contact_ids))
+        if not wanted:
+            return []
+
+        query = text(
+            """
+            INSERT INTO task_contacts (task_id, contact_id)
+            SELECT :task_id, contact_id
+            FROM unnest(CAST(:contact_ids AS integer[])) AS contact_id
+            ON CONFLICT (task_id, contact_id) DO NOTHING
+            RETURNING contact_id
+            """
+        )
+        result = await self.conn.execute(
+            query, {"task_id": task_id, "contact_ids": wanted}
+        )
+        return [int(row[0]) for row in result.fetchall()]
 
     async def _remove_link(
         self, *, table: str, column: str, task_id: int, linked_id: int

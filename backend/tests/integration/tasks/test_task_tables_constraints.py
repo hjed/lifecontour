@@ -26,6 +26,10 @@ from tests.integration.tasks.task_seeding import USER_ID
 from tests.integration.tasks.task_seeding import count as _count
 from tests.integration.tasks.task_seeding import create_contact as _create_contact
 from tests.integration.tasks.task_seeding import create_journal as _create_journal
+from tests.integration.tasks.task_seeding import link_contact as _link_contact
+from tests.integration.tasks.task_seeding import (
+    link_intermediate_journal as _link_intermediate_journal,
+)
 
 # Statements are built once at module level so that a ``pytest.raises`` block
 # wraps only the execution under test, never the construction of its SQL.
@@ -74,34 +78,6 @@ async def _create_task(
         )
     ).scalar_one()
     return int(task_id)
-
-
-async def _link_intermediate_journal(
-    conn: AsyncConnection, *, task_id: int, journal_id: int
-) -> None:
-    await conn.execute(
-        text(
-            """
-            INSERT INTO task_intermediate_journals (task_id, journal_id)
-            VALUES (:task_id, :journal_id)
-            """
-        ),
-        {"task_id": task_id, "journal_id": journal_id},
-    )
-
-
-async def _link_contact(
-    conn: AsyncConnection, *, task_id: int, contact_id: int
-) -> None:
-    await conn.execute(
-        text(
-            """
-            INSERT INTO task_contacts (task_id, contact_id)
-            VALUES (:task_id, :contact_id)
-            """
-        ),
-        {"task_id": task_id, "contact_id": contact_id},
-    )
 
 
 @pytest_asyncio.fixture

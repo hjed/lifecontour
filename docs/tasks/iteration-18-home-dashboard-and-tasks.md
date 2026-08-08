@@ -114,6 +114,15 @@ The creating journal remains unreachable: no service method other than `create_t
 is still **no retarget surface** — no endpoint and no MCP tool until Phase 8 — and still no way to read a
 task back.
 
+**Since ITER18-001 Phase 11:** a task's contacts are editable.
+`POST`/`DELETE /api/tasks/{task_id}/relationships/contacts[/{contact_id}]` and the MCP tools
+`link_task_to_contact` / `unlink_task_from_contact` all call `TaskService.link_contact` and
+`unlink_contact`, which are `@transactional`, idempotent in both directions, work in every status, and
+enforce contact **existence** only — contacts still have no owner column. `TaskRepository.add_contact`
+no longer exists: `add_contacts` batches the write and `create_task` uses it. There is still **no way to
+read a task's contacts back** — no get, no list, no frontend surface — and no domain event for a link
+change (ITER18-003).
+
 ### The home page
 
 - `frontend/src/app/page.tsx` renders six static `Card`s (Contacts, Journal, Calendar, Photos, AI
@@ -1097,7 +1106,8 @@ service's contact check is the single place the rule lands.
   task ownership with its own `SELECT … FOR KEY SHARE`, so N contacts cost 2N statements to link a task
   the service created three lines earlier — an odd asymmetry next to the batched existence check.
   Batching it means a new `add_contacts` on the port and its adapter, which is Phase 11's surface, not
-  this one's. **Follow-up recorded for Phase 11.**
+  this one's. **Follow-up recorded for Phase 11 — done there:** `add_contact` was replaced outright
+  rather than joined, so there is one way to write a contact link rather than two.
 - **A `make_task_container` helper replaced the two hand-rolled DI containers.** `TaskProvider` no
   longer stands alone — `TaskService` needs the journal, contact and settings graphs, and Dishka
   validates the whole graph at construction — so Phase 2's DI test broke the moment the factory landed.
@@ -1834,29 +1844,240 @@ Phase 22.
 **Required Test Coverage:** unit — role rules and idempotency. Integration — attach/detach round-trips and
 each rejection on both surfaces, including the cross-user journal. E2E deferred to Phase 22.
 
-#### Phase 11: Contact Links — REST and MCP
+#### Phase 11: Contact Links — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 5.
-**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple · **Overrun recorded
+before work started (delivery rule 3): ~330 production → ~1,900 tracked** · **Actual:** **465 production
+→ 2,853 tracked** (2,853 insertions, 107 deletions across 22 files). All figures below are
+**insertions**, counted the same way rather than mixing conventions — an earlier draft of this entry
+summed insertions+deletions per file against an insertions-only total, which the phase's own review
+caught. 465 production: service 139, MCP tools 101, controller 82, REST schemas 66, adapter 56,
+port 21. 2,127 tests and fixtures; 261 docs.
+
+The ×4 figure is the one calibration **rule 15** was written to correct, and it was written *because*
+Phase 5 came in at 5.6× its own production on exactly this shape. This phase has two entry points, so it
+pays for two rejection matrices — a shared service is no evidence that both callers reach it — and it
+also changes a **port and its adapter**, which rule 13 puts at ×6 on its own. Phases 5 and 6 landed at
+2,036 and 2,483 tracked; nothing about this one is smaller than either.
+
+**Splitting was declined, and the cut considered is recorded rather than implied.** The only clean split
+is *link now, unlink later*, which ships a surface able to create links the user cannot remove — a breach
+of delivery rule 9 and of the specification's *"task text and contact links can be edited at any time, in
+any status"*. The second candidate, deferring the batched write, would reopen and rewrite
+`create_task`'s link loop in a later PR when the follow-up is assigned **here**. Rule 10 (coherence beats
+size) applies. What Phase 6 got wrong was recording its overrun afterwards; this one is recorded before
+any code is written.
+
+**The pre-recorded figure undershot again — the fifth phase running — but by the *smallest* margin yet,
+and the reason is worth keeping.** 2,853 against the doc's 600 is 4.8×; against this phase's own
+production it is **6.1×**, which is rule 15's ×6 almost exactly. That is the first time an advance
+estimate in this iteration has landed on its own multiplier, and the difference from Phases 4–6 is that
+the production figure was estimated from *what would be written* (a port method, a service pair, two
+schemas, two routes, two tools) rather than from a guess at the capability's size. **Suggested refinement
+to rule 15:** the ×6 multiplier is reliable; what has been wrong every time is the production estimate it
+multiplies. Enumerate the artefacts first, then apply ×6.
+
+**What the review round found, because it is a different list from the previous phases'.** Phases 4–6
+were reviewed into *more* tests; this one was reviewed into **fewer**. The findings that mattered were a
+parametrised unit test that could not fail (deleted, with a comment recording why it is not there), a
+`x in d or y in d` assertion that accepted two outcomes (pinned to one), a justification for the
+savepoint that was simply **untrue** — PostgreSQL's `DETAIL` *does* name the vanished key, so the real
+reason to re-read is that parsing localised driver prose is fragile — and three recorded numbers that
+were wrong, including a per-file production breakdown that summed insertions+deletions against an
+insertions-only total. The pattern worth carrying: once a phase's tests are thorough, what review starts
+catching is **claims**, in docstrings and in this document, rather than gaps in coverage. Two smaller
+items were acted on (an acceptance criterion whose write-up asserted more than its test did — the
+anchors are now checked; a redundant assertion) and one was recorded rather than closed (the theoretical
+deadlock below).
+
+**What the pull request's automated review found — a real 500, and it was not this phase's.** Every id
+column in this schema is a PostgreSQL `INTEGER` and Python's `int` is unbounded, so `2147483648` parsed
+cleanly out of a path or a body, reached the repository, and died in asyncpg's *parameter binding*:
+`DataError: value out of int32 range`, rendered to the caller as an internal error for an id no row
+could ever have. Probed before fixing, it reproduced on **five** routes — including `PATCH /api/tasks/{id}`
+(Phase 6) and `create_task`'s `contact_ids` (Phase 5), neither of which this phase added.
+
+The fix is `backend/app/api/common/identifiers.py` (`DatabaseId`, `DatabaseIdPath`, `INT32_MAX`), applied
+to **every id the tasks API and the tasks MCP tools accept**, with eight tests pinning the 400. Fixing
+only the two new routes was rejected: leaving `PATCH` broken beside a fixed neighbour in the same module
+is a worse outcome than fixing both. Extending it further was also rejected — every other domain's
+endpoints have the same 500 waiting in them, and that sweep deserves its own review rather than riding
+along inside a phase that ships contact links. **Raised as issue #1272**, with the two open questions it
+should settle (whether the lower bound is 1 everywhere, and whether a defensive `DataError` handler
+belongs in `error_handlers.py` for whatever the sweep misses).
+
+The review's second finding was a docstring claiming a **422** for a non-integer path id. The
+application-wide `validation_error_handler` renders every `RequestValidationError` as **400**, so the
+docstring described behaviour no client of this application can observe — the same class of wrong claim
+the pre-merge review round caught, and worth noting that it recurred immediately after.
 
 **Acceptance Criteria:**
 
-- [ ] Link and unlink a contact over REST and MCP in the same PR; linking is idempotent.
-- [ ] Links carry **no** relationship type, role or attendance status, and nothing parses contacts out of
-      the task text.
-- [ ] Contact links are editable in any status; the contact must belong to the acting user. **Read
-      Phase 4's contact divergence first** — `contacts` has no owner column, so the enforceable rule is
-      existence. If this phase does not change that, it inherits the divergence rather than restating
-      the criterion as met.
-- [ ] Deleting a contact removes its task links without touching the tasks — the FK direction fixed in
-      Phase 1, asserted here.
-- [ ] **Follow-up from Phase 4: batch the link write.** `TaskService.create_task` links contacts in a
-      loop, and each `add_contact` re-proves task ownership with its own `SELECT … FOR KEY SHARE` — 2N
-      statements for N contacts. This is the phase that owns the contact-link surface, so an
-      `add_contacts` on the port and its adapter belongs here, with `create_task` migrated onto it.
+- [x] Link and unlink a contact over REST and MCP in the same PR; linking is idempotent. —
+      `POST`/`DELETE /api/tasks/{task_id}/relationships/contacts[/{contact_id}]` and the MCP tools
+      `link_task_to_contact` / `unlink_task_from_contact`, both over `TaskService.link_contact` and
+      `unlink_contact`. Idempotency is the composite primary key's, not the service's: there is no
+      "is it already linked?" read anywhere, so two interleaved links need no lock. **Unlinking is
+      idempotent too**, which the criterion does not ask for and `DELETE` requires.
+- [x] Links carry **no** relationship type, role or attendance status, and nothing parses contacts out of
+      the task text. — the REST body is a bare resource identifier with `extra="forbid"` at both levels,
+      the tool schemas offer no such parameter and the transport refuses one, and a task whose text names
+      a real contact by the exact string the `contacts` row holds still has no links. That last is a
+      criterion about a code path that must *not* exist, so it is asserted where its absence shows.
+- [x] Contact links are editable in any status — asserted for all three statuses at all three levels,
+      with the stored status unmoved. **The ownership half is inherited, not met.** `contacts` still has
+      no owner column, so the enforceable rule remains existence, exactly as Phase 4 recorded; this phase
+      changes nothing about that and does not restate the criterion as satisfied. The divergence now also
+      lives in `domain-architecture.md`, where the contact-link rules are written down.
+- [x] Deleting a contact removes its task links without touching the tasks. — asserted through a link
+      **this surface created**, not a hand-inserted row: a service writing somewhere else would pass
+      Phase 1's table test and fail this one. The task, its anchors and its other links all survive, and
+      the task can still be "unlinked" from the deleted contact without error.
+- [x] **Follow-up from Phase 4: batch the link write.** — `add_contact` was *replaced* by
+      `add_contacts(task_id, contact_ids, user_id)`, one `FOR KEY SHARE` guard and one multi-row
+      `INSERT … ON CONFLICT DO NOTHING RETURNING contact_id`. `create_task` and the single-contact link
+      surface both go through it, so there is one way to write a link rather than two. An observing
+      repository asserts three contacts cost one call.
+
+**Decisions taken (Phase 11):**
+
+- **The link routes answer 204, not the task.** Phase 5 declined to echo contact links on create,
+  because re-deriving the linked set in a controller would be a second definition of what got linked
+  sitting beside a read model that does not exist — and it still does not (Phase 13). 204 additionally
+  makes the idempotency *invisible*: a repeat of either call is indistinguishable from the first, which
+  is the whole of what idempotent means to a client. `POST /api/contacts/{id}/tags` → 204 is the
+  existing precedent for a plain-reference link in this repository.
+- **The path is `/relationships/contacts`, a member route under `/api/tasks/`.** It follows the
+  journal-contact precedent, and it hangs off the task rather than a journal for the reason Phase 6 gave
+  for `PATCH /api/tasks/{id}`: a contact link involves no journal at all. There is still no
+  `/api/tasks` **collection**.
+- **The body is a single resource identifier, not JSON:API's to-many array.** One contact per call keeps
+  "was anything created" unambiguous, and matches `TagAssignmentRequest`. Recorded as a knowing
+  narrowing of the relationship semantics rather than an oversight. The id is validated as an integer in
+  the schema, so a malformed one is a 400 like every other bad field instead of a `ValueError` escaping
+  a cast as a 500.
+- **Unlinking deliberately does not require the contact to exist, and linking does.** The asymmetry is
+  the cascade: `task_contacts.contact_id` is `ON DELETE CASCADE`, so a deleted contact's links are
+  already gone, and 404-ing there would fail exactly the call a user reaches for while tidying up. It
+  also means the fourth criterion's scenario stays reachable rather than becoming an error path.
+- **`add_contact` was replaced rather than joined by `add_contacts`.** Keeping both would leave the
+  singular method with one caller and two ways to write one row. `remove_contact` stays singular because
+  nothing removes in bulk; the asymmetry is the callers', not the port's taste.
+- **The batched insert runs inside a `SAVEPOINT`, and that is load-bearing rather than tidy.** Phase 4
+  mapped a contact deleted between the existence check and the write back to `ContactNotFoundError`.
+  With one insert per contact the id was whichever one was being written; a batched insert has to work
+  it out, and **it does so by re-reading rather than by parsing the error.** PostgreSQL *does* name the
+  key in the violation's `DETAIL` — an earlier draft of this entry claimed otherwise and the phase's own
+  review caught it — but that is localised prose whose availability depends on the driver, and this is
+  the module that already has a bug on record from matching against the wrong rendering of an error
+  (Phase 4's `str(error)` case). A second `SELECT` answers the same question from data. **That re-read
+  is what the savepoint is for:** PostgreSQL puts the transaction into a failed state on a constraint
+  violation, so the lookup would raise before it could answer. **Mutation-checked:** replacing
+  `savepoint(transaction)` with a plain block makes the integration test fail with
+  `InFailedSQLTransactionError`, which is precisely the 500 the mapping exists to prevent. If the re-read
+  finds every contact present the violation is re-raised untouched, because naming an arbitrary id would
+  send the caller looking for a contact that exists.
+- **The batched insert passes its ids as one array, after review found the obvious form has a ceiling.**
+  It began as a multi-row `VALUES` list with a bind parameter per contact — correct until there are
+  32,767 of them, which is asyncpg's hard limit on query arguments, past which a wholly valid create
+  raises `InterfaceError` and the caller sees a 500. Capping the surface was the tempting fix and the
+  wrong one: the specification says a task may reference *any number* of contacts, so the mechanism has
+  to mean it rather than the schema quietly deciding otherwise. `unnest` over a single `integer[]` costs
+  two parameters whatever *N* is. **Mutation-checked** with a 33,000-contact test that fails on the old
+  form with exactly that `InterfaceError`, because a bug with a threshold needs a regression test on the
+  far side of it.
+- **A deadlock is theoretically reachable through the batch and is recorded rather than closed.**
+  `ON CONFLICT DO NOTHING` takes speculative-insert locks in row order, which `unnest` takes from the
+  array, so two transactions linking overlapping contact sets to the **same** task in opposite orders
+  could deadlock.
+  It is unreachable today — the only batched caller is `create_task`, whose task id was assigned a
+  statement earlier and cannot be the subject of a concurrent call — and the obvious fix (sorting the
+  ids) would break the first-mention-order property `create_task` asserts. Raised by this phase's
+  review; a comment marks the spot, and the phase that adds a second batched caller owns the decision.
+- **No row lock beyond the guard's existing `FOR KEY SHARE`, and the reason is not "nothing else is
+  mutable".** Phase 6 needed `FOR NO KEY UPDATE` because `set_status` reads a status, decides a rule from
+  it, and writes the decision back, so an interleaving can lose a *rule*. Linking decides nothing from
+  prior state: `ON CONFLICT DO NOTHING` is atomic and two interleaved links have the same outcome in
+  either order. The lesson Phase 6 recorded is about read-decide-write sequences, and this is not one.
+- **The MCP tools return `linked` and `changed`.** `linked` is the resulting state, `changed` says
+  whether a row moved. Both are needed while there is no read tool: without `changed` an agent cannot
+  tell a fresh link from a no-op, and without `linked` it would have to infer the state from which tool
+  it called. This is the one thing the REST 204 withholds, and an HTTP client can re-derive it by asking
+  for the read model when Phase 13 ships.
+- **An unknown contact answers the contacts domain's "Contact not found", not the task domain's bare
+  "Not found".** The shared MCP handler branches by error class, and `ContactNotFoundError` is reused
+  from the contacts domain (Phase 4's decision), so the answer names the contact and its id. That is
+  strictly more actionable than the task-shaped answer, and the test asserts it rather than the weaker
+  "not an internal error".
+- **The ordering is contacts-then-task, and the leak that would matter is absent.** `link_contact`
+  proves the contact exists before the repository proves the task is the caller's, so a foreign task
+  plus an unknown contact reports the contact. Nothing leaks: `contacts` has no owner in this system, so
+  contact existence is not a cross-user fact, and checking the task first would cost an extra round trip
+  to change which of two 404s a caller sees.
 
 **Required Test Coverage:** unit — schemas, tool schemas, idempotency. Integration — round-trips, contact
 deletion behaviour, cross-user rejection, both surfaces. E2E deferred to Phase 22.
+
+- **Unit (15 tests):** `backend/tests/unit/tasks/test_task_service_contact_links.py` — the batched call
+  shape; linking twice reporting no change; an unknown contact rejected with nothing written; unlink
+  idempotent and making **no** contact-existence call at all; the journal and settings repositories
+  untouched on every path (asserted on `mock_calls`, not on named methods); an unknown and a foreign
+  task both `TaskNotFoundError` with identical messages; and the vanished-contact mapping in three
+  shapes — mapped, re-raised for another constraint, and re-raised when the recovery read finds nothing
+  missing.
+  **A parametrised "works in any status" unit test was written and then deleted**, because this phase's
+  review was right that it was tautological: neither method reads a status, so the three runs were
+  byte-identical and the test would have survived any regression of the rule it named. The rule rests on
+  the *absence* of a status read, which `test_no_status_is_read_or_written` asserts directly, and on the
+  three real matrices below, each of which seeds every status against a database and checks the stored
+  status is unmoved. A comment in the file records why the obvious test is not there, so it is not
+  written again.
+- **Unit (12 new, 48 total):** `backend/tests/unit/api/test_task_schemas.py` — the minimal link body, the
+  pinned `contacts` type and a mismatch rejected, `data.id` required, and `relationship_type`, `role`,
+  `status`, `attendance` and an `attributes` member each refused, at both nesting levels.
+- **Unit (17 new, 30 total):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` — both tools
+  registered and requiring exactly `task_id` and `contact_id`; injected collaborators absent; no
+  relationship field and no journal parameter on either, asserted against the **generated** schema; and
+  the link description stating both that a repeat is harmless and that no role is recorded, because a
+  model that has seen `link_journal_to_contact` will otherwise reach for one.
+- **Unit (3 changed):** `test_task_service_create.py` — the N-contacts-one-call assertion replacing the
+  per-contact one, de-duplication surviving the batching, and the vanished-contact mapping through it.
+- **Integration (22 tests):** `backend/tests/integration/tasks/test_task_contact_links_integration.py` —
+  both round trips and their repeats; several contacts accumulating; every status with the stored status
+  unmoved; the contact-deletion cascade through a link this surface made, and the unlink that follows it;
+  an unknown contact and a real second user's task on both calls, byte-identically to an absent id, with
+  that user's link left in place; **contacts never inferred from the text**; `create_task`'s three
+  contacts costing one `add_contacts` call; the vanished contact answering 404 against real PostgreSQL;
+  and the two unit-of-work observations. The link one watches the **contact read** rather than the
+  insert, because the insert's own savepoint would show a nested transaction either way — the kind of
+  false evidence Phase 6's review found in the "read it back afterwards" idiom.
+- **Integration (17 new, 51 total):** `backend/tests/integration/api/test_task_endpoints.py` — 204 on
+  each call and on each repeat, with the row counted; every status; the contact-deletion case end to end;
+  404 `CONTACT_NOT_FOUND` writing nothing; the cross-user pair proved byte-identical on both verbs; and
+  five rejected bodies including `relationship_type`, `role`, `status`, another resource type and an
+  unknown member beside `data`.
+- **Integration (14 new, 36 total):** `backend/tests/integration/mcp/test_task_tools_mcp.py` — the same
+  matrix over `tools/call`, including `linked`/`changed` on all four outcomes, every status, no
+  intermediate journal row written, the actionable contact rejection, the indistinguishable cross-user
+  answer on both tools, and three relationship arguments refused by the transport before the service is
+  reached.
+- **E2E:** none — deferral taken as the phase states. The phase changes no frontend file and ships no
+  user-visible surface; ITER18-001's e2e lands in Phase 22.
+- **Docs:** `docs/architecture/api-design.md`'s *Task Endpoints* gained the two routes and four
+  conventions (the relationship route and its 204, the single identifier object, unlink not requiring the
+  contact, and the two new tools' `linked`/`changed`). `domain-architecture.md` gained the contact-link
+  business rules and the batched-write half of the repository contract. `database-design.md` explains the
+  batched `ON CONFLICT` and why the savepoint is there. `mcp-setup.md` and `mcp-tools.md` deliberately
+  untouched — the tools document themselves.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (875 files) and
+  `core_shared` (129); `mypy .` clean over **870** backend files and 127 in `core_shared` (the
+  whole-project run, not the narrower `mypy app tests`, which reports 864 — the review found this entry
+  quoting the narrower number as though it were the wider one); the full `tests/unit/` suite
+  (2,870 tests); and `tests/integration/tasks/`, `tests/integration/api/` and `tests/integration/mcp/`
+  together (969 tests). Re-run after merging Phase 7 from `main` and adding the id bounds: **2,922** and
+  **999**, both green. No frontend or e2e gates — the phase changes no frontend file and ships no
+  user-visible surface.
 
 #### Phase 12: Read Model and Lapsed Derivation
 

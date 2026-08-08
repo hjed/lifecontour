@@ -32,6 +32,7 @@ from tests.integration.mcp.http_helpers import (
 )
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS,
+    COUNT_CONTACT_LINKS_FOR_TASK,
     COUNT_INTERMEDIATE_JOURNALS,
     COUNT_TASKS,
     FIXED_PAST_INSTANT,
@@ -41,6 +42,8 @@ from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
     create_task,
+    link_contact,
+    linked_contact_ids,
     stored_status,
 )
 
@@ -583,3 +586,373 @@ class TestSetTaskStatusTool:
 
         assert '"isError":true' in response.text
         assert await stored_status(clean_database, task_id) == "not_done"
+
+
+async def _link_contact(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "link_task_to_contact", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _unlink_contact(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(
+        client, session_id, "unlink_task_from_contact", arguments
+    )
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+@pytest.mark.integration
+class TestContactLinkTools:
+    """The same matrix an HTTP client gets, over ``tools/call``.
+
+    A shared service is no evidence that both callers reach it — Phase 5 found a
+    real defect on exactly this seam, where every task rejection reached an AI
+    client as "internal error". So the tools are asserted in their own right
+    rather than by reference to the endpoint tests.
+
+    The tools answer with ``linked`` (the resulting state) and ``changed``
+    (whether a row moved), so an agent can tell a fresh link from a no-op
+    without a read tool existing yet.
+    """
+
+    async def test_linking_writes_the_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _link_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+
+        assert "error" not in payload
+        assert payload["linked"] is True
+        assert payload["changed"] is True
+        assert await linked_contact_ids(clean_database, task_id) == [sarah]
+
+    async def test_linking_again_reports_no_change_and_leaves_one_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            first = await _link_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+            second = await _link_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+
+        assert (first["changed"], second["changed"]) == (True, False)
+        assert second["linked"] is True
+        assert (
+            await count(
+                clean_database, COUNT_CONTACT_LINKS_FOR_TASK, {"task_id": task_id}
+            )
+            == 1
+        )
+
+    async def test_unlinking_removes_the_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+        await link_contact(clean_database, task_id=task_id, contact_id=sarah)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _unlink_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+
+        assert "error" not in payload
+        assert payload["linked"] is False
+        assert payload["changed"] is True
+        assert await linked_contact_ids(clean_database, task_id) == []
+
+    async def test_unlinking_again_reports_no_change(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+        await link_contact(clean_database, task_id=task_id, contact_id=sarah)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            first = await _unlink_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+            second = await _unlink_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+
+        assert (first["changed"], second["changed"]) == (True, False)
+        assert second["linked"] is False
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_links_are_editable_in_every_status(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """Cancelled included — the one status ``set_task_status`` will not leave."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            linked = await _link_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+            unlinked = await _unlink_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+
+        assert linked["linked"] is True
+        assert unlinked["linked"] is False
+        assert await stored_status(clean_database, task_id) == status.value
+
+    async def test_no_journal_link_is_created(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A contact link is not a journal link, whatever the tool is called."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            await _link_contact(client, session_id, task_id=task_id, contact_id=sarah)
+
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+
+@pytest.mark.integration
+class TestContactLinkToolRejections:
+    """Every refusal reaches an agent as something it can act on."""
+
+    async def test_an_unknown_contact_is_reported_as_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Not as an internal error, which an agent can do nothing with.
+
+        The contacts domain's own branch of the shared handler answers this, so
+        it comes back as *"Contact not found"* rather than the task domain's
+        bare *"Not found"* — which is the more useful answer: the task is fine,
+        the contact is the problem, and the message says which id.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _link_contact(
+                client, session_id, task_id=task_id, contact_id=999_999
+            )
+
+        assert payload["error"] == "Contact not found"
+        assert "999999" in payload["message"]
+        assert await linked_contact_ids(clean_database, task_id) == []
+
+    async def test_another_users_task_is_indistinguishable_from_an_absent_one(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _link_contact(
+                client, session_id, task_id=foreign_task, contact_id=sarah
+            )
+            absent = await _link_contact(
+                client, session_id, task_id=999_999, contact_id=sarah
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(foreign_task), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await linked_contact_ids(clean_database, foreign_task) == []
+
+    async def test_unlinking_another_users_task_leaves_its_link_in_place(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+        await link_contact(clean_database, task_id=foreign_task, contact_id=sarah)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _unlink_contact(
+                client, session_id, task_id=foreign_task, contact_id=sarah
+            )
+
+        assert payload["error"] == "Not found"
+        assert await linked_contact_ids(clean_database, foreign_task) == [sarah]
+
+    @pytest.mark.parametrize("unwanted", ["relationship_type", "role", "status"])
+    async def test_a_call_carrying_relationship_data_is_refused_by_the_transport(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        unwanted: str,
+    ):
+        """The schema offers no such parameter, so the call never reaches the service.
+
+        Asserted on the *rejection*, not on the argument's absence from a
+        response body — a request echo would satisfy that either way.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "link_task_to_contact",
+                {
+                    "task_id": task_id,
+                    "contact_id": sarah,
+                    unwanted: "PARTICIPANT",
+                },
+            )
+
+        assert '"isError":true' in response.text
+        assert await linked_contact_ids(clean_database, task_id) == []
+
+
+@pytest.mark.integration
+class TestIdsOutsideTheColumnsRange:
+    """The transport refuses an id no row could have, before the service runs.
+
+    The same defect the endpoint tests describe: an out-of-range id used to
+    reach the driver and come back as an internal error, which is the least
+    actionable answer an agent can get. The bound is in the generated schema, so
+    the call is refused rather than attempted.
+    """
+
+    async def test_a_task_id_beyond_int32_is_refused(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ):
+        sarah = await create_contact(clean_database, first_name="Sarah")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "link_task_to_contact",
+                {"task_id": 2_147_483_648, "contact_id": sarah},
+            )
+
+        assert '"isError":true' in response.text
+
+    async def test_a_contact_id_beyond_int32_is_refused(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "unlink_task_from_contact",
+                {"task_id": task_id, "contact_id": 2_147_483_648},
+            )
+
+        assert '"isError":true' in response.text
+        assert await linked_contact_ids(clean_database, task_id) == []

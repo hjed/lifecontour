@@ -20,14 +20,21 @@ would invite the surface to create one implicitly, which the tasks model does
 not do. For the same reason the creating journal is absent here: it comes from
 the request path, so a client cannot anchor a task to a journal it did not come
 from.
+
+**A contact link is a resource identifier and nothing else.** Its request model
+carries a type and an id, with no attributes at all, because the specification
+gives task-contact links no relationship type, no role and no attendance
+status. Those are refused rather than ignored, on the same reasoning as ``now``:
+a field silently dropped is a field a client believes was stored.
 """
 
 from datetime import datetime
 from typing import Literal
 
 from core_shared.models.tasks import TaskStatus
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.api.common.identifiers import INT32_MAX, DatabaseId
 from app.api.common.schemas import (
     JsonApiCreateRequest,
     JsonApiLinks,
@@ -37,6 +44,7 @@ from app.api.common.schemas import (
 
 RESOURCE_TYPE_DESC = "Resource type"
 TASK_RESOURCE_TYPE: Literal["tasks"] = "tasks"
+CONTACT_RESOURCE_TYPE: Literal["contacts"] = "contacts"
 
 
 class TaskAttributes(BaseModel):
@@ -74,14 +82,14 @@ class TaskCreateAttributes(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(..., description="The commitment, as plain text")
-    due_journal_id: int = Field(
+    due_journal_id: DatabaseId = Field(
         ...,
         description=(
             "The future-dated journal this task is due in. Must be an existing "
             "journal of yours, dated after today in your timezone."
         ),
     )
-    contact_ids: list[int] | None = Field(
+    contact_ids: list[DatabaseId] | None = Field(
         default=None,
         description="Optional contacts this task references; duplicates are ignored",
     )
@@ -170,6 +178,76 @@ class TaskUpdateRequest(JsonApiUpdateRequest[TaskUpdateData]):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+
+class TaskContactLinkData(BaseModel):
+    """The contact a link request names, as a JSON:API resource identifier.
+
+    A resource identifier object is a *type and an id* — there are no
+    attributes, because a task-contact link has nothing to carry. The
+    specification is explicit that these links hold no relationship type, no
+    role and no attendance status, which is a claim about what the surface
+    **refuses**, not merely about what it omits: dropping a ``role`` silently
+    would leave a client believing it had recorded one. ``extra="forbid"`` is
+    what turns the omission into a contract.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["contacts"] = Field(
+        default=CONTACT_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="The id of the contact to link")
+
+    @field_validator("id")
+    @classmethod
+    def _must_name_a_row(cls, value: str) -> str:
+        """JSON:API carries ids as strings; this system's contact ids are integers.
+
+        Checked here rather than in the controller so a malformed id is a 400
+        from the schema like every other bad field, instead of a ``ValueError``
+        escaping a cast as a 500.
+
+        **The range matters as much as the type**, which review caught. Python's
+        ``int`` is unbounded and ``contacts.id`` is a PostgreSQL ``INTEGER``, so
+        ``2147483648`` parsed cleanly, reached the repository and died in the
+        driver — asyncpg refuses to *bind* an out-of-range value, so the caller
+        got a 500 for what is plainly a bad request. See
+        :mod:`app.api.common.identifiers`.
+        """
+        try:
+            contact_id = int(value)
+        except ValueError as error:
+            raise ValueError("The contact id must be an integer") from error
+        if not 1 <= contact_id <= INT32_MAX:
+            raise ValueError(
+                f"The contact id must be between 1 and {INT32_MAX}; no row can "
+                f"have the id {contact_id}"
+            )
+        return value
+
+    @property
+    def contact_id(self) -> int:
+        """The id as the domain wants it, having been validated above."""
+        return int(self.id)
+
+
+class TaskContactLinkRequest(BaseModel):
+    """Request model for linking a contact to a task.
+
+    Forbids extras at the envelope as well as inside ``data``, for the reason
+    the create request ended up doing so: a guard with a gap is no guard to
+    whoever finds the gap, and a JSON:API envelope has more than one nesting
+    depth.
+
+    A single identifier rather than JSON:API's to-many array is a deliberate
+    narrowing. One link per call keeps "was anything created" unambiguous, and
+    it matches the shape the contact-tag surface already uses.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: TaskContactLinkData = Field(..., description="The contact to link")
 
 
 class TaskResponse(JsonApiResponse[TaskResource]):

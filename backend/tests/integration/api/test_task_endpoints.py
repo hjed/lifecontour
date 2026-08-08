@@ -47,6 +47,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 from app.core.settings.models import UserSettings
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS,
+    COUNT_CONTACT_LINKS_FOR_TASK,
     COUNT_INTERMEDIATE_JOURNALS,
     COUNT_TASKS,
     FIXED_PAST_INSTANT,
@@ -56,6 +57,9 @@ from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
     create_task,
+    delete_contact,
+    link_contact,
+    linked_contact_ids,
     stored_status,
 )
 
@@ -796,3 +800,457 @@ class TestRejectedUpdateBodies:
         assert _error(response.json())["code"] == "TASK_VALIDATION_ERROR"
         assert await stored_status(async_connection, target_id) == "not_done"
         assert await stored_status(async_connection, other_id) == "not_done"
+
+
+def _link_body(contact_id: int, **overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {"type": "contacts", "id": str(contact_id)}
+    data.update(overrides)
+    return {"data": data}
+
+
+@pytest.mark.integration
+class TestContactLinkEndpoints:
+    """``POST``/``DELETE`` under ``/api/tasks/{id}/relationships/contacts``.
+
+    Both answer **204**. There is no read model yet — no endpoint returns a
+    task's contacts — so echoing the link back would be a second definition of
+    what got linked, sitting beside a read surface that does not exist. 204 is
+    also what makes idempotency invisible to the client, which is the point of
+    it: a repeat of either call is indistinguishable from the first.
+    """
+
+    async def test_linking_a_contact_writes_the_row(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(sarah)
+        )
+
+        assert response.status_code == 204
+        assert await linked_contact_ids(async_connection, task_id) == [sarah]
+
+    async def test_linking_the_same_contact_again_answers_the_same_way(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A retry is not an error, and does not produce a second row."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        path = f"/api/tasks/{task_id}/relationships/contacts"
+
+        first = await authenticated_client.post(path, json=_link_body(sarah))
+        second = await authenticated_client.post(path, json=_link_body(sarah))
+
+        assert (first.status_code, second.status_code) == (204, 204)
+        assert (
+            await count(
+                async_connection, COUNT_CONTACT_LINKS_FOR_TASK, {"task_id": task_id}
+            )
+            == 1
+        )
+
+    async def test_unlinking_a_contact_removes_the_row(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        await link_contact(async_connection, task_id=task_id, contact_id=sarah)
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/contacts/{sarah}"
+        )
+
+        assert response.status_code == 204
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+    async def test_unlinking_again_answers_the_same_way(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """``DELETE`` is idempotent, so a second one is still a 204."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        await link_contact(async_connection, task_id=task_id, contact_id=sarah)
+        path = f"/api/tasks/{task_id}/relationships/contacts/{sarah}"
+
+        first = await authenticated_client.delete(path)
+        second = await authenticated_client.delete(path)
+
+        assert (first.status_code, second.status_code) == (204, 204)
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_links_are_editable_in_every_status(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """Including *cancelled*, which ``PATCH`` refuses to leave."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        linked = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(sarah)
+        )
+        unlinked = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/contacts/{sarah}"
+        )
+
+        assert (linked.status_code, unlinked.status_code) == (204, 204)
+        assert await stored_status(async_connection, task_id) == status.value
+
+    async def test_deleting_the_contact_afterwards_leaves_the_task_alone(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Criterion 4 through the surface that made the link."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(sarah)
+        )
+
+        await delete_contact(async_connection, sarah)
+
+        assert await linked_contact_ids(async_connection, task_id) == []
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 1
+        assert await stored_status(async_connection, task_id) == "not_done"
+
+
+@pytest.mark.integration
+class TestContactLinkRejections:
+    """One test per way the endpoint says no."""
+
+    async def test_an_unknown_contact_answers_404_and_writes_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(999_999)
+        )
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "CONTACT_NOT_FOUND"
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+    async def test_another_users_task_is_indistinguishable_from_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Neither the status nor the message may say which of the two it was."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            async_connection,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        foreign = await authenticated_client.post(
+            f"/api/tasks/{foreign_task}/relationships/contacts", json=_link_body(sarah)
+        )
+        absent = await authenticated_client.post(
+            "/api/tasks/999999/relationships/contacts", json=_link_body(sarah)
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        foreign_detail = str(_error(foreign.json())["detail"])
+        absent_detail = str(_error(absent.json())["detail"])
+        assert foreign_detail.replace(str(foreign_task), "X") == absent_detail.replace(
+            "999999", "X"
+        )
+        assert await linked_contact_ids(async_connection, foreign_task) == []
+
+    async def test_unlinking_another_users_task_leaves_its_link_in_place(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            async_connection,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        await link_contact(async_connection, task_id=foreign_task, contact_id=sarah)
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{foreign_task}/relationships/contacts/{sarah}"
+        )
+
+        assert response.status_code == 404
+        assert await linked_contact_ids(async_connection, foreign_task) == [sarah]
+
+    @pytest.mark.parametrize("field", ["relationship_type", "role", "status"])
+    async def test_a_body_carrying_relationship_data_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        field: str,
+    ):
+        """A task-contact link is a plain reference and says so by refusing.
+
+        Dropping the field silently would leave a client believing it had
+        recorded a role that nothing stored.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts",
+            json=_link_body(sarah, **{field: "PARTICIPANT"}),
+        )
+
+        assert response.status_code == 400
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+    async def test_a_body_declaring_another_resource_type_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts",
+            json={"data": {"type": "tasks", "id": str(sarah)}},
+        )
+
+        assert response.status_code == 400
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+    async def test_a_body_with_no_contact_id_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts",
+            json={"data": {"type": "contacts"}},
+        )
+
+        assert response.status_code == 400
+
+    async def test_unknown_members_beside_the_data_member_are_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The envelope level Phase 5's review found open on the create request."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts",
+            json={
+                "data": {"type": "contacts", "id": str(sarah)},
+                "relationship_type": "MENTION",
+            },
+        )
+
+        assert response.status_code == 400
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+
+@pytest.mark.integration
+class TestIdsOutsideTheColumnsRange:
+    """An id no row could have is a client error, not a server one.
+
+    Python's ``int`` is unbounded and every id column here is a PostgreSQL
+    ``INTEGER``, so ``2147483648`` used to parse cleanly, reach the repository
+    and die in the driver — asyncpg refuses to *bind* an out-of-range value, so
+    the caller got a 500 for what is plainly a bad request. Found by the pull
+    request's automated review, and reproduced on five routes before it was
+    fixed, including two this phase did not add.
+
+    The bound belongs at the surface because it is a fact about the column's
+    width rather than a domain rule: no service could enforce it without first
+    doing the query that fails.
+    """
+
+    async def test_a_body_contact_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts",
+            json=_link_body(2_147_483_648),
+        )
+
+        assert response.status_code == 400
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+    async def test_a_path_task_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+    ):
+        sarah = await create_contact(async_connection, first_name="Sarah")
+
+        response = await authenticated_client.post(
+            "/api/tasks/2147483648/relationships/contacts", json=_link_body(sarah)
+        )
+
+        assert response.status_code == 400
+
+    async def test_a_path_contact_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/contacts/2147483648"
+        )
+
+        assert response.status_code == 400
+
+    async def test_a_zero_id_is_rejected_rather_than_reported_as_missing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Serial columns start at 1, so zero identifies nothing.
+
+        Answering 404 would suggest the row might have existed once; the id is
+        simply not one this system can ever issue.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(0)
+        )
+
+        assert response.status_code == 400
+
+    async def test_the_status_route_is_bounded_too(
+        self,
+        authenticated_client: AsyncClient,
+    ):
+        """A route this phase did not add, fixed with it.
+
+        Leaving `PATCH` broken beside a fixed neighbour in the same module would
+        be a worse outcome than either fixing both or fixing neither.
+        """
+        response = await authenticated_client.patch(
+            "/api/tasks/2147483648",
+            json=_update_body(2_147_483_648, status="done"),
+        )
+
+        assert response.status_code == 400
+
+    async def test_create_rejects_a_contact_id_beyond_int32(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The same, on the create path's contact list."""
+        creating_id, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json=_body(
+                text="print the permit",
+                due_journal_id=due_id,
+                contact_ids=[2_147_483_648],
+            ),
+        )
+
+        assert response.status_code == 400
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
