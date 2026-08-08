@@ -49,6 +49,18 @@ async def set_task_status_schema() -> dict[str, Any]:
     return await _tool_schema("set_task_status")
 
 
+@pytest.fixture
+async def update_task_text_schema() -> dict[str, Any]:
+    """The ``update_task_text`` tool as an MCP client actually sees it."""
+    return await _tool_schema("update_task_text")
+
+
+@pytest.fixture
+async def delete_task_schema() -> dict[str, Any]:
+    """The ``delete_task`` tool as an MCP client actually sees it."""
+    return await _tool_schema("delete_task")
+
+
 class TestCreateTaskToolParameters:
     """What an AI client may send."""
 
@@ -298,3 +310,169 @@ class TestTheContactLinkToolsDocumentThemselves:
         description = link_contact_schema["description"].lower()
 
         assert "role" in description
+
+
+class TestUpdateTaskTextToolParameters:
+    """What an AI client may send to reword a task."""
+
+    def test_the_task_and_the_text_are_required(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        required = set(update_task_text_schema["input_schema"]["required"])
+
+        assert required == {"task_id", "text"}
+
+    def test_injected_collaborators_are_not_part_of_the_contract(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        properties = update_task_text_schema["input_schema"]["properties"]
+
+        assert "task_service" not in properties
+        assert "db_connection" not in properties
+
+    def test_no_journal_parameter_is_offered(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        """ "Updating a task never requires a journal" — specification, verbatim.
+
+        A journal parameter here would invite a model to supply one, and the
+        only thing the service could do with it is create an intermediate link
+        the user never asked for. Intermediate links are explicit only.
+        """
+        properties = update_task_text_schema["input_schema"]["properties"]
+
+        assert not [name for name in properties if "journal" in name]
+
+    def test_no_status_parameter_is_offered(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        """Two tools, two decisions: rewording is not a way to change a status.
+
+        The combined write exists for the ``PATCH`` body that genuinely carries
+        both. A model has a tool per intent, so it never has to reason about
+        what leaving a field out will do.
+        """
+        properties = update_task_text_schema["input_schema"]["properties"]
+
+        assert "status" not in properties
+
+    def test_the_schema_has_no_now_parameter(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        assert "now" not in update_task_text_schema["input_schema"]["properties"]
+
+
+class TestUpdateTaskTextDocumentsItself:
+    """What a model has to know before it calls this rather than after."""
+
+    def test_the_tool_has_a_description(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        assert len(update_task_text_schema["description"]) > 0
+
+    def test_the_description_says_text_is_editable_in_any_status(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        """Otherwise a model will not try to fix a typo on a cancelled task."""
+        description = update_task_text_schema["description"].lower()
+
+        assert "any status" in description
+
+    def test_the_text_parameter_says_it_replaces_rather_than_appends(
+        self, update_task_text_schema: dict[str, Any]
+    ) -> None:
+        """A model that assumes otherwise will send a fragment and lose the rest."""
+        description = update_task_text_schema["input_schema"]["properties"]["text"][
+            "description"
+        ].lower()
+
+        assert "replaces" in description
+
+
+class TestDeleteTaskToolParameters:
+    """What an AI client may send to destroy a task."""
+
+    def test_only_the_task_is_required(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        required = set(delete_task_schema["input_schema"]["required"])
+
+        assert required == {"task_id"}
+
+    def test_injected_collaborators_are_not_part_of_the_contract(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        properties = delete_task_schema["input_schema"]["properties"]
+
+        assert "task_service" not in properties
+        assert "db_connection" not in properties
+
+    def test_no_journal_parameter_is_offered(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        """Deleting a task involves no journal; the links go with the row."""
+        properties = delete_task_schema["input_schema"]["properties"]
+
+        assert not [name for name in properties if "journal" in name]
+
+
+class TestDeleteTaskLeadsWithCancelling:
+    """The phase's third criterion, asserted rather than merely written.
+
+    "Both docstrings make cancel the ordinary action and delete the exception."
+    For an AI client the docstring is not documentation, it is the only steer it
+    gets — a model choosing between two tools reads exactly this text, so a
+    description that presented deletion as the neutral way to retire a task
+    would make the specification's stance true of the UI and false of the agent.
+    """
+
+    def test_the_tool_has_a_description(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        assert len(delete_task_schema["description"]) > 0
+
+    def test_the_description_names_cancelling_as_the_ordinary_action(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        """Asserted on the phrase, not on the word.
+
+        Review caught the looser ``"cancel" in description`` being satisfied by
+        the substring inside "cancelled" — so a description reading "deleting is
+        tidier than cancelling" would have passed while saying the opposite of
+        the criterion.
+        """
+        description = delete_task_schema["description"].lower()
+
+        assert "prefer cancelling" in description
+        assert "cancelling is the ordinary" in description
+
+    def test_the_description_names_the_tool_that_cancels(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        """Naming the alternative in prose is not enough to act on it."""
+        description = delete_task_schema["description"]
+
+        assert "set_task_status" in description
+
+    def test_the_description_says_the_deletion_cannot_be_undone(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        """The asymmetry between the two is the whole reason to prefer cancelling."""
+        description = delete_task_schema["description"].lower()
+
+        assert "cannot be undone" in description
+
+    def test_the_description_says_what_survives_the_deletion(
+        self, delete_task_schema: dict[str, Any]
+    ) -> None:
+        """A model must not warn a user that their journals are at risk.
+
+        ``untouched`` is asserted alongside the two nouns because those words
+        appear in a description that says the opposite just as readily as in one
+        that says this.
+        """
+        description = delete_task_schema["description"].lower()
+
+        assert "untouched" in description
+        assert "journals" in description
+        assert "contacts" in description

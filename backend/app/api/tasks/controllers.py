@@ -7,11 +7,11 @@ due, and who it involves.
 The controller is deliberately thin. Every invariant — both anchors exist and
 belong to the acting user, the due journal is future-dated, referenced contacts
 exist — lives in ``TaskService.create_task``, which is a ``@transactional`` unit
-of work; the status transition matrix likewise lives in
-``TaskService.set_status``. This module therefore opens **no** transaction and
-catches **no** domain error: the registered ``DomainError`` handler renders each
-one with its own status and JSON:API code, so the MCP tool inherits exactly the
-same answers.
+of work; the transition matrix and the text rule likewise live in
+``TaskService.update_task``, and owner scoping in ``delete_task``. This module
+therefore opens **no** transaction and catches **no** domain error: the
+registered ``DomainError`` handler renders each one with its own status and
+JSON:API code, so the MCP tools inherit exactly the same answers.
 
 It *raises* exactly one, and only on the update path: a body whose resource id
 disagrees with the path is a JSON:API envelope problem with no domain or MCP
@@ -109,18 +109,24 @@ async def update_task(
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> TaskResponse:
-    """Change a task's status.
+    """Change a task's text, its status, or both.
 
     A task is reached by its own id here rather than through a journal, because
-    changing a status involves no journal at all: marking a task done or
-    cancelled creates no journal link and does not re-check the due journal, so
-    a *lapsed* task is completable from wherever the user found it. There is
-    still no task **collection** — the specification is explicit that no screen
-    lists every task — only this member route.
+    neither change involves a journal at all: marking a task done or cancelled
+    creates no journal link, rewording one infers no link either, and the due
+    journal is not re-read on either path — so a *lapsed* task stays both
+    completable and editable from wherever the user found it. There is still no
+    task **collection** — the specification is explicit that no screen lists
+    every task — only this member route.
+
+    Both attributes are optional and at least one must be present, because
+    JSON:API sends the attributes that changed. When both arrive they are one
+    change: the service applies them under a single read and a single write, so
+    a request can never be half-applied.
 
     Raises:
-        400: An unknown status, an unknown attribute, or a body id that
-             disagrees with the path.
+        400: An unknown status, blank text, an unknown attribute, a body naming
+             no change at all, or a body id that disagrees with the path.
         404: The task does not exist or is not yours; the two are the same
              answer by design.
         409: The transition is refused. Only leaving *cancelled* is: a cancelled
@@ -139,13 +145,53 @@ async def update_task(
             f"({task_id})",
         )
 
-    updated = await task_service.set_status(
+    attributes = task_request.data.attributes
+    updated = await task_service.update_task(
         user_id=user.id,
         task_id=task_id,
-        status=task_request.data.attributes.status,
+        text=attributes.text,
+        status=attributes.status,
         transaction=connection,
     )
     return TaskResponse(data=_to_resource(updated))
+
+
+@router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_task(
+    task_id: DatabaseIdPath,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """Delete a task permanently. Prefer cancelling it.
+
+    **Cancelling is the ordinary action and this is the exception**, matching
+    the stance the journals specification takes on event journals. A cancelled
+    task stays part of the record of what the user committed to and can be
+    reopened by retargeting it onto a new future journal; a deleted one is gone.
+    Use `PATCH /api/tasks/{task_id}` with `status: "cancelled"` unless the task
+    was a genuine mistake — a duplicate, or something typed into the wrong
+    place.
+
+    The task's intermediate-journal and contact links go with it. The journals
+    and contacts themselves are untouched, including both anchors: deleting the
+    task is the supported way to unblock a journal deletion that a task was
+    holding up, not a reason to lose the journal as well.
+
+    Answers 204 with no body: there is no resource left to return.
+
+    Raises:
+        400: A path id that is not an integer, or one outside the range an
+             ``INTEGER`` column can hold.
+        404: The task does not exist or is not yours; the two are the same
+             answer by design. A second delete of the same task answers 404 too,
+             because reporting success for a task that was not there would tell
+             a client a commitment is gone when it may still be on a journal.
+    """
+    await task_service.delete_task(
+        user_id=user.id, task_id=task_id, transaction=connection
+    )
 
 
 @router.post(

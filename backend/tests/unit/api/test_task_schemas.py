@@ -57,6 +57,16 @@ def _valid_update_body(**overrides: object) -> dict[str, object]:
     return {"data": {"type": "tasks", "id": "5", "attributes": attributes}}
 
 
+def _update_body(**attributes: object) -> dict[str, object]:
+    """An update body carrying exactly the attributes given, and no default.
+
+    ``_valid_update_body`` always starts from a status, which is the wrong base
+    for the optionality rules: a test that "text alone is accepted" has to be
+    able to send a body with no status in it at all.
+    """
+    return {"data": {"type": "tasks", "id": "5", "attributes": attributes}}
+
+
 class TestTaskCreateRequest:
     """What a client may send to create a task."""
 
@@ -202,13 +212,6 @@ class TestTaskUpdateRequest:
         with pytest.raises(ValidationError):
             TaskUpdateRequest.model_validate(_valid_update_body(status="in_progress"))
 
-    def test_status_is_required(self) -> None:
-        """It is the only thing this endpoint changes, so an empty body says nothing."""
-        with pytest.raises(ValidationError):
-            TaskUpdateRequest.model_validate(
-                {"data": {"type": "tasks", "id": "5", "attributes": {}}}
-            )
-
     def test_the_resource_id_is_required(self) -> None:
         """JSON:API identifies the resource in the body as well as the path."""
         with pytest.raises(ValidationError):
@@ -229,16 +232,81 @@ class TestTaskUpdateRequest:
             )
 
 
-class TestTheUpdateRequestChangesNothingElse:
-    """This phase's PATCH sets a status and refuses everything else.
+class TestTheUpdateRequestCarriesTextAndStatus:
+    """Both are optional individually, and at least one must be present.
 
-    Text (Phase 9) and the due journal (Phase 8) are edited through their own
-    work; accepting either here now would ship a half-implemented field that
-    silently did nothing.
+    JSON:API sends the attributes that changed, so a client rewording a task
+    sends no status and a client completing one sends no text — and a client
+    doing both in one request sends both, which is why the two are applied by a
+    single service call rather than two.
+    """
+
+    def test_text_alone_is_accepted(self) -> None:
+        request = TaskUpdateRequest.model_validate(_update_body(text="rewritten"))
+
+        assert request.data.attributes.text == "rewritten"
+        assert request.data.attributes.status is None
+
+    def test_status_alone_is_accepted(self) -> None:
+        request = TaskUpdateRequest.model_validate(_update_body(status="done"))
+
+        assert request.data.attributes.status == TaskStatus.DONE
+        assert request.data.attributes.text is None
+
+    def test_both_together_are_accepted(self) -> None:
+        """One request, one decision — the reason the service applies both at once."""
+        request = TaskUpdateRequest.model_validate(
+            _update_body(text="rewritten", status="done")
+        )
+
+        assert request.data.attributes.text == "rewritten"
+        assert request.data.attributes.status == TaskStatus.DONE
+
+    def test_a_body_naming_no_change_is_rejected(self) -> None:
+        """An update that updates nothing is a malformed request, not a no-op.
+
+        The *service* treats it as nothing to do, because down there it is. Over
+        JSON:API it is a client that built a body wrong, and answering 200 would
+        tell it the edit it thinks it made was applied.
+        """
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_update_body())
+
+    def test_an_explicitly_null_attribute_counts_as_naming_no_change(self) -> None:
+        """``{"text": null}`` is not a way to blank a task's text.
+
+        Text is required on a task, so null cannot mean "remove it"; treating it
+        as "not sent" is the only reading that does not invent a fourth state.
+        """
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_update_body(text=None, status=None))
+
+    def test_empty_text_reaches_the_domain_rather_than_being_refused_twice(
+        self,
+    ) -> None:
+        """One definition of an acceptable task, not two that can drift apart.
+
+        The schema's job is the envelope; whether a text is acceptable is the
+        entity's, and it answers the same way for a create, a ``PATCH`` and an
+        MCP call. Adding ``min_length`` here would put a second rule beside it
+        that a later change to one would silently leave inconsistent with the
+        other.
+        """
+        request = TaskUpdateRequest.model_validate(_update_body(text=""))
+
+        assert request.data.attributes.text == ""
+
+
+class TestTheUpdateRequestChangesNothingElse:
+    """Text and status are the whole of it; everything else is refused.
+
+    The due journal (Phase 8) and contact links (Phase 11) are edited through
+    their own surfaces; accepting either here now would ship a half-implemented
+    field that silently did nothing.
     """
 
     @pytest.mark.parametrize(
-        "field", ["text", "due_journal_id", "creating_journal_id", "contact_ids"]
+        "field", ["due_journal_id", "creating_journal_id", "contact_ids"]
     )
     def test_no_other_attribute_exists(self, field: str) -> None:
         assert field not in TaskUpdateAttributes.model_fields
@@ -246,7 +314,6 @@ class TestTheUpdateRequestChangesNothingElse:
     @pytest.mark.parametrize(
         ("field", "value"),
         [
-            ("text", "rewritten"),
             ("due_journal_id", 9),
             ("creating_journal_id", 9),
             ("now", "2020-01-01T00:00:00+00:00"),

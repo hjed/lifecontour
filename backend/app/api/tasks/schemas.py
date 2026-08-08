@@ -32,7 +32,7 @@ from datetime import datetime
 from typing import Literal
 
 from core_shared.models.tasks import TaskStatus
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.common.identifiers import INT32_MAX, DatabaseId
 from app.api.common.schemas import (
@@ -131,23 +131,55 @@ class TaskCreateRequest(JsonApiCreateRequest[TaskCreateData]):
 class TaskUpdateAttributes(BaseModel):
     """Attributes a client may send to update a task.
 
-    Only the status, for now. Text is editable in any status and the due journal
-    is retargetable, but each has its own rules and its own phase; carrying
-    either field here before those rules exist would accept an edit and silently
-    do nothing with it. ``extra="forbid"`` is what makes that a contract rather
-    than an omission, so a field arriving early is refused rather than dropped.
+    The text and the status, and **both are optional individually**: JSON:API
+    sends the attributes that changed, so a client rewording a task sends no
+    status and one completing it sends no text. Sending both is a single change
+    to a single resource, which is why the service applies them under one read
+    and one write rather than as two calls that could half-succeed.
+
+    What is refused is a body naming *neither*. Down in the service that is
+    simply nothing to do; out here it is a client that built a request wrong,
+    and answering 200 would tell it the edit it thinks it made was applied.
+
+    The due journal (Phase 8) and contact links (Phase 11) are edited through
+    their own surfaces, and ``extra="forbid"`` is what keeps their absence a
+    contract rather than an omission — a field arriving early is refused rather
+    than silently dropped.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    status: TaskStatus = Field(
-        ...,
+    text: str | None = Field(
+        default=None,
+        description=(
+            "The task's new text, replacing the existing text entirely. "
+            "Editable in any status, including cancelled. Omit to leave it "
+            "unchanged."
+        ),
+    )
+    status: TaskStatus | None = Field(
+        default=None,
         description=(
             "The status to move the task to: not_done, done, or cancelled. A "
             "cancelled task cannot be moved back here — retarget it onto a new "
-            "future journal to reopen it as not done."
+            "future journal to reopen it as not done. Omit to leave it "
+            "unchanged."
         ),
     )
+
+    @model_validator(mode="after")
+    def _must_name_a_change(self) -> TaskUpdateAttributes:
+        """Refuse an update that updates nothing.
+
+        Note this also settles what an explicit ``null`` means: text is required
+        on a task, so ``{"text": null}`` cannot mean "remove it", and reading it
+        as "not sent" is the only interpretation that does not invent a fourth
+        state. A body carrying nothing but nulls therefore names no change and
+        is refused here like any other.
+        """
+        if self.text is None and self.status is None:
+            raise ValueError("An update must name at least one of 'text' or 'status'.")
+        return self
 
 
 class TaskUpdateData(BaseModel):

@@ -2,10 +2,11 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **62 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–7 complete** (task tables + domain entity; task repository; journal-date resolution
-and the future-dated rule; the creation service and its core invariants; create over REST and MCP; the
-status lifecycle over service, REST and MCP; and retargeting semantics in the service — the model's one
-automatic link, and its only way back out of a terminal status).
+**ITER18-001 Phases 1–7, 9 and 11 complete** (task tables + domain entity; task repository; journal-date
+resolution and the future-dated rule; the creation service and its core invariants; create over REST and
+MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
+one automatic link, and its only way back out of a terminal status; text update and delete over both
+surfaces; and contact links over both surfaces).
 **ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
 for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
 blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
@@ -113,6 +114,16 @@ journal a task is already due in is a no-op. The new refusal is `TaskReopenNotAc
 The creating journal remains unreachable: no service method other than `create_task` accepts one. There
 is still **no retarget surface** — no endpoint and no MCP tool until Phase 8 — and still no way to read a
 task back.
+
+**Since ITER18-001 Phase 9:** a task can be reworded and destroyed, on both surfaces.
+`PATCH /api/tasks/{id}` now carries the text, the status, or both; `DELETE /api/tasks/{id}` answers 204
+and takes the task's link rows with it, leaving the journals and contacts alone. The MCP tools are
+`create_task`, `set_task_status`, `update_task_text` and `delete_task`. `TaskService.update_task` owns
+text and status together under one `FOR NO KEY UPDATE` read and one write — so a `PATCH` carrying both
+can never be half-applied — and `set_status` is now a delegation to it, leaving the transition matrix
+with a single implementation. `retarget_due_journal` keeps its own path: it revalidates a due journal,
+which the text/status update deliberately never does. There is still **no way to read a task back**, no
+retarget surface (Phase 8) and no intermediate-journal link operation (Phase 10).
 
 **Since ITER18-001 Phase 11:** a task's contacts are editable.
 `POST`/`DELETE /api/tasks/{task_id}/relationships/contacts[/{contact_id}]` and the MCP tools
@@ -394,6 +405,23 @@ rules below follow from that record and apply to every phase in this document:
     volume each, and take ×6-against-production as the working default for any phase with more than one
     entry point.** ITER18-001 Phases 6, 8, 9, 10, 11, 13 and 14 are all REST+MCP pairs estimated at ×4
     today.
+16. **Estimate a multi-capability phase as N × S × properties, and prefer splitting it** — added after
+    ITER18-001 Phase 9 came in at **3,300 tracked against a 600 estimate (5.5×) and 8.6× its own
+    production**, well above Phase 6's 5.6×. Phase 9 shipped *two* capabilities (text update, delete) on
+    *three* surfaces (service, endpoint, tool), and each surface re-asserted the same handful of
+    properties per capability — editable in all three statuses, the lapsed case, no inferred link, the
+    cross-user answer, the blast radius. Rule 15 budgets per surface; this refines it: the test volume
+    is **capabilities × surfaces × properties**, so a second capability roughly doubles a phase that was
+    already at rule 15's ceiling. Two consequences. **The 500-line limit in rule 3 is unreachable for any
+    REST+MCP capability phase in this domain, and should be restated rather than repeatedly breached.**
+    Phase 9's two halves come to ~1,300–1,400 lines *each*; even a single capability on three surfaces
+    (Phase 6) came to 2,483. Delivery rule 5 requires MCP parity in the same phase, and a surface's tests
+    are not optional — Phase 5 found a real defect on exactly that seam. The workable form of rule 3 for
+    this iteration is **one capability per phase, ~1,500 tracked lines**, with the 500-line figure kept
+    for phases that add no new entry point. And **the remaining capability phases should each carry one
+    capability**: ITER18-001 Phases 10 (attach *and* detach), 11 (link *and* unlink, plus a batching
+    follow-up) and 13 (get *and* list-by-journal) are each two capabilities under one heading and should
+    be split, or re-estimated at roughly ×9 against production.
 
 **Programme size:** 62 phases — and therefore 62 PRs — across the five iterations
 (ITER18-001: 22, ITER18-002: 6, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8).
@@ -585,9 +613,15 @@ leaves tasks uncreatable and invisible).
    (Phase 3)*.
 3. ~~**Whether task text has a length bound**, and whether it is markdown or plain~~ — ✅ **settled in
    Phase 1: plain text, `TEXT`, no length bound.** See *Decisions taken (Phase 1)*.
-4. **Whether MCP gets a delete tool** — settled in **Phase 7**. The specification's MCP list omits delete
-   while listing every other operation, but principle 1 (no meaningful UI-only behaviour) argues for
-   including it. Recommended: include `delete_task`, and record the addition here.
+4. ~~**Whether MCP gets a delete tool**~~ — ✅ **settled in Phase 9: yes, `delete_task` ships.** The entry
+   said Phase 7; Phase 7 had not landed when Phase 9 came up, and Phase 9's own criterion already named
+   the tool, so it was settled where the work was. The specification's MCP list omits delete while
+   listing every other operation, but principle 1 (no meaningful UI-only behaviour) decides it the
+   other way: an agent that can create a task by mistake must be able to undo that mistake, and the
+   alternative is a user cleaning up after their assistant by hand. The stance the specification
+   actually cares about — cancel is ordinary, delete is the exception — is carried by the tool's
+   *description* rather than by its absence, and that description is test-asserted. See *Decisions
+   taken (Phase 9)*.
 
 #### Phase 1: Schema, Tables and Domain Entity ✅ COMPLETE
 
@@ -1808,23 +1842,238 @@ a *"reopen it anyway"* affordance possible. It must be given its own code in the
 **Required Test Coverage:** unit — schemas and tool schema. Integration — both surfaces, the
 unacknowledged-reopen rejection, and the intermediate link in the response. E2E deferred to Phase 22.
 
-#### Phase 9: Text Update and Delete — REST and MCP
+#### Phase 9: Text Update and Delete — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 5.
-**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple.
+**Revised before work started (delivery rule 3):** ~300 production → **~1,700 tracked**. The original
+figure treats this as a capability *triple*; it is a **quadruple** — text update × 2 surfaces, delete
+× 2 surfaces — and Phase 6 had already measured this domain's tests at 5.6× production. **This is the
+first phase in the iteration to record the overrun *before* work rather than after**, which is what
+delivery rule 3 asks for and what Phase 6 explicitly noted it had failed to do.
+
+**Rule 3's 500-line limit was nonetheless breached, and the escape clause does not cover it.** That
+clause permits an overrun only where splitting would break rule 9 (every phase shippable), and
+splitting this one into "text update" and "delete" would not have: both halves ship independently. The
+honest accounting is that the phase was split*table* and was not split, for a weaker reason — the two
+halves share one `PATCH` schema change, and separating them would have put half a contract in each PR.
+What the actual numbers then show is that splitting would not have reached 500 either: each half comes
+to roughly 1,300–1,400 lines on its own. **No REST+MCP capability phase in this domain fits in 500
+lines**, because a capability's tests are its rules times its surfaces, and this domain has three. That
+is a finding about the 500-line rule rather than an excuse for this PR — see calibration rule 16.
+**Actual:** **311 production → 3,300 tracked** (3,300 insertions, 176 deletions: 311 production —
+service 158, MCP tools 79, controller 74 net, REST schemas 50, server instructions 1 — 2,690 tests and
+fixtures, 299 docs, of which 270 are this entry).
+
+**The production estimate was right; the revised test estimate was 58% low.** 311 against ~300 is the
+closest production call in this iteration. The tests came to **8.6× production**, well above even
+Phase 6's 5.6×; roughly 300 of those lines are the review round (a second false-evidence test found and
+fixed in Phase 6's file as well as this one, the REST half of criterion 3, the combined-write refusal on
+both halves, and a link-cascade over-reach case). The reason is the one Phase 6 identified, one step
+further along: the subject is
+not a matrix but a *pair* of capabilities, each asserted on three surfaces (service, endpoint, tool)
+and each surface asserting the same handful of properties — editable in all three statuses, the
+lapsed case, no inferred link, the cross-user answer. **Calibration refinement:** for a phase shipping
+*N* capabilities across *S* surfaces, the test volume scales with N × S × (properties per capability),
+so estimate from that product rather than from a multiplier on production lines. A quadruple in this
+domain is a ~2,700-line PR, which is over the 500-line rule — the honest reading is that the 500-line
+rule and the "MCP parity in the same phase" rule are in tension for any multi-capability phase, and
+that ITER18-001's remaining capability phases (10, 11, 13, 14) should each be planned as **one
+capability**, not two.
 
 **Acceptance Criteria:**
 
-- [ ] Text is editable in **any** status, through `PATCH /api/tasks/{id}` and MCP `update_task_text`.
-- [ ] Hard delete via `DELETE /api/tasks/{id}` and MCP `delete_task` (open decision 4), removing the task
-      and its link rows and nothing else.
-- [ ] Both docstrings make cancel the ordinary action and delete the exception, consistent with the
-      journals specification's stance.
-- [ ] Both surfaces 404 on another user's task.
+- [x] Text is editable in **any** status, through `PATCH /api/tasks/{id}` and MCP `update_task_text`. —
+      asserted for all three statuses on all three of the service, the endpoint and the tool, plus the
+      *lapsed* case (a task due in a past journal), because the due journal is never re-read.
+- [x] Hard delete via `DELETE /api/tasks/{id}` and MCP `delete_task` (open decision 4 — **settled here,
+      see below**), removing the task and its link rows and nothing else. — both link tables are
+      asserted empty afterwards and both anchors, the intermediate journal, the contact and a sibling
+      task are all asserted to survive, on both surfaces.
+- [x] Both docstrings make cancel the ordinary action and delete the exception, consistent with the
+      journals specification's stance. — and the MCP one is asserted as a *test*, not merely written:
+      the description must name cancelling, name `set_task_status` as the tool that does it, say the
+      deletion cannot be undone, and say the journals and contacts survive.
+- [x] Both surfaces 404 on another user's task. — byte-identically to an absent id once the ids are
+      stripped, on the edit and the delete, with the foreign row proved untouched in each case.
+
+**Decisions taken (Phase 9):**
+
+- **Open decision 4 is settled here, and the answer is to ship `delete_task`.** The entry says "settled
+  in Phase 7"; Phase 7 has not landed and this phase's own criterion already names the tool, so it is
+  settled where the work is. The specification's MCP list omits delete while listing every other
+  operation, but **principle 1 (no meaningful UI-only behaviour)** decides it the other way: an agent
+  that can create a task by mistake must be able to undo that mistake, and the alternative is a user
+  cleaning up after their assistant by hand. The stance the specification actually cares about —
+  cancel is ordinary, delete is the exception — is preserved by the *description* rather than by the
+  tool's absence, which is why that description is test-asserted rather than left to prose.
+  **The specification itself was amended**, on review's prompting: delivery rule 4 makes it the
+  acceptance bar, so recording the addition only here would leave the next reader re-litigating the
+  same omission. Its list is prefaced "MCP **must** support the ability to" — a floor rather than an
+  inventory — and the section opens "There must be no meaningful UI-only behaviour in this work", which
+  reads as *requiring* the tool rather than merely permitting it. `delete a task` is now on that list,
+  with a paragraph recording why it had been ambiguous rather than excluded.
+- **One service method owns text and status, and `set_status` delegates to it.** A `PATCH` may carry
+  both, because JSON:API sends the attributes that changed. Applying them as two service calls would
+  be two units of work and two read-decide-write sequences, so a client rewording *and* completing a
+  task in one request could have half of it applied. `TaskService.update_task` therefore takes both
+  optionally under one locking read and one write, and `set_status` — Phase 6's signature, and the
+  intent the MCP tool exposes — became a three-line delegation. Two implementations of the transition
+  matrix would be two places for it to drift and only one of them would be the one a given caller hit.
+  Phase 6's 34 status tests all pass unchanged, which is the evidence the delegation preserved
+  behaviour; a new test pins that the two entry points produce the same result.
+- **Phase 6's row lock is inherited rather than re-tested.** `update_task` reads, decides and writes,
+  which is exactly the shape that loses a *rule* rather than a field when two calls overlap — so it
+  keeps `find_by_id_for_update`. Because `set_status` now delegates, Phase 6's two-connection
+  overlapping-call test already exercises this code path end to end; duplicating that machinery
+  (committed rows under a one-off user id, cleanup in a `finally`) would add cost without adding
+  coverage. That the locking read is the one used is pinned per-method in the unit tests instead.
+- **`delete_task` takes no locking read, and its absence is pinned by a test.** Unlike the update it
+  decides nothing from what it read: one owner-scoped statement either removes a row or does not, and
+  `rowcount == 0` is already `TaskNotFoundError`. Adding a read would add a round trip and a second
+  way for the two to disagree. Worth stating because "the other member-route method locks, so this one
+  should" is the plausible-looking change a later reader might make.
+- **The links are left to the cascade, deliberately.** The service issues one `DELETE`; the link rows
+  go because migration 0105's foreign keys say so. A service that walked the link tables could leave
+  half of them behind, and would give the tasks domain the power to delete rows by enumeration rather
+  than by constraint. A unit test asserts `remove_contact` and `remove_intermediate_journal` are never
+  called, and an integration test asserts the cascade actually happens — the second is a property of
+  the *schema*, so a database is the only place it can be shown.
+- **A `PATCH` naming no change is refused (400) even though the service treats it as a no-op.** Down in
+  the service an empty update is simply nothing to do, and putting a transport's rule there would be
+  the wrong layer. Out at JSON:API it is a client that built a body wrong, and answering 200 would tell
+  it an edit it thinks it made was applied. The rule lives in a Pydantic `model_validator`, so the
+  controller still decides exactly one thing (the `data.id` match) and the "controller catches nothing"
+  rule survives. This also settles explicit `null`: text is required on a task, so `{"text": null}`
+  cannot mean "remove it" and is read as "not sent".
+- **Text is validated by the entity, not by the schema.** `dataclasses.replace(task, text=…)` re-runs
+  `Task.__post_init__`, so blank text raises the existing `TaskValidationError` (400) on every surface.
+  Adding `min_length` to the request model would put a second rule beside the first that a later change
+  to one would silently leave inconsistent with the other. Phase 1's decisions hold: no length bound,
+  and the text is **not** trimmed — creation does not trim, and trimming on one path only would make a
+  task's text depend on which surface last wrote it. Both are asserted.
+- **`update_task_text` offers no `status`, and `set_task_status` no `text`.** The combined write exists
+  for the `PATCH` body that genuinely carries both; a model gets one tool per intent, so it never has
+  to reason about what leaving a field out will do. A test asserts a status smuggled into
+  `update_task_text` is refused by the transport before the service is reached.
+- **Test doubles were shared rather than copied a third time**, continuing Phase 5's lesson and Phase
+  6's action on it. `set_status`, `update_task` and `delete_task` all start from the same position — one
+  persisted task, reached by the owner-scoped locking read, with the journal, contact and settings
+  repositories present but forbidden — so those fixtures moved out of
+  `test_task_service_set_status.py` into `tests/unit/tasks/conftest.py`, with the constants and the
+  entity builder in `task_doubles.py` beside it (a fixture cannot be imported; a plain function can).
+  `test_task_service_create.py` keeps its own, because creation genuinely *configures* those
+  repositories rather than merely forbidding them.
+- **`test_task_error_handling.py` was deliberately not extended.** The shared MCP handler branches on
+  the error *type*, and both types these tools can raise — `TaskNotFoundError` and
+  `TaskValidationError` — are already asserted there. A copy under a different operation name would
+  assert nothing the existing tests do not.
+- **A second false-evidence test was found and fixed, this one Phase 6's.** Phase 6 corrected the "read
+  the row back to prove a commit" claim; the same class of mistake survived one row over, in
+  `test_asking_for_the_current_status_does_not_touch_the_row`. PostgreSQL's `now()` is
+  `transaction_timestamp()` — constant across a transaction — and the integration fixture runs each
+  test inside one, so the `DEFAULT now()` the seed row carries and the `updated_at = now()` an update
+  writes are the *identical value*. "`updated_at` did not move" therefore held whether or not the no-op
+  existed, and Phase 9's review demonstrated it by deleting the short-circuit and watching the test
+  pass. Phase 9's own copy of that assertion had inherited the flaw. Both are fixed the same way: a
+  shared `backdate_updated_at` helper moves the timestamp to a value `now()` cannot produce, and each
+  is paired with a **positive** test that a real change *does* move it — without which a backdated
+  timestamp that never moves is equally consistent with "the column is never written". All four were
+  verified by deleting the short-circuit and confirming the two negative tests fail. **The lesson worth
+  carrying**, and the second instance of it in this iteration: an assertion that a *timestamp* did not
+  change is only evidence if something other than the code under test could have changed it.
 
 **Required Test Coverage:** unit — text validation bounds, schemas, tool schemas. Integration — edit in each
 status; delete removes link rows and leaves journals and contacts untouched; cross-user 404. E2E deferred to
 Phase 22.
+
+Counts below are `pytest --collect-only` figures, not hand-counted. Phase 9's review found the first
+draft of this list inflated by 15–50% because the numbers were written from the test *functions* while
+the surrounding text spoke of *tests*, and several are parametrised. Since this section is the
+calibration record later phases estimate from, the distinction matters: **collected** tests are quoted,
+with the function count in brackets where the two differ.
+
+- **Unit (23 tests, 17 functions):** `backend/tests/unit/tasks/test_task_service_update_text.py` — the text written and
+  returned in each of the three statuses and the status carried through unchanged in each (rewording a
+  cancelled task must not quietly reopen it); the anchors, owner and id untouched; the journal, contact
+  and settings repositories **never touched at all** (asserted on `mock_calls`, per Phase 6) and no link
+  row written; the *locking* read used and the plain read not; blank, whitespace-only and tab/newline
+  text refused with no save; no length bound (10,000 characters accepted) and no trimming; an unknown
+  task and another user's task both raising identical messages with no write; the same text a no-op and
+  an empty update a no-op; text and status together in **one** save; a refused transition taking the
+  text edit with it; and blank text refused *before* the transition is considered, so a doubly-invalid
+  request has a stable answer.
+- **Unit (7 tests):** `backend/tests/unit/tasks/test_task_service_delete.py` — the delete owner-scoped;
+  **no read precedes it** (the design decision, pinned rather than assumed); the link tables not walked;
+  no other domain touched and nothing saved; and `TaskNotFoundError` propagating identically for an
+  unknown id and another user's task.
+- **Unit (2 tests added; 20 collected):** `backend/tests/unit/tasks/test_task_service_set_status.py`
+  (extended) — the delegation: a status-only call leaves the text alone, and produces the same result as
+  the equivalent combined update. Its existing tests are the real regression guard and pass unchanged;
+  its fixtures moved to the shared conftest.
+- **Unit (5 tests added, 2 rewritten; 39 collected):** `backend/tests/unit/api/test_task_schemas.py`
+  (extended) — text alone, status alone and both together accepted; a body naming neither rejected; a
+  body of explicit nulls rejected; empty text passing the schema and reaching the domain rather than
+  being refused twice. The old "status is required" test became "a body naming no change is rejected",
+  and `text` moved out of the forbidden-attributes list into the accepted ones.
+- **Unit (5 tests):** `backend/tests/unit/api/test_task_endpoint_docs.py` (new) — acceptance criterion
+  3's **REST half**, which the first draft of this phase left unasserted while asserting the MCP half
+  five times over (found by review): the `DELETE` docstring — which FastAPI publishes verbatim as the
+  endpoint's OpenAPI description — must lead with "prefer cancelling", name the status change that
+  cancels, say the deletion is permanent, and say the journals and contacts are untouched. Plus the
+  `PATCH` docstring stating the at-least-one-attribute rule, which a client cannot infer from the schema.
+- **Unit (16 tests added; 29 collected):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py`
+  (extended) — both tools registered; their required parameters; injected collaborators absent; no
+  journal parameter on either; no `now`; no `status` on `update_task_text`; the text parameter saying it
+  *replaces*; the description saying text is editable in **any status**; and four assertions on
+  `delete_task`'s description carrying acceptance criterion 3 (leads with "prefer cancelling", names
+  `set_task_status`, says it cannot be undone, says the journals and contacts are untouched). The first
+  two were tightened after review pointed out that `"cancel" in description` is satisfied by the
+  substring inside *cancelled*, so a description reading "deleting is tidier than cancelling" would have
+  passed while saying the opposite.
+- **Integration (22 tests, 19 functions):** `backend/tests/integration/tasks/test_task_service_update_and_delete_integration.py`
+  — the text read back **from the database** in each status; a lapsed task still editable; no link row
+  created; the anchors unchanged; text and status travelling together; blank text leaving the row
+  untouched; `updated_at` unmoved by a same-text call; the task row gone and **both** link tables
+  emptied by a delete while the journals, the contact and a sibling task all survive; **a second task
+  sharing the same intermediate journal and the same contact keeping both of its links** (added after
+  review: every other link assertion is an unqualified `COUNT(*)` over a table where only the doomed
+  task has rows, so a delete that over-reached along the *journal* or *contact* side of a link would
+  have satisfied all six of them); the cross-user edit and delete both not found with the row intact
+  and byte-identical to an absent id; a repeat delete not found; and the two decorator-sensitive tests —
+  an observing repository proving the unit of work is open around the write and around the delete (both
+  verified to fail with `@transactional` removed, and to pass with it restored).
+- **Integration (14 tests added; 51 collected):** `backend/tests/integration/api/test_task_endpoints.py` (extended) —
+  `PATCH` text in each status over HTTP with the row read back after the response; text and status in
+  one request; **a refused status taking the text edit with it (409, both columns unchanged) and its
+  mirror, blank text beside a valid status (400, both unchanged)** — added after review, because
+  half-applying a combined request is the exact failure the single-service-call design exists to
+  prevent and it was previously asserted only against the service; the lapsed case; no link row; blank
+  text 400 with the row unchanged; the cross-user 404 proved byte-identical; `DELETE` answering **204
+  with an empty body** and removing the row; the link rows gone with all three journals and the contact
+  still present; a sibling task untouched; a repeat delete 404; and the cross-user delete 404 with the
+  foreign row intact. The rejected-bodies parametrisation swapped `text` (now accepted) for
+  `due_journal_id` (Phase 8's, still refused) and renamed the empty-attributes case.
+- **Integration (11 tests added; 35 collected):** `backend/tests/integration/mcp/test_task_tools_mcp.py` (extended) —
+  the same matrix through `tools/call` over the mounted MCP transport, because a shared service is not
+  evidence both callers reach it: `update_task_text` in each status with the row read back, the lapsed
+  case, no link row, blank text refused naming the field, the indistinguishable cross-user answer, and
+  a status argument refused by the transport; `delete_task` confirming with `{"deleted": true,
+  "task_id": …}`, emptying both link tables while the journals and contact survive, a sibling task
+  untouched, a second delete not found, and the cross-user delete not found with the row intact.
+- **E2E:** none — deferred as the phase states. The phase changes no file under `frontend/` and ships no
+  user-visible surface; ITER18-001's e2e lands in Phase 22.
+- **Docs:** `docs/architecture/api-design.md`'s *Task Endpoints* gained the `DELETE` row, a rewritten
+  `PATCH` row, and five conventions (the at-least-one-attribute rule and what explicit `null` means;
+  text and status as one change; 204-and-no-body with the cascade's blast radius and the repeat-delete
+  404; delete-is-the-exception carried by what the surfaces say; and the four MCP tools with the
+  one-tool-per-intent rule). `docs/architecture/domain-architecture.md` gained the service's mutation
+  surface. `mcp-setup.md` and `mcp-tools.md` deliberately untouched — the tools document themselves.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (879 files) and
+  `core_shared` (129); `mypy` clean over 874 backend files and 127 in `core_shared`; the full
+  `tests/unit/` suite (**2,882 tests**); and `tests/integration/tasks/`, `tests/integration/api/` and
+  `tests/integration/mcp/` together (**969 tests**). No frontend or e2e gates — the phase changes no
+  frontend file and ships no user-visible surface.
 
 #### Phase 10: Intermediate Journal Links — REST and MCP
 
