@@ -22,9 +22,9 @@ argument.
 import json
 from typing import Annotated, Any
 
-from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
+from core_shared.models.tasks import Task, TaskStatus
 from fastmcp import FastMCP
-from pydantic import Field
+from pydantic import Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
@@ -76,31 +76,6 @@ def _task_to_dict(task: Task, intermediate_journal_ids: list[int]) -> dict[str, 
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
     }
-
-
-async def _trail_of(task: Task, task_service: TaskService, user_id: str) -> list[int]:
-    """The journals ``task`` has passed through, for the tool's answer.
-
-    A plain read, run after the write's unit of work has committed. The tool
-    opens no transaction of its own for this, exactly as it opens none for the
-    write.
-
-    **A task that vanishes in that window reads as an empty trail, not "not
-    found".** The write has already committed, so reporting a successful
-    mutation as a failure would be worse than terse — and empty is the literal
-    truth, since ``task_intermediate_journals`` cascades from ``task_id``. The
-    window is **reachable**: ``delete_task`` in this same module can remove the
-    task between the commit and this read. Mirrors the endpoint's handling
-    deliberately, so the two surfaces cannot diverge on it.
-    """
-    if task.id is None:  # pragma: no cover - a persisted task always has one
-        return []
-    try:
-        return await task_service.list_intermediate_journal_ids(
-            user_id=user_id, task_id=task.id
-        )
-    except TaskNotFoundError:
-        return []
 
 
 @mcp_unified_error_handler("create_task", "task")
@@ -164,7 +139,7 @@ async def create_task(
     """
     user_id = await get_current_user_id()
 
-    created = await task_service.create_task(
+    created, trail = await task_service.create_task_with_trail(
         user_id=user_id,
         creating_journal_id=creating_journal_id,
         due_journal_id=due_journal_id,
@@ -172,10 +147,7 @@ async def create_task(
         transaction=db_connection,
         contact_ids=contact_ids,
     )
-    return json.dumps(
-        _task_to_dict(created, await _trail_of(created, task_service, user_id)),
-        indent=2,
-    )
+    return json.dumps(_task_to_dict(created, trail), indent=2)
 
 
 @mcp_unified_error_handler("set_task_status", "task")
@@ -215,16 +187,13 @@ async def set_task_status(
     """
     user_id = await get_current_user_id()
 
-    updated = await task_service.set_status(
+    updated, trail = await task_service.set_status_with_trail(
         user_id=user_id,
         task_id=task_id,
         status=status,
         transaction=db_connection,
     )
-    return json.dumps(
-        _task_to_dict(updated, await _trail_of(updated, task_service, user_id)),
-        indent=2,
-    )
+    return json.dumps(_task_to_dict(updated, trail), indent=2)
 
 
 @mcp_unified_error_handler("link_task_to_contact", "task")
@@ -339,13 +308,15 @@ async def retarget_task(
         ),
     ],
     acknowledge_reopen: Annotated[
-        bool,
+        StrictBool,
         Field(
             description=(
                 "Confirms that reopening a task which is already done is "
                 "intended. Without it, retargeting a done task is refused. "
                 "Ignored for a task that is not done or is cancelled, neither "
-                "of which needs confirming."
+                "of which needs confirming. Must be a JSON boolean — 1, "
+                '"true" and "yes" are refused rather than treated as a '
+                "confirmation."
             )
         ),
     ] = False,
@@ -377,17 +348,14 @@ async def retarget_task(
     """
     user_id = await get_current_user_id()
 
-    retargeted = await task_service.retarget_due_journal(
+    retargeted, trail = await task_service.retarget_due_journal_with_trail(
         user_id=user_id,
         task_id=task_id,
         due_journal_id=due_journal_id,
         transaction=db_connection,
         acknowledge_reopen=acknowledge_reopen,
     )
-    return json.dumps(
-        _task_to_dict(retargeted, await _trail_of(retargeted, task_service, user_id)),
-        indent=2,
-    )
+    return json.dumps(_task_to_dict(retargeted, trail), indent=2)
 
 
 @mcp_unified_error_handler("update_task_text", "task")
@@ -425,16 +393,13 @@ async def update_task_text(
     """
     user_id = await get_current_user_id()
 
-    updated = await task_service.update_task(
+    updated, trail = await task_service.update_task_with_trail(
         user_id=user_id,
         task_id=task_id,
         text=text,
         transaction=db_connection,
     )
-    return json.dumps(
-        _task_to_dict(updated, await _trail_of(updated, task_service, user_id)),
-        indent=2,
-    )
+    return json.dumps(_task_to_dict(updated, trail), indent=2)
 
 
 @mcp_unified_error_handler("delete_task", "task")

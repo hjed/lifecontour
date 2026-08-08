@@ -1883,6 +1883,43 @@ class TestRejectedRetargetBodies:
         assert response.status_code == 400
         assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
 
+    @pytest.mark.parametrize("value", ["true", "yes", 1, "1"], ids=str)
+    async def test_a_truthy_non_boolean_acknowledgement_does_not_reopen_a_done_task(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        value: object,
+    ):
+        """The wrong *type* must not be able to confirm a reopen.
+
+        Pydantic's ordinary ``bool`` parsing accepts all of these, so before the
+        pull request's review caught it a client sending ``"true"`` reopened a
+        completed task without ever sending a boolean. Asserted at the surface
+        as well as on the schema, because what matters is that the task is still
+        *done* afterwards — the acknowledgement gate's whole purpose.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json=_retarget_body(later_id, acknowledge_reopen=value),
+        )
+
+        assert response.status_code == 400
+        assert await stored_status(async_connection, task_id) == "done"
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+
     async def test_a_due_journal_id_beyond_int32_is_rejected(
         self,
         authenticated_client: AsyncClient,

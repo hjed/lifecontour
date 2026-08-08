@@ -32,7 +32,14 @@ from datetime import datetime
 from typing import Literal
 
 from core_shared.models.tasks import TaskStatus
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from app.api.common.identifiers import INT32_MAX, DatabaseId
 from app.api.common.schemas import (
@@ -247,7 +254,7 @@ class TaskRetargetAttributes(BaseModel):
             "rule is re-checked here, whatever the task's current status."
         ),
     )
-    acknowledge_reopen: bool = Field(
+    acknowledge_reopen: StrictBool = Field(
         default=False,
         description=(
             "Confirms that reopening a *done* task is intended. Retargeting "
@@ -255,9 +262,21 @@ class TaskRetargetAttributes(BaseModel):
             "journal reopens it; without this the request is refused with "
             "TASK_REOPEN_NOT_ACKNOWLEDGED. Ignored for any other status — "
             "retargeting is the documented way out of cancelled and needs no "
-            "confirmation."
+            'confirmation. Must be a JSON boolean: 1, "true" and "yes" are '
+            "refused rather than coerced."
         ),
     )
+    """``StrictBool``, not ``bool``, and the difference is the whole gate.
+
+    Pydantic's ordinary ``bool`` parsing is lax: ``1``, ``"true"``, ``"yes"``
+    and ``"on"`` all arrive as ``True``. For most fields that is a convenience;
+    here it means a client that sent the wrong *type* has reopened a completed
+    task, which is precisely the outcome this field exists to make deliberate.
+    An explicit confirmation that can be produced by accident is not one, so the
+    schema refuses anything that is not already a boolean. Raised in review on
+    the pull request, against a test whose stated intent — non-booleans are
+    refused — only held for values Pydantic could not coerce at all.
+    """
 
 
 class TaskRetargetData(BaseModel):

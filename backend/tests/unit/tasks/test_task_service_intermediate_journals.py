@@ -25,7 +25,7 @@ import inspect
 from unittest.mock import AsyncMock
 
 import pytest
-from core_shared.models.tasks import TaskNotFoundError
+from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
 
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_service import TaskService
@@ -111,6 +111,106 @@ class TestTheTrailIsReadThroughTheOwnerScopedPort:
             await service.list_intermediate_journal_ids(
                 user_id=OTHER_USER_ID, task_id=TASK_ID
             )
+
+
+class TestTheTrailIsReadInsideTheWritesUnitOfWork:
+    """The four ``*_with_trail`` wrappers, and why they exist.
+
+    Reading the trail *after* the write's unit of work has committed lets a
+    concurrent write on the same task land in between, so a response could pair
+    an older ``due_journal_id`` and status with a newer set of links — a task
+    representation that never existed as one version. Raised by the pull
+    request's automated review. ``@transactional`` is re-entrant, so a wrapper
+    that calls the write and then the read has both inside one unit of work.
+    """
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "create_task_with_trail",
+            "update_task_with_trail",
+            "set_status_with_trail",
+            "retarget_due_journal_with_trail",
+        ],
+    )
+    def test_each_wrapper_owns_a_unit_of_work(self, method: str) -> None:
+        """Without the decorator the two halves are two transactions again.
+
+        Asserted on the marker ``functools.wraps`` leaves, which is the same
+        signal the read below is checked *not* to carry.
+        """
+        assert hasattr(getattr(TaskService, method), "__wrapped__"), (
+            f"{method} must be @transactional, or its read leaves the write's "
+            f"unit of work"
+        )
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "create_task_with_trail",
+            "update_task_with_trail",
+            "set_status_with_trail",
+            "retarget_due_journal_with_trail",
+        ],
+    )
+    def test_each_wrapper_takes_the_transaction_it_joins(self, method: str) -> None:
+        parameters = inspect.signature(
+            inspect.unwrap(getattr(TaskService, method))
+        ).parameters
+
+        assert "transaction" in parameters
+
+    async def test_the_retarget_wrapper_returns_the_task_and_its_trail(
+        self, service: TaskService, mock_task_repo: AsyncMock
+    ) -> None:
+        """Both halves come back together, which is the whole point."""
+        task = Task(
+            id=TASK_ID,
+            user_id=USER_ID,
+            text="return Sarah's book",
+            creating_journal_id=1,
+            due_journal_id=3,
+            status=TaskStatus.NOT_DONE,
+        )
+        mock_task_repo.find_by_id_for_update.return_value = task
+        mock_task_repo.save.return_value = task
+
+        retargeted, trail = await service.retarget_due_journal_with_trail(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            due_journal_id=3,
+            transaction=AsyncMock(),
+        )
+
+        # Retargeting onto the journal it is already due in is the no-op path,
+        # which keeps this test about the *pairing* rather than about Phase 7's
+        # rules — those have their own file.
+        assert retargeted is task
+        assert trail == [11, 22]
+
+    async def test_the_wrapper_reads_the_trail_owner_scoped(
+        self, service: TaskService, mock_task_repo: AsyncMock
+    ) -> None:
+        task = Task(
+            id=TASK_ID,
+            user_id=USER_ID,
+            text="return Sarah's book",
+            creating_journal_id=1,
+            due_journal_id=3,
+            status=TaskStatus.NOT_DONE,
+        )
+        mock_task_repo.find_by_id_for_update.return_value = task
+
+        await service.retarget_due_journal_with_trail(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            due_journal_id=3,
+            transaction=AsyncMock(),
+        )
+
+        mock_task_repo.list_intermediate_journal_ids.assert_awaited_once_with(
+            TASK_ID, USER_ID
+        )
 
 
 class TestTheReadOpensNoUnitOfWork:

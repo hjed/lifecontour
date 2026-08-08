@@ -394,12 +394,30 @@ class TestTaskRetargetRequest:
 
         assert request.data.attributes.acknowledge_reopen is True
 
-    def test_a_non_boolean_acknowledgement_is_rejected(self) -> None:
-        """A confirmation coerced from prose would be a confirmation nobody gave."""
+    @pytest.mark.parametrize("value", ["maybe", "true", "yes", "on", 1, "1"])
+    def test_a_non_boolean_acknowledgement_is_rejected(self, value: object) -> None:
+        """A confirmation coerced from a non-boolean is a confirmation nobody gave.
+
+        The truthy strings and ``1`` are the point of this test, and they are
+        why the field is ``StrictBool``. Pydantic's ordinary ``bool`` parsing
+        accepts every one of them, so before the pull request's review caught
+        it, a client that sent ``"true"`` — the wrong *type* — silently reopened
+        a completed task. Only ``"maybe"`` was covered here originally, which
+        Pydantic cannot coerce at all, so the test passed while the gate leaked.
+        """
         with pytest.raises(ValidationError):
             TaskRetargetRequest.model_validate(
-                _valid_retarget_body(acknowledge_reopen="maybe")
+                _valid_retarget_body(acknowledge_reopen=value)
             )
+
+    @pytest.mark.parametrize("value", [False, True])
+    def test_a_real_boolean_is_accepted_either_way(self, value: bool) -> None:
+        """Strictness refuses the wrong type, not the honest answer."""
+        request = TaskRetargetRequest.model_validate(
+            _valid_retarget_body(acknowledge_reopen=value)
+        )
+
+        assert request.data.attributes.acknowledge_reopen is value
 
     def test_the_due_journal_is_required(self) -> None:
         """There is nothing else this request could be asking for."""

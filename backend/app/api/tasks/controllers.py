@@ -32,14 +32,22 @@ done* and writes an intermediate link, so a body able to carry a ``status``
 beside a ``due_journal_id`` would have two answers and no rule for picking one.
 Its answer includes the task's **intermediate journals**, which is what lets a
 caller see the journal it just left without a second request. Every route that
-returns a task fills the same attribute in — create and the status ``PATCH`` as
-well as the retarget — so there is one resource type with one attribute set
-whichever route produced it, rather than a payload a client has to special-case.
-While no read surface exists, these responses are also the only place the trail
-is reachable at all.
+returns a task fills the same attribute in — create and the ``PATCH`` as well as
+the retarget — so there is one resource type with one attribute set whichever
+route produced it, rather than a payload a client has to special-case. While no
+read surface exists, these responses are also the only place the trail is
+reachable at all.
+
+Those routes call the service's ``*_with_trail`` methods rather than reading the
+trail themselves, and that is a correctness matter rather than tidiness: a read
+taken *after* the write's unit of work commits can observe a concurrent write on
+the same task, and would pair an older ``due_journal_id`` and status with a newer
+set of links — a task representation that never existed as one version. The
+wrappers put both inside one unit of work. Raised by the pull request's automated
+review.
 """
 
-from core_shared.models.tasks import Task, TaskNotFoundError, TaskValidationError
+from core_shared.models.tasks import Task, TaskValidationError
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, status
@@ -87,33 +95,6 @@ def _to_resource(task: Task, intermediate_journal_ids: list[int]) -> TaskResourc
     )
 
 
-async def _trail_of(task: Task, task_service: TaskService, user_id: str) -> list[int]:
-    """The journals ``task`` has passed through, for the response body.
-
-    A plain read, run after the write's unit of work has committed, so what it
-    reports is what a client would see if it asked again — which is the point of
-    including it: the caller sees the trail without a second request.
-
-    **A task that vanishes in that window reads as an empty trail, not a 404.**
-    The write has already committed, so answering "not found" would report a
-    successful mutation as a failure — the same class of mistake ``_save``
-    exists to prevent on the write side, and the window here is wider because
-    it straddles a commit. Empty is not a fallback but the literal truth:
-    ``task_intermediate_journals`` cascades from ``task_id``, so a task that is
-    gone has no links left to list. The window is **reachable**:
-    ``DELETE /api/tasks/{task_id}`` in this same module can remove the task
-    between the commit and this read.
-    """
-    if task.id is None:  # pragma: no cover - a persisted task always has one
-        return []
-    try:
-        return await task_service.list_intermediate_journal_ids(
-            user_id=user_id, task_id=task.id
-        )
-    except TaskNotFoundError:
-        return []
-
-
 @router.post("/journals/{journal_id}/tasks", status_code=status.HTTP_201_CREATED)
 @inject
 async def create_task(
@@ -137,7 +118,11 @@ async def create_task(
              else's — or a referenced contact does not exist.
     """
     attributes = task_request.data.attributes
-    created = await task_service.create_task(
+    # The trail is read inside the write's unit of work rather than after it, so
+    # the task and its links in the response are one consistent snapshot. Empty
+    # in practice on this path — creation writes no intermediate link — but read
+    # rather than assumed, so the field has one definition across every surface.
+    created, trail = await task_service.create_task_with_trail(
         user_id=user.id,
         creating_journal_id=journal_id,
         due_journal_id=attributes.due_journal_id,
@@ -145,13 +130,7 @@ async def create_task(
         transaction=connection,
         contact_ids=attributes.contact_ids,
     )
-    # Read rather than assumed empty. Creation writes no intermediate link, so
-    # the answer is always ``[]`` today — but a renderer that hardcoded it here
-    # and queried on the other routes would be two definitions of one field,
-    # and the first to drift would be this one.
-    return TaskResponse(
-        data=_to_resource(created, await _trail_of(created, task_service, user.id))
-    )
+    return TaskResponse(data=_to_resource(created, trail))
 
 
 @router.patch("/tasks/{task_id}")
@@ -200,16 +179,14 @@ async def update_task(
         )
 
     attributes = task_request.data.attributes
-    updated = await task_service.update_task(
+    updated, trail = await task_service.update_task_with_trail(
         user_id=user.id,
         task_id=task_id,
         text=attributes.text,
         status=attributes.status,
         transaction=connection,
     )
-    return TaskResponse(
-        data=_to_resource(updated, await _trail_of(updated, task_service, user.id))
-    )
+    return TaskResponse(data=_to_resource(updated, trail))
 
 
 @router.post("/tasks/{task_id}/retarget")
@@ -252,18 +229,14 @@ async def retarget_task(
              is written: not the status, not the anchor, not the link.
     """
     attributes = retarget_request.data.attributes
-    retargeted = await task_service.retarget_due_journal(
+    retargeted, trail = await task_service.retarget_due_journal_with_trail(
         user_id=user.id,
         task_id=task_id,
         due_journal_id=attributes.due_journal_id,
         transaction=connection,
         acknowledge_reopen=attributes.acknowledge_reopen,
     )
-    return TaskResponse(
-        data=_to_resource(
-            retargeted, await _trail_of(retargeted, task_service, user.id)
-        )
-    )
+    return TaskResponse(data=_to_resource(retargeted, trail))
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

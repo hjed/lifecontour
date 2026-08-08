@@ -1882,6 +1882,50 @@ class TestRejectedRetargetArguments:
         assert '"isError":true' in response.text
         assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
 
+    @pytest.mark.parametrize("value", ["true", "yes", 1, "1"], ids=str)
+    async def test_a_truthy_non_boolean_acknowledgement_does_not_reopen_a_done_task(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        value: object,
+    ):
+        """A model that sends the wrong type must not reopen a completed task.
+
+        The transport coerced every one of these before the parameter became
+        ``StrictBool`` — so an agent that sent ``"true"``, which is a plausible
+        thing for a model to emit, silently undid a completion. Asserted on the
+        stored status rather than only the refusal.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "retarget_task",
+                {
+                    "task_id": task_id,
+                    "due_journal_id": later_id,
+                    "acknowledge_reopen": value,
+                },
+            )
+
+        assert '"isError":true' in response.text
+        assert await stored_status(clean_database, task_id) == "done"
+        assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
+
     @pytest.mark.parametrize("field", ["task_id", "due_journal_id"])
     async def test_an_id_beyond_int32_is_refused_before_the_driver_sees_it(
         self,
