@@ -190,6 +190,8 @@ async def set_task_status(
         task_id=task_id,
         status=status,
         transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(_task_to_dict(updated), indent=2)
 
@@ -325,6 +327,8 @@ async def update_task_text(
         task_id=task_id,
         text=text,
         transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(_task_to_dict(updated), indent=2)
 

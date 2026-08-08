@@ -32,6 +32,10 @@ CREATING_JOURNAL_ID = 11
 DUE_JOURNAL_ID = 22
 
 ORIGINAL_TEXT = "return Sarah's book"
+# What a reword moves it to. Shared rather than redeclared per file because the
+# event tests assert the ``(old, new)`` pair the service tests produce, and two
+# copies of "the new text" would let those two halves drift apart silently.
+UPDATED_TEXT = "return Sarah's book and the DVD"
 
 
 def make_task(

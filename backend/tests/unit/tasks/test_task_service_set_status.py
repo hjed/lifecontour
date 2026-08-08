@@ -21,9 +21,11 @@ Phase 9 added two more member-route operations that start from exactly this
 position, so the setup moved rather than being copied a third time.
 """
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     Task,
     TaskNotFoundError,
@@ -40,6 +42,7 @@ from tests.unit.tasks.task_doubles import (
     TASK_ID,
     USER_ID,
     make_task,
+    published_events,
 )
 
 
@@ -50,13 +53,25 @@ async def set_status(
     *,
     user_id: str = USER_ID,
     task_id: int = TASK_ID,
+    source: Provenance | None = None,
+    changed_by: str | None = None,
 ) -> Task:
-    """Call ``set_status`` with the ordinary arguments, overriding as needed."""
+    """Call ``set_status`` with the ordinary arguments, overriding as needed.
+
+    Provenance is omitted unless a test names it, so the service's own default
+    is what every other test here exercises.
+    """
+    provenance: dict[str, Any] = {}
+    if source is not None:
+        provenance["source"] = source
+    if changed_by is not None:
+        provenance["changed_by"] = changed_by
     return await service.set_status(
         user_id=user_id,
         task_id=task_id,
         status=status,
         transaction=transaction,
+        **provenance,
     )
 
 
@@ -333,3 +348,198 @@ class TestSetStatusIsTheUpdatePath:
         )
 
         assert through_set_status == through_update
+
+
+@pytest.mark.unit
+class TestTheStatusChangeIsAnnounced:
+    """A status change is an event, and the pair is what makes it readable.
+
+    The specification's event set names "task status changed" alongside "task
+    text updated"; both are one ``TaskUpdated`` carrying ``changed_fields``,
+    because both arrive through the one method that owns them. What is asserted
+    here is the status half of that payload and the thing only this entry point
+    can get wrong — losing provenance across the delegation.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_status_change_publishes_exactly_one_task_updated_event(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await set_status(service, mock_transaction, TaskStatus.DONE)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskUpdated"
+        assert event.aggregate_id == TASK_ID
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("current", "target"),
+        [
+            (TaskStatus.NOT_DONE, TaskStatus.DONE),
+            (TaskStatus.NOT_DONE, TaskStatus.CANCELLED),
+            (TaskStatus.DONE, TaskStatus.NOT_DONE),
+            (TaskStatus.DONE, TaskStatus.CANCELLED),
+        ],
+    )
+    async def test_every_allowed_transition_carries_its_own_old_new_pair(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        current: TaskStatus,
+        target: TaskStatus,
+    ) -> None:
+        """All four open cells, because the pair is the whole payload.
+
+        A history line reading "done → not done" is a different fact from "not
+        done → done", and a projection cannot recover either from a payload that
+        named only where the task ended up.
+        """
+        mock_task_repo.find_by_id_for_update.return_value = make_task(current)
+
+        await set_status(service, mock_transaction, target)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["changed_fields"] == {
+            "status": (current.value, target.value)
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_pair_holds_strings_rather_than_enum_members(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """``json.dumps`` would refuse a ``TaskStatus``, and the outbox is JSON.
+
+        The publisher serialises the payload on the way into ``outbox_events``,
+        so an enum member here is not a style question — it raises at the write,
+        taking the task change down with it.
+        """
+        await set_status(service, mock_transaction, TaskStatus.DONE)
+
+        (event,) = published_events(mock_event_publisher)
+        old, new = event.event_data["changed_fields"]["status"]
+        assert isinstance(old, str)
+        assert isinstance(new, str)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_asking_for_the_status_it_already_has_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        status: TaskStatus,
+    ) -> None:
+        """No write, no event — including cancelled → cancelled."""
+        mock_task_repo.find_by_id_for_update.return_value = make_task(status)
+
+        await set_status(service, mock_transaction, status)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("target", [TaskStatus.NOT_DONE, TaskStatus.DONE])
+    async def test_a_refused_transition_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        target: TaskStatus,
+    ) -> None:
+        """A refusal is not a change, so it leaves no trace in the history.
+
+        Worth asserting rather than assuming: the raise happens before the
+        write, and a later refactor that moved the publish above the transition
+        check would record reopenings that the matrix actually refused.
+        """
+        mock_task_repo.find_by_id_for_update.return_value = make_task(
+            TaskStatus.CANCELLED
+        )
+
+        with pytest.raises(TaskStatusTransitionError):
+            await set_status(service, mock_transaction, target)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_task_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.find_by_id_for_update.return_value = None
+
+        with pytest.raises(TaskNotFoundError):
+            await set_status(service, mock_transaction, TaskStatus.DONE)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_the_delegation_carries_provenance_rather_than_dropping_it(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The one thing this entry point can lose that ``update_task`` cannot.
+
+        ``set_status`` publishes nothing itself — it hands its arguments to
+        ``update_task``, which does. A delegation that forgot to pass these two
+        along would still change the status, still publish an event and still
+        pass every other test in this file, while filing an AI agent's decision
+        to cancel somebody's commitment under "system" in their own history.
+        """
+        await set_status(
+            service,
+            mock_transaction,
+            TaskStatus.CANCELLED,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_status_change_from_the_browser_is_recorded_as_ui(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await set_status(
+            service,
+            mock_transaction,
+            TaskStatus.DONE,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.UI.value
+        assert event.event_data["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_a_caller_that_names_no_origin_is_recorded_as_the_system(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await set_status(service, mock_transaction, TaskStatus.DONE)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"

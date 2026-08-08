@@ -1,4 +1,4 @@
-"""Unit tests for the tasks domain's ``TaskCreated`` and ``TaskDeleted`` events.
+"""Unit tests for the tasks domain's domain events.
 
 The specification makes tasks first-class domain entities that "emit domain
 events through the same transactional outbox and stream that contacts and
@@ -14,25 +14,37 @@ recover if they are wrong:
   ``outbox_events.event_data`` and a Redis stream, never as the Python objects
   constructed here.
 
+``TaskUpdated`` adds a third thing to pin: ``changed_fields`` is read *by index*
+downstream, so the ``(old, new)`` ordering is asserted positionally rather than
+by unpacking, in the same form ``HistoryService._rows_from_changed_fields``
+reads it.
+
 Constants come from :mod:`tests.unit.tasks.task_doubles` so an event's idea of a
 task and the service tests' idea of one cannot drift apart.
 """
 
 import json
 from datetime import datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock
 
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 
-from app.core.tasks.models.events import TaskCreated, TaskDeleted
+from app.core.tasks.models.events import TaskCreated, TaskDeleted, TaskUpdated
 from tests.unit.tasks.task_doubles import (
     CREATING_JOURNAL_ID,
     DUE_JOURNAL_ID,
     ORIGINAL_TEXT,
     TASK_ID,
+    UPDATED_TEXT,
     USER_ID,
 )
+
+TEXT_CHANGE: dict[str, Any] = {"text": (ORIGINAL_TEXT, UPDATED_TEXT)}
+STATUS_CHANGE: dict[str, Any] = {
+    "status": (TaskStatus.NOT_DONE.value, TaskStatus.DONE.value)
+}
 
 
 def make_created(
@@ -50,6 +62,24 @@ def make_created(
         status=status,
         creating_journal_id=CREATING_JOURNAL_ID,
         due_journal_id=DUE_JOURNAL_ID,
+        source=source,
+        changed_by=changed_by,
+        transaction=transaction,
+    )
+
+
+def make_updated(
+    *,
+    changed_fields: dict[str, Any] | None = None,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+    transaction: AsyncMock | None = None,
+) -> TaskUpdated:
+    """A ``TaskUpdated`` over the shared task constants, rewording by default."""
+    return TaskUpdated(
+        task_id=TASK_ID,
+        user_id=USER_ID,
+        changed_fields=TEXT_CHANGE if changed_fields is None else changed_fields,
         source=source,
         changed_by=changed_by,
         transaction=transaction,
@@ -179,6 +209,133 @@ class TestTaskCreated:
         assert make_created().transaction is None
 
 
+class TestTaskUpdated:
+    """The single event a successful text and/or status change publishes.
+
+    **One event, not one per field.** A ``PATCH`` may reword a task and complete
+    it in the same request, and that is one write in one unit of work; publishing
+    a separate event per changed field would announce two things happening where
+    one did. ``JournalUpdated``, ``ContactUpdated``, ``RouteUpdated`` and
+    ``GearItemUpdated`` all carry ``changed_fields`` for exactly this reason, and
+    ``HistoryService._rows_from_changed_fields`` already fans that dict out into
+    one ``field_history`` row per field — so the user still reads a distinct
+    "text" line and a distinct "status" line in their history.
+    """
+
+    def test_identifies_itself_as_a_task_updated_event(self) -> None:
+        event = make_updated()
+
+        assert event.event_type == "TaskUpdated"
+        assert event.event_id.startswith(f"task_updated_{TASK_ID}_")
+
+    def test_aggregate_id_is_the_integer_task_id(self) -> None:
+        event = make_updated()
+
+        assert event.aggregate_id == TASK_ID
+        assert isinstance(event.aggregate_id, int)
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """A whole-key comparison, as on the other two types.
+
+        ``user_id`` is carried for the same reason it is on every task event:
+        Phase 8 scopes a task-scoped history read by owner, and reading it off
+        the event rather than the row is what lets that read answer for a task
+        that has since been deleted.
+        """
+        event = make_updated()
+
+        assert event.event_data == {
+            "task_id": TASK_ID,
+            "user_id": USER_ID,
+            "changed_fields": TEXT_CHANGE,
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_a_reword_carries_only_the_text_field(self) -> None:
+        event = make_updated(changed_fields=TEXT_CHANGE)
+
+        assert list(event.event_data["changed_fields"]) == ["text"]
+
+    def test_a_status_change_carries_only_the_status_field(self) -> None:
+        event = make_updated(changed_fields=STATUS_CHANGE)
+
+        assert list(event.event_data["changed_fields"]) == ["status"]
+
+    def test_one_event_carries_both_fields_when_both_moved(self) -> None:
+        """The assertion the one-event-per-write decision rests on.
+
+        The event does not decide *what* changed — the service does — but it has
+        to be able to say both in one payload, or the decision is not available
+        to it.
+        """
+        event = make_updated(changed_fields={**TEXT_CHANGE, **STATUS_CHANGE})
+
+        assert set(event.event_data["changed_fields"]) == {"text", "status"}
+
+    def test_each_change_is_an_old_new_pair_in_that_order(self) -> None:
+        """Asserted **positionally**, because that is how it is read.
+
+        ``_rows_from_changed_fields`` guards ``len(change) == 2`` and then takes
+        ``change[0]`` as the old value and ``change[1]`` as the new one. A pair
+        written the other way round would project a history line claiming the
+        user renamed their task back to what it was called before, and nothing
+        downstream could tell.
+        """
+        event = make_updated(changed_fields={**TEXT_CHANGE, **STATUS_CHANGE})
+
+        changed_fields = event.event_data["changed_fields"]
+        for change in changed_fields.values():
+            assert len(change) == 2
+        assert changed_fields["text"][0] == ORIGINAL_TEXT
+        assert changed_fields["text"][1] == UPDATED_TEXT
+        assert changed_fields["status"][0] == TaskStatus.NOT_DONE.value
+        assert changed_fields["status"][1] == TaskStatus.DONE.value
+
+    def test_status_values_are_strings_rather_than_enum_members(self) -> None:
+        """``json.dumps`` would refuse a ``TaskStatus``; the pair must be scalars."""
+        event = make_updated(changed_fields=STATUS_CHANGE)
+
+        old, new = event.event_data["changed_fields"]["status"]
+        assert isinstance(old, str)
+        assert isinstance(new, str)
+        assert (old, new) == ("not_done", "done")
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = TaskUpdated(
+            task_id=TASK_ID, user_id=USER_ID, changed_fields=TEXT_CHANGE
+        )
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_records_ui_provenance_from_the_caller(self) -> None:
+        event = make_updated(source=Provenance.UI, changed_by="ui")
+
+        assert event.event_data["source"] == "ui"
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_records_mcp_provenance_from_the_caller(self) -> None:
+        event = make_updated(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_occurred_at_is_timezone_aware_utc(self) -> None:
+        event = make_updated()
+
+        assert isinstance(event.occurred_at, datetime)
+        assert event.occurred_at.tzinfo is not None
+        assert event.occurred_at.utcoffset() == timedelta(0)
+
+    def test_carries_the_transaction_it_was_given(self) -> None:
+        transaction = AsyncMock()
+
+        event = make_updated(transaction=transaction)
+
+        assert event.transaction is transaction
+
+
 class TestTaskDeleted:
     """The event a successful hard delete publishes."""
 
@@ -256,9 +413,10 @@ class TestEventIdentity:
         task's deletion could vanish from its own history.
         """
         created = make_created()
+        updated = make_updated()
         deleted = make_deleted()
 
-        assert created.event_id != deleted.event_id
+        assert len({created.event_id, updated.event_id, deleted.event_id}) == 3
 
     def test_an_id_is_separated_from_its_neighbours_by_its_own_timestamp(self) -> None:
         """Two events of one type on one task are told apart by ``occurred_at``.
@@ -293,3 +451,49 @@ class TestPayloadSurvivesTheStream:
         event = make_deleted(source=Provenance.MCP, changed_by="mcp")
 
         assert json.loads(json.dumps(event.event_data)) == event.event_data
+
+    def test_updated_payload_reaches_the_stream_with_both_pairs_intact(self) -> None:
+        """Asserted against the *arrived* form, not for equality with the sent one.
+
+        The other two types round trip to something equal to themselves. This one
+        cannot: the pairs are built as tuples, following ``JournalUpdated`` and
+        ``ContactUpdated``, and ``json.dumps`` writes a tuple as an array that
+        ``json.loads`` reads back as a ``list`` — and ``("a", "b") == ["a", "b"]``
+        is ``False``. Nothing downstream cares, because the projection indexes
+        rather than compares, so the payload keeps the domain's convention and
+        the test states what actually arrives.
+        """
+        event = make_updated(
+            changed_fields={**TEXT_CHANGE, **STATUS_CHANGE},
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        round_tripped = json.loads(json.dumps(event.event_data))
+
+        assert round_tripped["changed_fields"] == {
+            "text": [ORIGINAL_TEXT, UPDATED_TEXT],
+            "status": ["not_done", "done"],
+        }
+
+    def test_a_status_pair_reaches_the_projection_as_an_indexable_two_list(
+        self,
+    ) -> None:
+        """The phase's own criterion, asserted in the form that reads it.
+
+        "``[old, new]`` after the JSON round trip through Redis" is not a
+        statement about tuples — it is a statement about what
+        ``_rows_from_changed_fields`` finds when it applies its
+        ``isinstance(change, (list, tuple)) and len(change) == 2`` guard and then
+        indexes. This asserts that, so a payload that arrived as a dict
+        ``{"old": ..., "new": ...}``, or as a bare string, fails here rather than
+        by silently projecting no rows at all.
+        """
+        event = make_updated(changed_fields=STATUS_CHANGE)
+
+        change = json.loads(json.dumps(event.event_data))["changed_fields"]["status"]
+
+        assert isinstance(change, list)
+        assert len(change) == 2
+        assert change[0] == TaskStatus.NOT_DONE.value
+        assert change[1] == TaskStatus.DONE.value

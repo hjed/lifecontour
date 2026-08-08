@@ -1353,6 +1353,92 @@ class TestTheToolsRecordMcpProvenance:
         assert event.payload["source"] == Provenance.MCP.value
         assert event.payload["changed_by"] == "mcp"
 
+    async def test_a_reworded_task_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _update_task_text(
+                client,
+                session_id,
+                task_id=task_id,
+                text="print the permit and the map",
+            )
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {
+            "text": ["print the permit", "print the permit and the map"]
+        }
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_a_status_change_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The tool most worth attributing: an agent closing a commitment.
+
+        ``set_task_status`` publishes nothing itself — it delegates to
+        ``update_task`` — so this asserts the provenance survives both hops, from
+        the tool through the delegation to the stored row.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _set_task_status(
+                client, session_id, task_id=task_id, status="done"
+            )
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {"status": ["not_done", "done"]}
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_a_refused_status_change_records_nothing(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Leaving cancelled is refused, and a refusal is not a change."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _set_task_status(
+                client, session_id, task_id=task_id, status="done"
+            )
+
+        assert "error" in payload
+        assert await task_events(clean_database, task_id=task_id) == []
+
     async def test_a_refused_delete_records_nothing(
         self,
         authenticated_lifespan_client,

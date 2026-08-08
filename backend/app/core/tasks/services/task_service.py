@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
@@ -51,7 +51,7 @@ from app.core.journal.services.journal_date_resolver import (
     journal_date,
     today_in,
 )
-from app.core.tasks.models.events import TaskCreated, TaskDeleted
+from app.core.tasks.models.events import TaskCreated, TaskDeleted, TaskUpdated
 from app.infrastructure.unit_of_work import savepoint, transactional
 
 if TYPE_CHECKING:
@@ -243,6 +243,8 @@ class TaskService:
         transaction: AsyncConnection,
         text: str | None = None,
         status: TaskStatus | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> Task:
         """Change one of the user's tasks: its text, its status, or both.
 
@@ -259,9 +261,19 @@ class TaskService:
         tidy up the ones they cannot.
 
         A call that changes nothing is a no-op: nothing is written, so
-        ``updated_at`` does not move and no change is recorded that did not
-        happen. That covers the status a task already has, the text it already
-        has, and — for a caller that is not a JSON:API surface — naming neither.
+        ``updated_at`` does not move, **no event is published** and no change is
+        recorded that did not happen. That covers the status a task already has,
+        the text it already has, and — for a caller that is not a JSON:API
+        surface — naming neither.
+
+        **One write publishes one** ``TaskUpdated``, carrying ``changed_fields``
+        for whichever of the two moved. Not one event per field: a ``PATCH`` may
+        reword a task and complete it, and that is a single unit of work, so
+        splitting it into two announcements would report two changes where one
+        happened. The pairs are what the method already decided — the old value
+        comes from the locking read, which is the only place it still exists
+        once the row is saved — so the payload names a change the service made
+        rather than a field the caller mentioned.
 
         Args:
             user_id: The acting user; the task must be theirs
@@ -271,6 +283,8 @@ class TaskService:
                 entity rather than here, so there is one definition of an
                 acceptable task rather than two that can drift apart.
             status: The status to move to, or ``None`` to leave it alone
+            source: Where the change came from, recorded on the event
+            changed_by: The actor, as the other domains write it
 
         Returns:
             The changed task — or the unchanged one, when nothing differed.
@@ -296,21 +310,49 @@ class TaskService:
             raise TaskNotFoundError(task_id)
 
         updated = task
+        # Built as the decisions are made rather than by diffing the two tasks
+        # afterwards: the decision is where a change is distinguished from a
+        # resent value, and recovering that from a before/after comparison would
+        # be a second implementation of the same rule.
+        changed_fields: dict[str, Any] = {}
+
         # The entity's own rule first, as on creation: a blank text is wrong
         # outright, while a refused transition depends on state the caller may
         # not have known. ``replace`` re-runs ``__post_init__``, so the check is
         # the entity's rather than a second copy of it living here.
         if text is not None and text != task.text:
             updated = replace(updated, text=text)
+            changed_fields["text"] = (task.text, text)
 
         if status is not None and status != task.status:
             if not is_status_transition_allowed(task.status, status):
                 raise TaskStatusTransitionError(task.status, status)
             updated = replace(updated, status=status)
+            # ``.value`` because the payload is serialised into
+            # ``outbox_events.event_data``; ``json.dumps`` refuses an enum
+            # member, which would take the task's own write down with it.
+            changed_fields["status"] = (task.status.value, status.value)
 
         if updated is task:
             return task
-        return await self.task_repo.save(updated)
+
+        saved = await self.task_repo.save(updated)
+
+        # After the save, so the event announces a change that finished. The
+        # ids come from the arguments rather than off the saved row: unlike a
+        # create, both were known before the write, and ``Task.id`` is optional
+        # on the entity because an unsaved one has none.
+        await self.event_publisher.publish(
+            TaskUpdated(
+                task_id=task_id,
+                user_id=user_id,
+                changed_fields=changed_fields,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return saved
 
     @transactional
     async def link_contact(
@@ -402,6 +444,8 @@ class TaskService:
         task_id: int,
         status: TaskStatus,
         transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> Task:
         """Move one of the user's tasks to ``status``, changing nothing else.
 
@@ -413,13 +457,19 @@ class TaskService:
         distinct intent an AI client needs a tool for, and because it is the
         signature Phase 6 shipped.
 
-        See :meth:`update_task` for the rules, the row lock and the no-op.
+        See :meth:`update_task` for the rules, the row lock, the no-op and the
+        ``TaskUpdated`` it publishes. Provenance is **forwarded** rather than
+        defaulted here: this method publishes nothing itself, so dropping these
+        two would still change the status and still publish an event, filing an
+        AI agent's decision to cancel somebody's commitment under "system".
 
         Args:
             user_id: The acting user; the task must be theirs
             task_id: The task to move
             status: The status to move it to
             transaction: The request connection; the unit of work commits here
+            source: Where the change came from, recorded on the event
+            changed_by: The actor, as the other domains write it
 
         Returns:
             The task in its new status — or unchanged, when it was already there.
@@ -435,6 +485,8 @@ class TaskService:
             task_id=task_id,
             status=status,
             transaction=transaction,
+            source=source,
+            changed_by=changed_by,
         )
 
     @transactional

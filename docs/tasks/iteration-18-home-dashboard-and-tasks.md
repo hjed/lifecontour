@@ -3448,20 +3448,100 @@ tests split between `tests/integration/api/test_task_endpoints.py` and
   looked; the lesson is not "mutation-check the ones you suspect" but that a green-on-arrival test has
   no evidence behind it until something has been shown to break it.
 
-#### Phase 2: Events — Text Updated and Status Changed
+#### Phase 2: Events — Text Updated and Status Changed ✅ COMPLETE
 
 **Prerequisites:** Phase 1, ITER18-001 Phase 6.
 **Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Revised before work started (delivery rule 3):** ~130 production → **~950–1,250 tracked**. The ×4 is
+the figure Phase 1's own entry concluded was low, and this phase also threads provenance through **two**
+entry points, which rule 15 budgets at roughly one behaviour matrix each. It was revised *down* from
+Phase 1's actual on the production side, because there is no new module, no DI line and no new
+construction site — the events file and the publisher both already exist.
+**Actual:** **132 production → 1,366 tracked** (events module 71, service 66, controller 2, MCP 4 —
+1,366 test lines, ~130 docs of which most is this entry). **Both halves of the revised estimate held**,
+which is the first time in this iteration that has happened: production landed at 132 against ~130, and
+tests at 1,366 against a 950–1,250 range — 10% over the top of it, at **×10.3 of production**. The
+ratio looks alarming and is not: production is small precisely *because* the shape was already there,
+so the ratio measures the denominator shrinking rather than the tests bloating. *Calibration addition:*
+a phase that adds a **variant of an existing shape** rather than a new one should estimate its tests
+from the **behaviour count** — here, the ways a write can move zero, one or two fields, times three
+provenance origins — and its production from the diff alone, because the two stop tracking each other.
 
 **Acceptance Criteria:**
 
-- [ ] Event classes and publishing for text updated and status changed.
-- [ ] Status-change events carry old and new status in the `changed_fields` shape the history projection
-      expects — `[old, new]` after the JSON round trip through Redis.
-- [ ] Same-unit-of-work publishing and provenance threading as Phase 1.
+- [x] Event classes and publishing for text updated and status changed. — **one class,
+      `TaskUpdated`, carrying `changed_fields`; the plural in this criterion was not followed and the
+      divergence is recorded below.** Published from `TaskService.update_task`, which owns both fields,
+      and reached from `set_status` by delegation.
+- [x] Status-change events carry old and new status in the `changed_fields` shape the history projection
+      expects — `[old, new]` after the JSON round trip through Redis. — asserted **twice**: in memory,
+      and by reading the payload back out of `outbox_events` in Postgres. The stored form is the one
+      that matters, and the assertion is written the way `_rows_from_changed_fields` reads it —
+      `isinstance(change, list)`, `len(change) == 2`, then `change[0]` / `change[1]` — because a payload
+      shaped any other way does not raise in that helper, it silently projects **no rows at all**.
+- [x] Same-unit-of-work publishing and provenance threading as Phase 1. — rollback asserted against a
+      real database for both fields, by failing inside a **caller's** unit of work; provenance asserted
+      per surface (`ui` from the `PATCH`, `mcp` from both tools) rather than only at the service, whose
+      `SYSTEM` default is a silent success.
 
 **Required Test Coverage:** unit — payload shape per type, including the positional `changed_fields` form.
 Integration — outbox rows per operation; rollback leaves none. No e2e.
+
+**Delivered: 45 unit tests and 22 integration tests.** 15 unit tests for the event class
+(`tests/unit/tasks/test_task_events.py`) and 30 for service publishing and provenance — 15 on the text
+path, 15 on the status path — across `test_task_service_update_text.py` and
+`test_task_service_set_status.py`; 15 integration tests in
+`tests/integration/tasks/test_task_events_integration.py` and 7 surface tests split between
+`tests/integration/api/test_task_endpoints.py` and `tests/integration/mcp/test_task_tools_mcp.py`.
+No e2e, per this entry and because nothing is user-visible until Phases 6 and 9.
+
+**Decisions taken (Phase 2):**
+
+- **One `TaskUpdated` event, not one type per field — a deliberate divergence from this entry's
+  wording.** "Event *classes* … for text updated and status changed" reads as two types, and two types
+  would mean a single `PATCH` that rewords a task *and* completes it publishes **two events for one
+  write**. That is not a shape this system uses anywhere: `JournalUpdated`, `ContactUpdated`,
+  `RouteUpdated` and `GearItemUpdated` are each one event carrying `changed_fields`, and
+  `HistoryService._rows_from_changed_fields` already fans that dict out into **one `field_history` row
+  per field** — so a user still reads a distinct "text" line and a distinct "status" line, which is the
+  whole of what per-field event types would have bought. The alternative invents a per-field event
+  convention for tasks alone. **Phase 6 should read this**: its criterion asks for "handlers for
+  created, deleted, text updated and status changed", and text-updated and status-changed are one
+  handler over the existing generic helper.
+- **The payload names only what actually moved.** A caller resending the text a task already has puts no
+  `text` key in `changed_fields`, because both surfaces send whole resources and "the field the caller
+  mentioned" is not "the field that changed". This is what keeps **Phase 5's completeness criterion**
+  — *every task write path publishes exactly one event* — true for this path with no exception
+  attached: one write, one event, and a no-op is not a write.
+- **`changed_fields` is built as the decisions are made, not by diffing before and after.** The
+  branch that decides a text differs is the same branch that records the pair; recovering that from a
+  before/after comparison afterwards would be a second implementation of the same rule, free to
+  disagree with the first. The old values cost nothing, because the locking read `update_task` already
+  performs is the only place they still exist once the row is saved.
+- **`set_status` forwards provenance rather than defaulting it.** It publishes nothing itself, so a
+  delegation that dropped the two arguments would still change the status, still publish an event, and
+  still pass every other test in its file — while filing an AI agent's decision to cancel somebody's
+  commitment under "system" in their own history. Pinned by a unit test that fails on exactly that
+  mutation, and end to end through the MCP tool.
+- **Status is serialised as `TaskStatus.value` at the point the pair is built.** Not a style choice:
+  `OutboxEventPublisher` calls `json.dumps` on the payload, which refuses an enum member — so an enum
+  here would take the task's own write down with it, inside the user's request.
+- **The mutation check found nothing wrong and is recorded anyway.** Phase 1's lesson was that a
+  green-on-arrival test has no evidence behind it, so each half was broken in turn: removing the publish
+  call fails **35** tests across unit and integration; dropping `source`/`changed_by` at the `PATCH` and
+  at both MCP tools fails **exactly the four** provenance tests and nothing else; dropping the
+  forwarding inside `set_status` fails **two**. The middle result is the useful one — it says the
+  surface tests are testing the surfaces rather than the service behind them.
+- **The quality gates found a real leak that the phase created, in a *test* helper.** `committed_task`
+  commits rows for real — the concurrency tests need two connections to see one row, which the savepoint
+  fixture cannot give them — and swept `tasks` and `journals` afterwards but not `outbox_events`, which
+  has no `user_id` to sweep by. That was harmless while `set_status` published nothing. It stopped being
+  harmless the moment this phase made it publish: the race tests began committing `TaskUpdated` rows that
+  survived into every later test reading the outbox unfiltered, and four of **Phase 1's** tests started
+  failing in a combined run while passing file-by-file. The cleanup now deletes the task's own events by
+  `aggregate_id`. *Worth recording because the failure had no connection to the code under test* — the
+  suites that broke touched neither `update_task` nor its event — and because the same trap is waiting
+  for any later phase that makes an already-committed path start publishing.
 
 #### Phase 3: Events — Due Journal Retargeted
 
@@ -3520,7 +3600,10 @@ asserting every task write path publishes exactly one event. No e2e.
 
 - [ ] `HistoryService._HANDLERS` gains handlers for created, deleted, text updated and status changed,
       mapping each to `field_history` rows under a task entity type, with marker field names consistent
-      with the journal and contact conventions.
+      with the journal and contact conventions. **That is three handlers, not four:** Phase 2 shipped
+      text and status as one `TaskUpdated` carrying `changed_fields`, so both are covered by a single
+      handler over the existing `_rows_from_changed_fields`, which already produces one row per changed
+      field. See *Decisions taken (Phase 2)*.
 - [ ] `HistoryProjectionConsumer` subscribes to the task event patterns; writes stay idempotent
       (`ON CONFLICT DO NOTHING` on `(event_id, entity_type, entity_id, field_name)`), so stream redelivery
       is safe.

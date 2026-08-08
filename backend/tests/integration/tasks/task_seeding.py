@@ -416,8 +416,26 @@ async def committed_task(
         yield user_id, task_id, journal_ids
     finally:
         async with async_engine.connect() as cleanup:
-            # The link rows cascade with the task, so the two deletes below are
+            # The link rows cascade with the task, so the three deletes below are
             # the whole of the clean-up.
+            #
+            # **The outbox row does not cascade, and is not scoped by user.**
+            # A test using this helper calls the real service on a real
+            # connection, so the events those writes publish are *committed* —
+            # unlike everything the savepoint fixture rolls back — and
+            # ``outbox_events`` has no ``user_id`` to sweep them by. Left
+            # behind, they are visible to every later test that reads the task
+            # events without filtering, which is how a passing suite starts
+            # failing on a test that touched nothing. ``aggregate_id`` is the
+            # task id and task ids are globally unique, so this removes exactly
+            # this task's events and no other domain's.
+            await cleanup.execute(
+                text(
+                    "DELETE FROM outbox_events "
+                    "WHERE event_type LIKE 'Task%' AND aggregate_id = :task_id"
+                ),
+                {"task_id": task_id},
+            )
             await cleanup.execute(
                 text("DELETE FROM tasks WHERE user_id = :user_id"),
                 {"user_id": user_id},
