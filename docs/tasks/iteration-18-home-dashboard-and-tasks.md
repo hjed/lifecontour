@@ -157,8 +157,16 @@ through `create_task` and `retarget_due_journal`. A journal holding *both* roles
 retarget onto a previously-attached journal produces, keeps its intermediate link removable. The
 task is read *without* a lock here, unlike the status and retarget paths. No port or adapter changed:
 Phase 2's `add_intermediate_journal` and `remove_intermediate_journal` already carried the ownership
-guard and the idempotence. There is still **no way to read a task's journals back** and no domain event
-for a link change (ITER18-003).
+guard and the idempotence.
+
+**The trail is readable, though not through these two routes.** An earlier draft of this paragraph said
+there was still no way to read a task's journals back; **Phase 8 landed while this phase was in flight
+and made that false**, exposing `intermediate_journal_ids` on every task-returning response — `create`,
+`PATCH` and retarget over REST, and the task-returning MCP tools. There is still no standalone task
+`GET` or list (Phase 13), so the trail is read from a write's answer rather than asked for directly.
+The two link routes here deliberately do **not** join that set: they answer 204 and `attached`/`changed`
+respectively, because re-reading the trail on a link call would report something the caller did not ask
+about and bury the one thing it did. Still no domain event for a link change (ITER18-003).
 
 ### The home page
 
@@ -2415,6 +2423,23 @@ That held — but the claims it caught here were disproportionately **numbers th
 writing itself up**, which is a self-inflicted class the previous phases also produced. Numbers in this
 document should be pasted from a command's output, not recalled.
 
+**A third class appeared after the pull request was open, and it is new: claims that were true when
+written and were made false by a merge.** This phase sat open long enough for **three** phases to land on
+`main` beneath it — 9, ITER18-003 P1, and 8 — and Phase 8 turned this entry's *"there is still no way to
+read a task's journals back"* into a falsehood by putting `intermediate_journal_ids` on every
+task-returning response. The automated review caught it; nothing in the local process would have, because
+the sentence was correct at the moment it was written and no test covers prose. **What to carry:** a
+merge is a documentation event, not just a code one. The paragraphs most at risk are the *"there is still
+no…"* ones — every phase writes them, and every later phase is trying to make one of them false.
+
+**Acting on that immediately found a second one**, which is why the rule is worth stating rather than
+merely noting. Re-reading every *"still no"* sentence in this entry turned up
+`TaskReopenNotAcknowledgedError` being described as *"still unmapped"* when Phase 8's merge had mapped it
+an hour earlier — the same rot, in a bullet nobody had flagged. Two of this entry's *"still no"* claims
+had gone stale, both from the same merge, and the second was found only because the first prompted a
+sweep. **So: after every merge from `main`, grep the phase entry for "still no" and re-check each hit.**
+It takes a minute and it caught one claim the automated review missed.
+
 **Acceptance criterion 2's evidence was narrowed, because it proved less than it claimed.** The
 "explicit only" half was written up as being shown by these two methods reading no status, touching no
 contact and resolving no timezone. That is a statement about the *two new methods* and says nothing
@@ -2512,9 +2537,14 @@ they are not the criterion.
   has to run against the aborted transaction to work out which id went missing. Proved against real
   PostgreSQL by a repository that deletes the journal from inside its own read.
 - **The MCP tools return `attached` and `changed`**, Phase 11's `linked`/`changed` in this phase's
-  vocabulary. `attached` is the resulting state, `changed` says whether a row moved; both are needed while
-  no read tool exists, and `changed` is precisely what the REST 204 withholds in order to keep the
-  idempotency invisible to an HTTP client.
+  vocabulary. `attached` is the resulting state, `changed` says whether a row moved, and `changed` is
+  precisely what the REST 204 withholds in order to keep the idempotency invisible to an HTTP client.
+  **Phase 8 changed the surrounding context but not this decision.** Every task-*returning* tool now
+  carries `intermediate_journal_ids`, so an agent can see a trail without these two tools reporting one —
+  which strengthens the case for the pair rather than weakening it. Answering with the whole task here
+  would mean re-reading the trail on every link call to report something the caller did not ask about,
+  while burying the one thing it did: whether this call moved a row. There is still no `get_task` tool
+  (Phase 13), so the trail is read from a write's answer rather than asked for directly.
 - **This phase publishes no domain event, and the silence is now asserted.** ITER18-003 Phase 1 landed
   `TaskCreated` and `TaskDeleted` while this phase was in flight, adding an `event_publisher` to
   `TaskService`'s constructor. The specification lists *"journal linked or unlinked"* among the events
@@ -2523,10 +2553,14 @@ they are not the criterion.
   it. Both link methods therefore take the publisher and never reach it, and a test per method asserts
   `mock_calls == []` on it, so the absence is a decision on record rather than something the next phase
   has to guess at.
-- **`TaskReopenNotAcknowledgedError` is still unmapped, and still deliberately so.** Phase 7 carried it
-  forward to Phase 8, which is the phase that ships a surface able to raise it. This phase added a
-  neighbouring entry to the same table and did not take the opportunity, because a code for an error no
-  endpoint can produce is untestable at the surface it exists for.
+- **`TaskReopenNotAcknowledgedError` was left unmapped here, and Phase 8 has since mapped it.** When this
+  phase added `TASK_JOURNAL_IS_ANCHOR` to the error-code table it deliberately did not map its neighbour,
+  because a code for an error no endpoint could raise is untestable at the surface it exists for — Phase 7
+  had carried it forward to whichever phase shipped the retarget route. That phase landed while this one
+  was open, and `TASK_REOPEN_NOT_ACKNOWLEDGED` now sits directly above `TASK_JOURNAL_IS_ANCHOR` in the
+  same table, arriving through the merge rather than through this phase. The reasoning stands; only the
+  tense changed. **This was the second sentence in this entry that a merge falsified**, and unlike the
+  first it was caught by re-reading the phase's own *"still no"* claims rather than by review.
 
 **Required Test Coverage:** unit — role rules and idempotency. Integration — attach/detach round-trips and
 each rejection on both surfaces, including the cross-user journal. E2E deferred to Phase 22.
