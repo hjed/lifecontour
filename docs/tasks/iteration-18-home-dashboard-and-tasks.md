@@ -2035,12 +2035,14 @@ they are not the criterion.
   other. Recorded because the cheaper order (check the anchor first, skip a query) is the obvious review
   suggestion and is equally correct.
 - **The vanished-journal race is mapped, and needs no savepoint.** A journal deleted between the check and
-  the insert fails the foreign key, and the caller was promised a 404; the violation is matched on the
-  `journal_id` column in the driver's *own* message — `_driver_message`, not `str(error)`, which is the
-  Phase 4 bug — and re-raised untouched otherwise. Unlike `_link_contacts` this needs no `SAVEPOINT`:
-  one journal is named per call, so nothing has to run against the aborted transaction to work out which
-  id went missing. Proved against real PostgreSQL by a repository that deletes the journal from inside
-  its own read.
+  the insert fails the foreign key, and the caller was promised a 404; the violation is matched against
+  the driver's *own* message — `_driver_message`, not `str(error)`, which is the Phase 4 bug — and
+  re-raised untouched otherwise. **What is matched in that message is the foreign key's full name**, for
+  the reason the next bullet records; an earlier draft of this one said "the `journal_id` column", which
+  described the behaviour the review round removed and was caught on the pull request by the automated
+  review. Unlike `_link_contacts` this needs no `SAVEPOINT`: one journal is named per call, so nothing
+  has to run against the aborted transaction to work out which id went missing. Proved against real
+  PostgreSQL by a repository that deletes the journal from inside its own read.
 - **The MCP tools return `attached` and `changed`**, Phase 11's `linked`/`changed` in this phase's
   vocabulary. `attached` is the resulting state, `changed` says whether a row moved; both are needed while
   no read tool exists, and `changed` is precisely what the REST 204 withholds in order to keep the
