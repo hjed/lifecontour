@@ -298,3 +298,158 @@ class TestTheContactLinkToolsDocumentThemselves:
         description = link_contact_schema["description"].lower()
 
         assert "role" in description
+
+
+@pytest.fixture
+async def attach_journal_schema() -> dict[str, Any]:
+    """``attach_intermediate_journal_to_task`` as an MCP client actually sees it."""
+    return await _tool_schema("attach_intermediate_journal_to_task")
+
+
+@pytest.fixture
+async def detach_journal_schema() -> dict[str, Any]:
+    """``detach_intermediate_journal_from_task`` as an MCP client sees it."""
+    return await _tool_schema("detach_intermediate_journal_from_task")
+
+
+class TestIntermediateJournalToolParameters:
+    """What an AI client may send to attach or detach an intermediate journal."""
+
+    def test_attaching_needs_a_task_and_a_journal(
+        self, attach_journal_schema: dict[str, Any]
+    ) -> None:
+        required = set(attach_journal_schema["input_schema"]["required"])
+
+        assert required == {"task_id", "journal_id"}
+
+    def test_detaching_needs_a_task_and_a_journal(
+        self, detach_journal_schema: dict[str, Any]
+    ) -> None:
+        required = set(detach_journal_schema["input_schema"]["required"])
+
+        assert required == {"task_id", "journal_id"}
+
+    def test_injected_collaborators_are_not_part_of_the_attach_contract(
+        self, attach_journal_schema: dict[str, Any]
+    ) -> None:
+        properties = attach_journal_schema["input_schema"]["properties"]
+
+        assert "task_service" not in properties
+        assert "db_connection" not in properties
+
+    def test_injected_collaborators_are_not_part_of_the_detach_contract(
+        self, detach_journal_schema: dict[str, Any]
+    ) -> None:
+        properties = detach_journal_schema["input_schema"]["properties"]
+
+        assert "task_service" not in properties
+        assert "db_connection" not in properties
+
+    @pytest.mark.parametrize("parameter", ["task_id", "journal_id"])
+    @pytest.mark.parametrize("tool", ["attach", "detach"])
+    def test_both_ids_are_bounded_to_what_the_column_can_hold(
+        self,
+        attach_journal_schema: dict[str, Any],
+        detach_journal_schema: dict[str, Any],
+        tool: str,
+        parameter: str,
+    ) -> None:
+        """An id past ``INTEGER`` used to be a 500 in asyncpg's parameter binding.
+
+        The bound belongs in the schema rather than only in the service, because
+        the transport refuses an out-of-range argument before any of this
+        application's code runs — which is what turns a 500 into a rejection the
+        model can read and correct.
+
+        Both tools, which review caught: the earlier version read only the attach
+        schema, so the detach tool's bounds were claimed and untested.
+        """
+        schemas = {"attach": attach_journal_schema, "detach": detach_journal_schema}
+        schema = schemas[tool]["input_schema"]["properties"][parameter]
+
+        assert schema["minimum"] == 1
+        assert schema["maximum"] == 2147483647
+
+
+class TestTheJournalLinkCarriesNoRole:
+    """An intermediate link is a mention, and the schema has to say so.
+
+    ``link_journal_to_contact`` takes a relationship type, a status and a role,
+    so a model that has seen it will reach for the same arguments here. There are
+    none to reach for, and the transport refuses what the schema does not offer —
+    which is where the guarantee actually lives.
+    """
+
+    @pytest.mark.parametrize(
+        "unwanted", ["relationship_type", "role", "status", "anchor", "now"]
+    )
+    def test_the_attach_schema_offers_no_role_or_seam(
+        self, attach_journal_schema: dict[str, Any], unwanted: str
+    ) -> None:
+        assert unwanted not in attach_journal_schema["input_schema"]["properties"]
+
+    @pytest.mark.parametrize(
+        "unwanted", ["relationship_type", "role", "status", "anchor", "now"]
+    )
+    def test_the_detach_schema_offers_no_role_or_seam(
+        self, detach_journal_schema: dict[str, Any], unwanted: str
+    ) -> None:
+        assert unwanted not in detach_journal_schema["input_schema"]["properties"]
+
+    def test_neither_tool_offers_a_contact(
+        self,
+        attach_journal_schema: dict[str, Any],
+        detach_journal_schema: dict[str, Any],
+    ) -> None:
+        """A journal link is not a contact link, and needs no contact at all."""
+        for schema in (attach_journal_schema, detach_journal_schema):
+            properties = schema["input_schema"]["properties"]
+            assert not [name for name in properties if "contact" in name]
+
+
+class TestTheJournalLinkToolsDocumentThemselves:
+    """The docstring and the schema are these tools' only documentation.
+
+    **No "has a description" test here, deliberately.** The contact-link tests
+    above carry one and it cannot fail: the fixture already asserts the tool is
+    registered, and a registered tool with no docstring is not something any
+    edit to this module produces. What is worth asserting is that the two rules a
+    model will otherwise learn from a rejection are stated *before* it sends one,
+    so those are asserted by their content.
+    """
+
+    def test_the_attach_description_says_a_repeat_is_harmless(
+        self, attach_journal_schema: dict[str, Any]
+    ) -> None:
+        """Otherwise an agent avoids a retry it is free to make.
+
+        Asserted on the phrase rather than on the word "already", which review
+        caught as a proxy loose enough to survive deleting the sentence — the
+        parameter description says "must not *already* be the task's creating or
+        due journal", so the word was present either way.
+        """
+        description = attach_journal_schema["description"].lower()
+
+        assert "already attached is accepted" in description
+
+    def test_the_attach_description_names_the_anchors_it_refuses(
+        self, attach_journal_schema: dict[str, Any]
+    ) -> None:
+        """The most likely wrong call is attaching the journal it is due in.
+
+        A model reaching for "link this task to its journal" will otherwise send
+        the due journal, be refused, and have to learn the rule from the error.
+        """
+        description = attach_journal_schema["description"].lower()
+
+        assert "due" in description
+        assert "creating" in description
+
+    def test_the_detach_description_says_the_anchors_cannot_be_removed(
+        self, detach_journal_schema: dict[str, Any]
+    ) -> None:
+        """The rule the test's name promises, and the remedy that replaces it."""
+        description = detach_journal_schema["description"].lower()
+
+        assert "cannot be removed this way" in description
+        assert "retarget" in description

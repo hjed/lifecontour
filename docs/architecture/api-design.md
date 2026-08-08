@@ -299,6 +299,8 @@ do exist for operations that involve no journal at all.
 | `PATCH /api/tasks/{task_id}` | Change a task's status. Body attributes: `status` (`not_done`, `done`, `cancelled`) | 200; 400 unknown status, unknown attribute, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
 | `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown |
 | `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned |
+| `POST /api/tasks/{task_id}/relationships/intermediate-journals` | Attach an intermediate journal. Body: a resource identifier, `{"data": {"type": "journals", "id": "9"}}` | 204; 400 unknown field, a role attribute, another resource type, or a non-integer id; 404 task or journal unknown/not-owned; 409 the journal is already the creating or due journal |
+| `DELETE /api/tasks/{task_id}/relationships/intermediate-journals/{journal_id}` | Remove an intermediate-journal link | 204; 404 task unknown/not-owned; 409 the journal is the creating or due journal *and* holds no intermediate link |
 
 Conventions this surface pins down:
 
@@ -367,11 +369,45 @@ Conventions this surface pins down:
   is `1` because serial columns start there: 404 would suggest the row might
   have existed once. **Other domains' endpoints are still unbounded** — issue
   #1272 tracks the sweep, which is deliberately not done inside a feature phase.
+- **A journal relationship is named for the role it holds, not for the resource
+  it points at.** A task has three journal relationships — creating, due and
+  intermediate — and only the last is a row in a link table, so the route is
+  `/relationships/intermediate-journals`. Calling it `/journals` would promise a
+  route that can set an anchor, which the service refuses. The body's resource
+  `type` is still `journals`, because the relationship's name lives in the path
+  and the type names what the identifier points at. This is the first kebab-case
+  relationship member in this API; every earlier one happened to be a single
+  word.
+- **An anchor journal is 409, on both verbs.** A journal that is already the
+  task's creating or due journal cannot be attached — it is linked in a role an
+  intermediate link cannot express — and its anchor *role* cannot be detached.
+  One rule, so one error (`TASK_JOURNAL_IS_ANCHOR`), whose `detail` names *which*
+  anchor and how that anchor is really changed: the creating journal never
+  changes and the due journal is changed by retargeting. Detaching answers
+  explicitly rather than succeeding silently, because a bare 204 would read as
+  "it was not attached". **The detach refusal applies only when there is no link
+  row**: a journal can legitimately be both an anchor and an intermediate link —
+  attach it, then retarget onto it — and refusing there would leave a link the
+  client created with no way to remove it.
+- **An unreachable journal answers the journal domain's `JOURNAL_NOT_FOUND`**,
+  not `TASK_ANCHOR_JOURNAL_NOT_FOUND`. An intermediate journal is not an anchor,
+  and that error's message describes a rule this call is not about. Ownership is
+  enforced by the owner-scoped read, so another user's journal and an absent one
+  produce bodies that differ **only in the id the caller supplied** — the same
+  hedge the anchor 404 above carries, and the reason a rejection here cannot be
+  used to probe for other users' journals.
+- **Detaching does not require the journal to still exist**, the same asymmetry
+  the contact link carries and for the same reason:
+  `task_intermediate_journals` cascades from the journal side, and the
+  specification permits deleting a journal that is only an intermediate link.
 - The matching MCP tools are `create_task`, `set_task_status`,
-  `link_task_to_contact` and `unlink_task_from_contact` (documented in their
-  docstrings and parameter schemas, per the MCP documentation convention). The
-  two link tools return `linked` (the resulting state) and `changed` (whether a
-  row moved), which is the one thing the 204 withholds and an agent may want.
+  `link_task_to_contact`, `unlink_task_from_contact`,
+  `attach_intermediate_journal_to_task` and
+  `detach_intermediate_journal_from_task` (documented in their docstrings and
+  parameter schemas, per the MCP documentation convention). The four link tools
+  return the resulting state — `linked` or `attached` — beside `changed`
+  (whether a row moved), which is the one thing the 204 withholds and an agent
+  may want.
 
 ## Authentication Guidelines
 

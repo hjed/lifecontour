@@ -26,6 +26,8 @@ from app.api.tasks.schemas import (
     TaskContactLinkRequest,
     TaskCreateAttributes,
     TaskCreateRequest,
+    TaskIntermediateJournalLinkData,
+    TaskIntermediateJournalLinkRequest,
     TaskResource,
     TaskResponse,
     TaskUpdateAttributes,
@@ -36,6 +38,13 @@ from app.api.tasks.schemas import (
 def _valid_link_body(**overrides: object) -> dict[str, object]:
     """A minimal valid contact-link body, with data-level overrides applied."""
     data: dict[str, object] = {"type": "contacts", "id": "7"}
+    data.update(overrides)
+    return {"data": data}
+
+
+def _valid_journal_link_body(**overrides: object) -> dict[str, object]:
+    """A minimal valid intermediate-journal link body, with data-level overrides."""
+    data: dict[str, object] = {"type": "journals", "id": "9"}
     data.update(overrides)
     return {"data": data}
 
@@ -428,4 +437,127 @@ class TestTheLinkCarriesNoRelationshipData:
         with pytest.raises(ValidationError):
             TaskContactLinkData.model_validate(
                 {"type": "contacts", "id": "7", "surprise": 1}
+            )
+
+
+class TestTaskIntermediateJournalLinkRequest:
+    """What a client may send to attach an intermediate journal to a task.
+
+    The same resource-identifier shape as the contact link, and for the same
+    reason: an intermediate link records *that* a task was discussed or revisited
+    in a journal, and nothing else. There is no role to send, because the three
+    journal roles a task has are not a property of this row — the creating and
+    due journals are columns on the task, and attaching either through here is
+    refused by the service.
+
+    The resource **type** is ``journals``: the relationship's name lives in the
+    path (``/relationships/intermediate-journals``) and the type names what the
+    identifier points at, which is an ordinary journal.
+    """
+
+    def test_a_minimal_body_names_a_journal(self) -> None:
+        request = TaskIntermediateJournalLinkRequest.model_validate(
+            _valid_journal_link_body()
+        )
+
+        assert request.data.id == "9"
+        assert request.data.type == "journals"
+        assert request.data.journal_id == 9
+
+    def test_the_resource_type_defaults_to_journals(self) -> None:
+        request = TaskIntermediateJournalLinkRequest.model_validate(
+            {"data": {"id": "9"}}
+        )
+
+        assert request.data.type == "journals"
+
+    def test_a_mismatched_resource_type_is_rejected(self) -> None:
+        """Declaring ``contacts`` here would attach a journal to a task.
+
+        The two link routes take structurally identical bodies, so the type is
+        the only thing standing between them for a generic client that posts to
+        the wrong one.
+        """
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate(
+                _valid_journal_link_body(type="contacts")
+            )
+
+    def test_the_journal_id_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate(
+                {"data": {"type": "journals"}}
+            )
+
+    def test_the_data_member_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate({})
+
+    def test_a_non_integer_id_is_a_bad_request_rather_than_a_crash(self) -> None:
+        """Checked in the schema so it is a 400 like every other bad field.
+
+        Casting in the controller instead would let a ``ValueError`` escape as a
+        500 for what is plainly a malformed request.
+        """
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate(
+                _valid_journal_link_body(id="not-a-number")
+            )
+
+    @pytest.mark.parametrize("journal_id", ["0", "-1", "2147483648"])
+    def test_an_id_no_row_could_have_is_rejected(self, journal_id: str) -> None:
+        """Python's ``int`` is unbounded; ``journals.id`` is a PostgreSQL INTEGER.
+
+        Without the bound, ``2147483648`` parses cleanly, reaches the repository
+        and dies in asyncpg's parameter binding — a 500 for an id no row could
+        ever have. The lower bound is ``1`` because serial columns start there.
+        """
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate(
+                _valid_journal_link_body(id=journal_id)
+            )
+
+
+class TestTheJournalLinkCarriesNoRole:
+    """Criterion: an intermediate link is a plain mention, with no role field.
+
+    A client that has seen the journal-contact relationship — which does carry a
+    type, a role and an attendance status — will reach for one of those here.
+    Every one is refused rather than dropped, because a field silently ignored is
+    a field the client believes was stored.
+    """
+
+    @pytest.mark.parametrize("field", ["relationship_type", "role", "status", "anchor"])
+    def test_role_fields_are_rejected(self, field: str) -> None:
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate(
+                _valid_journal_link_body(**{field: "due"})
+            )
+
+    def test_attributes_are_rejected(self) -> None:
+        """There is nothing an intermediate link *has*, so nowhere to put it."""
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate(
+                _valid_journal_link_body(attributes={"role": "due"})
+            )
+
+    @pytest.mark.parametrize("field", ["relationship_type", "role", "status", "anchor"])
+    def test_role_fields_are_rejected_beside_the_data_member_too(
+        self, field: str
+    ) -> None:
+        """Both nesting levels, not just the inner one.
+
+        Review caught the claim that all four were refused at both levels when
+        only ``role`` was tested out here. A guard with a gap is no guard to
+        whoever finds the gap, and a JSON:API envelope has more than one depth.
+        """
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkRequest.model_validate(
+                {"data": {"type": "journals", "id": "9"}, field: "due"}
+            )
+
+    def test_unknown_fields_are_rejected_inside_the_data_member(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskIntermediateJournalLinkData.model_validate(
+                {"type": "journals", "id": "9", "surprise": 1}
             )

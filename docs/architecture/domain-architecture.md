@@ -138,6 +138,32 @@ the *creating* journal where it arose and the *due* journal where it matters.
     [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md) and inherited here rather than
     faked. Unlinking deliberately does *not* require the contact to still exist, because
     `task_contacts` cascades from the contact side and the row is already gone
+  - **A journal's role decides which rules reach it.** Only *intermediate* journals are rows in
+    `task_intermediate_journals`; the creating and due journals are columns on the task. So the
+    intermediate-link surface can neither add an anchor nor remove an anchor *role*, and both
+    attempts raise `TaskJournalIsAnchorError` (409) naming which anchor it was — an explicit refusal
+    rather than a silent no-op, because "there was no row to remove" would read to a caller as "it
+    was not attached". Attaching is otherwise idempotent (the composite primary key's, with no
+    read-then-add), requires the journal to exist and be the acting user's (answered with the
+    journal domain's own `JournalNotFoundError`, since an intermediate journal is not an anchor),
+    and is editable in any status. Detaching does *not* require the journal to still exist, on the
+    contact link's cascade reasoning
+  - **A journal can hold an anchor role *and* an intermediate link at once, and the detach refusal
+    is conditioned on that.** Retargeting keeps the previous due journal as an intermediate link and
+    never unlinks, so attaching a journal and then retargeting onto it leaves both. Detach therefore
+    deletes first and refuses only when nothing was removed: refusing on the anchor alone would make
+    a link the user created permanently unremovable, contradicting the specification's "intermediate
+    links can be removed". The anchor column is never touched either way
+  - **Intermediate links are explicit only, with exactly one exception.** Nothing infers a link
+    from where a user happened to be when they edited a task; the sole automatic link is
+    `retarget_due_journal` retaining the previous due journal, which is what keeps a repeatedly
+    deferred task's trail visible. A link created either way is an ordinary one the user may remove
+  - **The link methods read the task without a lock**, unlike `set_status` and
+    `retarget_due_journal`, which decide a rule from the status they read and write that decision
+    back. The only state that can move under a link call is a concurrent retarget making the
+    journal an anchor, and a journal that is both the due anchor and an intermediate link is a
+    shape retargeting produces legitimately, so a lock would narrow a window onto a supported
+    outcome — and would deepen the merge lock-order inversion ITER18-002 Phase 6 exists to remove
 - **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
   `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
   request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`); and

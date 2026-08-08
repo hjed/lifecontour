@@ -36,6 +36,7 @@ from app.api.tasks.schemas import (
     TaskAttributes,
     TaskContactLinkRequest,
     TaskCreateRequest,
+    TaskIntermediateJournalLinkRequest,
     TaskResource,
     TaskResponse,
     TaskUpdateRequest,
@@ -217,5 +218,89 @@ async def unlink_task_contact(
         user_id=user.id,
         task_id=task_id,
         contact_id=contact_id,
+        transaction=connection,
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/relationships/intermediate-journals",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+@inject
+async def attach_task_intermediate_journal(
+    task_id: DatabaseIdPath,
+    link_request: TaskIntermediateJournalLinkRequest,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """Attach a journal to a task as an intermediate journal.
+
+    An intermediate journal is one the task was discussed, revisited or
+    previously due in. **The relationship is named for the role**, not for the
+    resource: a task has three journal relationships and this route manipulates
+    only one of them, so calling it ``/journals`` would promise a route that can
+    set an anchor. The body's resource ``type`` is still ``journals``, because
+    that is what the identifier points at.
+
+    Attaching a journal that is already attached succeeds and changes nothing;
+    the answer is 204 either way, which is what makes the operation's idempotency
+    invisible to the client.
+
+    Raises:
+        400: An unknown field, a role attribute, a body declaring another
+             resource type, or an id that is not an integer within an
+             ``INTEGER`` column's range.
+        404: The task does not exist or is not yours — the two are the same
+             answer by design — or the journal does not exist or is not yours,
+             which are likewise one answer.
+        409: The journal is already the task's creating or due journal. It is
+             linked in a role this relationship cannot express: the creating
+             journal never changes, and the due journal is changed by
+             retargeting.
+    """
+    await task_service.attach_intermediate_journal(
+        user_id=user.id,
+        task_id=task_id,
+        journal_id=link_request.data.journal_id,
+        transaction=connection,
+    )
+
+
+@router.delete(
+    "/tasks/{task_id}/relationships/intermediate-journals/{journal_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+@inject
+async def detach_task_intermediate_journal(
+    task_id: DatabaseIdPath,
+    journal_id: DatabaseIdPath,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """Remove an intermediate-journal link from a task.
+
+    Idempotent, and deliberately **not** conditional on the journal still
+    existing: ``task_intermediate_journals`` cascades from the journal side, so a
+    deleted journal's links are already gone, and 404-ing here would fail the one
+    call a user reaches for while tidying up. Deleting a journal that is only an
+    intermediate link is permitted, which is what makes that state reachable.
+
+    Raises:
+        400: A path id that is not an integer, or one outside the range an
+             ``INTEGER`` column can hold.
+        404: The task does not exist or is not yours.
+        409: The journal is the task's creating or due journal **and** holds no
+             intermediate link, so there is nothing to remove — replacing the
+             due journal is a retarget, and the creating journal never changes.
+             Answered explicitly rather than as a silent success, which would
+             read as "it was not attached". A journal that is both an anchor and
+             an intermediate journal keeps its link removable.
+    """
+    await task_service.detach_intermediate_journal(
+        user_id=user.id,
+        task_id=task_id,
+        journal_id=journal_id,
         transaction=connection,
     )

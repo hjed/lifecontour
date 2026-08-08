@@ -129,6 +129,54 @@ class TaskAnchorJournalNotFoundError(TaskDomainError):
         self.journal_id = journal_id
 
 
+class TaskJournalIsAnchorError(TaskDomainError):
+    """Exception raised when an anchor journal is treated as an intermediate link.
+
+    A task's journals come in three roles and only one of them is a row in
+    ``task_intermediate_journals``. The creating and due journals are **columns
+    on the task**, so the intermediate-link surface can neither add them nor
+    remove them, and both attempts are this one error:
+
+    - **attaching** a journal that is already an anchor is refused because it is
+      already linked, in a role an intermediate link cannot express — the
+      specification's *"already linked in a stronger role"*;
+    - **detaching** an anchor role is refused **when there is no link row to
+      remove**. The repository would answer a bare ``False`` there, which a
+      caller would read as *"it was not attached"* rather than *"that link
+      cannot be removed at all"*. The condition matters: a journal can hold an
+      anchor role *and* an intermediate link at once — retargeting a task onto a
+      journal it already mentioned produces exactly that — and refusing there
+      would make a link the user created permanently unremovable.
+
+    One rule, so one error rather than two that would state it twice. What
+    differs between the two directions is only which call was made, which the
+    caller already knows; what they cannot know is **which anchor** it was and
+    how that anchor is really changed, so the message carries both. The creating
+    journal never changes, and the due journal is changed by *retargeting* the
+    task — naming the operation is what lets an agent recover without guessing.
+
+    **409 rather than 400**, for the reason ``TaskStatusTransitionError`` is one:
+    the request is well formed and the journal it names is a real journal of the
+    caller's. What it conflicts with is the role that journal already holds on
+    this task.
+    """
+
+    def __init__(self, task_id: int, journal_id: int, anchor: TaskJournalAnchor):
+        remedy = (
+            "The creating journal is set when the task is created and never changes."
+            if anchor == "creating"
+            else "The due journal is changed by retargeting the task."
+        )
+        super().__init__(
+            f"Journal {journal_id} is the {anchor} journal of task {task_id}, not "
+            f"an intermediate one. {remedy}",
+            409,
+        )
+        self.task_id = task_id
+        self.journal_id = journal_id
+        self.anchor = anchor
+
+
 class TaskDueJournalNotFutureError(TaskDomainError):
     """Exception raised when a due journal is not dated in the future.
 

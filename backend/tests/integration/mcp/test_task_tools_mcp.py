@@ -42,7 +42,9 @@ from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
     create_task,
+    intermediate_journal_ids,
     link_contact,
+    link_intermediate_journal,
     linked_contact_ids,
     stored_status,
 )
@@ -956,3 +958,425 @@ class TestIdsOutsideTheColumnsRange:
 
         assert '"isError":true' in response.text
         assert await linked_contact_ids(clean_database, task_id) == []
+
+
+async def _attach_journal(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(
+        client, session_id, "attach_intermediate_journal_to_task", arguments
+    )
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _detach_journal(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(
+        client, session_id, "detach_intermediate_journal_from_task", arguments
+    )
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+@pytest.mark.integration
+class TestIntermediateJournalTools:
+    """The same matrix an HTTP client gets, over ``tools/call``.
+
+    The tools answer with ``attached`` (the resulting state) and ``changed``
+    (whether a row moved), so an agent can tell a fresh link from a no-op without
+    a read tool existing yet. That is the one thing the REST 204 withholds.
+    """
+
+    async def test_attaching_writes_the_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert "error" not in payload
+        assert payload["attached"] is True
+        assert payload["changed"] is True
+        assert await intermediate_journal_ids(clean_database, task_id) == [mentioned]
+
+    async def test_attaching_again_reports_no_change_and_leaves_one_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            first = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+            second = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert (first["changed"], second["changed"]) == (True, False)
+        assert second["attached"] is True
+        assert await intermediate_journal_ids(clean_database, task_id) == [mentioned]
+
+    async def test_detaching_removes_the_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+        await link_intermediate_journal(
+            clean_database, task_id=task_id, journal_id=mentioned
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _detach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert payload["attached"] is False
+        assert payload["changed"] is True
+        assert await intermediate_journal_ids(clean_database, task_id) == []
+
+    async def test_detaching_again_reports_no_change(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+        await link_intermediate_journal(
+            clean_database, task_id=task_id, journal_id=mentioned
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            first = await _detach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+            second = await _detach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert (first["changed"], second["changed"]) == (True, False)
+        assert second["attached"] is False
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_the_links_are_editable_in_any_status(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert payload["changed"] is True
+        assert await stored_status(clean_database, task_id) == status.value
+
+    async def test_no_contact_link_is_written(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await create_contact(clean_database, first_name="Sarah")
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert await count(clean_database, COUNT_CONTACT_LINKS, {}) == 0
+
+
+@pytest.mark.integration
+class TestIntermediateJournalToolRejections:
+    """Every refusal, in the form an agent can act on.
+
+    The distinction that matters is between the two rejections attaching can
+    produce: *pick another journal* and *it is already linked in a stronger
+    role*. Both must be more than "an error occurred", and they must not read
+    alike.
+    """
+
+    @pytest.mark.parametrize("anchor", ["creating", "due"])
+    async def test_attaching_an_anchor_journal_names_the_role(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        anchor: str,
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        journal_id = creating_id if anchor == "creating" else due_id
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=journal_id
+            )
+
+        assert payload["error"] == "Task error"
+        assert anchor in payload["message"]
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    @pytest.mark.parametrize("anchor", ["creating", "due"])
+    async def test_detaching_an_anchor_journal_names_the_role(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        anchor: str,
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        journal_id = creating_id if anchor == "creating" else due_id
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _detach_journal(
+                client, session_id, task_id=task_id, journal_id=journal_id
+            )
+
+        assert payload["error"] == "Task error"
+        assert anchor in payload["message"]
+
+    async def test_an_anchor_refusal_does_not_read_like_a_missing_journal(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The two rejections have different remedies, so they must look different.
+
+        An agent that cannot tell them apart will retry with the same journal, or
+        go looking for a journal that is right in front of it.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            anchor = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=due_id
+            )
+            missing = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=999_999
+            )
+
+        assert anchor["error"] != missing["error"]
+        assert missing["error"] == "Journal not found"
+
+    async def test_an_unknown_journal_is_reported_as_a_journal(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The journal domain's answer, so the message names the journal and its id.
+
+        A task-shaped "Not found" would leave an agent unsure which of the two
+        ids it sent was the problem.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=999_999
+            )
+
+        assert payload["error"] == "Journal not found"
+        assert "999999" in payload["message"]
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_another_users_journal_is_indistinguishable_from_an_absent_one(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        theirs = await create_journal(
+            journal_repository, title="Not yours", user_id=OTHER_USER_ID
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=theirs
+            )
+            absent = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=999_999
+            )
+
+        assert foreign["error"] == absent["error"] == "Journal not found"
+        assert foreign["message"].replace(str(theirs), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_another_users_task_answers_exactly_as_an_absent_one(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """On both tools, and their link survives."""
+        their_journal = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        their_task = await create_task(
+            clean_database,
+            creating_journal_id=their_journal,
+            due_journal_id=their_journal,
+            user_id=OTHER_USER_ID,
+        )
+        their_mention = await create_journal(
+            journal_repository, title="Their mention", user_id=OTHER_USER_ID
+        )
+        await link_intermediate_journal(
+            clean_database, task_id=their_task, journal_id=their_mention
+        )
+        mine = await create_journal(journal_repository, title="Mine")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign_attach = await _attach_journal(
+                client, session_id, task_id=their_task, journal_id=mine
+            )
+            absent_attach = await _attach_journal(
+                client, session_id, task_id=999_999, journal_id=mine
+            )
+            foreign_detach = await _detach_journal(
+                client, session_id, task_id=their_task, journal_id=their_mention
+            )
+
+        assert foreign_attach["error"] == absent_attach["error"] == "Not found"
+        assert foreign_detach["error"] == "Not found"
+        assert await intermediate_journal_ids(clean_database, their_task) == [
+            their_mention
+        ]
+
+    @pytest.mark.parametrize("unwanted", ["role", "relationship_type", "status"])
+    async def test_a_role_argument_is_refused_by_the_transport(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        unwanted: str,
+    ):
+        """Refused before the service is reached, because the schema has no such field."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "attach_intermediate_journal_to_task",
+                {
+                    "task_id": task_id,
+                    "journal_id": mentioned,
+                    unwanted: "due",
+                },
+            )
+
+        assert '"isError":true' in response.text
+        assert await intermediate_journal_ids(clean_database, task_id) == []
+
+    async def test_a_journal_id_beyond_int32_is_refused(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "attach_intermediate_journal_to_task",
+                {"task_id": task_id, "journal_id": 2_147_483_648},
+            )
+
+        assert '"isError":true' in response.text
+        assert await intermediate_journal_ids(clean_database, task_id) == []

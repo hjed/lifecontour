@@ -10,10 +10,12 @@ payload rather than defining one.
 import datetime
 
 import pytest
+from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDomainError,
     TaskDueJournalNotFutureError,
+    TaskJournalIsAnchorError,
     TaskNotFoundError,
     TaskValidationError,
 )
@@ -79,3 +81,35 @@ class TestTaskErrorMapping:
         response = create_domain_error_response(TaskDomainError("something", 400))
 
         assert response.errors[0].code == "DOMAIN_ERROR"
+
+    def test_an_anchor_journal_refusal_maps_to_its_own_code(self) -> None:
+        """A journal already linked in an anchor role is a 409 of its own.
+
+        Distinguishability is the point rather than tidiness: a surface that can
+        tell this apart from a plain not-found can say *"that journal is already
+        the due one"*, while one that cannot has only "error" to show. 409
+        because the request is well formed and the journal is a real one of the
+        caller's — what it conflicts with is the role that journal already holds.
+        """
+        response = create_domain_error_response(TaskJournalIsAnchorError(7, 22, "due"))
+
+        error = response.errors[0]
+        assert error.code == "TASK_JOURNAL_IS_ANCHOR"
+        assert error.status == "409"
+        assert "22" in (error.detail or "")
+        assert "retarget" in (error.detail or "").lower()
+
+    def test_the_anchor_refusal_is_told_apart_from_a_missing_journal(self) -> None:
+        """The two rejections attaching can produce must not share a code.
+
+        A journal that is not the user's and one that is already an anchor are
+        different problems with different remedies — pick another journal, versus
+        it is already linked — and a client can only branch on them if the codes
+        differ.
+        """
+        anchor = create_domain_error_response(TaskJournalIsAnchorError(7, 22, "due"))
+        missing = create_domain_error_response(JournalNotFoundError(22))
+
+        assert anchor.errors[0].code != missing.errors[0].code
+        assert missing.errors[0].code == "JOURNAL_NOT_FOUND"
+        assert missing.errors[0].status == "404"

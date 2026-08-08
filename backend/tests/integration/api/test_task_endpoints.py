@@ -36,6 +36,7 @@ race, and a UTC reading fails both.
 """
 
 import pytest
+from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.tasks import TaskStatus
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -58,7 +59,10 @@ from tests.integration.tasks.task_seeding import (
     create_journal,
     create_task,
     delete_contact,
+    delete_journal,
+    intermediate_journal_ids,
     link_contact,
+    link_intermediate_journal,
     linked_contact_ids,
     stored_status,
 )
@@ -1254,3 +1258,448 @@ class TestIdsOutsideTheColumnsRange:
 
         assert response.status_code == 400
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+
+def _journal_link_body(journal_id: int, **overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {"type": "journals", "id": str(journal_id)}
+    data.update(overrides)
+    return {"data": data}
+
+
+@pytest.mark.integration
+class TestIntermediateJournalLinkEndpoints:
+    """``POST``/``DELETE`` under ``/api/tasks/{id}/relationships/intermediate-journals``.
+
+    The relationship is named for the role it holds, not for the resource it
+    points at. A task has three journal relationships — creating, due and
+    intermediate — and this route manipulates exactly one of them; calling it
+    ``/journals`` would promise a route that can set an anchor, which the service
+    refuses. The body's resource ``type`` is still ``journals``, because that is
+    what the identifier points at.
+
+    Both verbs answer **204**, for the reasons the contact routes do: there is no
+    read model to echo, and a 204 is what keeps an idempotent operation
+    indistinguishable from its own repeat.
+    """
+
+    async def test_attaching_a_journal_writes_the_row(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(mentioned),
+        )
+
+        assert response.status_code == 204
+        assert await intermediate_journal_ids(async_connection, task_id) == [mentioned]
+
+    async def test_attaching_again_answers_the_same_and_leaves_one_row(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Idempotency is invisible to the client, which is the whole of it."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+        path = f"/api/tasks/{task_id}/relationships/intermediate-journals"
+
+        first = await authenticated_client.post(
+            path, json=_journal_link_body(mentioned)
+        )
+        second = await authenticated_client.post(
+            path, json=_journal_link_body(mentioned)
+        )
+
+        assert (first.status_code, second.status_code) == (204, 204)
+        assert await intermediate_journal_ids(async_connection, task_id) == [mentioned]
+
+    async def test_detaching_a_journal_removes_the_row(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned
+        )
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals/{mentioned}"
+        )
+
+        assert response.status_code == 204
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+
+    async def test_detaching_again_answers_the_same(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned
+        )
+        path = f"/api/tasks/{task_id}/relationships/intermediate-journals/{mentioned}"
+
+        first = await authenticated_client.delete(path)
+        second = await authenticated_client.delete(path)
+
+        assert (first.status_code, second.status_code) == (204, 204)
+
+    async def test_detaching_a_deleted_journal_is_accepted(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The tidy-up call must not 404 on the journal the user just removed."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned
+        )
+        await delete_journal(async_connection, mentioned)
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals/{mentioned}"
+        )
+
+        assert response.status_code == 204
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_the_links_are_editable_in_any_status(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(mentioned),
+        )
+
+        assert response.status_code == 204
+        assert await stored_status(async_connection, task_id) == status.value
+
+
+@pytest.mark.integration
+class TestIntermediateJournalLinkRejections:
+    """Every refusal, at the surface a client actually reaches.
+
+    A shared service is no evidence that both callers reach it — the lesson
+    Phase 5 recorded after finding every task rejection arriving at AI clients as
+    "internal error" — so the whole matrix is asserted again here, with the
+    JSON:API ``code`` each answer carries.
+    """
+
+    @pytest.mark.parametrize("anchor", ["creating", "due"])
+    async def test_attaching_an_anchor_journal_is_a_409(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        anchor: str,
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        journal_id = creating_id if anchor == "creating" else due_id
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(journal_id),
+        )
+
+        assert response.status_code == 409
+        assert _error(response.json())["code"] == "TASK_JOURNAL_IS_ANCHOR"
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    @pytest.mark.parametrize("anchor", ["creating", "due"])
+    async def test_detaching_an_anchor_journal_is_a_409(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        anchor: str,
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        journal_id = creating_id if anchor == "creating" else due_id
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals/{journal_id}"
+        )
+
+        assert response.status_code == 409
+        assert _error(response.json())["code"] == "TASK_JOURNAL_IS_ANCHOR"
+
+    async def test_an_unknown_journal_is_a_404_naming_the_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The journal domain's answer, not a task-shaped one.
+
+        ``JOURNAL_NOT_FOUND`` tells the client which resource it got wrong;
+        ``TASK_ANCHOR_JOURNAL_NOT_FOUND`` would describe a rule about anchors
+        that this call is not about.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(999_999),
+        )
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "JOURNAL_NOT_FOUND"
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_another_users_journal_reads_as_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Identical once the id is normalised, so this is not a probe.
+
+        Deliberately **not** described as byte-identical: each body embeds the id
+        the caller supplied, so the two differ exactly there and nowhere else.
+        Phase 6's entry hedges the same claim the same way; this phase's first
+        draft dropped the hedge and review caught it.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        theirs = await create_journal(
+            journal_repository, title="Not yours", user_id=OTHER_USER_ID
+        )
+        path = f"/api/tasks/{task_id}/relationships/intermediate-journals"
+
+        foreign = await authenticated_client.post(path, json=_journal_link_body(theirs))
+        absent = await authenticated_client.post(path, json=_journal_link_body(999_999))
+
+        assert foreign.status_code == absent.status_code == 404
+        # The same template either way, differing only in the id the caller
+        # supplied — which is what makes the two answers indistinguishable as
+        # evidence about whose journal it was.
+        assert _error(foreign.json())["detail"] == str(JournalNotFoundError(theirs))
+        assert _error(absent.json())["detail"] == str(JournalNotFoundError(999_999))
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_another_users_task_answers_exactly_as_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """On both verbs, and their link survives."""
+        their_journal = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        their_task = await create_task(
+            async_connection,
+            creating_journal_id=their_journal,
+            due_journal_id=their_journal,
+            user_id=OTHER_USER_ID,
+        )
+        their_mention = await create_journal(
+            journal_repository, title="Their mention", user_id=OTHER_USER_ID
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=their_task, journal_id=their_mention
+        )
+        mine = await create_journal(journal_repository, title="Mine")
+
+        foreign_attach = await authenticated_client.post(
+            f"/api/tasks/{their_task}/relationships/intermediate-journals",
+            json=_journal_link_body(mine),
+        )
+        absent_attach = await authenticated_client.post(
+            "/api/tasks/999999/relationships/intermediate-journals",
+            json=_journal_link_body(mine),
+        )
+        foreign_detach = await authenticated_client.delete(
+            f"/api/tasks/{their_task}/relationships/intermediate-journals/"
+            f"{their_mention}"
+        )
+
+        assert foreign_attach.status_code == absent_attach.status_code == 404
+        assert _error(foreign_attach.json())["code"] == "TASK_NOT_FOUND"
+        assert foreign_detach.status_code == 404
+        assert await intermediate_journal_ids(async_connection, their_task) == [
+            their_mention
+        ]
+
+    @pytest.mark.parametrize("field", ["role", "relationship_type", "status"])
+    async def test_a_role_field_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        field: str,
+    ):
+        """An intermediate link is a mention; a field it does not have is refused."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(mentioned, **{field: "due"}),
+        )
+
+        assert response.status_code == 400
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+
+    async def test_another_resource_type_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The two link routes take structurally identical bodies but for the type."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(mentioned, type="contacts"),
+        )
+
+        assert response.status_code == 400
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+
+    async def test_unknown_members_beside_the_data_member_are_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json={"data": {"type": "journals", "id": str(mentioned)}, "role": "due"},
+        )
+
+        assert response.status_code == 400
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+
+    async def test_a_body_journal_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The 500 issue #1272 is about, closed on this phase's routes too."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(2_147_483_648),
+        )
+
+        assert response.status_code == 400
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+
+    async def test_a_path_journal_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals/2147483648"
+        )
+
+        assert response.status_code == 400
+
+    async def test_a_non_integer_body_id_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json={"data": {"type": "journals", "id": "not-a-number"}},
+        )
+
+        assert response.status_code == 400

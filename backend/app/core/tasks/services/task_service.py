@@ -31,11 +31,13 @@ import datetime
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.tasks import (
     Task,
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
+    TaskJournalIsAnchorError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -79,6 +81,12 @@ _ANCHOR_COLUMNS: tuple[tuple[TaskJournalAnchor, str], ...] = (
 )
 
 
+# The foreign key an intermediate link takes on the journal it names. Matched in
+# full rather than by its column, because ``journal_id`` on its own also appears
+# in the table's *primary key* violations.
+_INTERMEDIATE_JOURNAL_FK = "task_intermediate_journals_journal_id_fkey"
+
+
 def _driver_message(error: IntegrityError) -> str:
     """The database's own message, without the statement SQLAlchemy appends.
 
@@ -97,6 +105,32 @@ def _violated_anchor(error: IntegrityError) -> TaskJournalAnchor | None:
         if column in message:
             return anchor
     return None
+
+
+def _refuse_anchor_role(task: Task, task_id: int, journal_id: int) -> None:
+    """Refuse a journal that is already one of the task's two anchors.
+
+    Both directions of the intermediate-link surface share this: an anchor
+    cannot be attached (it is already linked, in a role a link row cannot
+    express) and cannot be detached (it is a column, so there is no row to
+    remove). One rule, checked in one place, so the two surfaces cannot drift.
+
+    Invariant 6 lets a task have the *same* journal in both roles, so the order
+    below is a decision rather than an accident: the **creating** anchor is
+    reported, because it is the one that can never be moved and is therefore the
+    more useful half to tell the caller about.
+
+    ``task_id`` is passed in rather than read off the entity: the caller looked
+    the task up by that id, so it is known to be an ``int`` there and would need
+    a redundant narrowing check here.
+    """
+    roles: tuple[tuple[TaskJournalAnchor, int], ...] = (
+        ("creating", task.creating_journal_id),
+        ("due", task.due_journal_id),
+    )
+    for anchor, anchor_journal_id in roles:
+        if anchor_journal_id == journal_id:
+            raise TaskJournalIsAnchorError(task_id, journal_id, anchor)
 
 
 class TaskService:
@@ -270,6 +304,174 @@ class TaskService:
                 user's.
         """
         return await self.task_repo.remove_contact(task_id, contact_id, user_id)
+
+    @transactional
+    async def attach_intermediate_journal(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        journal_id: int,
+        transaction: AsyncConnection,
+    ) -> bool:
+        """Link one of the user's journals to a task as an intermediate journal.
+
+        An intermediate journal is one the task was *"discussed, revisited, or
+        previously due"* in. This is the **explicit** half of that: nothing
+        anywhere infers a link from where the user happened to be when they
+        edited a task, so a link exists only because somebody asked for it here
+        or because :meth:`retarget_due_journal` retained a previous due journal —
+        the model's one automatic link.
+
+        **The journal must be the acting user's**, which is enforced by the same
+        owner-scoped read the anchors go through, so a journal belonging to
+        somebody else is indistinguishable from one that never existed.
+
+        **An anchor is not an intermediate link.** A journal that is already the
+        task's creating or due journal is refused: it is already linked, in a
+        role this table cannot express. The check costs nothing extra — the task
+        has been read already — and its order relative to the journal read is
+        unobservable, because an anchor is by construction a real journal of the
+        caller's (the anchor columns are ``ON DELETE RESTRICT`` foreign keys that
+        creation and retargeting both resolve owner-scoped).
+
+        **Idempotent.** Attaching a journal that is already attached succeeds and
+        writes nothing. There is no "is it already linked?" read: de-duplication
+        is ``task_intermediate_journals``' composite primary key, so nothing can
+        slip into a window between the question and the answer. Phase 7 made the
+        same choice for the automatic link.
+
+        **Editable in any status**, like a contact link. No status is read and
+        none is written, so a done or cancelled task takes a link exactly as an
+        open one does.
+
+        **The task is read without a lock**, unlike :meth:`set_status` and
+        :meth:`retarget_due_journal`. Those decide a *rule* from the status they
+        read and write that decision back, which an interleaving can corrupt. The
+        only state that can move underneath this method is a concurrent retarget
+        making this journal the due anchor after the check — and the resulting
+        shape, a due anchor that is also an intermediate link, is one
+        :meth:`retarget_due_journal` produces on its own and Phase 7 explicitly
+        declined to clean up ("nothing is ever unlinked, including a link that
+        has become redundant"). A lock would narrow a window onto an outcome that
+        is legitimate either side of it, and it would deepen the lock-order
+        inversion against journal merge that ITER18-002 Phase 6 exists to remove.
+
+        Args:
+            user_id: The acting user; the task and the journal must be theirs
+            task_id: The task to link
+            journal_id: The journal it was discussed or revisited in
+            transaction: The request connection; the unit of work commits here
+
+        Returns:
+            ``True`` when a link row was created, ``False`` when it was already
+            there.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's. The two are indistinguishable by design.
+            JournalNotFoundError: When the journal does not exist or is not the
+                acting user's — the journal domain's own error, so the answer
+                names the journal rather than describing it as a task anchor,
+                which it is not.
+            TaskJournalIsAnchorError: When the journal is already the task's
+                creating or due journal.
+        """
+        task = await self._require_task(task_id, user_id)
+        await self._require_owned_journal(user_id, journal_id)
+        _refuse_anchor_role(task, task_id, journal_id)
+
+        try:
+            return await self.task_repo.add_intermediate_journal(
+                task_id, journal_id, user_id
+            )
+        except IntegrityError as error:
+            # The same race as ``_save``, one table over: the journal was proved
+            # to exist a statement ago, and a delete since then must still read
+            # as the 404 promised above rather than as a raw integrity error
+            # rendered to the caller as a 500. No ``SAVEPOINT`` is needed, unlike
+            # the batched contact insert: one journal is named per call, so the
+            # violation can only be about that one and nothing has to run against
+            # the aborted transaction to work out which.
+            #
+            # Matched on the *foreign key's* name rather than on the bare column,
+            # which review caught: ``journal_id`` alone also appears in a primary
+            # key violation's ``Key (task_id, journal_id)=(…) already exists``,
+            # so a duplicate would have been reported to the caller as a missing
+            # journal. Unreachable while the insert is ``ON CONFLICT DO NOTHING``
+            # — which is exactly the kind of "safe today" the ``str(error)`` bug
+            # in Phase 4 also was.
+            if _INTERMEDIATE_JOURNAL_FK not in _driver_message(error):
+                raise
+            raise JournalNotFoundError(journal_id) from error
+
+    @transactional
+    async def detach_intermediate_journal(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        journal_id: int,
+        transaction: AsyncConnection,
+    ) -> bool:
+        """Remove an intermediate-journal link from one of the user's tasks.
+
+        **The journal is not required to still exist**, which is the deliberate
+        asymmetry with :meth:`attach_intermediate_journal` and the same one
+        :meth:`unlink_contact` carries. ``task_intermediate_journals.journal_id``
+        cascades, so a deleted journal's links are already gone — the
+        specification's *"deleting a journal that is only an intermediate link is
+        permitted; the intermediate link is removed"* — and demanding the journal
+        here would fail exactly the call a user reaches for while tidying up.
+
+        **An anchor role cannot be removed this way**, and the refusal is
+        explicit rather than a silent no-op. The repository would answer ``False``
+        for an anchor with no link row, and a caller would read that as *"it was
+        not attached"* rather than *"that link cannot be removed at all"*. The
+        creating journal never changes; the due journal is replaced by
+        retargeting.
+
+        **The refusal is about the missing row, not about the anchor**, which is
+        the correction a review of this phase forced. Refusing on the anchor
+        alone made a legitimately reachable link permanently unremovable: attach
+        a journal, then retarget the task *onto* it, and the row this surface
+        wrote is still there while the journal has since become the due anchor —
+        a shape :meth:`retarget_due_journal` deliberately leaves alone ("nothing
+        is ever unlinked, including a link that has become redundant"). Refusing
+        there would contradict the specification's *"intermediate links can be
+        removed"* for a link the user created through this very method. So the
+        delete runs first and the refusal applies only when it removed nothing:
+        the anchor column is never touched either way, and the caller who
+        genuinely meant *"stop this task being due here"* still gets told to
+        retarget. The refusal path writes nothing — a ``DELETE`` matching no rows
+        is not a write.
+
+        Idempotent for the same reason ``DELETE`` is: detaching a journal that is
+        not attached changes nothing and says so.
+
+        Args:
+            user_id: The acting user; the task must be theirs
+            task_id: The task to unlink
+            journal_id: The intermediate journal to stop referencing
+            transaction: The request connection; the unit of work commits here
+
+        Returns:
+            ``True`` when a link row was removed, ``False`` when there was none.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's.
+            TaskJournalIsAnchorError: When the journal is the task's creating or
+                due journal **and** there is no intermediate link to remove.
+        """
+        task = await self._require_task(task_id, user_id)
+
+        removed = await self.task_repo.remove_intermediate_journal(
+            task_id, journal_id, user_id
+        )
+        if not removed:
+            _refuse_anchor_role(task, task_id, journal_id)
+        return removed
 
     @transactional
     async def set_status(
@@ -489,6 +691,35 @@ class TaskService:
                 raise
             journal_id = creating_journal_id if anchor == "creating" else due_journal_id
             raise TaskAnchorJournalNotFoundError(anchor, journal_id) from error
+
+    async def _require_task(self, task_id: int, user_id: str) -> Task:
+        """Read one of the user's tasks, or raise the promised 404.
+
+        The plain read, not the locking one — see
+        :meth:`attach_intermediate_journal` for why the link methods do not need
+        a lock where the status and retarget methods do.
+        """
+        task = await self.task_repo.find_by_id(task_id, user_id)
+        if task is None:
+            raise TaskNotFoundError(task_id)
+        return task
+
+    async def _require_owned_journal(self, user_id: str, journal_id: int) -> Journal:
+        """Load a journal the acting user owns, on the anchors' terms.
+
+        Goes through :meth:`_journals_by_id`, so the property that ownership is
+        enforced *by the query* — and therefore that another user's journal is
+        indistinguishable from an absent one — has one place to hold rather than
+        three. The error is the journal domain's, not
+        ``TaskAnchorJournalNotFoundError``: an intermediate journal is not an
+        anchor, and that error's message ("a task must be anchored to journals
+        that exist and belong to you") would be describing a rule this call is
+        not about.
+        """
+        found = await self._journals_by_id(user_id, [journal_id])
+        if journal_id not in found:
+            raise JournalNotFoundError(journal_id)
+        return found[journal_id]
 
     async def _link_contacts(
         self,
