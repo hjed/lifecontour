@@ -207,17 +207,71 @@ async def stored_status(conn: AsyncConnection, task_id: int) -> str:
     )
 
 
-# There is deliberately **no** ``stored_updated_at`` helper, and this note is
-# here so it is not added again. A no-op looks like it should be provable by the
-# timestamp not moving, but it is not provable that way under these fixtures:
-# ``tasks.updated_at`` is written with ``now()``, which in PostgreSQL is the
-# *transaction* timestamp, and every statement in a test — the seed insert, the
-# write under test, the read back — shares the fixture's single transaction. So
-# a rewrite stamps exactly the value the insert did, and an assertion that the
-# timestamp is unchanged holds whether or not anything was written. Probed
-# rather than reasoned about: a test asserting the timestamp *does* move on a
-# real write fails. Prove a no-op with a field the operation would have changed
-# — the status, an anchor, or a link row — each of which can fail.
+async def stored_updated_at(conn: AsyncConnection, task_id: int) -> datetime:
+    """The ``updated_at`` column as the database holds it.
+
+    **Only meaningful after ``backdate_updated_at``.** Comparing this against a
+    value the same transaction produced proves nothing — see that function for
+    why. Read it to check a backdated timestamp either survived a no-op or was
+    overwritten by a real write; do not use it to compare two readings taken
+    inside one test without backdating between them.
+    """
+    stored: datetime = (
+        await conn.execute(
+            text("SELECT updated_at FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+    ).scalar_one()
+    return stored
+
+
+async def stored_text(conn: AsyncConnection, task_id: int) -> str:
+    """The text column as the database holds it, bypassing every layer above."""
+    return str(
+        (
+            await conn.execute(
+                text("SELECT text FROM tasks WHERE id = :task_id"),
+                {"task_id": task_id},
+            )
+        ).scalar_one()
+    )
+
+
+async def backdate_updated_at(conn: AsyncConnection, task_id: int) -> datetime:
+    """Move a task's ``updated_at`` into the past, and return where it was put.
+
+    **A no-op test needs this to mean anything.** PostgreSQL's ``now()`` is
+    ``transaction_timestamp()`` — constant for a whole transaction — and the
+    integration fixture runs each test inside one. So the ``DEFAULT now()`` the
+    seed row was inserted with and the ``updated_at = now()`` an update writes
+    are the *identical* value, and "``updated_at`` did not move" holds whether
+    or not a write happened. Review caught exactly that: the assertion passed
+    against a service with the no-op short-circuit deleted.
+
+    Backdating breaks the tie. The stored timestamp is now something ``now()``
+    cannot produce, so a write that did happen is visible as a change and a
+    write that did not is visible as this value surviving.
+    """
+    moved_to = FIXED_PAST_INSTANT
+    await conn.execute(
+        text("UPDATE tasks SET updated_at = :moved_to WHERE id = :task_id"),
+        {"moved_to": moved_to, "task_id": task_id},
+    )
+    return moved_to
+
+
+async def task_exists(conn: AsyncConnection, task_id: int) -> bool:
+    """Whether a task row is still there at all.
+
+    Distinct from ``stored_status`` and ``stored_text``, which both assume the
+    row exists and raise if it does not: a deletion test needs to ask the
+    question rather than trip over the answer.
+    """
+    return (
+        await conn.execute(
+            text("SELECT 1 FROM tasks WHERE id = :task_id"), {"task_id": task_id}
+        )
+    ).scalar_one_or_none() is not None
 
 
 async def stored_anchors(conn: AsyncConnection, task_id: int) -> tuple[int, int]:

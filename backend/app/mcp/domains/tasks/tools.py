@@ -88,10 +88,10 @@ async def _trail_of(task: Task, task_service: TaskService, user_id: str) -> list
     **A task that vanishes in that window reads as an empty trail, not "not
     found".** The write has already committed, so reporting a successful
     mutation as a failure would be worse than terse — and empty is the literal
-    truth, since ``task_intermediate_journals`` cascades from ``task_id``.
-    Unreachable until a delete surface exists; ``delete_task`` arrives in the
-    next phase. Mirrors the endpoint's handling deliberately, so the two
-    surfaces cannot diverge on it.
+    truth, since ``task_intermediate_journals`` cascades from ``task_id``. The
+    window is **reachable**: ``delete_task`` in this same module can remove the
+    task between the commit and this read. Mirrors the endpoint's handling
+    deliberately, so the two surfaces cannot diverge on it.
     """
     if task.id is None:  # pragma: no cover - a persisted task always has one
         return []
@@ -390,10 +390,99 @@ async def retarget_task(
     )
 
 
+@mcp_unified_error_handler("update_task_text", "task")
+async def update_task_text(
+    task_id: Annotated[
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to reword.")
+    ],
+    text: Annotated[
+        str,
+        Field(
+            description=(
+                "The task's new text. Replaces the existing text entirely — "
+                "send the whole commitment, not an addition to it. Required "
+                "and non-empty."
+            )
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Reword a task, in any status.
+
+    Text is editable at any time and in any status, including on a task that is
+    done or cancelled and on one whose due journal has already passed — nothing
+    about a task's state makes its wording unfixable.
+
+    No journal is involved and none is linked: rewording a task does not attach
+    it to whatever journal the conversation happens to be about. Use the journal
+    link tools for that.
+
+    Returns:
+        JSON string with the task: id, text, status, both journal anchors, the
+        journals it has passed through, and timestamps.
+    """
+    user_id = await get_current_user_id()
+
+    updated = await task_service.update_task(
+        user_id=user_id,
+        task_id=task_id,
+        text=text,
+        transaction=db_connection,
+    )
+    return json.dumps(
+        _task_to_dict(updated, await _trail_of(updated, task_service, user_id)),
+        indent=2,
+    )
+
+
+@mcp_unified_error_handler("delete_task", "task")
+async def delete_task(
+    task_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description="The id of the task to delete permanently.",
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Delete a task permanently. Prefer cancelling it instead.
+
+    Cancelling is the ordinary way to retire a task: call set_task_status with
+    'cancelled'. A cancelled task stays part of the record of what the user
+    committed to, and can be reopened later by retargeting it onto a new future
+    journal. Deleting is the exception, for genuine mistakes — a duplicate, or
+    something recorded against the wrong thing — and it cannot be undone.
+
+    The task's journal and contact links go with it. The journals and contacts
+    themselves are untouched, including the journals it was created in and due
+    in.
+
+    Deleting a task that does not exist, or is not yours, reports not found —
+    including a second delete of a task already deleted.
+
+    Returns:
+        JSON string confirming the deletion: deleted (true) and task_id.
+    """
+    user_id = await get_current_user_id()
+
+    await task_service.delete_task(
+        user_id=user_id, task_id=task_id, transaction=db_connection
+    )
+    return json.dumps({"deleted": True, "task_id": task_id}, indent=2)
+
+
 def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
     mcp.add_tool(set_task_status)
     mcp.add_tool(retarget_task)
+    mcp.add_tool(update_task_text)
+    mcp.add_tool(delete_task)
     mcp.add_tool(link_task_to_contact)
     mcp.add_tool(unlink_task_from_contact)

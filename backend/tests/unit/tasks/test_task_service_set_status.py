@@ -15,6 +15,10 @@ rules:
 
 Repositories are mocked: none of this needs a database, and the transitions
 matter more than the SQL, which the integration test covers.
+
+The doubles live in ``conftest.py`` and ``task_doubles.py`` beside this file:
+Phase 9 added two more member-route operations that start from exactly this
+position, so the setup moved rather than being copied a third time.
 """
 
 from unittest.mock import AsyncMock
@@ -27,82 +31,16 @@ from core_shared.models.tasks import (
     TaskStatusTransitionError,
 )
 
-from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_service import TaskService
-
-USER_ID = "test-user-123"
-OTHER_USER_ID = "other-user-456"
-
-TASK_ID = 7
-CREATING_JOURNAL_ID = 11
-DUE_JOURNAL_ID = 22
-
-
-def make_task(status: TaskStatus = TaskStatus.NOT_DONE) -> Task:
-    """A persisted task in ``status``, as the repository would hand it back."""
-    return Task(
-        id=TASK_ID,
-        user_id=USER_ID,
-        text="return Sarah's book",
-        creating_journal_id=CREATING_JOURNAL_ID,
-        due_journal_id=DUE_JOURNAL_ID,
-        status=status,
-    )
-
-
-@pytest.fixture
-def mock_task_repo() -> AsyncMock:
-    """A task repository that echoes back whatever it is asked to save."""
-    repo = AsyncMock()
-
-    async def save(task: Task) -> Task:
-        return task
-
-    repo.save.side_effect = save
-    repo.find_by_id_for_update.return_value = make_task()
-    return repo
-
-
-@pytest.fixture
-def mock_journal_repo() -> AsyncMock:
-    """A journal repository no status change may touch."""
-    return AsyncMock()
-
-
-@pytest.fixture
-def mock_contact_repo() -> AsyncMock:
-    """A contact repository no status change may touch."""
-    return AsyncMock()
-
-
-@pytest.fixture
-def mock_settings_repo() -> AsyncMock:
-    """A settings repository; a status change never needs a timezone."""
-    repo = AsyncMock()
-    repo.get_timezone.return_value = "UTC"
-    return repo
-
-
-@pytest.fixture
-def mock_transaction() -> AsyncMock:
-    """A stand-in connection; ``@transactional`` runs unwrapped for a non-real one."""
-    return AsyncMock()
-
-
-@pytest.fixture
-def service(
-    mock_task_repo: AsyncMock,
-    mock_journal_repo: AsyncMock,
-    mock_contact_repo: AsyncMock,
-    mock_settings_repo: AsyncMock,
-) -> TaskService:
-    """The service under test."""
-    return TaskService(
-        task_repo=mock_task_repo,
-        journal_repo=mock_journal_repo,
-        contact_repo=mock_contact_repo,
-        date_resolver=JournalDateResolver(mock_settings_repo),
-    )
+from tests.unit.tasks.task_doubles import (
+    CREATING_JOURNAL_ID,
+    DUE_JOURNAL_ID,
+    ORIGINAL_TEXT,
+    OTHER_USER_ID,
+    TASK_ID,
+    USER_ID,
+    make_task,
+)
 
 
 async def set_status(
@@ -190,7 +128,7 @@ class TestAllowedTransitions:
         saved = mock_task_repo.save.await_args.args[0]
         assert saved.creating_journal_id == CREATING_JOURNAL_ID
         assert saved.due_journal_id == DUE_JOURNAL_ID
-        assert saved.text == "return Sarah's book"
+        assert saved.text == ORIGINAL_TEXT
         assert saved.user_id == USER_ID
 
 
@@ -342,3 +280,56 @@ class TestSameStatus:
 
         assert result.status == status
         mock_task_repo.save.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestSetStatusIsTheUpdatePath:
+    """Phase 9 made ``set_status`` a delegation, and it must stay one.
+
+    A status change can arrive on its own (this method, and the MCP tool behind
+    it) or beside a text edit in one ``PATCH``. Two implementations of the
+    transition matrix would be two places for it to drift, and only one of them
+    would be the one a given caller hit — so there is one, and this asserts the
+    delegation rather than trusting the two to be kept in step by hand.
+
+    Every other test in this file then covers both paths at once, which is why
+    the delegation is worth pinning rather than treating as an implementation
+    detail.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_status_only_path_reaches_the_same_code(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The text is left alone, which is what "status only" has to mean."""
+        result = await set_status(service, mock_transaction, TaskStatus.DONE)
+
+        saved = mock_task_repo.save.await_args.args[0]
+        assert saved.text == ORIGINAL_TEXT
+        assert result.text == ORIGINAL_TEXT
+        assert result.status == TaskStatus.DONE
+
+    @pytest.mark.asyncio
+    async def test_it_produces_the_same_result_as_the_combined_update(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Same task, same target status, same answer — through either entry point."""
+        through_set_status = await set_status(
+            service, mock_transaction, TaskStatus.CANCELLED
+        )
+
+        mock_task_repo.find_by_id_for_update.return_value = make_task()
+        through_update = await service.update_task(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            status=TaskStatus.CANCELLED,
+            transaction=mock_transaction,
+        )
+
+        assert through_set_status == through_update

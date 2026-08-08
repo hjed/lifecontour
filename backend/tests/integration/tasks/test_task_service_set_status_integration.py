@@ -48,6 +48,7 @@ from tests.integration.tasks.task_seeding import (
     COUNT_INTERMEDIATE_JOURNALS,
     OTHER_USER_ID,
     USER_ID,
+    backdate_updated_at,
     committed_task,
     count,
     create_journal,
@@ -170,24 +171,21 @@ class TestStatusChangesAgainstRealRows:
         async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
     ):
-        """Asking for the status a task already has leaves it exactly as it was.
+        """``updated_at`` must not move for a change that did not happen.
 
         The history projection derives a status-change event from a write, so a
-        no-op that still wrote would report a change the user never made.
+        no-op that still wrote would report a change the user never made — and
+        the timestamp is the only evidence out here that no write occurred.
 
-        **This test cannot prove the write did not happen, and no test at this
-        level can.** It previously claimed the unmoved ``updated_at`` was that
-        evidence; it is not. The column is written with ``now()``, which in
-        PostgreSQL is the *transaction* timestamp, and the savepoint fixture
-        runs the seed insert, the call and the read back inside one transaction
-        — so a rewrite stamps exactly the value the insert did and the
-        comparison holds either way. Found in ITER18-001 Phase 8 by writing the
-        inverted assertion and watching it fail. A same-status no-op is the one
-        case with no field left that a real write would have changed, so the
-        assertion is dropped rather than replaced, and the claim is made where
-        it *is* observable: ``mock_task_repo.save.assert_not_awaited()`` in
-        ``tests/unit/tasks/test_task_service_set_status.py``. What survives here
-        is the round trip against a real row, which is this file's job.
+        **The timestamp is backdated first, and Phase 6 did not do that** —
+        which made this assertion vacuous, in the same way and for the same
+        reason the "read the row back to prove a commit" claim Phase 6 itself
+        corrected was vacuous. PostgreSQL's ``now()`` is constant across a
+        transaction and the fixture runs the whole test in one, so the
+        insert-time default and an update-time ``now()`` are the identical
+        value: the comparison held whether or not the no-op existed. Found by
+        Phase 9's review, and fixed here rather than left as a known-false
+        witness beside the new one.
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
@@ -196,6 +194,7 @@ class TestStatusChangesAgainstRealRows:
             due_journal_id=due_id,
             status=TaskStatus.CANCELLED,
         )
+        backdated = await backdate_updated_at(async_connection, task_id)
 
         result = await service.set_status(
             user_id=USER_ID,
@@ -206,8 +205,40 @@ class TestStatusChangesAgainstRealRows:
 
         after = await task_repository.find_by_id(task_id, USER_ID)
         assert after is not None
-        assert after.status == TaskStatus.CANCELLED
+        assert after.updated_at == backdated
         assert result.status == TaskStatus.CANCELLED
+
+    async def test_a_real_status_change_does_move_updated_at(
+        self,
+        service: TaskService,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The other half of the pair, without which the first proves nothing.
+
+        A backdated timestamp that never moves is equally consistent with "the
+        no-op worked" and "no write ever reaches this column".
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+        backdated = await backdate_updated_at(async_connection, task_id)
+
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        after = await task_repository.find_by_id(task_id, USER_ID)
+        assert after is not None
+        assert after.updated_at is not None
+        assert after.updated_at > backdated
 
     async def test_the_anchors_are_unchanged(
         self,
