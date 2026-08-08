@@ -2,16 +2,19 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **62 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–7 and 9 complete** (task tables + domain entity; task repository; journal-date
+**ITER18-001 Phases 1–7, 9 and 11 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
 MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
-one automatic link, and its only way back out of a terminal status; and text update and delete over both
-surfaces).
-**ITER18-002 Phases 1 and 3 complete** (the delete guard: journal deletion is refused, explanatorily, for
-any journal anchoring a task; and merge, which is never refused — it re-points task links onto the
+one automatic link, and its only way back out of a terminal status; text update and delete over both
+surfaces; and contact links over both surfaces).
+**ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
+for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
+blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
 survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw integrity
-error). **ITER18-002 Phase 2 must merge next**, per the Sequencing Strategy — the delete refusal is not
-yet shaped for REST and MCP callers.
+error). Delivery rule 9 is satisfied for both shipped journal operations; **the rest of ITER18-001 is
+next**, per the Sequencing Strategy. ITER18-002's remaining phases (4: cancellation as a lapse reason,
+5: the delete-failure UI and its e2e, 6: the retarget/merge lock order) depend on later ITER18-001
+phases.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -120,7 +123,16 @@ text and status together under one `FOR NO KEY UPDATE` read and one write — so
 can never be half-applied — and `set_status` is now a delegation to it, leaving the transition matrix
 with a single implementation. `retarget_due_journal` keeps its own path: it revalidates a due journal,
 which the text/status update deliberately never does. There is still **no way to read a task back**, no
-retarget surface (Phase 8) and no link operation (Phases 10–11).
+retarget surface (Phase 8) and no intermediate-journal link operation (Phase 10).
+
+**Since ITER18-001 Phase 11:** a task's contacts are editable.
+`POST`/`DELETE /api/tasks/{task_id}/relationships/contacts[/{contact_id}]` and the MCP tools
+`link_task_to_contact` / `unlink_task_from_contact` all call `TaskService.link_contact` and
+`unlink_contact`, which are `@transactional`, idempotent in both directions, work in every status, and
+enforce contact **existence** only — contacts still have no owner column. `TaskRepository.add_contact`
+no longer exists: `add_contacts` batches the write and `create_task` uses it. There is still **no way to
+read a task's contacts back** — no get, no list, no frontend surface — and no domain event for a link
+change (ITER18-003).
 
 ### The home page
 
@@ -1128,7 +1140,8 @@ service's contact check is the single place the rule lands.
   task ownership with its own `SELECT … FOR KEY SHARE`, so N contacts cost 2N statements to link a task
   the service created three lines earlier — an odd asymmetry next to the batched existence check.
   Batching it means a new `add_contacts` on the port and its adapter, which is Phase 11's surface, not
-  this one's. **Follow-up recorded for Phase 11.**
+  this one's. **Follow-up recorded for Phase 11 — done there:** `add_contact` was replaced outright
+  rather than joined, so there is one way to write a contact link rather than two.
 - **A `make_task_container` helper replaced the two hand-rolled DI containers.** `TaskProvider` no
   longer stands alone — `TaskService` needs the journal, contact and settings graphs, and Dishka
   validates the whole graph at construction — so Phase 2's DI test broke the moment the factory landed.
@@ -2080,29 +2093,240 @@ with the function count in brackets where the two differ.
 **Required Test Coverage:** unit — role rules and idempotency. Integration — attach/detach round-trips and
 each rejection on both surfaces, including the cross-user journal. E2E deferred to Phase 22.
 
-#### Phase 11: Contact Links — REST and MCP
+#### Phase 11: Contact Links — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 5.
-**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple · **Overrun recorded
+before work started (delivery rule 3): ~330 production → ~1,900 tracked** · **Actual:** **465 production
+→ 2,853 tracked** (2,853 insertions, 107 deletions across 22 files). All figures below are
+**insertions**, counted the same way rather than mixing conventions — an earlier draft of this entry
+summed insertions+deletions per file against an insertions-only total, which the phase's own review
+caught. 465 production: service 139, MCP tools 101, controller 82, REST schemas 66, adapter 56,
+port 21. 2,127 tests and fixtures; 261 docs.
+
+The ×4 figure is the one calibration **rule 15** was written to correct, and it was written *because*
+Phase 5 came in at 5.6× its own production on exactly this shape. This phase has two entry points, so it
+pays for two rejection matrices — a shared service is no evidence that both callers reach it — and it
+also changes a **port and its adapter**, which rule 13 puts at ×6 on its own. Phases 5 and 6 landed at
+2,036 and 2,483 tracked; nothing about this one is smaller than either.
+
+**Splitting was declined, and the cut considered is recorded rather than implied.** The only clean split
+is *link now, unlink later*, which ships a surface able to create links the user cannot remove — a breach
+of delivery rule 9 and of the specification's *"task text and contact links can be edited at any time, in
+any status"*. The second candidate, deferring the batched write, would reopen and rewrite
+`create_task`'s link loop in a later PR when the follow-up is assigned **here**. Rule 10 (coherence beats
+size) applies. What Phase 6 got wrong was recording its overrun afterwards; this one is recorded before
+any code is written.
+
+**The pre-recorded figure undershot again — the fifth phase running — but by the *smallest* margin yet,
+and the reason is worth keeping.** 2,853 against the doc's 600 is 4.8×; against this phase's own
+production it is **6.1×**, which is rule 15's ×6 almost exactly. That is the first time an advance
+estimate in this iteration has landed on its own multiplier, and the difference from Phases 4–6 is that
+the production figure was estimated from *what would be written* (a port method, a service pair, two
+schemas, two routes, two tools) rather than from a guess at the capability's size. **Suggested refinement
+to rule 15:** the ×6 multiplier is reliable; what has been wrong every time is the production estimate it
+multiplies. Enumerate the artefacts first, then apply ×6.
+
+**What the review round found, because it is a different list from the previous phases'.** Phases 4–6
+were reviewed into *more* tests; this one was reviewed into **fewer**. The findings that mattered were a
+parametrised unit test that could not fail (deleted, with a comment recording why it is not there), a
+`x in d or y in d` assertion that accepted two outcomes (pinned to one), a justification for the
+savepoint that was simply **untrue** — PostgreSQL's `DETAIL` *does* name the vanished key, so the real
+reason to re-read is that parsing localised driver prose is fragile — and three recorded numbers that
+were wrong, including a per-file production breakdown that summed insertions+deletions against an
+insertions-only total. The pattern worth carrying: once a phase's tests are thorough, what review starts
+catching is **claims**, in docstrings and in this document, rather than gaps in coverage. Two smaller
+items were acted on (an acceptance criterion whose write-up asserted more than its test did — the
+anchors are now checked; a redundant assertion) and one was recorded rather than closed (the theoretical
+deadlock below).
+
+**What the pull request's automated review found — a real 500, and it was not this phase's.** Every id
+column in this schema is a PostgreSQL `INTEGER` and Python's `int` is unbounded, so `2147483648` parsed
+cleanly out of a path or a body, reached the repository, and died in asyncpg's *parameter binding*:
+`DataError: value out of int32 range`, rendered to the caller as an internal error for an id no row
+could ever have. Probed before fixing, it reproduced on **five** routes — including `PATCH /api/tasks/{id}`
+(Phase 6) and `create_task`'s `contact_ids` (Phase 5), neither of which this phase added.
+
+The fix is `backend/app/api/common/identifiers.py` (`DatabaseId`, `DatabaseIdPath`, `INT32_MAX`), applied
+to **every id the tasks API and the tasks MCP tools accept**, with eight tests pinning the 400. Fixing
+only the two new routes was rejected: leaving `PATCH` broken beside a fixed neighbour in the same module
+is a worse outcome than fixing both. Extending it further was also rejected — every other domain's
+endpoints have the same 500 waiting in them, and that sweep deserves its own review rather than riding
+along inside a phase that ships contact links. **Raised as issue #1272**, with the two open questions it
+should settle (whether the lower bound is 1 everywhere, and whether a defensive `DataError` handler
+belongs in `error_handlers.py` for whatever the sweep misses).
+
+The review's second finding was a docstring claiming a **422** for a non-integer path id. The
+application-wide `validation_error_handler` renders every `RequestValidationError` as **400**, so the
+docstring described behaviour no client of this application can observe — the same class of wrong claim
+the pre-merge review round caught, and worth noting that it recurred immediately after.
 
 **Acceptance Criteria:**
 
-- [ ] Link and unlink a contact over REST and MCP in the same PR; linking is idempotent.
-- [ ] Links carry **no** relationship type, role or attendance status, and nothing parses contacts out of
-      the task text.
-- [ ] Contact links are editable in any status; the contact must belong to the acting user. **Read
-      Phase 4's contact divergence first** — `contacts` has no owner column, so the enforceable rule is
-      existence. If this phase does not change that, it inherits the divergence rather than restating
-      the criterion as met.
-- [ ] Deleting a contact removes its task links without touching the tasks — the FK direction fixed in
-      Phase 1, asserted here.
-- [ ] **Follow-up from Phase 4: batch the link write.** `TaskService.create_task` links contacts in a
-      loop, and each `add_contact` re-proves task ownership with its own `SELECT … FOR KEY SHARE` — 2N
-      statements for N contacts. This is the phase that owns the contact-link surface, so an
-      `add_contacts` on the port and its adapter belongs here, with `create_task` migrated onto it.
+- [x] Link and unlink a contact over REST and MCP in the same PR; linking is idempotent. —
+      `POST`/`DELETE /api/tasks/{task_id}/relationships/contacts[/{contact_id}]` and the MCP tools
+      `link_task_to_contact` / `unlink_task_from_contact`, both over `TaskService.link_contact` and
+      `unlink_contact`. Idempotency is the composite primary key's, not the service's: there is no
+      "is it already linked?" read anywhere, so two interleaved links need no lock. **Unlinking is
+      idempotent too**, which the criterion does not ask for and `DELETE` requires.
+- [x] Links carry **no** relationship type, role or attendance status, and nothing parses contacts out of
+      the task text. — the REST body is a bare resource identifier with `extra="forbid"` at both levels,
+      the tool schemas offer no such parameter and the transport refuses one, and a task whose text names
+      a real contact by the exact string the `contacts` row holds still has no links. That last is a
+      criterion about a code path that must *not* exist, so it is asserted where its absence shows.
+- [x] Contact links are editable in any status — asserted for all three statuses at all three levels,
+      with the stored status unmoved. **The ownership half is inherited, not met.** `contacts` still has
+      no owner column, so the enforceable rule remains existence, exactly as Phase 4 recorded; this phase
+      changes nothing about that and does not restate the criterion as satisfied. The divergence now also
+      lives in `domain-architecture.md`, where the contact-link rules are written down.
+- [x] Deleting a contact removes its task links without touching the tasks. — asserted through a link
+      **this surface created**, not a hand-inserted row: a service writing somewhere else would pass
+      Phase 1's table test and fail this one. The task, its anchors and its other links all survive, and
+      the task can still be "unlinked" from the deleted contact without error.
+- [x] **Follow-up from Phase 4: batch the link write.** — `add_contact` was *replaced* by
+      `add_contacts(task_id, contact_ids, user_id)`, one `FOR KEY SHARE` guard and one multi-row
+      `INSERT … ON CONFLICT DO NOTHING RETURNING contact_id`. `create_task` and the single-contact link
+      surface both go through it, so there is one way to write a link rather than two. An observing
+      repository asserts three contacts cost one call.
+
+**Decisions taken (Phase 11):**
+
+- **The link routes answer 204, not the task.** Phase 5 declined to echo contact links on create,
+  because re-deriving the linked set in a controller would be a second definition of what got linked
+  sitting beside a read model that does not exist — and it still does not (Phase 13). 204 additionally
+  makes the idempotency *invisible*: a repeat of either call is indistinguishable from the first, which
+  is the whole of what idempotent means to a client. `POST /api/contacts/{id}/tags` → 204 is the
+  existing precedent for a plain-reference link in this repository.
+- **The path is `/relationships/contacts`, a member route under `/api/tasks/`.** It follows the
+  journal-contact precedent, and it hangs off the task rather than a journal for the reason Phase 6 gave
+  for `PATCH /api/tasks/{id}`: a contact link involves no journal at all. There is still no
+  `/api/tasks` **collection**.
+- **The body is a single resource identifier, not JSON:API's to-many array.** One contact per call keeps
+  "was anything created" unambiguous, and matches `TagAssignmentRequest`. Recorded as a knowing
+  narrowing of the relationship semantics rather than an oversight. The id is validated as an integer in
+  the schema, so a malformed one is a 400 like every other bad field instead of a `ValueError` escaping
+  a cast as a 500.
+- **Unlinking deliberately does not require the contact to exist, and linking does.** The asymmetry is
+  the cascade: `task_contacts.contact_id` is `ON DELETE CASCADE`, so a deleted contact's links are
+  already gone, and 404-ing there would fail exactly the call a user reaches for while tidying up. It
+  also means the fourth criterion's scenario stays reachable rather than becoming an error path.
+- **`add_contact` was replaced rather than joined by `add_contacts`.** Keeping both would leave the
+  singular method with one caller and two ways to write one row. `remove_contact` stays singular because
+  nothing removes in bulk; the asymmetry is the callers', not the port's taste.
+- **The batched insert runs inside a `SAVEPOINT`, and that is load-bearing rather than tidy.** Phase 4
+  mapped a contact deleted between the existence check and the write back to `ContactNotFoundError`.
+  With one insert per contact the id was whichever one was being written; a batched insert has to work
+  it out, and **it does so by re-reading rather than by parsing the error.** PostgreSQL *does* name the
+  key in the violation's `DETAIL` — an earlier draft of this entry claimed otherwise and the phase's own
+  review caught it — but that is localised prose whose availability depends on the driver, and this is
+  the module that already has a bug on record from matching against the wrong rendering of an error
+  (Phase 4's `str(error)` case). A second `SELECT` answers the same question from data. **That re-read
+  is what the savepoint is for:** PostgreSQL puts the transaction into a failed state on a constraint
+  violation, so the lookup would raise before it could answer. **Mutation-checked:** replacing
+  `savepoint(transaction)` with a plain block makes the integration test fail with
+  `InFailedSQLTransactionError`, which is precisely the 500 the mapping exists to prevent. If the re-read
+  finds every contact present the violation is re-raised untouched, because naming an arbitrary id would
+  send the caller looking for a contact that exists.
+- **The batched insert passes its ids as one array, after review found the obvious form has a ceiling.**
+  It began as a multi-row `VALUES` list with a bind parameter per contact — correct until there are
+  32,767 of them, which is asyncpg's hard limit on query arguments, past which a wholly valid create
+  raises `InterfaceError` and the caller sees a 500. Capping the surface was the tempting fix and the
+  wrong one: the specification says a task may reference *any number* of contacts, so the mechanism has
+  to mean it rather than the schema quietly deciding otherwise. `unnest` over a single `integer[]` costs
+  two parameters whatever *N* is. **Mutation-checked** with a 33,000-contact test that fails on the old
+  form with exactly that `InterfaceError`, because a bug with a threshold needs a regression test on the
+  far side of it.
+- **A deadlock is theoretically reachable through the batch and is recorded rather than closed.**
+  `ON CONFLICT DO NOTHING` takes speculative-insert locks in row order, which `unnest` takes from the
+  array, so two transactions linking overlapping contact sets to the **same** task in opposite orders
+  could deadlock.
+  It is unreachable today — the only batched caller is `create_task`, whose task id was assigned a
+  statement earlier and cannot be the subject of a concurrent call — and the obvious fix (sorting the
+  ids) would break the first-mention-order property `create_task` asserts. Raised by this phase's
+  review; a comment marks the spot, and the phase that adds a second batched caller owns the decision.
+- **No row lock beyond the guard's existing `FOR KEY SHARE`, and the reason is not "nothing else is
+  mutable".** Phase 6 needed `FOR NO KEY UPDATE` because `set_status` reads a status, decides a rule from
+  it, and writes the decision back, so an interleaving can lose a *rule*. Linking decides nothing from
+  prior state: `ON CONFLICT DO NOTHING` is atomic and two interleaved links have the same outcome in
+  either order. The lesson Phase 6 recorded is about read-decide-write sequences, and this is not one.
+- **The MCP tools return `linked` and `changed`.** `linked` is the resulting state, `changed` says
+  whether a row moved. Both are needed while there is no read tool: without `changed` an agent cannot
+  tell a fresh link from a no-op, and without `linked` it would have to infer the state from which tool
+  it called. This is the one thing the REST 204 withholds, and an HTTP client can re-derive it by asking
+  for the read model when Phase 13 ships.
+- **An unknown contact answers the contacts domain's "Contact not found", not the task domain's bare
+  "Not found".** The shared MCP handler branches by error class, and `ContactNotFoundError` is reused
+  from the contacts domain (Phase 4's decision), so the answer names the contact and its id. That is
+  strictly more actionable than the task-shaped answer, and the test asserts it rather than the weaker
+  "not an internal error".
+- **The ordering is contacts-then-task, and the leak that would matter is absent.** `link_contact`
+  proves the contact exists before the repository proves the task is the caller's, so a foreign task
+  plus an unknown contact reports the contact. Nothing leaks: `contacts` has no owner in this system, so
+  contact existence is not a cross-user fact, and checking the task first would cost an extra round trip
+  to change which of two 404s a caller sees.
 
 **Required Test Coverage:** unit — schemas, tool schemas, idempotency. Integration — round-trips, contact
 deletion behaviour, cross-user rejection, both surfaces. E2E deferred to Phase 22.
+
+- **Unit (15 tests):** `backend/tests/unit/tasks/test_task_service_contact_links.py` — the batched call
+  shape; linking twice reporting no change; an unknown contact rejected with nothing written; unlink
+  idempotent and making **no** contact-existence call at all; the journal and settings repositories
+  untouched on every path (asserted on `mock_calls`, not on named methods); an unknown and a foreign
+  task both `TaskNotFoundError` with identical messages; and the vanished-contact mapping in three
+  shapes — mapped, re-raised for another constraint, and re-raised when the recovery read finds nothing
+  missing.
+  **A parametrised "works in any status" unit test was written and then deleted**, because this phase's
+  review was right that it was tautological: neither method reads a status, so the three runs were
+  byte-identical and the test would have survived any regression of the rule it named. The rule rests on
+  the *absence* of a status read, which `test_no_status_is_read_or_written` asserts directly, and on the
+  three real matrices below, each of which seeds every status against a database and checks the stored
+  status is unmoved. A comment in the file records why the obvious test is not there, so it is not
+  written again.
+- **Unit (12 new, 48 total):** `backend/tests/unit/api/test_task_schemas.py` — the minimal link body, the
+  pinned `contacts` type and a mismatch rejected, `data.id` required, and `relationship_type`, `role`,
+  `status`, `attendance` and an `attributes` member each refused, at both nesting levels.
+- **Unit (17 new, 30 total):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` — both tools
+  registered and requiring exactly `task_id` and `contact_id`; injected collaborators absent; no
+  relationship field and no journal parameter on either, asserted against the **generated** schema; and
+  the link description stating both that a repeat is harmless and that no role is recorded, because a
+  model that has seen `link_journal_to_contact` will otherwise reach for one.
+- **Unit (3 changed):** `test_task_service_create.py` — the N-contacts-one-call assertion replacing the
+  per-contact one, de-duplication surviving the batching, and the vanished-contact mapping through it.
+- **Integration (22 tests):** `backend/tests/integration/tasks/test_task_contact_links_integration.py` —
+  both round trips and their repeats; several contacts accumulating; every status with the stored status
+  unmoved; the contact-deletion cascade through a link this surface made, and the unlink that follows it;
+  an unknown contact and a real second user's task on both calls, byte-identically to an absent id, with
+  that user's link left in place; **contacts never inferred from the text**; `create_task`'s three
+  contacts costing one `add_contacts` call; the vanished contact answering 404 against real PostgreSQL;
+  and the two unit-of-work observations. The link one watches the **contact read** rather than the
+  insert, because the insert's own savepoint would show a nested transaction either way — the kind of
+  false evidence Phase 6's review found in the "read it back afterwards" idiom.
+- **Integration (17 new, 51 total):** `backend/tests/integration/api/test_task_endpoints.py` — 204 on
+  each call and on each repeat, with the row counted; every status; the contact-deletion case end to end;
+  404 `CONTACT_NOT_FOUND` writing nothing; the cross-user pair proved byte-identical on both verbs; and
+  five rejected bodies including `relationship_type`, `role`, `status`, another resource type and an
+  unknown member beside `data`.
+- **Integration (14 new, 36 total):** `backend/tests/integration/mcp/test_task_tools_mcp.py` — the same
+  matrix over `tools/call`, including `linked`/`changed` on all four outcomes, every status, no
+  intermediate journal row written, the actionable contact rejection, the indistinguishable cross-user
+  answer on both tools, and three relationship arguments refused by the transport before the service is
+  reached.
+- **E2E:** none — deferral taken as the phase states. The phase changes no frontend file and ships no
+  user-visible surface; ITER18-001's e2e lands in Phase 22.
+- **Docs:** `docs/architecture/api-design.md`'s *Task Endpoints* gained the two routes and four
+  conventions (the relationship route and its 204, the single identifier object, unlink not requiring the
+  contact, and the two new tools' `linked`/`changed`). `domain-architecture.md` gained the contact-link
+  business rules and the batched-write half of the repository contract. `database-design.md` explains the
+  batched `ON CONFLICT` and why the savepoint is there. `mcp-setup.md` and `mcp-tools.md` deliberately
+  untouched — the tools document themselves.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (875 files) and
+  `core_shared` (129); `mypy .` clean over **870** backend files and 127 in `core_shared` (the
+  whole-project run, not the narrower `mypy app tests`, which reports 864 — the review found this entry
+  quoting the narrower number as though it were the wider one); the full `tests/unit/` suite
+  (2,870 tests); and `tests/integration/tasks/`, `tests/integration/api/` and `tests/integration/mcp/`
+  together (969 tests). Re-run after merging Phase 7 from `main` and adding the id bounds: **2,922** and
+  **999**, both green. No frontend or e2e gates — the phase changes no frontend file and ships no
+  user-visible surface.
 
 #### Phase 12: Read Model and Lapsed Derivation
 
@@ -2574,23 +2798,178 @@ deletes; one query for many tasks. No e2e (Phase 5).
   rule's home, the unscoped query, the required collaborator, the provider placement, the savepoint-backed
   backstop, the sync fallback, and why merge is deliberately unguarded).
 
-#### Phase 2: Delete Guard Surfaces — REST and MCP
+#### Phase 2: Delete Guard Surfaces — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Estimated diff:** ~130 production → **~520 tracked** (×4) · **Actual:** ~228 production → **~1105
+tracked** across 15 files (production 228 — the payload builder and the `error_meta` hook 55, the two
+wirings 29, the published OpenAPI model 80, the `responses=` block and two docstrings 34, package
+exports 2, imports and comments 28; tests 826 across four files; docs 51 on top of the iteration doc).
+
+**The production estimate was right until review, and the tests were 3.6× it throughout.** The first
+pass came in at 146 against an estimated 130 — as close as rule 13 gets. The remaining 82 is one
+review finding: the 409 was declared with a description but **no schema**, so the acceptance
+criterion's "discoverable from the OpenAPI document" was not true, and a typed model plus its tests
+had to be written (see the decisions below).
+
+What ran over on tests is the same thing Phase 3 recorded, and it is worth sharpening rather than
+repeating: **a phase whose deliverable is "two surfaces must agree" pays its test cost per surface,
+not per rule.** The payload builder is one function with one behaviour, but proving it arrives needs
+the shape asserted at the REST wiring, at the MCP wiring, and then a third time comparing the two —
+and the integration halves cannot be shared, because REST resolves `JournalService` from Dishka while
+the MCP tool constructs it by hand. Phase 3 hit this and called it "the test count is set by the
+number of ways the data can be corrupted". The parity variant is: **for a phase whose acceptance
+criteria name more than one surface, multiply the test estimate by the number of surfaces before
+applying rule 13's multiplier — and count the contract's published form as one of the surfaces.**
 
 **Acceptance Criteria:**
 
-- [ ] `DELETE /api/journals/{id}` returns the structured error (status per open decision 1), naming each
-      blocking task and its action journal.
-- [ ] MCP `delete_journal` returns the equivalent in the same PR, so an agent can resolve the blockage
-      without the UI.
-- [ ] The payload is explanatory prose **plus** machine-readable ids — not an opaque constraint message —
-      and the ids are enough to build a link without a further lookup.
+- [x] `DELETE /api/journals/{id}` returns the structured error (status per open decision 1), naming each
+      blocking task and its action journal. — 409 with code `JOURNAL_HAS_ANCHORED_TASKS` and
+      `errors[0].meta` carrying `journal_id` plus a `blocking_tasks` list; each blocker gives
+      `task_id`, `text`, `status`, `blocking_roles` and the action journal's id **and** title. The
+      route declares the 409 in `responses=` with a **typed model**
+      (`JournalHasAnchoredTasksErrorResponse`), so the payload is discoverable from the OpenAPI
+      schema rather than only from a failing call — which is what Phase 5's dialog will be typed
+      against.
+- [x] MCP `delete_journal` returns the equivalent in the same PR, so an agent can resolve the blockage
+      without the UI. — a new `except JournalHasAnchoredTasksError` branch in
+      `mcp_unified_error_handler`, returning the same two keys plus `code`; the tool docstring says
+      what comes back and what to do with it.
+- [x] The payload is explanatory prose **plus** machine-readable ids — not an opaque constraint message —
+      and the ids are enough to build a link without a further lookup. — `detail`/`message` still carry
+      Phase 1's sentence unchanged; the ids sit beside it. Tested as a behaviour rather than a shape:
+      one integration test reads `action_journal_id` out of the refusal and `GET`s that journal, and
+      asserts the title it gets back is the `action_journal_title` the payload promised.
+
+**Decisions taken (Phase 2):**
+
+- **One builder, not one per surface.** `blocking_task_payload` lives in
+  `core_shared/core_shared/models/journals/task_anchor.py`, next to the rule that builds a
+  `BlockingTask`, and both surfaces call it. The specification asks for "the same failure" over REST
+  and MCP; two serialisers agreeing today is a thing to re-test forever, one serialiser is a property
+  of the code. Pinned at both levels anyway — a unit test compares the two mappings of one error
+  instance, and an integration test refuses the *same seeded journal* over both surfaces and compares
+  field for field, because the unit test cannot show that both surfaces are *wired* to the builder.
+- **The seam is `DomainError.error_meta()`, not a special case in the handler.** A typed hook on the
+  base class returning `None` by default, so `create_domain_error_response` stayed a one-line change
+  and no `getattr` sniffing was needed. `exclude_none=True` drops the key for every other error, so
+  the other ~40 error responses are byte-for-byte unchanged — asserted directly, on the dumped body.
+- **`status` is emitted as `.value`.** `TaskStatus` is a `StrEnum`, so an encoder would have accepted
+  the member and nothing would have failed; a caller reading the dict directly should still get a
+  plain `str` rather than something that merely compares equal to one. Pinned with `type(...) is str`
+  and a `json.dumps` round-trip, which is the assertion that would catch a future non-`StrEnum` field.
+- **The MCP branch sits above the `JournalDomainError` catch-all**, which would otherwise flatten the
+  refusal back to its message — this is the whole phase, silently undone. Mutation-checked: moving the
+  branch below the catch-all fails five tests. Two tests keep it honest in the other direction, that
+  `JournalValidationError` still reaches the catch-all and `JournalNotFoundError` still reports as
+  missing, so the branch cannot be widened by accident.
+- **`mcp-setup.md` gained nothing**, per the repo convention that per-tool MCP documentation lives in
+  the docstring. The `delete_journal` docstring now describes the refusal payload field by field.
+- **No frontend file and no e2e**, as the phase specifies. The delete-failure dialog and its coverage
+  are Phase 5, whose prerequisite this is.
+- **A payload nobody can find is not a surface — and both places it is published were, at first,
+  untestable prose.** Raised by the phase's own review, and it was the most useful thing it found.
+  The 409 `responses=` entry originally carried only a description, so the *OpenAPI document* said
+  "this can 409" and nothing about the shape; and the MCP docstring — which by repo convention is the
+  only per-tool documentation there is — was nine lines that could be deleted with zero failures.
+  Both are now pinned by `tests/unit/journal/test_journal_delete_guard_documentation.py`, and both
+  mutation-checked: removing the `model=` fails the schema test, removing the docstring paragraph
+  fails three. **The rule worth carrying: when a phase's deliverable is a contract, the document that
+  publishes the contract needs a test, or the deliverable is only half shipped.** The typed model is
+  hand-written while the body is built by `blocking_task_payload`, so the blocked-delete integration
+  test also validates the real 409 body against it — the drift the two-sources arrangement invites is
+  closed where it would appear.
+- **And publishing the model was not the same as publishing the *contract*.** The PR's automated
+  review caught the follow-on mistake: `status` and `code` were declared as `Field("409", ...)` and
+  `Field("JOURNAL_HAS_ANCHORED_TASKS", ...)`, which reads like pinning the values and does the
+  opposite — a default makes a Pydantic field **optional**, so both landed outside `required` and
+  typed as a bare `str`. The document therefore advertised a `code` that a generated client could
+  not rely on being present, let alone discriminate on, which is precisely what the model was added
+  for. Both are now `Literal`, which makes them required *and* emits a `const`. **The lesson pairs
+  with the one above: a published contract needs a test that reads the published form, not the model
+  source — the mistake was invisible in the class definition and obvious in the generated schema.**
+  The new test asserts both fields are in `required` with the right `const`, and fails if either
+  default returns; and because the blocked-delete integration test validates a real body against
+  this model, the literals are checked against what the endpoint actually emits rather than merely
+  declared.
+- **The third finding was in the test, not the code — and the fix is the reusable part.** Review
+  round 2 spotted that the MCP docstring documented `code`, `message` and every blocker field but
+  **not the top-level `journal_id`** the handler returns. The docstring test was supposed to prevent
+  exactly that and did not, because its expected field names were a **hand-written list** — as
+  complete as whoever typed it, which is to say not. It now derives them from a real error's
+  `error_meta()`, so any field the refusal grows must be documented or the test fails.
+  **And tightening it exposed a second, sneakier hole:** the check was a substring search, and
+  `journal_id` is a substring of `action_journal_id` — so the missing field looked documented by the
+  field that had displaced it, and the naive version of this fix still passed. The test now matches
+  each name in its marked-up ` ``field`` ` form, and mutation-checking it by deleting `journal_id`
+  from the docstring reports precisely that field. **Carry-forward: a test that enumerates what a
+  contract should contain must derive the list from the thing itself, and match on a delimited form
+  — a hand-written substring check fails in both directions at once.**
+- **The guard's query is still not owner-scoped, and Phase 2 makes that worth restating.** Phase 1
+  documented the exemption and it stands: the query substitutes for a foreign-key check, so a row an
+  owner filter hid would come back as the raw `IntegrityError`. What Phase 2 adds is *ids* on top of
+  Phase 1's task text, so a caller reaching `JournalService.delete_journal` without the ownership
+  check would hand out directly addressable references to another user's rows. Nothing reaches it
+  that way today — both surfaces check, `TaskService` cannot create a cross-user anchor, and both
+  ownership tests still pass — but the protection is conventional rather than structural, which is
+  exactly the shape of **issue #1267** (`JournalService` takes no user id at all). Recorded here so
+  #1267 is read as covering this too.
 
 **Required Test Coverage:** unit — error-to-response mapping and payload schema. Integration — both
 surfaces with several blocking tasks, with a done-only blocker, and with intermediate-only links (succeeds).
 No e2e (Phase 5).
+
+**Delivered: 25 unit tests and 8 integration tests.**
+
+- **Unit (17):** `backend/tests/unit/journal/test_journal_delete_guard_surfaces.py`, a new file rather
+  than more classes in Phase 1's — that file tests the rule, the error and the guard, and the surfaces
+  are a fourth concern with different collaborators. *The payload (6):* all six fields present; each of
+  the three statuses as its string value; roles as an ordered list including `["creating", "due"]`; and
+  a `json.dumps` round-trip. *The error's hook (3):* journal id and every blocker; order preserved;
+  and `JournalNotFoundError` offering nothing. *REST (4):* the meta lands on `errors[0].meta`; the
+  prose survives beside it with the 409 and the code; the dumped body still carries the blockers; and
+  another domain error gains no `meta` key at all. *MCP (3):* the code, the message and the same
+  blockers; `JournalValidationError` still reaching the catch-all; `JournalNotFoundError` still
+  reported missing. *Parity (1):* one error, both mappings, equal blocker lists.
+- **Unit — documentation (8):** `tests/unit/journal/test_journal_delete_guard_documentation.py`. The
+  route's generated OpenAPI declares the 409 *and* a `$ref`'d schema rather than only a description,
+  the published model lists exactly the six blocker fields, `status` and `code` are **required with
+  a `const`** rather than optional defaults, and the 404 is declared too; the MCP tool's description
+  names the code, every payload field, and what to do next. Both halves are the only place the
+  contract is published, so both are asserted rather than assumed. The field list is **derived from a
+  real error's payload**, not hand-written, and matched on its marked-up form — see the third review
+  finding below for why both halves of that matter.
+- **Integration (8):** four in `tests/integration/api/test_journal_endpoints.py` — three blockers in
+  three roles with three different action journals, asserted as one exact list in id order with the
+  journal still standing (and the body validated against the published schema, which is what stops
+  the hand-written model drifting from the builder); a done-only blocker reporting `status: "done"`;
+  an intermediate-only journal deleting with its link row and leaving both anchors whole; and the
+  follow-the-link test above. Four in `tests/integration/mcp/test_journal_tools_integration.py` — the
+  same three, plus the cross-surface parity test that refuses one seeded journal over both surfaces
+  in one client and compares `blocking_tasks`, `journal_id`, `detail`/`message` and the code.
+- **Mutation checks, all four verified rather than assumed.** Removing `meta=domain_error.error_meta()`
+  fails three of the four REST integration tests — not the intermediate-only one, correctly, since a
+  successful delete has no payload to lose. Moving the MCP branch below the catch-all fails five tests
+  across both levels. Removing the 409's `model=` fails the schema test; removing the MCP docstring's
+  payload paragraph fails three; returning `status`/`code` to defaulted strings fails the
+  discriminator test; and dropping `journal_id` from the docstring fails the field-coverage test by
+  name.
+- **Two test-quality fixes the review also caught**, both worth naming because each would have passed
+  for the wrong reason: an `assert response.status_code in (200, 204)` on the intermediate-only delete
+  — a multi-outcome assertion of exactly the kind `CLAUDE.md` forbids, on a route whose status code is
+  declared — now asserts `204`; and both intermediate-only tests counted `task_intermediate_journals`
+  **globally**, so they would have been satisfied by an unrelated task losing its mention. Both are now
+  scoped to the task under test.
+- **Gates run locally:** ruff format and lint clean over `backend/` and `core_shared/`; mypy clean
+  (864 backend + 94 `core_shared` source files); **2851 unit tests** and **1369 integration tests**
+  (`api`, `mcp`, `tasks`, `journal`) passing against Docker PostgreSQL, zero failures. No frontend
+  gates and no e2e — no file under `frontend/` changes.
+- **Docs:** `docs/architecture/api-design.md` gained a *Structured Error Detail (`errors[].meta`)*
+  section under Error Handling Guidelines — the `error_meta()` contract, that it is opt-in, and the
+  four conventions (prose alongside not instead, plain JSON only, id *and* label for anything
+  linkable). `docs/architecture/domain-architecture.md`'s *The journal delete guard* gained the
+  per-surface payload table and the two load-bearing placements.
 
 #### Phase 3: Merge — Re-pointing and De-duplication ✅ COMPLETE
 

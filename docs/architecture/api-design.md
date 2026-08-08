@@ -98,6 +98,34 @@ This document provides comprehensive API design patterns for both REST and MCP i
 - Map HTTP status codes to appropriate error types
 - Log unexpected errors for debugging
 
+### Structured Error Detail (`errors[].meta`)
+
+Most refusals are fully expressed by their prose — a caller told "journal 4 not
+found" has everything it can act on. A few are not: a refusal that names *other*
+rows the caller now has to go and deal with leaves it parsing English for ids.
+
+Those errors override `DomainError.error_meta()` (`core_shared/core_shared/exceptions.py`),
+returning a dict of plain JSON types. `create_domain_error_response` renders it
+as the JSON:API error object's `meta`, and the MCP tool decorator renders the
+same dict as the failure payload's context — **one builder, two surfaces**, so a
+refusal cannot describe itself differently depending on who asked.
+
+Conventions:
+
+- **Opt-in.** The base implementation returns `None`, which `exclude_none=True`
+  drops, so an error that adds nothing keeps exactly the body it has today.
+- **Alongside the prose, never instead of it.** `detail` still carries the
+  explanation a person reads; `meta` is what a client builds links from.
+- **Plain JSON only.** Neither surface applies an encoder that knows about enums
+  or dataclasses, so the conversion happens in the builder rather than twice.
+- **Both an id and a label** for anything the caller is expected to link to, so
+  it can render the link and follow it without a second request.
+
+`JournalHasAnchoredTasksError` is the current example: `DELETE
+/api/journals/{id}` answers 409 with code `JOURNAL_HAS_ANCHORED_TASKS` and a
+`meta.blocking_tasks` list giving each blocking task's id, text, status and
+blocking roles, plus the id and title of the journal it can be actioned from.
+
 ### FastAPI Exception Handling
 
 - Create custom exception handlers for common errors
@@ -270,6 +298,8 @@ do exist for operations that involve no journal at all.
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
 | `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
+| `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown |
+| `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned |
 
 Conventions this surface pins down:
 
@@ -336,12 +366,45 @@ Conventions this surface pins down:
   the tool *say* — and for the MCP tool that is load-bearing rather than
   decorative, since the description is the only steer a model gets when choosing
   between them.
-- The matching MCP tools are `create_task`, `set_task_status`, `update_task_text`
-  and `delete_task` (documented in their docstrings and parameter schemas, per
-  the MCP documentation convention). `update_task_text` offers no `status`
-  parameter and `set_task_status` no `text`: a model gets one tool per intent, so
-  it never has to reason about what leaving a field out will do. The combined
-  write exists for the `PATCH` body that genuinely carries both.
+- **A contact link is a relationship route, and it answers 204.** The link
+  carries no relationship type, no role and no attendance status — the
+  specification calls it a plain reference — so there is no resource to return
+  and nothing to put in an `attributes` member. 204 is also what keeps the
+  operation's *idempotency invisible*: linking a contact that is already linked,
+  or unlinking one that is not, answers exactly as the first call did. Returning
+  the task instead would mean re-deriving its linked set in the controller,
+  which would be a second definition of what got linked sitting beside a read
+  model that does not exist yet.
+- **The link body is a single resource identifier, not a to-many array.** JSON:API
+  models a to-many relationship update as an array; this surface takes one
+  contact per call, because that keeps "was anything created" unambiguous and
+  matches the shape `POST /api/contacts/{id}/tags` already uses. Recorded as a
+  knowing narrowing rather than an oversight. Unknown members are forbidden at
+  both nesting levels and the `contacts` type is pinned, as on the other task
+  request models.
+- **Unlinking does not require the contact to still exist.** `task_contacts`
+  cascades from the contact side, so a deleted contact's links are already gone;
+  404-ing there would fail exactly the call a user reaches for while tidying up.
+  Task ownership is still enforced, so another user's task answers 404 on both
+  verbs, byte-identically to an absent one.
+- **Ids are bounded to what the column can hold.** Every id column here is a
+  PostgreSQL `INTEGER`, and Python's `int` is not, so `2147483648` used to parse
+  cleanly, reach the repository and die in asyncpg's *parameter binding* — a 500
+  for an id no row could ever have. `app/api/common/identifiers.py` bounds them
+  to `1..2147483647` on every id the tasks API and its MCP tools accept, path
+  and body alike, so the answer is the 400 the client deserves. The lower bound
+  is `1` because serial columns start there: 404 would suggest the row might
+  have existed once. **Other domains' endpoints are still unbounded** — issue
+  #1272 tracks the sweep, which is deliberately not done inside a feature phase.
+- The matching MCP tools are `create_task`, `set_task_status`, `update_task_text`,
+  `delete_task`, `link_task_to_contact` and `unlink_task_from_contact` (documented
+  in their docstrings and parameter schemas, per the MCP documentation
+  convention). `update_task_text` offers no `status` parameter and
+  `set_task_status` no `text`: a model gets one tool per intent, so it never has
+  to reason about what leaving a field out will do — the combined write exists
+  for the `PATCH` body that genuinely carries both. The two link tools return
+  `linked` (the resulting state) and `changed` (whether a row moved), which is
+  the one thing the 204 withholds and an agent may want.
 
 ## Authentication Guidelines
 

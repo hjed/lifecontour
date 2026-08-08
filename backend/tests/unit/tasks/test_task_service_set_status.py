@@ -155,7 +155,7 @@ class TestNoJournalIsInvolved:
         await set_status(service, mock_transaction, target)
 
         mock_task_repo.add_intermediate_journal.assert_not_awaited()
-        mock_task_repo.add_contact.assert_not_awaited()
+        mock_task_repo.add_contacts.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("target", [TaskStatus.DONE, TaskStatus.CANCELLED])

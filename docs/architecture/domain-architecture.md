@@ -129,6 +129,15 @@ the *creating* journal where it arose and the *due* journal where it matters.
     future-dated **at the moment it is set** needs journal data and the user's timezone, so it is
     enforced in the service layer where REST and MCP both inherit it
   - *Lapsed* is derived, never stored — a not-done task whose due journal has passed or been cancelled
+  - **Contact links are a plain reference.** They carry no relationship type, no role and no
+    attendance status — unlike journal-contact relationships, which carry all three — and nothing
+    parses contacts out of the task text. They are editable in **any** status, so no status is read
+    or written when one is added or removed, and both operations are idempotent. The enforceable
+    half of "the contact must be the acting user's" is **existence**: `contacts` has no owner column
+    in this system, a divergence recorded in
+    [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md) and inherited here rather than
+    faked. Unlinking deliberately does *not* require the contact to still exist, because
+    `task_contacts` cascades from the contact side and the row is already gone
 - **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
   `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
   request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`); and
@@ -154,6 +163,11 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `FOR KEY SHARE` so a concurrent delete cannot turn the promised `TaskNotFoundError` into a raw
   foreign-key violation. The repository is responsible for persistence and task ownership only; every
   other invariant is the service layer's.
+  **Contact links are written in batch.** `add_contacts(task_id, contact_ids, user_id)` takes the
+  ownership guard once and inserts every link in one statement, returning the ids for which a row was
+  actually created. The singular `add_contact` it replaced made the guard the expensive half — *N*
+  contacts cost *2N* statements — and the batch is what `TaskService.create_task` and the
+  single-contact link surface both use. `remove_contact` stays singular: nothing removes in bulk.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch
@@ -495,6 +509,29 @@ Four decisions are worth knowing before changing it:
   port and adapter belong to the tasks domain. Dishka validates the whole graph at construction, so
   taking the dependency the other way would force every container registering one provider to register
   the other. The adapter needs only the connection, so `JournalProvider` stays self-sufficient.
+
+**The refusal reaches both surfaces as data, from one builder.** The specification requires the same
+failure over REST and MCP, "so an agent can resolve them without going through the UI" — which means
+ids rather than a sentence to parse. `JournalHasAnchoredTasksError` therefore overrides
+`DomainError.error_meta()` (see [API Design → Structured Error
+Detail](api-design.md#structured-error-detail-errorsmeta)), serialising each blocker through
+`blocking_task_payload` in `task_anchor.py`:
+
+| Surface | Where it lands |
+|---|---|
+| `DELETE /api/journals/{id}` | 409, JSON:API `errors[0].meta` — `journal_id` plus `blocking_tasks` |
+| MCP `delete_journal` | tool payload with `code: "JOURNAL_HAS_ANCHORED_TASKS"` and the same two keys |
+
+Each blocker carries `task_id`, `text`, `status`, `blocking_roles` (`creating` and/or `due`) and the
+`action_journal_id` **and** `action_journal_title` — id *and* title, so a client renders the link and
+follows it without a second request. The prose message stays in `detail`/`message` alongside it: the
+payload is for the client, the sentence is for the person.
+
+Two placements are load-bearing and each has a test that fails without it. The serialiser is
+**one function** rather than one per surface, because two surfaces disagreeing about the same failure
+is the failure mode worth designing out; and the MCP decorator's `except JournalHasAnchoredTasksError`
+sits **above** its `JournalDomainError` catch-all, which would otherwise flatten the refusal back to
+its message.
 
 The guard is check-then-act, so `delete_journal` also wraps the delete **in a SAVEPOINT**: an
 `IntegrityError` re-runs the guard and raises the same explanatory error for a task inserted in the

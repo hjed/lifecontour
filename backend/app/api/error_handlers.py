@@ -189,6 +189,11 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         .replace("_", " ")
         .title(),
         detail=domain_error.message,
+        # Machine-readable detail for the few refusals whose prose is not enough
+        # to act on — see ``DomainError.error_meta``. Every other error returns
+        # ``None`` here, and the response is dumped with ``exclude_none=True``,
+        # so their bodies are byte-for-byte what they were.
+        meta=domain_error.error_meta(),
     )
 
     return JsonApiErrorResponse(errors=[api_error])

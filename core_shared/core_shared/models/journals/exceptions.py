@@ -1,7 +1,13 @@
 """Exceptions for the journal domain."""
 
+from typing import Any
+
 from core_shared.exceptions import DomainError
-from core_shared.models.journals.task_anchor import BlockingTask, describe_roles
+from core_shared.models.journals.task_anchor import (
+    BlockingTask,
+    blocking_task_payload,
+    describe_roles,
+)
 
 
 class JournalDomainError(DomainError):
@@ -101,6 +107,26 @@ class JournalHasAnchoredTasksError(JournalDomainError):
         super().__init__(_describe_blockage(blocking_tasks), 409)
         self.journal_id = journal_id
         self.blocking_tasks = blocking_tasks
+
+    def error_meta(self) -> dict[str, Any]:
+        """The blockers as data, so a caller need not parse the message.
+
+        This is the one journal error that opts into structured detail, and it
+        is the one that needs it: the message tells a *person* what to do, while
+        an agent resolving the blockage without a UI needs the task ids to act
+        on and the journal ids to open. Both surfaces render this same dict —
+        REST as the JSON:API error ``meta``, MCP as the failure payload — so the
+        specification's "the same failure over the API and MCP" is a property of
+        the code rather than of two implementations agreeing.
+        """
+        return {
+            "journal_id": self.journal_id,
+            # Left in the order the repository returned them, which is the order
+            # the message lists them in.
+            "blocking_tasks": [
+                blocking_task_payload(task) for task in self.blocking_tasks
+            ],
+        }
 
 
 def _describe_blockage(blocking_tasks: tuple[BlockingTask, ...]) -> str:

@@ -22,6 +22,8 @@ from pydantic import ValidationError
 
 from app.api.tasks.schemas import (
     TaskAttributes,
+    TaskContactLinkData,
+    TaskContactLinkRequest,
     TaskCreateAttributes,
     TaskCreateRequest,
     TaskResource,
@@ -29,6 +31,13 @@ from app.api.tasks.schemas import (
     TaskUpdateAttributes,
     TaskUpdateRequest,
 )
+
+
+def _valid_link_body(**overrides: object) -> dict[str, object]:
+    """A minimal valid contact-link body, with data-level overrides applied."""
+    data: dict[str, object] = {"type": "contacts", "id": "7"}
+    data.update(overrides)
+    return {"data": data}
 
 
 def _valid_body(**overrides: object) -> dict[str, object]:
@@ -404,3 +413,86 @@ class TestTaskResponse:
 
         assert attributes.created_at is None
         assert attributes.updated_at is None
+
+
+class TestTaskContactLinkRequest:
+    """What a client may send to link a contact to a task.
+
+    The body is a **resource identifier object** — a type and an id, no
+    attributes — because that is all a task-contact link is. The specification
+    is explicit that these links *"do not carry a relationship type, a role, or
+    an attendance status"*, so every one of those is a field this schema must
+    refuse rather than merely omit.
+    """
+
+    def test_a_minimal_body_names_a_contact(self) -> None:
+        request = TaskContactLinkRequest.model_validate(_valid_link_body())
+
+        assert request.data.id == "7"
+        assert request.data.type == "contacts"
+
+    def test_the_resource_type_defaults_to_contacts(self) -> None:
+        request = TaskContactLinkRequest.model_validate({"data": {"id": "7"}})
+
+        assert request.data.type == "contacts"
+
+    def test_a_mismatched_resource_type_is_rejected(self) -> None:
+        """The linked resource is a contact; declaring anything else is an error.
+
+        A generic JSON:API client picks its request shape from the type it
+        declares, so accepting ``"tasks"`` here and linking a contact would mean
+        that client mutated a relationship it never asked for.
+        """
+        with pytest.raises(ValidationError):
+            TaskContactLinkRequest.model_validate(_valid_link_body(type="tasks"))
+
+    def test_the_contact_id_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskContactLinkRequest.model_validate({"data": {"type": "contacts"}})
+
+    def test_the_data_member_is_required(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskContactLinkRequest.model_validate({})
+
+
+class TestTheLinkCarriesNoRelationshipData:
+    """Criterion 2, stated where a client can be told about it."""
+
+    @pytest.mark.parametrize(
+        "field", ["relationship_type", "role", "status", "attendance"]
+    )
+    def test_relationship_fields_are_rejected(self, field: str) -> None:
+        """A journal-contact link carries these; a task-contact link never does.
+
+        Accepting one silently would be worse than refusing it: the client would
+        believe it had recorded a role, and nothing would have stored it.
+        """
+        with pytest.raises(ValidationError):
+            TaskContactLinkRequest.model_validate(_valid_link_body(**{field: "x"}))
+
+    def test_attributes_are_rejected(self) -> None:
+        """There is nothing a link *has*, so there is nowhere to put it."""
+        with pytest.raises(ValidationError):
+            TaskContactLinkRequest.model_validate(
+                _valid_link_body(attributes={"role": "organiser"})
+            )
+
+    def test_unknown_fields_are_rejected_beside_the_data_member(self) -> None:
+        """The envelope level Phase 5's review found open on the create request.
+
+        A guard with a gap is no guard to whoever finds the gap, and a JSON:API
+        envelope has more than one nesting depth.
+        """
+        with pytest.raises(ValidationError):
+            TaskContactLinkRequest.model_validate(
+                {
+                    "data": {"type": "contacts", "id": "7"},
+                    "relationship_type": "MENTION",
+                }
+            )
+
+    def test_unknown_fields_are_rejected_inside_the_data_member(self) -> None:
+        with pytest.raises(ValidationError):
+            TaskContactLinkData.model_validate(
+                {"type": "contacts", "id": "7", "surprise": 1}
+            )

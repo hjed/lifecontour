@@ -300,7 +300,7 @@ class TestOwnerScoping:
         contact_id = await create_contact(async_connection, first_name="Priya")
 
         with pytest.raises(TaskNotFoundError):
-            await task_repository.add_contact(task_id, contact_id, USER_ID)
+            await task_repository.add_contacts(task_id, [contact_id], USER_ID)
 
         with pytest.raises(TaskNotFoundError):
             await task_repository.remove_contact(task_id, contact_id, USER_ID)
@@ -343,7 +343,7 @@ class TestDelete:
         mentioned_id = await create_journal(journal_repository, title="Mentioned here")
         contact_id = await create_contact(async_connection)
         await task_repository.add_intermediate_journal(task_id, mentioned_id, USER_ID)
-        await task_repository.add_contact(task_id, contact_id, USER_ID)
+        await task_repository.add_contacts(task_id, [contact_id], USER_ID)
 
         await task_repository.delete(task_id, USER_ID)
 
@@ -404,7 +404,7 @@ class TestVanishedTask:
         with pytest.raises(TaskNotFoundError):
             await task_repository.list_intermediate_journal_ids(task_id, USER_ID)
         with pytest.raises(TaskNotFoundError):
-            await task_repository.add_contact(task_id, contact_id, USER_ID)
+            await task_repository.add_contacts(task_id, [contact_id], USER_ID)
         with pytest.raises(TaskNotFoundError):
             await task_repository.remove_contact(task_id, contact_id, USER_ID)
         with pytest.raises(TaskNotFoundError):
@@ -557,10 +557,9 @@ class TestContactLinks:
         assert saved_task.id is not None
         contact_id = await create_contact(async_connection)
 
-        assert (
-            await task_repository.add_contact(saved_task.id, contact_id, USER_ID)
-            is True
-        )
+        assert await task_repository.add_contacts(
+            saved_task.id, [contact_id], USER_ID
+        ) == [contact_id]
         assert await task_repository.list_contact_ids(saved_task.id, USER_ID) == [
             contact_id
         ]
@@ -575,9 +574,9 @@ class TestContactLinks:
         assert saved_task.id is not None
         task_id = saved_task.id
         contact_id = await create_contact(async_connection)
-        await task_repository.add_contact(task_id, contact_id, USER_ID)
+        await task_repository.add_contacts(task_id, [contact_id], USER_ID)
 
-        assert await task_repository.add_contact(task_id, contact_id, USER_ID) is False
+        assert await task_repository.add_contacts(task_id, [contact_id], USER_ID) == []
         assert await count(async_connection, _COUNT_CONTACTS, {"task_id": task_id}) == 1
 
     async def test_remove_reports_whether_it_removed_anything(
@@ -590,7 +589,7 @@ class TestContactLinks:
         assert saved_task.id is not None
         task_id = saved_task.id
         contact_id = await create_contact(async_connection)
-        await task_repository.add_contact(task_id, contact_id, USER_ID)
+        await task_repository.add_contacts(task_id, [contact_id], USER_ID)
 
         assert (
             await task_repository.remove_contact(task_id, contact_id, USER_ID) is True
@@ -611,8 +610,8 @@ class TestContactLinks:
         task_id = saved_task.id
         sarah_id = await create_contact(async_connection, first_name="Sarah")
         priya_id = await create_contact(async_connection, first_name="Priya")
-        await task_repository.add_contact(task_id, sarah_id, USER_ID)
-        await task_repository.add_contact(task_id, priya_id, USER_ID)
+        await task_repository.add_contacts(task_id, [sarah_id], USER_ID)
+        await task_repository.add_contacts(task_id, [priya_id], USER_ID)
 
         linked = await task_repository.list_contact_ids(task_id, USER_ID)
 
