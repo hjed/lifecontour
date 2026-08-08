@@ -12,7 +12,11 @@ from typing import Any
 
 import pydantic
 from core_shared.models.contacts.exceptions import ContactValidationError
-from core_shared.models.journals import JournalDomainError, JournalNotFoundError
+from core_shared.models.journals import (
+    JournalDomainError,
+    JournalHasAnchoredTasksError,
+    JournalNotFoundError,
+)
 from core_shared.models.tasks import TaskDomainError
 
 from app.core.contacts.models.exceptions import (
@@ -98,6 +102,24 @@ def mcp_unified_error_handler(
             except JournalNotFoundError as e:
                 MCPLogger.log_not_found_error(operation_name, "Journal", str(e))
                 return MCPResponseBuilder.not_found_error_response("Journal", str(e))
+
+            except JournalHasAnchoredTasksError as e:
+                # Above the catch-all below, because this is the one journal
+                # refusal an agent is expected to *resolve* rather than report:
+                # the specification asks that MCP identify the blocking tasks
+                # and the journals that surface them "so an agent can resolve
+                # them without going through the UI". The message alone would
+                # make it parse English for ids.
+                #
+                # Same data as the REST surface's ``errors[].meta``, from the
+                # same builder, plus the code REST sends so a client can branch
+                # on the refusal without matching on prose.
+                MCPLogger.log_validation_error(operation_name, e.message)
+                return MCPResponseBuilder.error_response(
+                    error_type="Journal has anchored tasks",
+                    message=e.message,
+                    context={"code": "JOURNAL_HAS_ANCHORED_TASKS", **e.error_meta()},
+                )
 
             except JournalDomainError as e:
                 # Handles all journal domain errors including validation errors raised

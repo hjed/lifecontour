@@ -21,7 +21,7 @@ cycle between two eagerly re-exporting packages.
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from core_shared.models.tasks import TaskStatus
 
@@ -129,6 +129,38 @@ def blocking_task_from_anchors(
         action_journal_id=action_journal_id,
         action_journal_title=action_journal_title,
     )
+
+
+def blocking_task_payload(task: BlockingTask) -> dict[str, Any]:
+    """One blocker's wire shape, for a caller that needs more than the prose.
+
+    The specification asks that the refusal reach the API **and** MCP naming
+    "the blocking tasks and the journals that surface them, so an agent can
+    resolve them without going through the UI". Prose alone cannot do that: an
+    agent would have to parse English to find an id. So the same blockers travel
+    as data alongside the message — and from **one** builder, because two
+    surfaces describing the same failure differently is the failure mode worth
+    designing out rather than testing for repeatedly.
+
+    Everything here is a plain JSON type. The MCP surface hands its payload to
+    ``json.dumps`` and the REST surface to ``JSONResponse``, neither of which
+    has a rule for an enum or a tuple, so the conversion belongs here rather
+    than being half-done and finished twice.
+    """
+    return {
+        "task_id": task.task_id,
+        "text": task.text,
+        # ``.value`` rather than the member: ``TaskStatus`` is a ``StrEnum``, so
+        # an encoder would accept it, but a caller reading the dict directly
+        # should get a plain ``str`` rather than something that compares equal
+        # to one.
+        "status": task.status.value,
+        "blocking_roles": list(task.blocking_roles),
+        # Id *and* title, so the caller can render the link and follow it
+        # without a second lookup.
+        "action_journal_id": task.action_journal_id,
+        "action_journal_title": task.action_journal_title,
+    }
 
 
 def describe_roles(roles: tuple[TaskAnchorRole, ...]) -> str:

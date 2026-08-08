@@ -98,6 +98,34 @@ This document provides comprehensive API design patterns for both REST and MCP i
 - Map HTTP status codes to appropriate error types
 - Log unexpected errors for debugging
 
+### Structured Error Detail (`errors[].meta`)
+
+Most refusals are fully expressed by their prose — a caller told "journal 4 not
+found" has everything it can act on. A few are not: a refusal that names *other*
+rows the caller now has to go and deal with leaves it parsing English for ids.
+
+Those errors override `DomainError.error_meta()` (`core_shared/core_shared/exceptions.py`),
+returning a dict of plain JSON types. `create_domain_error_response` renders it
+as the JSON:API error object's `meta`, and the MCP tool decorator renders the
+same dict as the failure payload's context — **one builder, two surfaces**, so a
+refusal cannot describe itself differently depending on who asked.
+
+Conventions:
+
+- **Opt-in.** The base implementation returns `None`, which `exclude_none=True`
+  drops, so an error that adds nothing keeps exactly the body it has today.
+- **Alongside the prose, never instead of it.** `detail` still carries the
+  explanation a person reads; `meta` is what a client builds links from.
+- **Plain JSON only.** Neither surface applies an encoder that knows about enums
+  or dataclasses, so the conversion happens in the builder rather than twice.
+- **Both an id and a label** for anything the caller is expected to link to, so
+  it can render the link and follow it without a second request.
+
+`JournalHasAnchoredTasksError` is the current example: `DELETE
+/api/journals/{id}` answers 409 with code `JOURNAL_HAS_ANCHORED_TASKS` and a
+`meta.blocking_tasks` list giving each blocking task's id, text, status and
+blocking roles, plus the id and title of the journal it can be actioned from.
+
 ### FastAPI Exception Handling
 
 - Create custom exception handlers for common errors

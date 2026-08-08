@@ -18,6 +18,7 @@ from core_shared.models.journals import (
     JournalContactRelationship,
     JournalContactRelationshipType,
 )
+from core_shared.models.tasks import TaskStatus
 from dishka import Provider, Scope, make_async_container, provide
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -60,9 +61,28 @@ from tests.integration.mcp.http_helpers import (
 )
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
+    count,
     create_journal,
     create_task,
+    link_intermediate_journal,
 )
+
+
+async def call_delete_journal_tool(client: Any, journal_id: int) -> Any:
+    """Ask the MCP ``delete_journal`` tool to delete a journal."""
+    return await client.post(
+        "/mcp-server/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "delete_journal",
+                "arguments": {"journal_id": journal_id},
+            },
+        },
+        headers=mcp_headers(await initialize_mcp_session(client)),
+    )
 
 
 class JournalTestProvider(Provider):
@@ -421,6 +441,208 @@ class TestJournalToolsIntegration:
             {"id": other_journal_id},
         )
         assert surviving.scalar_one() == 1
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_tells_an_agent_which_tasks_block_and_where_to_go(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """An agent has no UI to fall back on.
+
+        The specification requires this surface to identify "the blocking tasks
+        and the journals that surface them, so an agent can resolve them without
+        going through the UI" — which means ids, not a sentence. Three tasks
+        block in three different ways and each names the journal to read next.
+        """
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Trip Planning")
+        elsewhere = await create_journal(journal_repo, title="Permit Meeting")
+        earlier = await create_journal(journal_repo, title="Monday Planning")
+
+        created_here = await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=elsewhere,
+            text="print the permit",
+        )
+        due_here = await create_task(
+            async_connection,
+            creating_journal_id=earlier,
+            due_journal_id=target,
+            text="book the hut",
+        )
+        both = await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=target,
+            text="pack the ropes",
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await call_delete_journal_tool(authenticated_client, target)
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["code"] == "JOURNAL_HAS_ANCHORED_TASKS"
+        assert payload["journal_id"] == target
+        assert payload["blocking_tasks"] == [
+            {
+                "task_id": created_here,
+                "text": "print the permit",
+                "status": "not_done",
+                "blocking_roles": ["creating"],
+                "action_journal_id": elsewhere,
+                "action_journal_title": "Permit Meeting",
+            },
+            {
+                "task_id": due_here,
+                "text": "book the hut",
+                "status": "not_done",
+                "blocking_roles": ["due"],
+                "action_journal_id": earlier,
+                "action_journal_title": "Monday Planning",
+            },
+            {
+                "task_id": both,
+                "text": "pack the ropes",
+                "status": "not_done",
+                "blocking_roles": ["creating", "due"],
+                "action_journal_id": target,
+                "action_journal_title": "Trip Planning",
+            },
+        ]
+        # The prose survives alongside the data — an agent relaying the refusal
+        # to a person should not have to compose the sentence itself.
+        assert "print the permit" in payload["message"]
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM journals WHERE id = :id",
+                {"id": target},
+            )
+            == 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_done_task_blocks_the_tool_too_and_the_status_says_so(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """Status changes what the refusal *says*, never whether it refuses."""
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Finished Trip")
+        elsewhere = await create_journal(journal_repo, title="Permit Meeting")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=elsewhere,
+            text="print the permit",
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await call_delete_journal_tool(authenticated_client, target)
+
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["code"] == "JOURNAL_HAS_ANCHORED_TASKS"
+        assert payload["blocking_tasks"] == [
+            {
+                "task_id": task_id,
+                "text": "print the permit",
+                "status": "done",
+                "blocking_roles": ["creating"],
+                "action_journal_id": elsewhere,
+                "action_journal_title": "Permit Meeting",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_tool_still_deletes_a_journal_a_task_only_mentions(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """The refusal is narrow. A mention is not an anchor, so the deletion
+        goes through and takes only the mention with it."""
+        journal_repo = SqlJournalRepository(async_connection)
+        mentioned = await create_journal(journal_repo, title="Mentioned In Passing")
+        creating = await create_journal(journal_repo, title="Monday Planning")
+        due = await create_journal(journal_repo, title="Permit Meeting")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating,
+            due_journal_id=due,
+            text="print the permit",
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await call_delete_journal_tool(authenticated_client, mentioned)
+
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["deleted"] is True
+        # Scoped to this task rather than the whole table, so the assertion
+        # cannot be satisfied by some other task losing its mention.
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM task_intermediate_journals "
+                "WHERE task_id = :task_id",
+                {"task_id": task_id},
+            )
+            == 0
+        )
+        anchors = (
+            await async_connection.execute(
+                text(
+                    "SELECT creating_journal_id, due_journal_id, status "
+                    "FROM tasks WHERE id = :id"
+                ),
+                {"id": task_id},
+            )
+        ).one()
+        assert anchors == (creating, due, "not_done")
+
+    @pytest.mark.asyncio
+    async def test_both_surfaces_return_the_same_blockers_for_the_same_journal(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """ "The same failure … over REST and MCP", against a real database.
+
+        A unit test pins that the two surfaces share one builder. It cannot pin
+        that they are both *wired* to it: the REST path resolves ``JournalService``
+        from Dishka while the MCP tool constructs it by hand, so neither is
+        evidence for the other — the same reason Phase 3 tested merge at both
+        surfaces. Here one seeded journal is refused twice and the two answers
+        are compared field for field.
+        """
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Trip Planning")
+        elsewhere = await create_journal(journal_repo, title="Permit Meeting")
+        await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=elsewhere,
+            text="print the permit",
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=target,
+            due_journal_id=target,
+            text="pack the ropes",
+            status=TaskStatus.CANCELLED,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            rest_response = await authenticated_client.delete(f"/api/journals/{target}")
+            mcp_response = await call_delete_journal_tool(authenticated_client, target)
+
+        assert rest_response.status_code == 409
+        rest_error = rest_response.json()["errors"][0]
+        mcp_payload = extract_mcp_json_payload(mcp_response.text)
+
+        assert rest_error["meta"]["blocking_tasks"] == mcp_payload["blocking_tasks"]
+        assert rest_error["meta"]["journal_id"] == mcp_payload["journal_id"]
+        assert rest_error["detail"] == mcp_payload["message"]
+        assert rest_error["code"] == mcp_payload["code"]
 
     @pytest.mark.asyncio
     async def test_delete_journal_integration_real_db(

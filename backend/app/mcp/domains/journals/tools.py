@@ -3448,6 +3448,16 @@ async def delete_journal(
     deleting it. A journal a task merely mentions can be deleted; the mention
     goes with it and the task is unaffected.
 
+    The refusal is resolvable without a UI: it comes back with
+    ``code: "JOURNAL_HAS_ANCHORED_TASKS"``, an explanatory ``message``, the
+    ``journal_id`` that could not be deleted, and a ``blocking_tasks`` list.
+    Each entry gives the task's ``task_id``, ``text``, ``status`` and
+    ``blocking_roles`` (``creating`` and/or ``due``) plus the
+    ``action_journal_id`` and ``action_journal_title`` of the journal that
+    surfaces it — normally the task's due journal, or its creating journal when
+    the due journal is the one being deleted. Read that journal, deal with the
+    task there, and retry.
+
     Args:
         journal_id: The unique identifier of the journal to delete
         delete_children: Optional flag to delete child journals
