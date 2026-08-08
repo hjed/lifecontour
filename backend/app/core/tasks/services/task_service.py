@@ -733,14 +733,24 @@ class TaskService:
         transaction: AsyncConnection,
         text: str | None = None,
         status: TaskStatus | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> tuple[Task, list[int]]:
-        """:meth:`update_task`, and the journals the task has passed through."""
+        """:meth:`update_task`, and the journals the task has passed through.
+
+        ``source`` and ``changed_by`` are forwarded for the reason
+        :meth:`create_task_with_trail` gives: a wrapper that swallowed them would
+        file every change made in the browser or by an assistant under
+        ``SYSTEM``, and nothing above the outbox row would show it.
+        """
         updated = await self.update_task(
             user_id=user_id,
             task_id=task_id,
             transaction=transaction,
             text=text,
             status=status,
+            source=source,
+            changed_by=changed_by,
         )
         return updated, await self._trail_within_unit_of_work(updated, user_id)
 
@@ -752,13 +762,22 @@ class TaskService:
         task_id: int,
         status: TaskStatus,
         transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> tuple[Task, list[int]]:
-        """:meth:`set_status`, and the journals the task has passed through."""
+        """:meth:`set_status`, and the journals the task has passed through.
+
+        Provenance crosses **two** hops from here — this wrapper to
+        :meth:`set_status`, and that to :meth:`update_task`, which is what
+        actually publishes. Either one dropping it is a silent success.
+        """
         updated = await self.set_status(
             user_id=user_id,
             task_id=task_id,
             status=status,
             transaction=transaction,
+            source=source,
+            changed_by=changed_by,
         )
         return updated, await self._trail_within_unit_of_work(updated, user_id)
 

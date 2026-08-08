@@ -3761,6 +3761,20 @@ No e2e, per this entry and because nothing is user-visible until Phases 6 and 9.
   `aggregate_id`. *Worth recording because the failure had no connection to the code under test* — the
   suites that broke touched neither `update_task` nor its event — and because the same trap is waiting
   for any later phase that makes an already-committed path start publishing.
+- **Merging ITER18-001 Phase 8 mid-review put provenance behind a new hop.** That phase landed four
+  `*_with_trail` wrappers and repointed the surfaces at them, so the endpoint and both MCP tools no
+  longer call `update_task` and `set_status` directly. Git merged the two changes cleanly and produced
+  code that could not typecheck — provenance arguments passed to wrappers that did not accept them —
+  which **CI caught and the local gates did not**, because the local run predated the merge. The fix is
+  the one `create_task_with_trail` had already chosen for itself, in a docstring written before this
+  phase existed: forward `source` and `changed_by` rather than swallow them. `retarget_due_journal_with_trail`
+  is deliberately left without them, because Phase 3 is what gives a retarget an event to carry them on.
+  *The lesson is about the failure mode, not the merge:* a wrapper is the ideal place to lose provenance,
+  because doing so is a **silent success** — the task still changes, an event is still published, and the
+  only symptom is a person's edit and an assistant's edit becoming indistinguishable in the user's own
+  history. Two behavioural tests now pin the forwarding through both wrappers, and were mutation-checked
+  against a wrapper that *accepts* both arguments and forwards neither — the exact shape a signature-only
+  test would wave through.
 
 #### Phase 3: Events — Due Journal Retargeted
 
