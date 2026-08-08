@@ -58,6 +58,31 @@ def _link_to_dict(
     }
 
 
+def _journal_link_to_dict(
+    task_id: int, journal_id: int, *, attached: bool, changed: bool
+) -> dict[str, Any]:
+    """The answer both intermediate-journal tools give.
+
+    ``attached`` is the *resulting state* and ``changed`` says whether this call
+    moved a row, for the reason the contact tools carry the same pair: the
+    operations are idempotent, so without ``changed`` an agent could not tell a
+    fresh link from a no-op, and without ``attached`` it would have to infer the
+    state from which tool it called.
+
+    **These two tools return the pair rather than the task**, which the
+    task-returning tools now carry a trail on. Answering with the whole task
+    would mean re-reading the trail on every link call to say something the
+    caller did not ask about, and would hide the one fact it did: whether this
+    call moved a row.
+    """
+    return {
+        "task_id": task_id,
+        "journal_id": journal_id,
+        "attached": attached,
+        "changed": changed,
+    }
+
+
 def _task_to_dict(task: Task, intermediate_journal_ids: list[int]) -> dict[str, Any]:
     """The answer every task-returning tool gives.
 
@@ -458,6 +483,122 @@ async def delete_task(
     return json.dumps({"deleted": True, "task_id": task_id}, indent=2)
 
 
+@mcp_unified_error_handler("attach_intermediate_journal_to_task", "task")
+async def attach_intermediate_journal_to_task(
+    task_id: Annotated[
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to link.")
+    ],
+    journal_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description=(
+                "The id of the journal the task was discussed or revisited in. "
+                "Must be an existing journal of yours, and must not already be "
+                "the task's creating or due journal."
+            ),
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Note that a task came up in another journal, as an intermediate link.
+
+    An intermediate journal is one the task was **discussed, revisited, or
+    previously due** in, so the task stays visible there as well as on the two
+    journals it is anchored to. The link carries no role and no relationship
+    type: it records that the task and the journal are connected, and nothing
+    more.
+
+    **The two anchors are not reachable from here.** A task's creating journal
+    and its due journal are properties of the task itself, not links: the
+    creating one is fixed when the task is created and never changes, and the
+    due one is moved by retargeting. Naming either of them here is refused, and
+    the message says which it was.
+
+    Attaching a journal that is already attached is accepted and changes
+    nothing, so a retry is safe. Retargeting a task keeps its previous due
+    journal as an intermediate link automatically — this tool is for the links a
+    person asks for, and nothing infers one from an ordinary edit.
+
+    Returns:
+        JSON string with task_id, journal_id, attached (the resulting state, and
+        true here) and changed (whether this call created the link, false when
+        it was already there).
+    """
+    user_id = await get_current_user_id()
+
+    changed = await task_service.attach_intermediate_journal(
+        user_id=user_id,
+        task_id=task_id,
+        journal_id=journal_id,
+        transaction=db_connection,
+    )
+    return json.dumps(
+        _journal_link_to_dict(task_id, journal_id, attached=True, changed=changed),
+        indent=2,
+    )
+
+
+@mcp_unified_error_handler("detach_intermediate_journal_from_task", "task")
+async def detach_intermediate_journal_from_task(
+    task_id: Annotated[
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to unlink.")
+    ],
+    journal_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description="The id of the intermediate journal to stop referencing.",
+        ),
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Remove an intermediate-journal link from a task.
+
+    Removes the link only — the task and the journal are both left alone. Works
+    in any status, and detaching a journal that is not attached is accepted
+    rather than refused, so a retry is safe. Deleting the journal itself removes
+    its intermediate links automatically, so this is not needed for that.
+
+    **One shape is not retry-safe**, and it is worth knowing before you build a
+    retry on this: a journal that is *both* an anchor and an intermediate journal
+    succeeds the first time and is refused the second, because once the link row
+    is gone this call is indistinguishable from asking to unlink the task's due
+    journal. Everywhere else, repeating the call is harmless.
+
+    **The task's creating and due journals cannot be removed this way** and
+    naming either is refused rather than quietly doing nothing: those roles are
+    not links at all. To move a task off the journal it is due in, **retarget**
+    it onto a new future journal; the creating journal never changes. A journal
+    that is *both* an anchor and an intermediate journal — which happens when a
+    task is retargeted onto a journal it already mentioned — keeps its
+    intermediate link removable; only the anchor role is out of reach.
+
+    Returns:
+        JSON string with task_id, journal_id, attached (the resulting state, and
+        false here) and changed (whether this call removed a link, false when
+        there was none).
+    """
+    user_id = await get_current_user_id()
+
+    changed = await task_service.detach_intermediate_journal(
+        user_id=user_id,
+        task_id=task_id,
+        journal_id=journal_id,
+        transaction=db_connection,
+    )
+    return json.dumps(
+        _journal_link_to_dict(task_id, journal_id, attached=False, changed=changed),
+        indent=2,
+    )
+
+
 def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
@@ -467,3 +608,5 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(delete_task)
     mcp.add_tool(link_task_to_contact)
     mcp.add_tool(unlink_task_from_contact)
+    mcp.add_tool(attach_intermediate_journal_to_task)
+    mcp.add_tool(detach_intermediate_journal_from_task)

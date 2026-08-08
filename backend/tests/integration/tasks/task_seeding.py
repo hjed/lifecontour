@@ -75,6 +75,7 @@ _INSERT_CONTACT_LINK = text("""
     VALUES (:task_id, :contact_id)
 """)
 _DELETE_CONTACT = text("DELETE FROM contacts WHERE id = :contact_id")
+_DELETE_JOURNAL = text("DELETE FROM journals WHERE id = :journal_id")
 _SELECT_CONTACT_LINKS = text(
     "SELECT contact_id FROM task_contacts WHERE task_id = :task_id ORDER BY contact_id"
 )
@@ -181,6 +182,18 @@ async def linked_contact_ids(conn: AsyncConnection, task_id: int) -> list[int]:
 async def delete_contact(conn: AsyncConnection, contact_id: int) -> None:
     """Delete a contact row, letting the schema's cascades do whatever they do."""
     await conn.execute(_DELETE_CONTACT, {"contact_id": contact_id})
+
+
+async def delete_journal(conn: AsyncConnection, journal_id: int) -> None:
+    """Delete a journal row, letting the schema's constraints do whatever they do.
+
+    Deliberately not routed through ``JournalService``, which runs the anchor
+    delete guard: the tests that use this are about what the *schema* does to a
+    task's links — the ``ON DELETE CASCADE`` on an intermediate link against the
+    ``ON DELETE RESTRICT`` on an anchor — so the guard would answer before the
+    constraint could.
+    """
+    await conn.execute(_DELETE_JOURNAL, {"journal_id": journal_id})
 
 
 async def create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") -> int:

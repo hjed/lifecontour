@@ -129,6 +129,67 @@ class TaskAnchorJournalNotFoundError(TaskDomainError):
         self.journal_id = journal_id
 
 
+class TaskJournalIsAnchorError(TaskDomainError):
+    """Exception raised when an anchor journal is treated as an intermediate link.
+
+    A task's journals come in three roles and only one of them is a row in
+    ``task_intermediate_journals``. The creating and due journals are **columns
+    on the task**, so the intermediate-link surface can neither add them nor
+    remove them, and both attempts are this one error:
+
+    - **attaching** a journal that is already an anchor is refused because it is
+      already linked, in a role an intermediate link cannot express — the
+      specification's *"already linked in a stronger role"*;
+    - **detaching** an anchor role is refused **when there is no link row to
+      remove**. The repository would answer a bare ``False`` there, which a
+      caller would read as *"it was not attached"* rather than *"that link
+      cannot be removed at all"*. The condition matters: a journal can hold an
+      anchor role *and* an intermediate link at once — retargeting a task onto a
+      journal it already mentioned produces exactly that — and refusing there
+      would make a link the user created permanently unremovable.
+
+    One error rather than two, because the *remedy* is the same in both
+    directions: whatever the caller wanted, an anchor role is not something this
+    surface can add or remove. What they cannot know is **which anchor** it was
+    and how that anchor is really changed, so the message carries both. The
+    creating journal never changes, and the due journal is changed by
+    *retargeting* the task — naming the operation is what lets an agent recover
+    without guessing.
+
+    **The two directions are not, however, the same condition**, and an earlier
+    draft of this docstring said they were. Attaching is refused on the anchor
+    role alone. Detaching is refused only when there is *also* no link row, so a
+    journal holding both roles can be detached — see
+    :meth:`~app.core.tasks.services.task_service.TaskService.detach_intermediate_journal`
+    for why. One consequence is worth stating because nothing else would tell a
+    reader: that both-roles state can be **destroyed through this surface but not
+    recreated**, since re-attaching hits the attach rule. It is reachable only by
+    attaching a journal and then retargeting onto it, and it is redundant by
+    construction — the anchor already says more than the link does — so nothing
+    is lost, but the asymmetry is deliberate rather than an oversight.
+
+    **409 rather than 400**, for the reason ``TaskStatusTransitionError`` is one:
+    the request is well formed and the journal it names is a real journal of the
+    caller's. What it conflicts with is the role that journal already holds on
+    this task.
+    """
+
+    def __init__(self, task_id: int, journal_id: int, anchor: TaskJournalAnchor):
+        remedy = (
+            "The creating journal is set when the task is created and never changes."
+            if anchor == "creating"
+            else "The due journal is changed by retargeting the task."
+        )
+        super().__init__(
+            f"Journal {journal_id} is the {anchor} journal of task {task_id}, not "
+            f"an intermediate one. {remedy}",
+            409,
+        )
+        self.task_id = task_id
+        self.journal_id = journal_id
+        self.anchor = anchor
+
+
 class TaskDueJournalNotFutureError(TaskDomainError):
     """Exception raised when a due journal is not dated in the future.
 

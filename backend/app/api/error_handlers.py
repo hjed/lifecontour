@@ -41,6 +41,7 @@ from core_shared.models.journals import (
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
+    TaskJournalIsAnchorError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatusTransitionError,
@@ -166,6 +167,7 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         # it: until the retarget route existed this rendered as ``DOMAIN_ERROR``,
         # which is correct for an unreachable error and useless to a reachable one.
         TaskReopenNotAcknowledgedError: "TASK_REOPEN_NOT_ACKNOWLEDGED",
+        TaskJournalIsAnchorError: "TASK_JOURNAL_IS_ANCHOR",
         # Calendar errors
         CalendarNotFoundError: "CALENDAR_NOT_FOUND",
         CalendarValidationError: "CALENDAR_VALIDATION_ERROR",

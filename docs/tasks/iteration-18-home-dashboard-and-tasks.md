@@ -146,6 +146,30 @@ no longer exists: `add_contacts` batches the write and `create_task` uses it. Th
 read a task's contacts back** — no get, no list, no frontend surface — and no domain event for a link
 change (ITER18-003).
 
+**Since ITER18-001 Phase 10:** a task's *intermediate* journals are editable.
+`POST`/`DELETE /api/tasks/{task_id}/relationships/intermediate-journals[/{journal_id}]` and the MCP tools
+`attach_intermediate_journal_to_task` / `detach_intermediate_journal_from_task` all call
+`TaskService.attach_intermediate_journal` and `detach_intermediate_journal`, which are `@transactional`,
+idempotent in both directions and work in every status. **Attaching** requires the journal to be the
+acting user's; detaching never reads the journal at all, on the cascade reasoning `unlink_contact`
+already carries. Attaching a journal that already holds an **anchor** role is refused with
+`TaskJournalIsAnchorError` (409), and so is
+detaching one that holds an anchor role and no link row — so the two anchors remain reachable only
+through `create_task` and `retarget_due_journal`. A journal holding *both* roles at once, which a
+retarget onto a previously-attached journal produces, keeps its intermediate link removable. The
+task is read *without* a lock here, unlike the status and retarget paths. No port or adapter changed:
+Phase 2's `add_intermediate_journal` and `remove_intermediate_journal` already carried the ownership
+guard and the idempotence.
+
+**The trail is readable, though not through these two routes.** An earlier draft of this paragraph said
+there was still no way to read a task's journals back; **Phase 8 landed while this phase was in flight
+and made that false**, exposing `intermediate_journal_ids` on every task-returning response — `create`,
+`PATCH` and retarget over REST, and the task-returning MCP tools. There is still no standalone task
+`GET` or list (Phase 13), so the trail is read from a write's answer rather than asked for directly.
+The two link routes here deliberately do **not** join that set: they answer 204 and `attached`/`changed`
+respectively, because re-reading the trail on a link call would report something the caller did not ask
+about and bury the one thing it did. Still no domain event for a link change (ITER18-003).
+
 ### The home page
 
 - `frontend/src/app/page.tsx` renders six static `Card`s (Contacts, Journal, Calendar, Photos, AI
@@ -2294,23 +2318,374 @@ with the function count in brackets where the two differ.
   `tests/integration/mcp/` together (**969 tests**). No frontend or e2e gates — the phase changes no
   frontend file and ships no user-visible surface.
 
-#### Phase 10: Intermediate Journal Links — REST and MCP
+#### Phase 10: Intermediate Journal Links — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 5.
-**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple · **Overrun recorded
+before work started (delivery rule 3): ~350 production → ~2,100 tracked** · **Actual:** **572 production
+→ 3,718 tracked** (3,718 insertions, 10 deletions across 17 files, excluding this document). 618
+production: service 246, MCP tools 143, controller 92, REST schemas 72, the `core_shared` error 61, the
+export 2, the error-code map 2. 3,029 tests and shared seeding; 71 docs.
+
+**Every figure in this entry was re-derived from `git diff --numstat origin/main` and
+`pytest --collect-only` at the final tree, after the local review round found fourteen of them stale.**
+They had been computed rather than recalled — and then the Phase 8 merge and this review's own fixes
+moved them underneath. See *"a merge is a documentation event"* below: the sweep that rule prescribes
+has to cover the **numbers**, not just the prose, which is the half its first version missed.
+
+**The estimate is rebuilt the way Phase 11 concluded it should be — enumerate the artefacts, then apply
+rule 15's ×6 — rather than by guessing at the capability's size.** The artefacts are: a domain error and
+its export (~40), one entry in the JSON:API error-code map (1), two service methods (~120), two REST
+request schemas (~55), two routes (~70), and two MCP tools with their registration (~95). That is ~350
+production, and ×6 is ~2,100. The ×4 in the line above predates rule 15 and is left standing so the two
+numbers can be compared when this phase lands.
+
+**What this phase does *not* pay for, which is why it should sit below Phase 11's 2,853.**
+`TaskRepository.add_intermediate_journal`, `remove_intermediate_journal` and
+`list_intermediate_journal_ids` already exist — Phase 2 wrote them and Phase 7's automatic link goes
+through the first — and they are already owner-scoped through `_require_task_owned`'s
+`SELECT … FOR KEY SHARE` and already idempotent through `task_intermediate_journals`' composite primary
+key. So the acceptance criterion *"attaching is idempotent rather than duplicating"* is met by a
+constraint that is already live and already tested, and **rule 13's port+adapter ×6 does not apply
+here**. Rule 15's does: two entry points, so two rejection matrices.
+
+**Splitting was declined, and both cuts considered are recorded rather than implied.** The
+*capability* split — attach now, detach later — ships a surface able to create links the user cannot
+remove, the same breach of delivery rule 9 Phase 11 refused and a direct contradiction of the
+specification's *"Intermediate links can be removed"*. Rule 10 (coherence beats size) applies.
+
+The *layer* split that **sizing rule 4** prescribes — service plus unit tests as one phase, the two
+surfaces as the next — was omitted from this entry's first draft and is added here after review asked
+for it, because rule 4 explicitly makes such a phase mergeable on its own and it therefore does **not**
+breach rule 9. It was still the wrong cut, for a reason particular to this phase: rule 4 exists for
+phases where *"a service method's own logic is the hard part"*, and here it is not. The service is two
+gates and a delegation over repository methods Phase 2 already wrote and tested. Counted against what
+actually landed, the cut splits this phase's production **exactly** in half and leaves both halves well
+over 500: the service side is 309 (246 + 61 + 2) with 1,793 lines of unit and service-integration tests
+behind it — about **2,100** — and the surface side is 309 (92 + 72 + 143 + 2) with the remaining ~1,236
+test lines, about **1,545**. So the split buys two oversized PRs instead of one, and the larger of the two would be
+the half rule 4 calls the "hard part" precisely because it is *not* hard here. Splitting the two
+*surfaces* from each other is what rule 5 forbids outright. **Recorded as a general observation:** rule
+4's cut only helps when production *and its tests* concentrate in the service, and it is worth counting
+that before invoking it — here the tests concentrate there while the difficulty does not.
+
+**The pre-recorded figure undershot again — the sixth phase running — and this time the *reason* is not
+the production estimate.** 3,718 against the pre-recorded 2,100 is 1.8×; against this phase's own
+production it is **6.0×**, which is rule 15's ×6 almost exactly, for the second phase in a row. Phase 11 concluded that
+"the ×6 multiplier is reliable; what has been wrong every time is the production estimate it
+multiplies", and proposed enumerating the artefacts first. That was done here — every artefact in the
+list above was written — and the estimate still came in at 56% of the actual, because **the artefacts
+were each about twice as long as guessed**: the service was estimated at 120 lines and landed at 246,
+the tools at 95 and landed at 143. Not one of them was missing; all of them were longer.
+**Suggested refinement to rule 15:** when a phase's production is enumerated artefact by artefact,
+multiply the *artefact estimate* by ~1.5 before applying ×6 — in this repository a "method" means a
+method plus twenty lines of docstring recording why it is the way it is, and that prose is what the
+enumeration keeps omitting.
 
 **Acceptance Criteria:**
 
-- [ ] Attach and detach an intermediate journal, over REST and MCP in the same PR.
-- [ ] Intermediate links are **explicit only** — no code path infers one from an edit — and attaching is
-      idempotent rather than duplicating.
-- [ ] The creating and due links cannot be detached through this surface; attempting it is a clear error.
-- [ ] Attaching a journal that is already the creating or due journal is rejected: it is already linked in
-      a stronger role.
-- [ ] The journal must belong to the acting user.
+- [x] Attach and detach an intermediate journal, over REST and MCP in the same PR. —
+      `POST`/`DELETE /api/tasks/{task_id}/relationships/intermediate-journals[/{journal_id}]` and the MCP
+      tools `attach_intermediate_journal_to_task` / `detach_intermediate_journal_from_task`, all four over
+      `TaskService.attach_intermediate_journal` and `detach_intermediate_journal`.
+- [x] Intermediate links are **explicit only** — no code path infers one from an edit — and attaching is
+      idempotent rather than duplicating. — the explicit half is asserted as an *absence*: neither method
+      reads or writes a status, touches the contact repository or resolves a timezone, all on `mock_calls`
+      rather than on named methods. The one automatic link stays Phase 7's, and the two meet in a test
+      that defers a task and then detaches the journal it was deferred from. Idempotency is the composite
+      primary key's: there is **no** "is it already attached?" read anywhere, asserted directly
+      (`list_intermediate_journal_ids` is never called), and proved against the live constraint by a
+      repeat that leaves one row.
+- [x] The creating and due links cannot be detached through this surface; attempting it is a clear error. —
+      `TaskJournalIsAnchorError`, 409, `TASK_JOURNAL_IS_ANCHOR`, at all three levels for **both** anchors.
+      The refusal is explicit rather than a silent success, and that is the point: the repository would
+      answer a bare `False` for an anchor, which reads as *"it was not attached"* rather than *"that link
+      cannot be removed at all"*. **The refusal is conditioned on there being no link row to remove**,
+      which the review round corrected — see the decision below.
+- [x] Attaching a journal that is already the creating or due journal is rejected: it is already linked in
+      a stronger role. — the same error from the same shared gate, so the two directions cannot drift.
+      Invariant 6's case (one journal in both roles) is pinned to report *creating*, because without a
+      deliberate order it would report whichever the implementation tested first.
+- [x] The journal must belong to the acting user. — enforced by the owner-scoped read `create_task` and
+      `retarget_due_journal` already share, so another user's real journal is refused **identically to an
+      absent id once the id itself is normalised** at all three levels. The hedge is Phase 6's and is
+      restored here: each answer embeds the id the caller supplied, so the two differ exactly there and
+      nowhere else. This entry's first draft said *byte-identical*, which is false for any body carrying
+      an id, and the review round caught it here, in the REST test's own docstring, and in the sentence
+      it had already put into `api-design.md`. The answer is the **journal domain's**
+      `JournalNotFoundError`, not `TaskAnchorJournalNotFoundError`, whose message ("a task must be
+      anchored to journals that exist") would describe a rule this call is not about.
+
+**What the review round found, and why it is a different list again.** Phases 4–6 were reviewed into
+*more* tests and Phase 11 into *fewer*; this phase was reviewed into **one real bug and eight false
+claims**. The bug is the detach gate below — the only finding in six phases that changed behaviour a user
+could observe rather than a docstring or a number. The claims were: two mutation counts (10 for 12, and
+"exactly the two detach refusals" for nine), a file count (18 for 17), *byte-identical* used three times
+including in a permanent architecture document, "at both nesting levels" for four fields where only one
+was tested out there, "both ids bounded" where only the attach tool's were read, and an acceptance
+criterion whose evidence proved something narrower than it claimed (below). It also found a test that
+could not fail and two docstrings claiming coverage that lives in another file. **The pattern worth
+carrying:** Phase 11 concluded that once a phase's tests are thorough, review starts catching *claims*.
+That held — but the claims it caught here were disproportionately **numbers this document invented while
+writing itself up**, which is a self-inflicted class the previous phases also produced. Numbers in this
+document should be pasted from a command's output, not recalled.
+
+**A third class appeared after the pull request was open, and it is new: claims that were true when
+written and were made false by a merge.** This phase sat open long enough for **three** phases to land on
+`main` beneath it — 9, ITER18-003 P1, and 8 — and Phase 8 turned this entry's *"there is still no way to
+read a task's journals back"* into a falsehood by putting `intermediate_journal_ids` on every
+task-returning response. The automated review caught it; nothing in the local process would have, because
+the sentence was correct at the moment it was written and no test covers prose. **What to carry:** a
+merge is a documentation event, not just a code one. The paragraphs most at risk are the *"there is still
+no…"* ones — every phase writes them, and every later phase is trying to make one of them false.
+
+**Acting on that immediately found a second one**, which is why the rule is worth stating rather than
+merely noting. Re-reading every *"still no"* sentence in this entry turned up
+`TaskReopenNotAcknowledgedError` being described as *"still unmapped"* when Phase 8's merge had mapped it
+an hour earlier — the same rot, in a bullet nobody had flagged. Two of this entry's *"still no"* claims
+had gone stale, both from the same merge, and the second was found only because the first prompted a
+sweep. **So: after every merge from `main`, grep the phase entry for "still no" and re-check each hit.**
+It takes a minute and it caught one claim the automated review missed.
+
+**Acceptance criterion 2's evidence was narrowed, because it proved less than it claimed.** The
+"explicit only" half was written up as being shown by these two methods reading no status, touching no
+contact and resolving no timezone. That is a statement about the *two new methods* and says nothing
+about any other code path, which is what the criterion is about. The evidence that actually bears on it
+is Phase 6's, and it is restated here rather than assumed: a status change writes no intermediate link
+row. The **service** test is the load-bearing one — it loops every status and counts rows
+(`test_task_service_set_status_integration.py`); the REST and MCP counterparts make a single `done`
+change and assert the trail they report, which is weaker and is described as such rather than counted as
+a third matrix. Added to it is this phase's retarget-trail test, pinning that a retarget produces
+*exactly one* automatic link. The
+absences remain worth asserting — they are what makes the methods cheap and status-independent — but
+they are not the criterion.
+
+**Decisions taken (Phase 10):**
+
+- **The detach refusal is about the missing row, not about the anchor — a behaviour change forced by
+  review.** As first written, detach refused whenever the journal was an anchor. That made a legitimately
+  reachable link **permanently unremovable**: attach a journal, then retarget the task *onto* it, and the
+  row this surface wrote is still there — `retarget_due_journal` never unlinks, which Phase 7 decided
+  deliberately — while the journal has since become the due anchor. Every later detach answered 409, and
+  the row could only be shed by retargeting away again. That contradicts the specification's
+  *"Intermediate links can be removed"* for a link the user created through this very method.
+  The Decisions list already discussed this exact shape, but only in its **concurrent** form, and
+  concluded no lock was needed because the shape is legitimate. That reasoning was right about the shape
+  and blind to the sequential path, where this phase's own new refusal turned a benign redundant row into
+  a stuck one.
+  **The fix runs the delete first and refuses only when it removed nothing.** The anchor column is never
+  touched either way — the repository only ever deletes from the link table — so the caller who genuinely
+  meant *"stop this task being due here"* still gets told to retarget, and the refusal path still writes
+  nothing, a `DELETE` matching no rows being no write. Two alternatives were rejected: having *retarget*
+  drop the new due journal's intermediate row changes Phase 7's contract from another phase, and
+  recording the stuck row as accepted breaches the specification. **Mutation-checked in both directions**
+  — restoring the original order fails exactly the two new regression tests, and removing the gate
+  altogether fails ten across all three levels.
+- **The foreign key is matched by name, not by its column.** `"journal_id" in message` also matches a
+  primary-key violation's `Key (task_id, journal_id)=(…) already exists`, so a *duplicate* would have
+  been reported to the caller as a **missing journal** — a 404 for a row that is right there. Unreachable
+  while the insert is `ON CONFLICT DO NOTHING`, which is precisely the kind of "safe today" the
+  `str(error)` bug in Phase 4 also was, so the guard now matches
+  `task_intermediate_journals_journal_id_fkey` and a unit test pins the duplicate being re-raised.
+
+- **The specification's two deliberate acts are one API call.** It names two ways a link is created —
+  *"attaches an existing task to the journal they are viewing"* and *"links a journal to a task from the
+  task itself"* — and they differ only in which id the user picked first. Both reduce to
+  `(task_id, journal_id)`, so a second route would be the same operation under a different name and a
+  second place for the anchor rule to be forgotten. Recorded because a reader checking the specification
+  against this phase will look for the missing second entry point; the difference belongs to the UI
+  affordances Phase 16 onwards will build.
+- **The route is `/relationships/intermediate-journals`, the repository's first kebab-case relationship
+  member.** A task has three journal relationships and this one manipulates exactly one, so naming it
+  `/journals` would promise a route that can set an anchor. The body's resource `type` stays `journals`:
+  the relationship's name belongs in the path and the type names what the identifier points at. Every
+  earlier relationship route in this API happened to be a single word, so this is a new convention rather
+  than a departure from one.
+- **One error class covers both directions.** Attaching an anchor and detaching one are the same rule —
+  *an anchor role is not an intermediate link* — so `TaskJournalIsAnchorError(task_id, journal_id, anchor)`
+  serves both. What differs between them is which call was made, which the caller already knows; what
+  they cannot know is which anchor it was and how that anchor is really changed, so the message carries
+  both (the creating journal never changes; the due journal is changed by retargeting). Two classes would
+  have stated one rule twice.
+- **An unreachable journal answers the journal domain's error, reusing Phase 11's contact decision.**
+  `JournalNotFoundError` is already 404, already mapped to `JOURNAL_NOT_FOUND`, and already rendered by
+  the shared MCP handler as `Not found · Journal`, so an actionable answer cost no new plumbing. The MCP
+  test asserts the anchor refusal and the missing-journal refusal do **not** read alike, because their
+  remedies differ: *it is already linked* versus *pick another journal*.
+- **No port or adapter change, and that is why this phase is smaller than Phase 11.** Phase 2 wrote
+  `add_intermediate_journal`, `remove_intermediate_journal` and `list_intermediate_journal_ids`, all
+  owner-scoped through `_require_task_owned`'s `FOR KEY SHARE` and all idempotent through the composite
+  primary key. Rule 13's ×6 therefore did not apply here; rule 15's did.
+- **The task is read *without* a lock, and the reason is not "nothing else is mutable".** Phase 6 needed
+  `FOR NO KEY UPDATE` because `set_status` reads a status, decides a rule from it and writes the decision
+  back; Phase 7 inherited that. This does not: the only state that can move underneath it is a concurrent
+  retarget making the journal the due anchor after the check, and the resulting shape — a due anchor that
+  is *also* an intermediate link — is one `retarget_due_journal` produces on its own and which Phase 7
+  explicitly declined to clean up ("nothing is ever unlinked, including a link that has become
+  redundant"). A lock would narrow a window onto an outcome that is legitimate either side of it, and it
+  would deepen the lock-order inversion against journal merge that ITER18-002 Phase 6 exists to remove.
+  The *choice* is pinned by a test rather than left to the docstring: `find_by_id` is asserted used and
+  `find_by_id_for_update` asserted unused, and swapping them fails 10 of the 25 unit tests.
+- **The task gate runs before the journal gate.** Neither ordering leaks — both reads are scoped to the
+  *acting* user, so neither can answer a question about somebody else's data — so the tie is broken by
+  which resource the caller named as the subject: a 404 on the task beats a 404 on the journal. Asserted
+  on the reads made rather than on the outcome, since an outcome assertion would pass for an
+  implementation that reads the journal first and discards the answer.
+- **The anchor check runs after the journal read, and the order is unobservable.** An anchor is by
+  construction a real journal of the caller's — the anchor columns are `ON DELETE RESTRICT` foreign keys
+  that creation and retargeting both resolve owner-scoped — so no input reaches one gate and not the
+  other. Recorded because the cheaper order (check the anchor first, skip a query) is the obvious review
+  suggestion and is equally correct.
+- **The vanished-journal race is mapped, and needs no savepoint.** A journal deleted between the check and
+  the insert fails the foreign key, and the caller was promised a 404; the violation is matched against
+  the driver's *own* message — `_driver_message`, not `str(error)`, which is the Phase 4 bug — and
+  re-raised untouched otherwise. **What is matched in that message is the foreign key's full name**, for
+  the reason the next bullet records; an earlier draft of this one said "the `journal_id` column", which
+  described the behaviour the review round removed and was caught on the pull request by the automated
+  review. Unlike `_link_contacts` this needs no `SAVEPOINT`: one journal is named per call, so nothing
+  has to run against the aborted transaction to work out which id went missing. Proved against real
+  PostgreSQL by a repository that deletes the journal from inside its own read.
+- **The MCP tools return `attached` and `changed`**, Phase 11's `linked`/`changed` in this phase's
+  vocabulary. `attached` is the resulting state, `changed` says whether a row moved, and `changed` is
+  precisely what the REST 204 withholds in order to keep the idempotency invisible to an HTTP client.
+  **Phase 8 changed the surrounding context but not this decision.** Every task-*returning* tool now
+  carries `intermediate_journal_ids`, so an agent can see a trail without these two tools reporting one —
+  which strengthens the case for the pair rather than weakening it. Answering with the whole task here
+  would mean re-reading the trail on every link call to report something the caller did not ask about,
+  while burying the one thing it did: whether this call moved a row. There is still no `get_task` tool
+  (Phase 13), so the trail is read from a write's answer rather than asked for directly.
+- **This phase publishes no domain event, and the silence is now asserted.** ITER18-003 Phase 1 landed
+  `TaskCreated` and `TaskDeleted` while this phase was in flight, adding an `event_publisher` to
+  `TaskService`'s constructor. The specification lists *"journal linked or unlinked"* among the events
+  tasks should eventually emit, but that type belongs to the ITER18-003 phase that adds it — rule 6 caps
+  a phase at two new event types, and publishing one here would ship an event with no projection behind
+  it. Both link methods therefore take the publisher and never reach it, and a test per method asserts
+  `mock_calls == []` on it, so the absence is a decision on record rather than something the next phase
+  has to guess at.
+- **`TaskReopenNotAcknowledgedError` was left unmapped here, and Phase 8 has since mapped it.** When this
+  phase added `TASK_JOURNAL_IS_ANCHOR` to the error-code table it deliberately did not map its neighbour,
+  because a code for an error no endpoint could raise is untestable at the surface it exists for — Phase 7
+  had carried it forward to whichever phase shipped the retarget route. That phase landed while this one
+  was open, and `TASK_REOPEN_NOT_ACKNOWLEDGED` now sits directly above `TASK_JOURNAL_IS_ANCHOR` in the
+  same table, arriving through the merge rather than through this phase. The reasoning stands; only the
+  tense changed. **This was the second sentence in this entry that a merge falsified**, and unlike the
+  first it was caught by re-reading the phase's own *"still no"* claims rather than by review.
 
 **Required Test Coverage:** unit — role rules and idempotency. Integration — attach/detach round-trips and
 each rejection on both surfaces, including the cross-user journal. E2E deferred to Phase 22.
+
+Counts below are `pytest --collect-only` figures, following the convention Phase 9 established while this
+phase was in flight: parametrised cases count as the tests they collect, not as the functions that
+generate them. Every number here was read from that command's output rather than counted by hand, which
+is also the habit this phase's review round had to impose on the figures above.
+
+- **Unit (29 tests):** `backend/tests/unit/tasks/test_task_service_intermediate_journal_links.py` —
+  named for the *links* rather than for intermediate journals in general, because Phase 8 landed
+  `test_task_service_intermediate_journals.py` for the trail **read** while this phase was in flight and
+  the two collided on the same path. Main's file was kept byte-identical and this one renamed, which also
+  matches its integration counterpart. It covers: the write
+  and its arguments; a repeat reporting no change with **no** pre-read; an unknown and a foreign journal
+  both `JournalNotFoundError` with the read proved owner-scoped; each anchor refused on attach *and* on
+  detach with nothing written, plus **an anchor that also holds a link row being detachable**; the
+  same-journal case pinned to *creating*; the message naming retargeting for the due anchor and "never
+  changes" for the creating one; the plain read used and the locking read not; no status written and no
+  contact or timezone touched on any path (`mock_calls`); detach reaching the journal port **zero**
+  times; unknown and foreign tasks identical on both calls; the task gate proved to run before the
+  journal read; and the vanished-journal mapping in three shapes — mapped, re-raised for another
+  constraint, and re-raised for a **duplicate key**, which the bare-column match would have called a
+  missing journal.
+  The **task and journal** repositories are mocked with `spec=`, which the rest of this domain's unit
+  tests do not yet do: several assertions here are `assert_not_awaited()` or `mock_calls == []`, and on a
+  bare `AsyncMock` every one of those passes vacuously the moment the port method is renamed. The phase
+  leans on exactly such an assertion for "there is no pre-read". The remaining doubles come from
+  `conftest.py` unspec'd, which is that file's choice rather than this one's.
+- **Unit (19 new, 101 total):** `backend/tests/unit/api/test_task_schemas.py` — the minimal link body, the
+  pinned `journals` type and a mismatch rejected, `data.id` required, a non-integer id and three
+  out-of-range ids refused, and `role`, `relationship_type`, `status`, `anchor` and an `attributes` member
+  each refused at both nesting levels — *"both"* being three tests larger than the first draft, which
+  claimed all four at the envelope level and tested one.
+- **Unit (22 new, 82 total):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` — both tools
+  registered and requiring exactly `task_id` and `journal_id`; injected collaborators absent; both ids on
+  **both tools** bounded to `1..2147483647` in the generated schema (the first draft read only the attach
+  tool's); no role field, no `anchor` and no `now` on either; no contact parameter; and the descriptions
+  asserted by phrase rather than by keyword — a `"already" in description` proxy survived deleting the
+  sentence it was meant to pin, because the parameter description contained the word too. **No
+  "has a description" test**, deliberately: the fixture already fails if the tool is unregistered, and a
+  length check on a docstring cannot fail. A comment records why, so it is not written again.
+- **Unit (2 new, 12 total):** `backend/tests/unit/api/test_task_error_mapping.py` — the 409 and its code,
+  and that it does not share a code with `JOURNAL_NOT_FOUND`, whose remedy is different.
+- **Integration (30 tests):** `backend/tests/integration/tasks/test_task_intermediate_journal_links_integration.py`
+  — both round trips and their repeats against the live composite primary key; several journals
+  accumulating; every status with the stored status unmoved; both anchors refused in both directions
+  against anchors that are real foreign keys; invariant 6's shared journal; the retarget trail (the
+  journal a task was deferred *from* is detachable, the one it was deferred *to* is not, and **a journal
+  attached and then retargeted onto keeps its own link removable** — the review regression); the
+  specification's permitted delete, where deleting an intermediate journal takes its link and leaves the
+  task and both anchors intact, and the detach that follows it; a real second user's journal and a real
+  second user's task, with **their** link left in place; the two task rejections compared *with each
+  other* rather than each against a freshly-built error; the vanished journal answering 404 against real
+  PostgreSQL; and a unit-of-work observation per method. Both are watched at their own write, which the
+  contact-link tests could not do for the insert — that one wraps itself in a savepoint, so a nested
+  transaction would be open either way.
+  **The attach *order* is deliberately not asserted, and a comment records why**, because review found
+  the test that claimed it could not fail: `created_at` defaults to `now()`, which is
+  `transaction_timestamp()` and therefore identical for every row written in one transaction — and every
+  test here runs in the fixture's single transaction. `ORDER BY created_at, journal_id` degenerated to
+  `ORDER BY journal_id`, and the journals were created in ascending order, so the assertion held whatever
+  the service did. The same fact bounds what the trail can promise in production: two links written in
+  one request tie as well, so *"oldest link first"* is a partial order. **Phase 13 owns whatever ordering
+  its read model needs to guarantee**, and should not assume this column provides it.
+- **Integration (23 new, 136 total):** `backend/tests/integration/api/test_task_endpoints.py` — 204 on each
+  call and on each repeat with the row counted; every status; the deleted-journal detach; each rejection
+  with its JSON:API `code`; the cross-user journal proved to differ from an absent one only in the id;
+  the cross-user task on both verbs; and rejected bodies carrying `role`, `relationship_type` or
+  `status`, another resource type, an unknown member beside `data`, a non-integer id, and `2147483648`
+  in both the body and the path.
+- **Integration (20 new, 103 total):** `backend/tests/integration/mcp/test_task_tools_mcp.py` — the same
+  matrix over `tools/call`, including `attached`/`changed` on all four outcomes, every status, no contact
+  row written, the anchor refusal naming the role, the anchor refusal proved *not* to read like a missing
+  journal, the actionable journal rejection, the indistinguishable cross-user answers on both tools, and
+  three role arguments refused by the transport before the service is reached.
+- **Mutation checks, run rather than argued — and re-run after review corrected two of the counts.**
+  Measured over this phase's unit file plus its three integration files. Removing `@transactional` from
+  either method fails **exactly** its own unit-of-work test and nothing else. Removing detach's anchor
+  gate fails **10** tests across all three levels (the first draft said "exactly the two detach
+  refusals", which was wrong under any scoping and understated the coverage it was advertising).
+  Restoring the pre-review gate order — refuse before the delete — fails **exactly** the two new
+  regression tests. Swapping the plain read for the locking one fails **12 of the 29** unit tests.
+  Removing the vanished-journal mapping fails 2. Loosening the foreign-key match back to the bare column
+  fails the duplicate-key test.
+  **Added by the local review round, and the most valuable of them: neutering both service methods to
+  `return True` must fail every test that claims a link moved.** It now fails 29 of the 30
+  service-integration tests — the survivor is the unreachable-task case, which never reaches the write —
+  and all six per-status tests across REST and MCP. Before that round it left **14** of them passing.
+- **E2E:** none — deferral taken as the phase states. The phase changes no frontend file and ships no
+  user-visible surface; ITER18-001's e2e lands in Phase 22.
+- **Docs:** `docs/architecture/api-design.md`'s *Task Endpoints* gained the two routes and four
+  conventions (the role-named relationship member, the 409 on both verbs, the journal domain's 404, and
+  detach not requiring the journal). `domain-architecture.md` gained the journal-role rules, the
+  explicit-only rule and its one exception, and why the link methods take no lock. `mcp-setup.md` and
+  `mcp-tools.md` deliberately untouched — the tools document themselves.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` (882 files) and
+  `core_shared` (129); `mypy .` clean over **877** backend files and 127 in `core_shared`; the full
+  `tests/unit/` suite (**3,017** tests); and `tests/integration/tasks/`, `tests/integration/api/` and
+  `tests/integration/mcp/` together (**1,080** tests). Re-run three times as `main` moved underneath this
+  branch: after **Phase 9** (task text and delete) — **3,073** and **1,133**; after **ITER18-003 Phase 1**
+  (task created/deleted events), which added a constructor argument every `TaskService` construction in
+  this phase's tests had to take — **3,120** and **1,154**; and after **Phase 8** (retarget over REST and
+  MCP), whose merge was the only one of the three to need a hand-built resolution — **3,186** and
+  **1,219**, all green, over 892 `ruff` and 887 `mypy` files. Also run:
+  `tests/integration/core/integrations/test_journal_series_sync_processor.py`, the only *test* consumer
+  of the shared `task_seeding` module outside those three directories (`tests/integration/conftest.py`
+  imports from it too, and is loaded by every run). Re-run after the review round's fixes.
+  No frontend or e2e gates — the phase changes no frontend file and ships no user-visible surface.
+- **Two things review could not check, recorded rather than asserted.** *Test-first* (delivery rule 1)
+  is unverifiable from a single working tree: the ordering claimed here — service unit tests red on a
+  collection error, then the surfaces' unit tests red, then implementation — is not reconstructable
+  after the fact from one commit, and future phases that want it verified should commit the red step.
+  And **no unauthenticated (401) test exists for these two routes** — but none exists for any route in
+  `test_task_endpoints.py`, so it is a file-wide gap this phase inherited rather than one it introduced.
+  Worth closing when a phase touches that file's structure rather than its content.
 
 #### Phase 11: Contact Links — REST and MCP ✅ COMPLETE
 

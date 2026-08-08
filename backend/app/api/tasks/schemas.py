@@ -56,6 +56,7 @@ CONTACT_RESOURCE_TYPE: Literal["contacts"] = "contacts"
 # retarget body is an instruction with its own preconditions, not a task's
 # attributes.
 TASK_RETARGET_RESOURCE_TYPE: Literal["task-retarget"] = "task-retarget"
+JOURNAL_RESOURCE_TYPE: Literal["journals"] = "journals"
 
 
 class TaskAttributes(BaseModel):
@@ -384,6 +385,77 @@ class TaskContactLinkRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: TaskContactLinkData = Field(..., description="The contact to link")
+
+
+class TaskIntermediateJournalLinkData(BaseModel):
+    """The journal an attach request names, as a JSON:API resource identifier.
+
+    Structurally the contact link's twin, and deliberately so — the two are the
+    same kind of statement, *this task is connected to that row* — but the
+    resource ``type`` is what tells them apart for a client that posts to the
+    wrong route.
+
+    **There is no role field, and its absence is a contract.** A task's journals
+    come in three roles, and only *intermediate* is a row in this table: the
+    creating and due journals are columns on the task, set when it is created and
+    when it is retargeted. A ``role`` accepted here and dropped would leave a
+    client believing it had attached a due journal.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["journals"] = Field(
+        default=JOURNAL_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="The id of the journal to attach")
+
+    @field_validator("id")
+    @classmethod
+    def _must_name_a_row(cls, value: str) -> str:
+        """JSON:API carries ids as strings; this system's journal ids are integers.
+
+        Checked here rather than in the controller for the reason the contact
+        link checks it here: a malformed id is then a 400 from the schema like
+        every other bad field, instead of a ``ValueError`` escaping a cast as a
+        500. The range matters as much as the type — ``journals.id`` is a
+        PostgreSQL ``INTEGER`` and Python's ``int`` is not, so an id past
+        ``INT32_MAX`` would reach the driver and die in parameter binding. See
+        :mod:`app.api.common.identifiers`.
+        """
+        try:
+            journal_id = int(value)
+        except ValueError as error:
+            raise ValueError("The journal id must be an integer") from error
+        if not 1 <= journal_id <= INT32_MAX:
+            raise ValueError(
+                f"The journal id must be between 1 and {INT32_MAX}; no row can "
+                f"have the id {journal_id}"
+            )
+        return value
+
+    @property
+    def journal_id(self) -> int:
+        """The id as the domain wants it, having been validated above."""
+        return int(self.id)
+
+
+class TaskIntermediateJournalLinkRequest(BaseModel):
+    """Request model for attaching an intermediate journal to a task.
+
+    Forbids extras at the envelope as well as inside ``data``, for the reason the
+    create request ended up doing so: a guard with a gap is no guard to whoever
+    finds the gap, and a JSON:API envelope has more than one nesting depth.
+
+    One journal per call rather than JSON:API's to-many array, matching the
+    contact link and the contact-tag surface before it. Recorded as a knowing
+    narrowing of the relationship semantics rather than an oversight.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: TaskIntermediateJournalLinkData = Field(
+        ..., description="The journal to attach"
+    )
 
 
 class TaskResponse(JsonApiResponse[TaskResource]):
