@@ -838,6 +838,178 @@ class TaskService:
             due_journal_id,
         )
 
+    @transactional
+    async def create_task_with_trail(
+        self,
+        *,
+        user_id: str,
+        creating_journal_id: int,
+        due_journal_id: int,
+        text: str,
+        transaction: AsyncConnection,
+        contact_ids: Sequence[int] | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> tuple[Task, list[int]]:
+        """:meth:`create_task`, and the journals the new task has passed through.
+
+        Always empty in practice — creation writes no intermediate link — but
+        read rather than assumed, so the field has one definition across every
+        surface instead of an assumption here and a query elsewhere.
+
+        ``source`` and ``changed_by`` are forwarded rather than defaulted here:
+        a task an assistant created has to read as one an assistant created, and
+        a wrapper that swallowed them would silently relabel every MCP creation
+        as ``SYSTEM`` in the user's own history.
+        """
+        created = await self.create_task(
+            user_id=user_id,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=text,
+            transaction=transaction,
+            contact_ids=contact_ids,
+            source=source,
+            changed_by=changed_by,
+        )
+        return created, await self._trail_within_unit_of_work(created, user_id)
+
+    @transactional
+    async def update_task_with_trail(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        transaction: AsyncConnection,
+        text: str | None = None,
+        status: TaskStatus | None = None,
+    ) -> tuple[Task, list[int]]:
+        """:meth:`update_task`, and the journals the task has passed through."""
+        updated = await self.update_task(
+            user_id=user_id,
+            task_id=task_id,
+            transaction=transaction,
+            text=text,
+            status=status,
+        )
+        return updated, await self._trail_within_unit_of_work(updated, user_id)
+
+    @transactional
+    async def set_status_with_trail(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        status: TaskStatus,
+        transaction: AsyncConnection,
+    ) -> tuple[Task, list[int]]:
+        """:meth:`set_status`, and the journals the task has passed through."""
+        updated = await self.set_status(
+            user_id=user_id,
+            task_id=task_id,
+            status=status,
+            transaction=transaction,
+        )
+        return updated, await self._trail_within_unit_of_work(updated, user_id)
+
+    @transactional
+    async def retarget_due_journal_with_trail(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        due_journal_id: int,
+        transaction: AsyncConnection,
+        acknowledge_reopen: bool = False,
+    ) -> tuple[Task, list[int]]:
+        """:meth:`retarget_due_journal`, and the trail it just added to.
+
+        This is the pairing the retarget surfaces actually want: the journal the
+        task has just left is in the trail, and it is the same trail the task in
+        the first half of the tuple was written against.
+        """
+        retargeted = await self.retarget_due_journal(
+            user_id=user_id,
+            task_id=task_id,
+            due_journal_id=due_journal_id,
+            transaction=transaction,
+            acknowledge_reopen=acknowledge_reopen,
+        )
+        return retargeted, await self._trail_within_unit_of_work(retargeted, user_id)
+
+    async def _trail_within_unit_of_work(self, task: Task, user_id: str) -> list[int]:
+        """The task's trail, read inside the caller's still-open unit of work.
+
+        **Why these four wrappers exist at all.** Reading the trail *after* the
+        write's unit of work has committed lets a concurrent write on the same
+        task land in between, so the response could pair an older
+        ``due_journal_id`` and status with a newer set of links — a task
+        representation that never existed as one version. Raised by the pull
+        request's automated review. ``@transactional`` is re-entrant, so a
+        wrapper that calls the write and then this read has both inside **one**
+        unit of work, and the pair is a single consistent snapshot.
+
+        The response is still a snapshot of the moment it committed rather than
+        of the moment it is read, which is true of every write on this surface
+        and is not what was wrong: what was wrong was the two halves disagreeing
+        with each other.
+
+        A task that has vanished cannot be observed from in here — the write and
+        this read share a transaction — so, unlike the surfaces' own fallback,
+        there is nothing to catch.
+        """
+        assert task.id is not None, "a persisted task has an id"
+        return await self.task_repo.list_intermediate_journal_ids(task.id, user_id)
+
+    async def list_intermediate_journal_ids(
+        self, *, user_id: str, task_id: int
+    ) -> list[int]:
+        """List the journals one of the user's tasks has passed through.
+
+        These are the task's **intermediate** journals: the ones it was
+        discussed, revisited, or previously due in. Retargeting adds the
+        previous due journal automatically — the model's one automatic link —
+        and everything else that lands here is put there deliberately.
+
+        Neither anchor appears: the creating and due journals are columns on the
+        task, and a caller already has both. A journal *can* be in this list and
+        be an anchor at the same time, which is a legitimate shape rather than a
+        bug — retargeting back onto a journal a task already passed through
+        leaves it as both.
+
+        **This is a read**, so it takes no ``transaction`` and is not
+        ``@transactional``. There is nothing to commit, and a unit of work here
+        would commit whatever the caller happened to have open. It exists so a
+        controller or an MCP tool can answer with the trail without reaching
+        past the service into a repository.
+
+        **It is not free, and the cost is deliberate.** The adapter reaches the
+        links through ``_require_task_owned``, which is a ``FOR KEY SHARE``
+        read of the task row — so every caller pays an extra round trip and
+        leaves the weakest of row locks held until the request's connection is
+        released. That guard cannot simply be skipped: the link tables carry no
+        ``user_id``, so it is the *only* thing making this read owner-scoped,
+        and dropping it would let a caller list another user's trail. ``FOR KEY
+        SHARE`` blocks nothing but a delete of that row, and the request is
+        ending anyway, so the exposure is a request's tail rather than a
+        contended lock.
+
+        Args:
+            user_id: The acting user; the task must be theirs
+            task_id: The task to read
+
+        Returns:
+            The linked journal ids, oldest link first. Empty for a task that has
+            passed through nothing, which is a fact about that task rather than
+            an absent answer.
+
+        Raises:
+            TaskNotFoundError: When the task does not exist or is not the acting
+                user's. The two are indistinguishable by design, exactly as they
+                are on every other task read.
+        """
+        return await self.task_repo.list_intermediate_journal_ids(task_id, user_id)
+
     async def _save(
         self, task: Task, creating_journal_id: int, due_journal_id: int
     ) -> Task:

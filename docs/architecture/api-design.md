@@ -297,6 +297,7 @@ do exist for operations that involve no journal at all.
 |---|---|---|
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
 | `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
+| `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
 | `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown |
 | `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned |
@@ -398,6 +399,37 @@ Conventions this surface pins down:
   is `1` because serial columns start there: 404 would suggest the row might
   have existed once. **Other domains' endpoints are still unbounded** — issue
   #1272 tracks the sweep, which is deliberately not done inside a feature phase.
+- **A retarget is an action sub-resource, not a field on the `PATCH`.**
+  `POST /api/tasks/{id}/retarget` follows `POST /api/journals/{id}/merge`. A
+  retarget is not a field assignment: it forces the status to *not done* and
+  writes an intermediate link row, so a `PATCH` body able to carry a `status`
+  beside a `due_journal_id` would have two answers and no rule for choosing
+  between them — and that `PATCH` now genuinely carries two fields, so the
+  collision is concrete rather than hypothetical. JSON:API's canonical to-one
+  relationship route
+  (`PATCH .../relationships/due-journal`) was considered and rejected: a
+  relationship endpoint's 200 must return the *relationship*, and this operation
+  has to return the task. The body's `type` names the **operation**
+  (`task-retarget`) and carries no `id`, because it is an instruction rather
+  than the task's own attributes; the path already says which task.
+- **The reopen acknowledgement is a body attribute, defaulting to false.** Not a
+  query parameter and not a header: it is part of what the caller is asking for,
+  it must be *refused* if misspelled — `extra="forbid"` cannot guard a query
+  string — and MCP has no concept of either. Its refusal is **409 with its own
+  code**, `TASK_REOPEN_NOT_ACKNOWLEDGED`, rather than a validation error: the
+  body is well formed and the journal it names is a real, future, owned one, so
+  what it conflicts with is the state the task is in. The distinct code is what
+  lets a surface offer *"reopen it anyway"*; one that could only see a generic
+  failure would have nothing but "invalid" to show.
+- **Every task response carries the same attributes, including
+  `intermediate_journal_ids`.** The trail is on create, `PATCH` and retarget
+  alike, so a client can write one renderer for the resource: a `PATCH` on a
+  previously-retargeted task answering `[]` would be wrong rather than merely
+  terse. It is an *attribute* rather than a `relationships` member because the
+  resource already exposes `creating_journal_id` and `due_journal_id` as
+  attributes — one convention, not two — and it is read through the service
+  rather than in the controller, since controllers resolve services and never
+  repositories.
 - **A journal relationship is named for the role it holds, not for the resource
   it points at.** A task has three journal relationships — creating, due and
   intermediate — and only the last is a row in a link table, so the route is
@@ -429,9 +461,9 @@ Conventions this surface pins down:
   the contact link carries and for the same reason:
   `task_intermediate_journals` cascades from the journal side, and the
   specification permits deleting a journal that is only an intermediate link.
-- The matching MCP tools are `create_task`, `set_task_status`, `update_task_text`,
-  `delete_task`, `link_task_to_contact`, `unlink_task_from_contact`,
-  `attach_intermediate_journal_to_task` and
+- The matching MCP tools are `create_task`, `set_task_status`, `retarget_task`,
+  `update_task_text`, `delete_task`, `link_task_to_contact`,
+  `unlink_task_from_contact`, `attach_intermediate_journal_to_task` and
   `detach_intermediate_journal_from_task` (documented in their docstrings and
   parameter schemas, per the MCP documentation convention). `update_task_text`
   offers no `status` parameter and `set_task_status` no `text`: a model gets one
@@ -439,7 +471,9 @@ Conventions this surface pins down:
   do — the combined write exists for the `PATCH` body that genuinely carries
   both. The four link tools return the resulting state — `linked` or `attached` —
   beside `changed` (whether a row moved), which is the one thing the 204
-  withholds and an agent may want.
+  withholds and an agent may want. The trail matters more over MCP than over
+  HTTP: no tool reads a task back, so a trail left out of these answers would be
+  unreachable rather than inconvenient.
 
 ## Authentication Guidelines
 
