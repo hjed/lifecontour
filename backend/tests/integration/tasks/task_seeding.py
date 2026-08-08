@@ -262,6 +262,24 @@ async def stored_status(conn: AsyncConnection, task_id: int) -> str:
     )
 
 
+async def stored_updated_at(conn: AsyncConnection, task_id: int) -> datetime:
+    """The ``updated_at`` column as the database holds it.
+
+    **Only meaningful after ``backdate_updated_at``.** Comparing this against a
+    value the same transaction produced proves nothing — see that function for
+    why. Read it to check a backdated timestamp either survived a no-op or was
+    overwritten by a real write; do not use it to compare two readings taken
+    inside one test without backdating between them.
+    """
+    stored: datetime = (
+        await conn.execute(
+            text("SELECT updated_at FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+    ).scalar_one()
+    return stored
+
+
 async def stored_text(conn: AsyncConnection, task_id: int) -> str:
     """The text column as the database holds it, bypassing every layer above."""
     return str(

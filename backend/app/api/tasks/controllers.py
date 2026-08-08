@@ -23,6 +23,28 @@ second definition of what got linked, sitting beside a read surface that does
 not exist. 204 is also what keeps idempotency invisible: a repeat of either call
 is indistinguishable from the first, which is the whole of what idempotent
 means to a client.
+
+The **retarget** is the exception, and answers with the task. It is an action
+sub-resource — ``POST /tasks/{id}/retarget``, the shape
+``POST /journals/{id}/merge`` already uses — rather than a field on the status
+``PATCH``, because it is not a field assignment: it forces the status to *not
+done* and writes an intermediate link, so a body able to carry a ``status``
+beside a ``due_journal_id`` would have two answers and no rule for picking one.
+Its answer includes the task's **intermediate journals**, which is what lets a
+caller see the journal it just left without a second request. Every route that
+returns a task fills the same attribute in — create and the ``PATCH`` as well as
+the retarget — so there is one resource type with one attribute set whichever
+route produced it, rather than a payload a client has to special-case. While no
+read surface exists, these responses are also the only place the trail is
+reachable at all.
+
+Those routes call the service's ``*_with_trail`` methods rather than reading the
+trail themselves, and that is a correctness matter rather than tidiness: a read
+taken *after* the write's unit of work commits can observe a concurrent write on
+the same task, and would pair an older ``due_journal_id`` and status with a newer
+set of links — a task representation that never existed as one version. The
+wrappers put both inside one unit of work. Raised by the pull request's automated
+review.
 """
 
 from core_shared.models.history import Provenance
@@ -39,6 +61,7 @@ from app.api.tasks.schemas import (
     TaskCreateRequest,
     TaskResource,
     TaskResponse,
+    TaskRetargetRequest,
     TaskUpdateRequest,
 )
 from app.core.tasks.services.task_service import TaskService
@@ -47,12 +70,17 @@ from app.infrastructure.auth.models import SessionUser
 router = APIRouter(tags=["tasks"])
 
 
-def _to_resource(task: Task) -> TaskResource:
+def _to_resource(task: Task, intermediate_journal_ids: list[int]) -> TaskResource:
     """Render a task as a JSON:API resource.
 
     No ``self`` link is emitted: there is still no endpoint to *read* a task
     back — a ``PATCH`` target is not a ``GET`` target — and a link that 404s is
     worse than an absent one. It arrives with the read model.
+
+    The trail is a parameter rather than something read here, because a renderer
+    that queried would make every caller's cost invisible. Every route that
+    returns a task passes one: the resource has a single attribute set whichever
+    route produced it, so a client can write one renderer for it.
     """
     return TaskResource(
         id=str(task.id),
@@ -61,6 +89,7 @@ def _to_resource(task: Task) -> TaskResource:
             status=task.status,
             creating_journal_id=task.creating_journal_id,
             due_journal_id=task.due_journal_id,
+            intermediate_journal_ids=intermediate_journal_ids,
             created_at=task.created_at,
             updated_at=task.updated_at,
         ),
@@ -90,12 +119,17 @@ async def create_task(
              else's — or a referenced contact does not exist.
     """
     attributes = task_request.data.attributes
-    # The provenance the service records on the ``TaskCreated`` event. Passed
+    # The trail is read inside the write's unit of work rather than after it, so
+    # the task and its links in the response are one consistent snapshot. Empty
+    # in practice on this path — creation writes no intermediate link — but read
+    # rather than assumed, so the field has one definition across every surface.
+    #
+    # The provenance the service records on the ``TaskCreated`` event is passed
     # explicitly because the service defaults to ``SYSTEM``: an endpoint that
     # said nothing would file every change a person made in the browser under
     # "system" in their own history, and nothing above the outbox row would show
     # it.
-    created = await task_service.create_task(
+    created, trail = await task_service.create_task_with_trail(
         user_id=user.id,
         creating_journal_id=journal_id,
         due_journal_id=attributes.due_journal_id,
@@ -105,7 +139,7 @@ async def create_task(
         source=Provenance.UI,
         changed_by="ui",
     )
-    return TaskResponse(data=_to_resource(created))
+    return TaskResponse(data=_to_resource(created, trail))
 
 
 @router.patch("/tasks/{task_id}")
@@ -154,7 +188,7 @@ async def update_task(
         )
 
     attributes = task_request.data.attributes
-    updated = await task_service.update_task(
+    updated, trail = await task_service.update_task_with_trail(
         user_id=user.id,
         task_id=task_id,
         text=attributes.text,
@@ -163,7 +197,57 @@ async def update_task(
         source=Provenance.UI,
         changed_by="ui",
     )
-    return TaskResponse(data=_to_resource(updated))
+    return TaskResponse(data=_to_resource(updated, trail))
+
+
+@router.post("/tasks/{task_id}/retarget")
+@inject
+async def retarget_task(
+    task_id: DatabaseIdPath,
+    retarget_request: TaskRetargetRequest,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskResponse:
+    """Move a task onto a new due journal, keeping the one it is leaving.
+
+    This is how a deadline is extended, and it is the **only** way a cancelled
+    or a done task is reopened: retargeting always leaves the task *not done*.
+    It is also what a refused status transition tells a caller to do.
+
+    An action sub-resource rather than a field on ``PATCH /api/tasks/{id}``,
+    following ``POST /api/journals/{id}/merge``. A retarget is not a field
+    assignment — it forces the status and writes a link row — so a body able to
+    carry a ``status`` beside a ``due_journal_id`` would have two answers and no
+    rule for choosing between them.
+
+    The response carries the task **and its intermediate journals**, including
+    the one it has just left, so the trail is visible without a second request.
+    Asking for the journal the task is already due in is a no-op: nothing is
+    set, so nothing is validated, nothing is written and no acknowledgement is
+    needed.
+
+    Raises:
+        400: A due journal that is not future-dated (the message carries both
+             dates), an unknown attribute, a body declaring another resource
+             type, or an id outside the range an ``INTEGER`` column can hold.
+        404: The task does not exist or is not yours, or the new due journal
+             does not exist or is not yours — in both cases the two are the same
+             answer by design.
+        409: The task is *done* and the reopen was not acknowledged. Its own
+             code, ``TASK_REOPEN_NOT_ACKNOWLEDGED``, so a surface can offer
+             "reopen it anyway" rather than showing a generic failure. Nothing
+             is written: not the status, not the anchor, not the link.
+    """
+    attributes = retarget_request.data.attributes
+    retargeted, trail = await task_service.retarget_due_journal_with_trail(
+        user_id=user.id,
+        task_id=task_id,
+        due_journal_id=attributes.due_journal_id,
+        transaction=connection,
+        acknowledge_reopen=attributes.acknowledge_reopen,
+    )
+    return TaskResponse(data=_to_resource(retargeted, trail))
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

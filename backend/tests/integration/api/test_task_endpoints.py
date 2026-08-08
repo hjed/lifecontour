@@ -55,16 +55,20 @@ from tests.integration.tasks.task_seeding import (
     FIXED_PAST_INSTANT,
     OTHER_USER_ID,
     USER_ID,
+    backdate_updated_at,
     count,
     create_contact,
     create_journal,
     create_task,
     delete_contact,
+    intermediate_journal_ids,
     link_contact,
     link_intermediate_journal,
     linked_contact_ids,
+    stored_anchors,
     stored_status,
     stored_text,
+    stored_updated_at,
     task_events,
     task_exists,
 )
@@ -1195,6 +1199,815 @@ class TestRejectedUpdateBodies:
         assert _error(response.json())["code"] == "TASK_VALIDATION_ERROR"
         assert await stored_status(async_connection, target_id) == "not_done"
         assert await stored_status(async_connection, other_id) == "not_done"
+
+
+def _retarget_body(due_journal_id: object, **attributes: object) -> dict[str, object]:
+    return {
+        "data": {
+            "type": "task-retarget",
+            "attributes": {"due_journal_id": due_journal_id, **attributes},
+        }
+    }
+
+
+@pytest.mark.integration
+class TestRetargetEndpoint:
+    """``POST /api/tasks/{task_id}/retarget``: the deadline moves, the trail stays.
+
+    An action sub-resource rather than a field on the status ``PATCH``, for the
+    reason ``POST /api/journals/{id}/merge`` is one: a retarget is not an
+    assignment. It forces the status to *not done* and writes a link row, so a
+    body able to carry a ``status`` alongside a ``due_journal_id`` would have two
+    answers and no rule for choosing between them.
+
+    Phase 7 proved the rules against the service. What this file proves is that
+    the **endpoint inherits them**, which a shared service is not evidence of:
+    the whole matrix is asserted again at the surface a client reaches.
+
+    **Trails of more than one journal are compared sorted.** The port promises
+    oldest link first and orders by ``created_at``, but every request in a test
+    shares the fixture's single connection and therefore its transaction
+    timestamp — so ``created_at`` ties and the tie-break decides. Asserting the
+    tie-break's order would be asserting an artefact of the fixture rather than
+    a property of the surface; the membership and the *count* are what the
+    de-duplication claim is about.
+    """
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_a_retarget_lands_the_task_not_done_on_the_new_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """Whatever it was before — including *cancelled*, which ``PATCH`` cannot leave.
+
+        This is the specification's *"retargeting always leaves the task not
+        done"* asserted per starting status, because "whatever the current
+        status" is itself the claim.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json=_retarget_body(later_id, acknowledge_reopen=True),
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["type"] == "tasks"
+        assert data["id"] == str(task_id)
+        assert data["attributes"]["status"] == "not_done"
+        assert data["attributes"]["due_journal_id"] == later_id
+        assert data["attributes"]["creating_journal_id"] == creating_id
+        assert await stored_status(async_connection, task_id) == "not_done"
+        assert await stored_anchors(async_connection, task_id) == (
+            creating_id,
+            later_id,
+        )
+
+    async def test_the_response_carries_the_journal_the_task_just_left(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The phase's second criterion, asserted on the payload rather than the row.
+
+        A caller that had to make a second request to discover the trail would
+        not have been shown it — and the specification's third success criterion
+        is that a user moving a deadline *"still see[s] the trail of journals it
+        passed through"*.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(later_id)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["intermediate_journal_ids"] == [
+            due_id
+        ]
+
+    async def test_a_repeatedly_deferred_task_accumulates_its_trail(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Three hops, and the payload shows every journal the task passed through."""
+        creating_id, due_id = task_anchors
+        second = await create_journal(
+            journal_repository, title="Two weeks out", days_offset=14
+        )
+        third = await create_journal(
+            journal_repository, title="Three weeks out", days_offset=21
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        first_hop = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(second)
+        )
+        second_hop = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(third)
+        )
+
+        assert (first_hop.status_code, second_hop.status_code) == (200, 200)
+        trail = second_hop.json()["data"]["attributes"]["intermediate_journal_ids"]
+        assert sorted(trail) == sorted([due_id, second])
+
+    async def test_returning_to_a_journal_already_in_the_trail_adds_no_duplicate(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Deferral is not always forwards, and the link table has one row per pair.
+
+        Nothing is unlinked either: the journal it returns *from* stays in the
+        trail, because it really was previously due.
+        """
+        creating_id, due_id = task_anchors
+        second = await create_journal(
+            journal_repository, title="Two weeks out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        # Out to the later journal, back to the original, and out again — so the
+        # third hop leaves a journal the trail already holds.
+        for target in (second, due_id):
+            assert (
+                await authenticated_client.post(
+                    f"/api/tasks/{task_id}/retarget", json=_retarget_body(target)
+                )
+            ).status_code == 200
+        final = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(second)
+        )
+
+        assert final.status_code == 200
+        trail = final.json()["data"]["attributes"]["intermediate_journal_ids"]
+        assert sorted(trail) == sorted([due_id, second])
+        # Against the live composite primary key, not just the payload: three
+        # hops, two journals, two rows.
+        assert sorted(await intermediate_journal_ids(async_connection, task_id)) == (
+            sorted([due_id, second])
+        )
+
+    async def test_a_lapsed_task_is_resurrected_and_keeps_the_passed_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The journal being *left* is never judged, which is what makes this work.
+
+        A lapsed task is one whose due journal has passed. The specification's
+        fourth success criterion is that the user can find it on that journal and
+        resurrect it — so the past journal cannot be re-validated on the way out,
+        and it stays in the trail afterwards.
+        """
+        creating_id, _ = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        future_id = await create_journal(
+            journal_repository, title="Next week", days_offset=7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=passed_id,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(future_id)
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["due_journal_id"] == future_id
+        assert attributes["intermediate_journal_ids"] == [passed_id]
+
+    async def test_the_creating_journal_is_a_legitimate_target(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Invariant 6 holds on a retarget as it does on creation."""
+        journal_id = await create_journal(
+            journal_repository, title="Next week's trip", days_offset=7
+        )
+        other_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=journal_id,
+            due_journal_id=other_id,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(journal_id)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["due_journal_id"] == journal_id
+
+    async def test_retargeting_onto_the_current_due_journal_writes_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A no-op, mirroring the status endpoint's same-status no-op.
+
+        Nothing is being *set*, so nothing is validated and nothing is written —
+        which is what keeps a **lapsed** task's own journal answerable rather
+        than being refused for having passed.
+
+        **The timestamp is backdated first, without which the assertion below
+        could not fail.** ``updated_at`` is written with ``now()``, which in
+        PostgreSQL is the *transaction* timestamp, and every request in a test
+        shares the fixture's single transaction — so an insert-time default and
+        an update-time ``now()`` are the identical value, and "it did not move"
+        holds whether or not anything was written. Backdating breaks the tie.
+        A *cancelled* task is used so the status is a second, independent
+        witness: any path but the no-op would have written *not done* over it.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+        backdated = await backdate_updated_at(async_connection, task_id)
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(due_id)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["status"] == "cancelled"
+        assert await stored_status(async_connection, task_id) == "cancelled"
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+        assert await stored_updated_at(async_connection, task_id) == backdated
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_a_real_retarget_does_move_updated_at(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The other half of the pair, without which the no-op proves nothing.
+
+        A backdated timestamp that never moves is equally consistent with "the
+        no-op worked" and "no write ever reaches this column".
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        backdated = await backdate_updated_at(async_connection, task_id)
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(later_id)
+        )
+
+        assert response.status_code == 200
+        assert await stored_updated_at(async_connection, task_id) > backdated
+
+
+@pytest.mark.integration
+class TestReopeningADoneTaskNeedsAcknowledging:
+    """The phase's third criterion: a refusal a surface can *act* on.
+
+    Retargeting a done task reopens it, and the specification says the product
+    must say so before it happens. That is only buildable if the endpoint's
+    refusal is distinguishable from a validation failure — a surface that can
+    tell them apart can offer *"reopen it anyway"*, while one that cannot has
+    only "invalid" to show.
+    """
+
+    async def test_an_unacknowledged_reopen_answers_409_with_its_own_code(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(later_id)
+        )
+
+        assert response.status_code == 409
+        error = _error(response.json())
+        assert error["code"] == "TASK_REOPEN_NOT_ACKNOWLEDGED"
+        assert "acknowledge" in str(error["detail"]).lower()
+
+    async def test_the_refusal_writes_nothing_at_all(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Not the status, not the anchor, and not the automatic link.
+
+        A refusal that had already written the link would leave a trail through
+        a journal the task never moved to.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(later_id)
+        )
+
+        assert response.status_code == 409
+        assert await stored_status(async_connection, task_id) == "done"
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_the_same_request_acknowledged_reopens_the_task(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The refusal names a way through, and the way through works."""
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json=_retarget_body(later_id, acknowledge_reopen=True),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["status"] == "not_done"
+        assert await stored_status(async_connection, task_id) == "not_done"
+
+    async def test_a_cancelled_task_is_reopened_without_any_acknowledgement(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Retargeting is the documented — and only — way out of *cancelled*.
+
+        It is what ``TASK_STATUS_TRANSITION_REFUSED`` tells a caller to do, so
+        gating it would be asking the user to confirm the remedy they were just
+        sent to.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.CANCELLED,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(later_id)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["status"] == "not_done"
+
+    async def test_the_acknowledgement_does_not_excuse_a_past_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The gate is a confirmation, not a bypass, and it is checked last.
+
+        A caller who has confirmed a reopen still has to have named a journal
+        that satisfies invariant 4 — and one who has *not* confirmed is told
+        about the journal first, rather than being asked to confirm a request
+        that was never going to succeed.
+        """
+        creating_id, due_id = task_anchors
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(past_id)
+        )
+
+        assert response.status_code == 400
+        assert _error(response.json())["code"] == "TASK_DUE_JOURNAL_NOT_FUTURE"
+        assert await stored_status(async_connection, task_id) == "done"
+
+
+@pytest.mark.integration
+class TestTheRetargetRevalidatesTheJournalRules:
+    """Invariant 4 and ownership, re-run at the surface for every status."""
+
+    @pytest.mark.parametrize("status", list(TaskStatus))
+    async def test_a_past_dated_journal_is_refused_whatever_the_status(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """A due journal is being *set*, so the rule applies exactly as on creation."""
+        creating_id, due_id = task_anchors
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json=_retarget_body(past_id, acknowledge_reopen=True),
+        )
+
+        assert response.status_code == 400
+        error = _error(response.json())
+        assert error["code"] == "TASK_DUE_JOURNAL_NOT_FUTURE"
+        assert "not after today" in str(error["detail"])
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_another_users_journal_reads_as_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Byte-identical once the ids are stripped, as creation's is.
+
+        A distinguishable answer would turn the retarget into a way to probe for
+        another user's journals.
+        """
+        creating_id, due_id = task_anchors
+        foreign_id = await create_journal(
+            journal_repository,
+            title="Somebody else's trip",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        foreign = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(foreign_id)
+        )
+        absent = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(999_999)
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        foreign_error, absent_error = _error(foreign.json()), _error(absent.json())
+        assert (
+            foreign_error["code"]
+            == absent_error["code"]
+            == "TASK_ANCHOR_JOURNAL_NOT_FOUND"
+        )
+        assert str(foreign_error["detail"]).replace(str(foreign_id), "X") == str(
+            absent_error["detail"]
+        ).replace("999999", "X")
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+
+    async def test_another_users_task_is_indistinguishable_from_an_absent_one(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """And is left exactly where it was."""
+        _, due_id = task_anchors
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            async_connection,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        foreign = await authenticated_client.post(
+            f"/api/tasks/{foreign_task}/retarget", json=_retarget_body(due_id)
+        )
+        absent = await authenticated_client.post(
+            "/api/tasks/999999/retarget", json=_retarget_body(due_id)
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        foreign_error, absent_error = _error(foreign.json()), _error(absent.json())
+        assert foreign_error["code"] == absent_error["code"] == "TASK_NOT_FOUND"
+        assert str(foreign_error["detail"]).replace(str(foreign_task), "X") == str(
+            absent_error["detail"]
+        ).replace("999999", "X")
+        assert await stored_anchors(async_connection, foreign_task) == (
+            foreign_journal,
+            foreign_journal,
+        )
+
+
+@pytest.mark.integration
+class TestRejectedRetargetBodies:
+    """What a client may not send, and that the task does not move when it does."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"data": {"type": "task-retarget", "attributes": {}}},
+            {
+                "data": {
+                    "type": "tasks",
+                    "attributes": {"due_journal_id": 1},
+                }
+            },
+            {
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": 1, "status": "done"},
+                }
+            },
+            {
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": 1, "creating_journal_id": 1},
+                }
+            },
+            {
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {
+                        "due_journal_id": 1,
+                        "now": "2020-01-01T00:00:00+00:00",
+                    },
+                }
+            },
+            {
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": 1, "due_date": "2026-09-01"},
+                }
+            },
+            {
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": 1},
+                },
+                "acknowledge_reopen": True,
+            },
+            {
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": 1},
+                    "acknowledge_reopen": True,
+                }
+            },
+        ],
+        ids=[
+            "no due journal",
+            "wrong resource type",
+            "a status",
+            "the creating journal",
+            "now",
+            "a bare date",
+            "acknowledgement at the root",
+            "acknowledgement beside the attributes",
+        ],
+    )
+    async def test_a_rejected_body_leaves_the_task_where_it_was(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        body: dict[str, object],
+    ):
+        """The three nesting levels are guarded, and so is the operation's scope.
+
+        A misspelled acknowledgement silently dropped would be worse than one
+        refused: the caller would believe it had confirmed a reopen it had not.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=body
+        )
+
+        assert response.status_code == 400
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+
+    @pytest.mark.parametrize("value", ["true", "yes", 1, "1"], ids=str)
+    async def test_a_truthy_non_boolean_acknowledgement_does_not_reopen_a_done_task(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        value: object,
+    ):
+        """The wrong *type* must not be able to confirm a reopen.
+
+        Pydantic's ordinary ``bool`` parsing accepts all of these, so before the
+        pull request's review caught it a client sending ``"true"`` reopened a
+        completed task without ever sending a boolean. Asserted at the surface
+        as well as on the schema, because what matters is that the task is still
+        *done* afterwards — the acknowledgement gate's whole purpose.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json=_retarget_body(later_id, acknowledge_reopen=value),
+        )
+
+        assert response.status_code == 400
+        assert await stored_status(async_connection, task_id) == "done"
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+
+    async def test_a_due_journal_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """400 rather than the 500 an unbounded id used to reach the driver as."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(2_147_483_648)
+        )
+
+        assert response.status_code == 400
+        assert await stored_anchors(async_connection, task_id) == (creating_id, due_id)
+
+    async def test_a_path_task_id_beyond_int32_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        task_anchors: tuple[int, int],
+    ):
+        _, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            "/api/tasks/2147483648/retarget", json=_retarget_body(due_id)
+        )
+
+        assert response.status_code == 400
+
+
+@pytest.mark.integration
+class TestEveryTaskResponseCarriesTheSameAttributes:
+    """One resource type, one attribute set, whichever route produced it.
+
+    A ``tasks`` resource whose fields varied by route would be a worse contract
+    than the one extra indexed read it saves: a client could not write a single
+    renderer for it, and a ``PATCH`` answering with an empty trail for a task
+    that has one would simply be wrong.
+    """
+
+    async def test_a_freshly_created_task_has_an_empty_trail(
+        self,
+        authenticated_client: AsyncClient,
+        task_anchors: tuple[int, int],
+    ):
+        """Creation writes no intermediate link, and says so rather than omitting it."""
+        creating_id, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json=_body(text="print the permit", due_journal_id=due_id),
+        )
+
+        assert response.status_code == 201
+        assert response.json()["data"]["attributes"]["intermediate_journal_ids"] == []
+
+    async def test_a_status_change_reports_the_trail_the_task_already_had(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Answering ``[]`` here would be a lie rather than an omission."""
+        creating_id, due_id = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Where it used to be due", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=passed_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, status="done")
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["intermediate_journal_ids"] == [
+            passed_id
+        ]
 
 
 def _link_body(contact_id: int, **overrides: object) -> dict[str, object]:

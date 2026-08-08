@@ -25,7 +25,7 @@ from typing import Annotated, Any
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import Task, TaskStatus
 from fastmcp import FastMCP
-from pydantic import Field
+from pydantic import Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
@@ -58,13 +58,22 @@ def _link_to_dict(
     }
 
 
-def _task_to_dict(task: Task) -> dict[str, Any]:
+def _task_to_dict(task: Task, intermediate_journal_ids: list[int]) -> dict[str, Any]:
+    """The answer every task-returning tool gives.
+
+    ``intermediate_journal_ids`` is passed in rather than read here, and every
+    caller supplies one, so a task looks the same whichever tool produced it.
+    It matters more over MCP than over HTTP: there is no tool that reads a task
+    back, so a trail left out of these answers would be unreachable rather than
+    merely inconvenient.
+    """
     return {
         "id": task.id,
         "text": task.text,
         "status": str(task.status),
         "creating_journal_id": task.creating_journal_id,
         "due_journal_id": task.due_journal_id,
+        "intermediate_journal_ids": intermediate_journal_ids,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
     }
@@ -126,7 +135,8 @@ async def create_task(
 
     Returns:
         JSON string with the created task: id, text, status (always "not_done"
-        on creation), both journal anchors, and timestamps.
+        on creation), both journal anchors, the journals it has passed through
+        (always empty on creation), and timestamps.
     """
     user_id = await get_current_user_id()
 
@@ -135,7 +145,7 @@ async def create_task(
     # agent's work indistinguishable from an internal one in the user's own
     # history — the distinction the activity-history specification asks for by
     # name.
-    created = await task_service.create_task(
+    created, trail = await task_service.create_task_with_trail(
         user_id=user_id,
         creating_journal_id=creating_journal_id,
         due_journal_id=due_journal_id,
@@ -145,7 +155,7 @@ async def create_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_task_to_dict(created), indent=2)
+    return json.dumps(_task_to_dict(created, trail), indent=2)
 
 
 @mcp_unified_error_handler("set_task_status", "task")
@@ -180,12 +190,12 @@ async def set_task_status(
     changes nothing.
 
     Returns:
-        JSON string with the task: id, text, status, both journal anchors, and
-        timestamps.
+        JSON string with the task: id, text, status, both journal anchors, the
+        journals it has passed through, and timestamps.
     """
     user_id = await get_current_user_id()
 
-    updated = await task_service.set_status(
+    updated, trail = await task_service.set_status_with_trail(
         user_id=user_id,
         task_id=task_id,
         status=status,
@@ -193,7 +203,7 @@ async def set_task_status(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_task_to_dict(updated), indent=2)
+    return json.dumps(_task_to_dict(updated, trail), indent=2)
 
 
 @mcp_unified_error_handler("link_task_to_contact", "task")
@@ -287,6 +297,77 @@ async def unlink_task_from_contact(
     )
 
 
+@mcp_unified_error_handler("retarget_task", "task")
+async def retarget_task(
+    task_id: Annotated[
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to retarget.")
+    ],
+    due_journal_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description=(
+                "The journal the task should now be due in. Must be an existing "
+                "journal of yours dated in the future: today is not the future, "
+                "and a multi-day journal already under way is dated by the day "
+                "it started. The rule is re-checked here whatever the task's "
+                "current status, so create the journal first if the day you "
+                "want has none."
+            ),
+        ),
+    ],
+    acknowledge_reopen: Annotated[
+        StrictBool,
+        Field(
+            description=(
+                "Confirms that reopening a task which is already done is "
+                "intended. Without it, retargeting a done task is refused. "
+                "Ignored for a task that is not done or is cancelled, neither "
+                "of which needs confirming. Must be a JSON boolean — 1, "
+                '"true" and "yes" are refused rather than treated as a '
+                "confirmation."
+            )
+        ),
+    ] = False,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> str:
+    """
+    Move a task to a different due journal, keeping the one it is leaving.
+
+    This is how a deadline is extended, and it is the only way a cancelled task
+    is reopened — it is what set_task_status tells you to do when it refuses to
+    leave cancelled. The previous due journal is kept automatically as an
+    intermediate journal, so the trail of a repeatedly-deferred task stays
+    visible on the journals it passed through.
+
+    Retargeting always leaves the task **not done**. For a task that is already
+    done that means reopening it, which is rarely what moving a date was meant
+    to do, so it is refused unless acknowledge_reopen is true; the refusal says
+    so. A cancelled task needs no such confirmation.
+
+    Asking for the journal the task is already due in changes nothing at all.
+    The journal the task is *leaving* is never checked, so a task whose due
+    journal has already passed can be moved onto a future one.
+
+    Returns:
+        JSON string with the task: id, text, status (always "not_done" after a
+        real retarget), both journal anchors, the journals it has passed
+        through — including the one it just left — and timestamps.
+    """
+    user_id = await get_current_user_id()
+
+    retargeted, trail = await task_service.retarget_due_journal_with_trail(
+        user_id=user_id,
+        task_id=task_id,
+        due_journal_id=due_journal_id,
+        transaction=db_connection,
+        acknowledge_reopen=acknowledge_reopen,
+    )
+    return json.dumps(_task_to_dict(retargeted, trail), indent=2)
+
+
 @mcp_unified_error_handler("update_task_text", "task")
 async def update_task_text(
     task_id: Annotated[
@@ -317,12 +398,12 @@ async def update_task_text(
     link tools for that.
 
     Returns:
-        JSON string with the task: id, text, status, both journal anchors, and
-        timestamps.
+        JSON string with the task: id, text, status, both journal anchors, the
+        journals it has passed through, and timestamps.
     """
     user_id = await get_current_user_id()
 
-    updated = await task_service.update_task(
+    updated, trail = await task_service.update_task_with_trail(
         user_id=user_id,
         task_id=task_id,
         text=text,
@@ -330,7 +411,7 @@ async def update_task_text(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_task_to_dict(updated), indent=2)
+    return json.dumps(_task_to_dict(updated, trail), indent=2)
 
 
 @mcp_unified_error_handler("delete_task", "task")
@@ -381,6 +462,7 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
     mcp.add_tool(set_task_status)
+    mcp.add_tool(retarget_task)
     mcp.add_tool(update_task_text)
     mcp.add_tool(delete_task)
     mcp.add_tool(link_task_to_contact)
