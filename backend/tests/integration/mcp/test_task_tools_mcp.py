@@ -2173,7 +2173,7 @@ class TestIntermediateJournalTools:
         assert second["attached"] is False
 
     @pytest.mark.parametrize("status", list(TaskStatus))
-    async def test_the_links_are_editable_in_any_status(
+    async def test_attaching_works_in_any_status(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
@@ -2197,6 +2197,7 @@ class TestIntermediateJournalTools:
             )
 
         assert payload["changed"] is True
+        assert await intermediate_journal_ids(clean_database, task_id) == [mentioned]
         assert await stored_status(clean_database, task_id) == status.value
 
     async def test_no_contact_link_is_written(
@@ -2398,9 +2399,21 @@ class TestIntermediateJournalToolRejections:
             foreign_detach = await _detach_journal(
                 client, session_id, task_id=their_task, journal_id=their_mention
             )
+            absent_detach = await _detach_journal(
+                client, session_id, task_id=999_999, journal_id=their_mention
+            )
 
+        # Compared with each other rather than each against a constant, which is
+        # what the name promises; the id the caller supplied is normalised out as
+        # the only legitimate difference.
         assert foreign_attach["error"] == absent_attach["error"] == "Not found"
-        assert foreign_detach["error"] == "Not found"
+        assert foreign_attach["message"].replace(str(their_task), "X") == absent_attach[
+            "message"
+        ].replace("999999", "X")
+        assert foreign_detach["error"] == absent_detach["error"] == "Not found"
+        assert foreign_detach["message"].replace(str(their_task), "X") == absent_detach[
+            "message"
+        ].replace("999999", "X")
         assert await intermediate_journal_ids(clean_database, their_task) == [
             their_mention
         ]

@@ -45,6 +45,7 @@ from core_shared.models.tasks import (
 )
 from sqlalchemy.exc import IntegrityError
 
+from app.core.journal.models.repositories import JournalRepository
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.models.repositories import TaskRepository
 from app.core.tasks.services.task_service import TaskService
@@ -139,8 +140,12 @@ def mock_journal_repo() -> AsyncMock:
     other fixture (besides the task repository) worth specialising here —
     ``mock_contact_repo``, ``mock_settings_repo``, ``mock_event_publisher`` and
     ``mock_transaction`` are taken from the conftest unchanged.
+
+    ``spec=`` for the same reason the task double carries it: ``detach`` asserts
+    ``mock_calls == []`` on this port, and on a bare double that assertion would
+    survive the port being renamed underneath it.
     """
-    repo = AsyncMock()
+    repo = AsyncMock(spec=JournalRepository)
     repo.find_by_ids_for_user.return_value = [make_journal()]
     return repo
 
@@ -676,7 +681,7 @@ class TestUnreachableTasks:
         mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, OTHER_USER_ID)
 
     @pytest.mark.asyncio
-    async def test_detach_reports_an_unknown_task_as_not_found(
+    async def test_detach_from_another_users_task_is_indistinguishable(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,

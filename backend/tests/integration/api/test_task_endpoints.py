@@ -2688,7 +2688,7 @@ class TestIntermediateJournalLinkEndpoints:
         assert response.status_code == 204
 
     @pytest.mark.parametrize("status", list(TaskStatus))
-    async def test_the_links_are_editable_in_any_status(
+    async def test_attaching_works_in_any_status(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
@@ -2711,6 +2711,7 @@ class TestIntermediateJournalLinkEndpoints:
         )
 
         assert response.status_code == 204
+        assert await intermediate_journal_ids(async_connection, task_id) == [mentioned]
         assert await stored_status(async_connection, task_id) == status.value
 
 
@@ -2864,10 +2865,29 @@ class TestIntermediateJournalLinkRejections:
             f"/api/tasks/{their_task}/relationships/intermediate-journals/"
             f"{their_mention}"
         )
+        absent_detach = await authenticated_client.delete(
+            f"/api/tasks/999999/relationships/intermediate-journals/{their_mention}"
+        )
 
+        # The two answers compared *with each other*, which is what the name
+        # promises — an earlier version checked each against a constant and would
+        # have passed for two bodies that differed in any other way. The id the
+        # caller supplied is the only legitimate difference, so it is normalised
+        # out; a foreign task must otherwise be indistinguishable from an absent
+        # one, or the endpoint becomes a way to probe for other users' tasks.
         assert foreign_attach.status_code == absent_attach.status_code == 404
         assert _error(foreign_attach.json())["code"] == "TASK_NOT_FOUND"
-        assert foreign_detach.status_code == 404
+        assert str(_error(foreign_attach.json())["detail"]).replace(
+            str(their_task), "X"
+        ) == str(_error(absent_attach.json())["detail"]).replace("999999", "X")
+
+        # And the same on DELETE, which the earlier version never issued for the
+        # absent case at all.
+        assert foreign_detach.status_code == absent_detach.status_code == 404
+        assert str(_error(foreign_detach.json())["detail"]).replace(
+            str(their_task), "X"
+        ) == str(_error(absent_detach.json())["detail"]).replace("999999", "X")
+
         assert await intermediate_journal_ids(async_connection, their_task) == [
             their_mention
         ]

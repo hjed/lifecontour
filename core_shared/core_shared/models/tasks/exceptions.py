@@ -148,12 +148,25 @@ class TaskJournalIsAnchorError(TaskDomainError):
       journal it already mentioned produces exactly that — and refusing there
       would make a link the user created permanently unremovable.
 
-    One rule, so one error rather than two that would state it twice. What
-    differs between the two directions is only which call was made, which the
-    caller already knows; what they cannot know is **which anchor** it was and
-    how that anchor is really changed, so the message carries both. The creating
-    journal never changes, and the due journal is changed by *retargeting* the
-    task — naming the operation is what lets an agent recover without guessing.
+    One error rather than two, because the *remedy* is the same in both
+    directions: whatever the caller wanted, an anchor role is not something this
+    surface can add or remove. What they cannot know is **which anchor** it was
+    and how that anchor is really changed, so the message carries both. The
+    creating journal never changes, and the due journal is changed by
+    *retargeting* the task — naming the operation is what lets an agent recover
+    without guessing.
+
+    **The two directions are not, however, the same condition**, and an earlier
+    draft of this docstring said they were. Attaching is refused on the anchor
+    role alone. Detaching is refused only when there is *also* no link row, so a
+    journal holding both roles can be detached — see
+    :meth:`~app.core.tasks.services.task_service.TaskService.detach_intermediate_journal`
+    for why. One consequence is worth stating because nothing else would tell a
+    reader: that both-roles state can be **destroyed through this surface but not
+    recreated**, since re-attaching hits the attach rule. It is reachable only by
+    attaching a journal and then retargeting onto it, and it is redundant by
+    construction — the anchor already says more than the link does — so nothing
+    is lost, but the asymmetry is deliberate rather than an oversight.
 
     **409 rather than 400**, for the reason ``TaskStatusTransitionError`` is one:
     the request is well formed and the journal it names is a real journal of the

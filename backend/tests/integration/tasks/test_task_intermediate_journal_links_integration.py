@@ -295,6 +295,12 @@ class TestLinksAreEditableInAnyStatus:
     Seeded per status rather than parametrised over a stub, because the claim is
     that nothing reads or writes the status column — which only a real row can
     show.
+
+    **Each test asserts the row moved as well as the status not moving**, which
+    review had to point out: checking only "the call reported success and the
+    status is unchanged" is satisfied by a method that does nothing at all, and
+    all six of these passed against a stubbed-out service. "Editable" is a claim
+    about the edit landing, so the trail is read back every time.
     """
 
     @pytest.mark.parametrize("status", ALL_STATUSES)
@@ -325,6 +331,7 @@ class TestLinksAreEditableInAnyStatus:
             is True
         )
 
+        assert await intermediate_journal_ids(async_connection, task_id) == [mentioned]
         assert await stored_status(async_connection, task_id) == status.value
 
     @pytest.mark.parametrize("status", ALL_STATUSES)
@@ -358,6 +365,7 @@ class TestLinksAreEditableInAnyStatus:
             is True
         )
 
+        assert await intermediate_journal_ids(async_connection, task_id) == []
         assert await stored_status(async_connection, task_id) == status.value
 
 
@@ -626,6 +634,10 @@ class TestDeletingAJournal:
             transaction=async_connection,
         )
 
+        # Asserted *before* the delete: without it the closing assertion holds
+        # for a service that never wrote the link, which is what review found.
+        assert await intermediate_journal_ids(async_connection, task_id) == [mentioned]
+
         await delete_journal(async_connection, mentioned)
 
         assert await intermediate_journal_ids(async_connection, task_id) == []
@@ -693,7 +705,7 @@ class TestRejections:
         assert exc_info.value.journal_id == 999_999
         assert await _link_count(async_connection) == 0
 
-    async def test_another_users_journal_is_refused_byte_identically(
+    async def test_another_users_journal_is_refused_identically(
         self,
         service: TaskService,
         async_connection: AsyncConnection,

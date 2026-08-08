@@ -569,8 +569,23 @@ class TaskService:
         retarget. The refusal path writes nothing — a ``DELETE`` matching no rows
         is not a write.
 
-        Idempotent for the same reason ``DELETE`` is: detaching a journal that is
-        not attached changes nothing and says so.
+        **Idempotent for every journal except an anchor, and that exception is
+        real rather than pedantic.** Detaching an ordinary journal twice is safe:
+        the second call changes nothing and answers ``False``. But a journal that
+        holds *both* roles answers ``True`` the first time and raises the second,
+        because once the row is gone the method can no longer tell a retry from a
+        caller asking to unlink the due journal — the two are the same request.
+        So a client that retries after a timeout on **that one shape** can see a
+        409 for a call that already succeeded.
+
+        The alternative was to answer ``False`` there instead, and it was
+        rejected: it would drop the *"attempting it is a clear error"* the phase's
+        third acceptance criterion asks for, in order to serve a retry of a state
+        reachable only by attaching a journal and then retargeting onto it.
+        Distinguishing the two would need to record that a link once existed,
+        which is a row this model does not have. Recorded here rather than
+        smoothed over, because "idempotent" without the carve-out is what a
+        caller would otherwise build a retry on.
 
         Args:
             user_id: The acting user; the task must be theirs

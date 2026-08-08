@@ -150,8 +150,10 @@ change (ITER18-003).
 `POST`/`DELETE /api/tasks/{task_id}/relationships/intermediate-journals[/{journal_id}]` and the MCP tools
 `attach_intermediate_journal_to_task` / `detach_intermediate_journal_from_task` all call
 `TaskService.attach_intermediate_journal` and `detach_intermediate_journal`, which are `@transactional`,
-idempotent in both directions and work in every status. The journal must be the acting user's; attaching
-one that already holds an **anchor** role is refused with `TaskJournalIsAnchorError` (409), and so is
+idempotent in both directions and work in every status. **Attaching** requires the journal to be the
+acting user's; detaching never reads the journal at all, on the cascade reasoning `unlink_contact`
+already carries. Attaching a journal that already holds an **anchor** role is refused with
+`TaskJournalIsAnchorError` (409), and so is
 detaching one that holds an anchor role and no link row — so the two anchors remain reachable only
 through `create_task` and `retarget_due_journal`. A journal holding *both* roles at once, which a
 retarget onto a previously-attached journal produces, keeps its intermediate link removable. The
@@ -2321,10 +2323,15 @@ with the function count in brackets where the two differ.
 **Prerequisites:** Phase 5.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple · **Overrun recorded
 before work started (delivery rule 3): ~350 production → ~2,100 tracked** · **Actual:** **572 production
-→ 3,589 tracked** (3,589 insertions, 4 deletions across 16 files, excluding this document; every figure
-here read from `git diff --numstat` rather than recalled, after the review round found three of them
-wrong). 572 production: service 231, MCP tools 132, controller 85, REST schemas 72, the `core_shared`
-error 48, the export 2, the error-code map 2. 2,951 tests and shared seeding; 66 docs.
+→ 3,718 tracked** (3,718 insertions, 10 deletions across 17 files, excluding this document). 618
+production: service 246, MCP tools 143, controller 92, REST schemas 72, the `core_shared` error 61, the
+export 2, the error-code map 2. 3,029 tests and shared seeding; 71 docs.
+
+**Every figure in this entry was re-derived from `git diff --numstat origin/main` and
+`pytest --collect-only` at the final tree, after the local review round found fourteen of them stale.**
+They had been computed rather than recalled — and then the Phase 8 merge and this review's own fixes
+moved them underneath. See *"a merge is a documentation event"* below: the sweep that rule prescribes
+has to cover the **numbers**, not just the prose, which is the half its first version missed.
 
 **The estimate is rebuilt the way Phase 11 concluded it should be — enumerate the artefacts, then apply
 rule 15's ×6 — rather than by guessing at the capability's size.** The artefacts are: a domain error and
@@ -2353,23 +2360,23 @@ for it, because rule 4 explicitly makes such a phase mergeable on its own and it
 breach rule 9. It was still the wrong cut, for a reason particular to this phase: rule 4 exists for
 phases where *"a service method's own logic is the hard part"*, and here it is not. The service is two
 gates and a delegation over repository methods Phase 2 already wrote and tested. Counted against what
-actually landed, the cut splits this phase almost exactly in half and leaves **both** halves over 500:
-the service side is 281 production (231 + 48 + 2) with 1,744 lines of unit and service-integration tests
-behind it — about **2,025** — and the surface side is 291 production with the remaining ~1,207 test lines,
-about **1,500**. So the split buys two oversized PRs instead of one, and the larger of the two would be
+actually landed, the cut splits this phase's production **exactly** in half and leaves both halves well
+over 500: the service side is 309 (246 + 61 + 2) with 1,793 lines of unit and service-integration tests
+behind it — about **2,100** — and the surface side is 309 (92 + 72 + 143 + 2) with the remaining ~1,236
+test lines, about **1,545**. So the split buys two oversized PRs instead of one, and the larger of the two would be
 the half rule 4 calls the "hard part" precisely because it is *not* hard here. Splitting the two
 *surfaces* from each other is what rule 5 forbids outright. **Recorded as a general observation:** rule
 4's cut only helps when production *and its tests* concentrate in the service, and it is worth counting
 that before invoking it — here the tests concentrate there while the difficulty does not.
 
 **The pre-recorded figure undershot again — the sixth phase running — and this time the *reason* is not
-the production estimate.** 3,589 against the pre-recorded 2,100 is 1.7×; against this phase's own
-production it is **6.3×**, which is rule 15's ×6 for the second phase in a row. Phase 11 concluded that
+the production estimate.** 3,718 against the pre-recorded 2,100 is 1.8×; against this phase's own
+production it is **6.0×**, which is rule 15's ×6 almost exactly, for the second phase in a row. Phase 11 concluded that
 "the ×6 multiplier is reliable; what has been wrong every time is the production estimate it
 multiplies", and proposed enumerating the artefacts first. That was done here — every artefact in the
-list above was written — and the estimate still came in at 65% of the actual, because **the artefacts
-were each about half again as long as guessed**: the service was estimated at 120 lines and landed at
-200, the tools at 95 and landed at 129. Not one of them was missing; all of them were longer.
+list above was written — and the estimate still came in at 56% of the actual, because **the artefacts
+were each about twice as long as guessed**: the service was estimated at 120 lines and landed at 246,
+the tools at 95 and landed at 143. Not one of them was missing; all of them were longer.
 **Suggested refinement to rule 15:** when a phase's production is enumerated artefact by artefact,
 multiply the *artefact estimate* by ~1.5 before applying ×6 — in this repository a "method" means a
 method plus twenty lines of docstring recording why it is the way it is, and that prose is what the
@@ -2444,10 +2451,12 @@ It takes a minute and it caught one claim the automated review missed.
 "explicit only" half was written up as being shown by these two methods reading no status, touching no
 contact and resolving no timezone. That is a statement about the *two new methods* and says nothing
 about any other code path, which is what the criterion is about. The evidence that actually bears on it
-is Phase 6's, and it is restated here rather than assumed: a status change through every state writes no
-intermediate link row, asserted at all three levels
-(`test_task_service_set_status_integration.py`, `test_task_endpoints.py`, `test_task_tools_mcp.py`), plus
-this phase's retarget-trail test pinning that a retarget produces *exactly one* automatic link. The
+is Phase 6's, and it is restated here rather than assumed: a status change writes no intermediate link
+row. The **service** test is the load-bearing one — it loops every status and counts rows
+(`test_task_service_set_status_integration.py`); the REST and MCP counterparts make a single `done`
+change and assert the trail they report, which is weaker and is described as such rather than counted as
+a third matrix. Added to it is this phase's retarget-trail test, pinning that a retarget produces
+*exactly one* automatic link. The
 absences remain worth asserting — they are what makes the methods cheap and status-independent — but
 they are not the criterion.
 
@@ -2585,16 +2594,17 @@ is also the habit this phase's review round had to impose on the figures above.
   journal read; and the vanished-journal mapping in three shapes — mapped, re-raised for another
   constraint, and re-raised for a **duplicate key**, which the bare-column match would have called a
   missing journal.
-  The repositories are mocked with `spec=`, which the rest of this domain's unit tests do not yet do:
-  several assertions here are `assert_not_awaited()`, and on a bare `AsyncMock` every one of those passes
-  vacuously the moment the port method is renamed. Review asked for it, and the phase leans on exactly
-  such an assertion for "there is no pre-read".
-- **Unit (19 new, 67 total):** `backend/tests/unit/api/test_task_schemas.py` — the minimal link body, the
+  The **task and journal** repositories are mocked with `spec=`, which the rest of this domain's unit
+  tests do not yet do: several assertions here are `assert_not_awaited()` or `mock_calls == []`, and on a
+  bare `AsyncMock` every one of those passes vacuously the moment the port method is renamed. The phase
+  leans on exactly such an assertion for "there is no pre-read". The remaining doubles come from
+  `conftest.py` unspec'd, which is that file's choice rather than this one's.
+- **Unit (19 new, 101 total):** `backend/tests/unit/api/test_task_schemas.py` — the minimal link body, the
   pinned `journals` type and a mismatch rejected, `data.id` required, a non-integer id and three
   out-of-range ids refused, and `role`, `relationship_type`, `status`, `anchor` and an `attributes` member
   each refused at both nesting levels — *"both"* being three tests larger than the first draft, which
   claimed all four at the envelope level and tested one.
-- **Unit (22 new, 52 total):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` — both tools
+- **Unit (22 new, 82 total):** `backend/tests/unit/mcp/domains/test_task_tools_schema.py` — both tools
   registered and requiring exactly `task_id` and `journal_id`; injected collaborators absent; both ids on
   **both tools** bounded to `1..2147483647` in the generated schema (the first draft read only the attach
   tool's); no role field, no `anchor` and no `now` on either; no contact parameter; and the descriptions
@@ -2602,7 +2612,7 @@ is also the habit this phase's review round had to impose on the figures above.
   sentence it was meant to pin, because the parameter description contained the word too. **No
   "has a description" test**, deliberately: the fixture already fails if the tool is unregistered, and a
   length check on a docstring cannot fail. A comment records why, so it is not written again.
-- **Unit (2 new, 7 total):** `backend/tests/unit/api/test_task_error_mapping.py` — the 409 and its code,
+- **Unit (2 new, 12 total):** `backend/tests/unit/api/test_task_error_mapping.py` — the 409 and its code,
   and that it does not share a code with `JOURNAL_NOT_FOUND`, whose remedy is different.
 - **Integration (30 tests):** `backend/tests/integration/tasks/test_task_intermediate_journal_links_integration.py`
   — both round trips and their repeats against the live composite primary key; several journals
@@ -2625,13 +2635,13 @@ is also the habit this phase's review round had to impose on the figures above.
   the service did. The same fact bounds what the trail can promise in production: two links written in
   one request tie as well, so *"oldest link first"* is a partial order. **Phase 13 owns whatever ordering
   its read model needs to guarantee**, and should not assume this column provides it.
-- **Integration (23 new, 80 total):** `backend/tests/integration/api/test_task_endpoints.py` — 204 on each
+- **Integration (23 new, 136 total):** `backend/tests/integration/api/test_task_endpoints.py` — 204 on each
   call and on each repeat with the row counted; every status; the deleted-journal detach; each rejection
   with its JSON:API `code`; the cross-user journal proved to differ from an absent one only in the id;
   the cross-user task on both verbs; and rejected bodies carrying `role`, `relationship_type` or
   `status`, another resource type, an unknown member beside `data`, a non-integer id, and `2147483648`
   in both the body and the path.
-- **Integration (20 new, 58 total):** `backend/tests/integration/mcp/test_task_tools_mcp.py` — the same
+- **Integration (20 new, 103 total):** `backend/tests/integration/mcp/test_task_tools_mcp.py` — the same
   matrix over `tools/call`, including `attached`/`changed` on all four outcomes, every status, no contact
   row written, the anchor refusal naming the role, the anchor refusal proved *not* to read like a missing
   journal, the actionable journal rejection, the indistinguishable cross-user answers on both tools, and
@@ -2642,9 +2652,13 @@ is also the habit this phase's review round had to impose on the figures above.
   gate fails **10** tests across all three levels (the first draft said "exactly the two detach
   refusals", which was wrong under any scoping and understated the coverage it was advertising).
   Restoring the pre-review gate order — refuse before the delete — fails **exactly** the two new
-  regression tests. Swapping the plain read for the locking one fails **12** of the 27 unit tests (the
-  first draft said 10). Removing the vanished-journal mapping fails 2. Loosening the foreign-key match
-  back to the bare column fails the duplicate-key test.
+  regression tests. Swapping the plain read for the locking one fails **12 of the 29** unit tests.
+  Removing the vanished-journal mapping fails 2. Loosening the foreign-key match back to the bare column
+  fails the duplicate-key test.
+  **Added by the local review round, and the most valuable of them: neutering both service methods to
+  `return True` must fail every test that claims a link moved.** It now fails 29 of the 30
+  service-integration tests — the survivor is the unreachable-task case, which never reaches the write —
+  and all six per-status tests across REST and MCP. Before that round it left **14** of them passing.
 - **E2E:** none — deferral taken as the phase states. The phase changes no frontend file and ships no
   user-visible surface; ITER18-001's e2e lands in Phase 22.
 - **Docs:** `docs/architecture/api-design.md`'s *Task Endpoints* gained the two routes and four
@@ -2661,8 +2675,9 @@ is also the habit this phase's review round had to impose on the figures above.
   this phase's tests had to take — **3,120** and **1,154**; and after **Phase 8** (retarget over REST and
   MCP), whose merge was the only one of the three to need a hand-built resolution — **3,186** and
   **1,219**, all green, over 892 `ruff` and 887 `mypy` files. Also run:
-  `tests/integration/core/integrations/test_journal_series_sync_processor.py`, the one consumer of the
-  shared `task_seeding` module outside those three directories. Re-run after the review round's fixes.
+  `tests/integration/core/integrations/test_journal_series_sync_processor.py`, the only *test* consumer
+  of the shared `task_seeding` module outside those three directories (`tests/integration/conftest.py`
+  imports from it too, and is loaded by every run). Re-run after the review round's fixes.
   No frontend or e2e gates — the phase changes no frontend file and ships no user-visible surface.
 - **Two things review could not check, recorded rather than asserted.** *Test-first* (delivery rule 1)
   is unverifiable from a single working tree: the ordering claimed here — service unit tests red on a

@@ -562,6 +562,12 @@ async def detach_intermediate_journal_from_task(
     rather than refused, so a retry is safe. Deleting the journal itself removes
     its intermediate links automatically, so this is not needed for that.
 
+    **One shape is not retry-safe**, and it is worth knowing before you build a
+    retry on this: a journal that is *both* an anchor and an intermediate journal
+    succeeds the first time and is refused the second, because once the link row
+    is gone this call is indistinguishable from asking to unlink the task's due
+    journal. Everywhere else, repeating the call is harmless.
+
     **The task's creating and due journals cannot be removed this way** and
     naming either is refused rather than quietly doing nothing: those roles are
     not links at all. To move a task off the journal it is due in, **retarget**

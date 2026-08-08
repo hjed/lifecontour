@@ -423,11 +423,18 @@ async def detach_task_intermediate_journal(
 ) -> None:
     """Remove an intermediate-journal link from a task.
 
-    Idempotent, and deliberately **not** conditional on the journal still
-    existing: ``task_intermediate_journals`` cascades from the journal side, so a
-    deleted journal's links are already gone, and 404-ing here would fail the one
-    call a user reaches for while tidying up. Deleting a journal that is only an
-    intermediate link is permitted, which is what makes that state reachable.
+    Idempotent for every journal but one, and deliberately **not** conditional on
+    the journal still existing: ``task_intermediate_journals`` cascades from the
+    journal side, so a deleted journal's links are already gone, and 404-ing here
+    would fail the one call a user reaches for while tidying up. Deleting a
+    journal that is only an intermediate link is permitted, which is what makes
+    that state reachable.
+
+    **The exception is a journal that is both an anchor and an intermediate
+    journal.** It answers 204 the first time and 409 the second, because once the
+    link row is gone this route can no longer tell a retry from a request to
+    unlink the task's due journal. A client retrying after a timeout on that one
+    shape can therefore see a 409 for a call that already succeeded.
 
     Raises:
         400: A path id that is not an integer, or one outside the range an
