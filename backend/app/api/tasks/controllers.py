@@ -25,6 +25,7 @@ is indistinguishable from the first, which is the whole of what idempotent
 means to a client.
 """
 
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import Task, TaskValidationError
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
@@ -89,6 +90,11 @@ async def create_task(
              else's — or a referenced contact does not exist.
     """
     attributes = task_request.data.attributes
+    # The provenance the service records on the ``TaskCreated`` event. Passed
+    # explicitly because the service defaults to ``SYSTEM``: an endpoint that
+    # said nothing would file every change a person made in the browser under
+    # "system" in their own history, and nothing above the outbox row would show
+    # it.
     created = await task_service.create_task(
         user_id=user.id,
         creating_journal_id=journal_id,
@@ -96,6 +102,8 @@ async def create_task(
         text=attributes.text,
         transaction=connection,
         contact_ids=attributes.contact_ids,
+        source=Provenance.UI,
+        changed_by="ui",
     )
     return TaskResponse(data=_to_resource(created))
 
@@ -190,7 +198,11 @@ async def delete_task(
              a client a commitment is gone when it may still be on a journal.
     """
     await task_service.delete_task(
-        user_id=user.id, task_id=task_id, transaction=connection
+        user_id=user.id,
+        task_id=task_id,
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
     )
 
 

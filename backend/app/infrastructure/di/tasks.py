@@ -9,6 +9,7 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.repositories import TaskRepository
 from app.core.tasks.services.task_service import TaskService
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
 class TaskProvider(Provider):
@@ -44,11 +45,18 @@ class TaskProvider(Provider):
         journal_repo: JournalRepository,
         contact_repo: ContactRepository,
         date_resolver: JournalDateResolver,
+        event_publisher: OutboxEventPublisher,
     ) -> TaskService:
-        """Provide a TaskService instance."""
+        """Provide a TaskService instance.
+
+        The outbox publisher comes from ``InfrastructureProvider`` and is bound
+        to the same request connection the repositories hold, which is what lets
+        a task write and its domain event share one unit of work.
+        """
         return TaskService(
             task_repo=task_repo,
             journal_repo=journal_repo,
             contact_repo=contact_repo,
             date_resolver=date_resolver,
+            event_publisher=event_publisher,
         )
