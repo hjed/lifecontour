@@ -37,6 +37,7 @@ race, and a UTC reading fails both.
 """
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -68,6 +69,7 @@ from tests.integration.tasks.task_seeding import (
     stored_status,
     stored_text,
     stored_updated_at,
+    task_events,
     task_exists,
 )
 
@@ -2460,3 +2462,87 @@ class TestIdsOutsideTheColumnsRange:
 
         assert response.status_code == 400
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+
+@pytest.mark.integration
+class TestTheEndpointRecordsUiProvenance:
+    """A change made here has to be identifiable as one the *user* made.
+
+    The service defaults to ``SYSTEM``, so an endpoint that simply forgot to say
+    where it was calling from would still work, still write its row, and still
+    publish its event — and every change a person made in the browser would be
+    filed under "system" in their own history. Nothing above the outbox row can
+    catch that, which is why it is asserted here rather than left to the service
+    tests: a shared service is no evidence that its callers reach it correctly.
+    """
+
+    async def test_a_created_task_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json=_body(text="print the permit", due_journal_id=due_id),
+        )
+        assert response.status_code == 201
+
+        (event,) = await task_events(async_connection)
+        assert event.event_type == "TaskCreated"
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_a_deleted_task_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_id = await create_journal(
+            journal_repository, title="Where it matters", days_offset=7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.delete(f"/api/tasks/{task_id}")
+        assert response.status_code == 204
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskDeleted"
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_a_refused_delete_records_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Another user's task 404s, and must not leave a deletion in the record."""
+        creating_id = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        due_id = await create_journal(
+            journal_repository,
+            title="Theirs, later",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await authenticated_client.delete(f"/api/tasks/{foreign_task_id}")
+
+        assert response.status_code == 404
+        assert await task_events(async_connection) == []

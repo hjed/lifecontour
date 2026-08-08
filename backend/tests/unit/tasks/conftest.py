@@ -55,6 +55,17 @@ def mock_settings_repo() -> AsyncMock:
 
 
 @pytest.fixture
+def mock_event_publisher() -> AsyncMock:
+    """The outbox publisher, recording what the operation announced.
+
+    A double rather than the real ``OutboxEventPublisher`` because that one's
+    job is a single ``INSERT``: what it does with an event belongs to the
+    integration tests, and what the service hands it belongs here.
+    """
+    return AsyncMock()
+
+
+@pytest.fixture
 def mock_transaction() -> AsyncMock:
     """A stand-in connection; ``@transactional`` runs unwrapped for a non-real one."""
     return AsyncMock()
@@ -66,6 +77,7 @@ def service(
     mock_journal_repo: AsyncMock,
     mock_contact_repo: AsyncMock,
     mock_settings_repo: AsyncMock,
+    mock_event_publisher: AsyncMock,
 ) -> TaskService:
     """The service under test, over mocked ports."""
     return TaskService(
@@ -73,4 +85,5 @@ def service(
         journal_repo=mock_journal_repo,
         contact_repo=mock_contact_repo,
         date_resolver=JournalDateResolver(mock_settings_repo),
+        event_publisher=mock_event_publisher,
     )

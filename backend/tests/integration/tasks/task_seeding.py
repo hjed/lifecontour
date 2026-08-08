@@ -17,9 +17,12 @@ inheritance; importing them into each module instead trips ruff's F811 at every
 test that names one as a parameter.
 """
 
+import json
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 from core_shared.models.journals import EventDateRange, Journal
@@ -42,6 +45,7 @@ from app.infrastructure.di.integrations import IntegrationProvider
 from app.infrastructure.di.journal import JournalProvider
 from app.infrastructure.di.settings import SettingsProvider
 from app.infrastructure.di.tasks import TaskProvider
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 USER_ID = "test-user-123"
 # A second, unrelated owner. Owner scoping is only worth asserting against real
@@ -195,6 +199,57 @@ async def count(conn: AsyncConnection, sql: str, params: dict[str, int | str]) -
     return int((await conn.execute(text(sql), params)).scalar_one())
 
 
+@dataclass(frozen=True)
+class TaskEventRow:
+    """One ``outbox_events`` row published by the tasks domain, decoded."""
+
+    event_id: str
+    event_type: str
+    aggregate_id: int
+    payload: dict[str, Any]
+    occurred_at: datetime
+
+
+# Matched on the type prefix rather than an enumerated list, so the phases that
+# add the remaining seven event types inherit these assertions instead of having
+# to remember to widen a tuple. No other domain's event type begins "Task".
+_SELECT_TASK_EVENTS = text("""
+    SELECT event_id, event_type, aggregate_id, event_data, occurred_at
+    FROM outbox_events
+    WHERE event_type LIKE 'Task%'
+    ORDER BY occurred_at, id
+""")
+
+
+async def task_events(
+    conn: AsyncConnection, *, task_id: int | None = None
+) -> list[TaskEventRow]:
+    """Every task domain event in the outbox, oldest first.
+
+    Read straight from the table rather than through the publisher, for the same
+    reason the link helpers bypass the repository: a test asserting the service
+    wrote a row should not read it back through the port it wrote through.
+
+    ``event_data`` is decoded here because the column is ``TEXT`` — the payload
+    reaches its consumers as JSON, and a test that compared Python objects would
+    not be testing what the projection will actually see.
+    """
+    rows = await conn.execute(_SELECT_TASK_EVENTS)
+    events = [
+        TaskEventRow(
+            event_id=str(row.event_id),
+            event_type=str(row.event_type),
+            aggregate_id=int(row.aggregate_id),
+            payload=json.loads(row.event_data),
+            occurred_at=row.occurred_at,
+        )
+        for row in rows
+    ]
+    if task_id is None:
+        return events
+    return [event for event in events if event.aggregate_id == task_id]
+
+
 async def stored_status(conn: AsyncConnection, task_id: int) -> str:
     """The status column as the database holds it, bypassing every layer above."""
     return str(
@@ -329,6 +384,7 @@ def service_on(
         journal_repo=SqlJournalRepository(connection),
         contact_repo=SqlContactRepository(connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
+        event_publisher=OutboxEventPublisher(connection),
     )
 
 

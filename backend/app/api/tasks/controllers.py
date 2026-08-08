@@ -47,6 +47,7 @@ wrappers put both inside one unit of work. Raised by the pull request's automate
 review.
 """
 
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import Task, TaskValidationError
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
@@ -122,6 +123,12 @@ async def create_task(
     # the task and its links in the response are one consistent snapshot. Empty
     # in practice on this path — creation writes no intermediate link — but read
     # rather than assumed, so the field has one definition across every surface.
+    #
+    # The provenance the service records on the ``TaskCreated`` event is passed
+    # explicitly because the service defaults to ``SYSTEM``: an endpoint that
+    # said nothing would file every change a person made in the browser under
+    # "system" in their own history, and nothing above the outbox row would show
+    # it.
     created, trail = await task_service.create_task_with_trail(
         user_id=user.id,
         creating_journal_id=journal_id,
@@ -129,6 +136,8 @@ async def create_task(
         text=attributes.text,
         transaction=connection,
         contact_ids=attributes.contact_ids,
+        source=Provenance.UI,
+        changed_by="ui",
     )
     return TaskResponse(data=_to_resource(created, trail))
 
@@ -273,7 +282,11 @@ async def delete_task(
              a client a commitment is gone when it may still be on a journal.
     """
     await task_service.delete_task(
-        user_id=user.id, task_id=task_id, transaction=connection
+        user_id=user.id,
+        task_id=task_id,
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
     )
 
 

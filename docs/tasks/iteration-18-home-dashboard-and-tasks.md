@@ -3521,10 +3521,14 @@ no change to task behaviour. Nothing else depends on it, but it should not lag I
    aggregation strategy), rendered in an expandable row on the journal, or (b) folding task rows into the
    due journal's existing feed. (a) keeps the aggregation model honest and matches the journal/contact
    precedent; (b) adds no new surface.
-2. **Whether task events need typed payload models** in `core_shared/models/outbox_events.py` — settled in
-   **Phase 1**. The existing typed models cover integration-sync payloads (`contact.*`,
-   `journal_event.*`), while domain events like `JournalTagAssigned` are not in that dispatch map. Match
-   the domain-event convention unless a worker needs to consume task events.
+2. ~~**Whether task events need typed payload models** in `core_shared/models/outbox_events.py`~~ — ✅
+   **settled in Phase 1: no.** That dispatch map exists so integration *workers* can parse **inbound
+   sync** payloads (`contact.`, `sync.completed`, `journal_event.*`, `immich_album.`,
+   `journal_review.`); every core domain event — `JournalCreated`, `JournalTagAssigned`,
+   `ContactCreated` — is absent from it, and no worker consumes task events. Task events therefore
+   match the domain-event convention: a plain `dict[str, Any]` payload validated by the tests that
+   assert its shape. Adding a model would advertise a consumer that does not exist. See *Decisions
+   taken (Phase 1)*.
 3. **Whether the contact-activity entry updates on task status change** or records only the link —
    settled in **Phase 5**. The specification asks for "a read-only record alongside their journals", which
    the simpler link-based entry satisfies.
@@ -3535,28 +3539,133 @@ no change to task behaviour. Nothing else depends on it, but it should not lag I
 > test lines per type up front"*. Tasks need nine event types. Calibration rule 6 therefore caps this
 > iteration at two new types per phase, with the projection split from the publishing.
 
-#### Phase 1: Events — Task Created and Deleted
+#### Phase 1: Events — Task Created and Deleted ✅ COMPLETE
 
 **Prerequisites:** ITER18-001 Phase 9.
 **Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Revised before work started (delivery rule 3):** ~140 production → **~1,000–1,300 tracked**. The
+original figure contradicts the iteration's own calibration rule 6 — *"budget ~600 test lines per
+event type up front"*, borne out by ITER17-005 P1 (2 types, ~1440) and P2a (1 type, ~1270) — and this
+phase ships **two** types. It also threads provenance through **two** entry points, which rule 15
+budgets at roughly one behaviour matrix each. Production is genuinely small: the events module, a
+constructor argument, two publish calls, one DI line and four argument lines at the surfaces. The
+tests are the phase.
+**Actual:** **250 production → ~1,810 tracked** (events module 141, service 71, controller 8, MCP 8,
+DI 8 — 1,432 tests and fixtures, ~125 docs of which most is this entry). **Recording the overrun
+before work was right, and the revised figure was still low on both halves.** Production came in at
+250 against ~140 — the events module alone is 141 lines, because this repo documents *why* rather
+than *what* and both classes carry a decision in their docstring. Tests came to 1,432 against a
+1,000–1,300 range, i.e. **5.7× production**, in line with rule 15's ×6 default for a phase with more
+than one entry point. **The miss the estimate did not see is mechanical:** adding one constructor
+argument to `TaskService` touched **nine** service-construction sites across the unit and integration
+tests, none of which is interesting and all of which is diff. *Calibration addition:* a phase that
+changes a **widely-constructed** collaborator's signature should count its construction sites — a
+`grep` for the class name — as part of the estimate, because that cost scales with how well-tested
+the class already is and is invisible from the production change.
 
 **Acceptance Criteria:**
 
-- [ ] Domain event classes for task created and task deleted, following the journal/contact domain-event
-      conventions (`source` provenance, `changed_by`, `occurred_at`, aggregate id).
-- [ ] Each is published through `OutboxEventPublisher` **inside the same unit of work** as its write, so an
-      event never exists for a write that rolled back.
-- [ ] Provenance is threaded from the caller, so UI, MCP, system and integration origins are
-      distinguishable on every event.
-- [ ] Open decision 2 recorded here: whether task events need typed payload models in
-      `core_shared/models/outbox_events.py` (that dispatch map covers integration-sync payloads; domain
-      events like `JournalTagAssigned` are absent from it, which is the convention to match unless a worker
-      must consume task events).
-- [ ] The aggregate id is the task id, consistent with the integer decision taken in ITER18-001 Phase 1.
+- [x] Domain event classes for task created and task deleted, following the journal/contact domain-event
+      conventions (`source` provenance, `changed_by`, `occurred_at`, aggregate id). — in
+      `backend/app/core/tasks/models/events.py`, mirroring `app/core/journal/models/events.py`
+      including its local `DomainEvent` base (see *Decisions taken*). Payload shape is asserted as a
+      **whole-key comparison** rather than a set of `in` checks, so a later phase adding a field has
+      to do it deliberately, and both payloads are asserted to survive a JSON round trip because that
+      is how the projection will actually receive them.
+- [x] Each is published through `OutboxEventPublisher` **inside the same unit of work** as its write, so an
+      event never exists for a write that rolled back. — asserted against a real database by opening a
+      **caller's** unit of work and failing inside it: `@transactional` is re-entrant, so the service
+      joins it and neither the `tasks` row nor the `outbox_events` row survives. Both directions are
+      covered — a rolled-back create leaves no task and no event, a rolled-back delete leaves the task
+      *and* no deletion — plus the cheaper half, that a create refused by an invariant writes neither.
+- [x] Provenance is threaded from the caller, so UI, MCP, system and integration origins are
+      distinguishable on every event. — `Provenance.UI` from the controller, `Provenance.MCP` from the
+      tools, defaulting to `SYSTEM` in the service. Asserted **per surface** against the stored JSON,
+      not only at the service: the service's default is a silent success, so an endpoint that forgot
+      to say where it was calling from would pass every other test in its file while filing every
+      change a person made under "system" in their own history.
+- [x] Open decision 2 recorded here. — **settled: no typed payload models.** See the entry above and
+      *Decisions taken* below.
+- [x] The aggregate id is the task id, consistent with the integer decision taken in ITER18-001 Phase 1.
+      — asserted on both event types, including its type, because `field_history.entity_id` is an
+      `Integer` and Phase 6 files rows under this value.
 
 **Required Test Coverage:** unit — event construction and payload shape for both types. Integration — each
 write leaves exactly one outbox row with the right type, provenance and payload; a rolled-back write leaves
 none. No e2e.
+
+**Delivered: 45 unit tests and 21 integration tests.** 23 unit tests for the event classes
+(`tests/unit/tasks/test_task_events.py`) and 22 for service publishing and provenance — 13 on
+creation, 9 on deletion — across `test_task_service_create.py` and `test_task_service_delete.py`;
+15 integration tests in `tests/integration/tasks/test_task_events_integration.py` and 6 surface
+tests split between `tests/integration/api/test_task_endpoints.py` and
+`tests/integration/mcp/test_task_tools_mcp.py`.
+
+**Decisions taken (Phase 1):**
+
+- **Open decision 2 is settled: task events get no typed payload models.** The dispatch map in
+  `core_shared/models/outbox_events.py` exists so integration *workers* can parse **inbound sync**
+  payloads — `contact.`, `sync.completed`, `journal_event.*`, `immich_album.`, `journal_review.` —
+  and every core domain event is absent from it: `JournalCreated`, `JournalTagAssigned`,
+  `ContactCreated`. No worker consumes task events, and the specification's *Tasks and search*
+  section says the one consumer that might is to ignore them. A model here would advertise a consumer
+  that does not exist. What guards the shape instead is the whole-key unit assertion, which is the
+  same guarantee without the implication.
+- **`TaskDeleted` is a marker, and `delete_task` still takes no read.** Phase 9 of ITER18-001 recorded
+  that this method decides nothing from a read — one owner-scoped statement either removes a row or
+  raises — and pinned the absence of a locking read with a test. Carrying the task's text or anchors
+  on the event would have needed exactly that read, undoing a decision for the sake of a richer
+  history line, so the payload is task id, owner and provenance. `JournalDeleted` carries no title
+  either. `user_id` **is** on it, and deliberately: tasks are hard-deleted, so Phase 8's task-scoped
+  history read has to answer "is this yours?" for a task with no row left, and this event is the only
+  place that answer can come from. That makes this phase's payload choice a load-bearing input to
+  Phase 8's discriminator rather than a detail.
+- **`TaskCreated` carries no contact ids.** A task may be created with contacts, but whether that
+  publishes one event or two is Phase 5's completeness question — the one its criterion phrases as
+  "every task write path publishes exactly one event". Smuggling the ids into this payload would have
+  answered it here, early and without the tests that decision needs. A unit test pins the absence, so
+  Phase 5 finds a deliberate hole rather than an accident.
+- **A third local `DomainEvent` base, recorded rather than repeated silently.** The journal and
+  contact domains each define an identical copy, and the tasks domain now makes three. Nothing forces
+  it — `OutboxEventPublisher` types against the structural `DomainEventProtocol` — and extracting one
+  shared base is a genuine improvement. It is not taken here because it would edit three domains in a
+  phase whose subject is two event classes, which is precisely the shape calibration rule 7 identifies
+  as the expensive kind. The module docstring says so, so the next reader sees a decision rather than
+  a copy-paste.
+- **`changed_by` is the literal `"ui"` / `"mcp"`, not the acting user's id**, matching every existing
+  caller in the journal and contact domains. `user_id` already travels in the payload, so no actor
+  information is lost; diverging would make task entries render differently from journal ones in the
+  shared feed the activity-history specification asks for.
+- **The events are published *last*, after the links.** `create_task` publishes after
+  `_link_contacts` rather than straight after the save, following `JournalTagService`'s ordering: the
+  event announces a create that finished. A unit test proves the ordering by breaking the link write
+  and asserting nothing was published — the kind of claim a comment cannot make.
+- **Search isolation is inherited, not asserted here.** `SearchIndexerConsumer` matches
+  `_SEARCH_EVENT_TYPES` **exactly** and lists no task type, so `TaskCreated` and `TaskDeleted` are
+  acknowledged and ignored the moment they reach the stream. That is true by construction from this
+  phase onward; Phase 7 owns pinning it with a test, and this entry records that the property holds in
+  the interim rather than leaving it unstated while events are already flowing.
+- **The integration tests were mutation-checked before being trusted.** They were written after the
+  publishing code rather than before it — the unit tests drove that — so each publish call was removed
+  in turn to confirm the suite actually fails without it (8 failures without the create, 5 without the
+  delete). A test written green is worth what it can be shown to catch, and "assert nothing was
+  published" tests in particular pass just as happily against a service that publishes nothing at all.
+- **`DomainEvent.transaction` is inert, and the tests now say so.** The field is part of
+  `DomainEventProtocol` and every domain event carries it, but `OutboxEventPublisher` never reads it —
+  it inserts on the connection it was constructed with. Three unit tests originally justified
+  asserting it with *"same connection as the write, so the two commit or roll back together"*, which
+  describes a causal chain that does not exist: they would pass with the publisher bound to a wholly
+  separate connection. They now assert protocol conformance and say where the real evidence is. The
+  atomicity comes from DI handing the publisher and the repositories the same request connection, and
+  it is asserted against a live one.
+- **Review found two integration assertions that could not fail**, both since fixed. `occurred_at is
+  not None` is guaranteed by a `NOT NULL` column; it now brackets the call and asserts the stored
+  timestamp falls inside it, which is what distinguishes the event's clock from projection time.
+  And the "no other domain is disturbed" test compared only the count of *foreign* outbox rows, so it
+  passed with all task publishing removed — it now asserts the task's own row appeared as well. This
+  is the second time in this phase that a test written after its code proved to be worth less than it
+  looked; the lesson is not "mutation-check the ones you suspect" but that a green-on-arrival test has
+  no evidence behind it until something has been shown to break it.
 
 #### Phase 2: Events — Text Updated and Status Changed
 

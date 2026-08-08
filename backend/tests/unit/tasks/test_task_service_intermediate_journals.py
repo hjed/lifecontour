@@ -45,13 +45,18 @@ def mock_task_repo() -> AsyncMock:
 
 
 @pytest.fixture
-def service(mock_task_repo: AsyncMock) -> TaskService:
-    """The service under test; nothing but the task repository is reachable."""
+def service(mock_task_repo: AsyncMock, mock_event_publisher: AsyncMock) -> TaskService:
+    """The service under test; nothing but the task repository is reachable.
+
+    ``mock_event_publisher`` comes from ``conftest.py``. A trail read announces
+    nothing — it is a read — but the service requires a publisher to construct.
+    """
     return TaskService(
         task_repo=mock_task_repo,
         journal_repo=AsyncMock(),
         contact_repo=AsyncMock(),
         date_resolver=JournalDateResolver(AsyncMock()),
+        event_publisher=mock_event_publisher,
     )
 
 

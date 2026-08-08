@@ -31,6 +31,7 @@ import datetime
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     Task,
     TaskAnchorJournalNotFoundError,
@@ -50,6 +51,7 @@ from app.core.journal.services.journal_date_resolver import (
     journal_date,
     today_in,
 )
+from app.core.tasks.models.events import TaskCreated, TaskDeleted
 from app.infrastructure.unit_of_work import savepoint, transactional
 
 if TYPE_CHECKING:
@@ -62,6 +64,7 @@ if TYPE_CHECKING:
     from app.core.journal.models.repositories import JournalRepository
     from app.core.journal.services.journal_date_resolver import JournalDateResolver
     from app.core.tasks.models.repositories import TaskRepository
+    from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
 def _ordered_unique(values: Iterable[int]) -> list[int]:
@@ -108,6 +111,13 @@ class TaskService:
     retarget — because a due journal is being set for a second time — contact
     existence on a link, and owner scoping throughout. REST and MCP are thin
     callers of each.
+
+    It also **announces what it did**. Tasks are first-class domain entities, so
+    a write publishes its domain event through the transactional outbox in the
+    same unit of work as the write itself: the two commit together or neither
+    does, and a rejected write publishes nothing. Provenance comes from the
+    caller, so the UI, an AI agent over MCP and an internal caller stay
+    distinguishable in a task's history.
     """
 
     def __init__(
@@ -116,11 +126,13 @@ class TaskService:
         journal_repo: JournalRepository,
         contact_repo: ContactRepository,
         date_resolver: JournalDateResolver,
+        event_publisher: OutboxEventPublisher,
     ) -> None:
         self.task_repo = task_repo
         self.journal_repo = journal_repo
         self.contact_repo = contact_repo
         self.date_resolver = date_resolver
+        self.event_publisher = event_publisher
 
     @transactional
     async def create_task(
@@ -133,6 +145,8 @@ class TaskService:
         transaction: AsyncConnection,
         contact_ids: Sequence[int] | None = None,
         now: datetime.datetime | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> Task:
         """Create a task anchored to two of the user's journals.
 
@@ -143,6 +157,12 @@ class TaskService:
 
         Everything is validated before anything is written, so a rejected create
         leaves no partial task behind.
+
+        Publishes :class:`~app.core.tasks.models.events.TaskCreated` through the
+        transactional outbox **in this unit of work**, so the event and the task
+        commit together or not at all. A rejected create therefore publishes
+        nothing — the activity-history specification's *integrity by
+        construction*: history cannot record a change that did not occur.
 
         Args:
             user_id: The acting user; both journals must be theirs
@@ -158,6 +178,12 @@ class TaskService:
                 set it would make invariant 4 opt-out for any caller. Controllers
                 and MCP tools must not accept it, and their request schemas must
                 not carry a field of this name.
+            source: Where the create came from, recorded on the event. Defaults
+                to ``SYSTEM`` rather than to a surface, so a caller that forgets
+                to say is never mistaken for a user acting in the UI.
+            changed_by: The actor, as the other domains write it — the literal
+                ``"ui"`` or ``"mcp"`` rather than a user id, which the payload
+                already carries.
 
         Returns:
             The persisted task, carrying its database-assigned id.
@@ -188,6 +214,24 @@ class TaskService:
         created = await self._save(task, creating_journal_id, due_journal_id)
         assert created.id is not None, "Task ID must be set after save"
         await self._link_contacts(created.id, contacts, user_id, transaction)
+
+        # Last, and deliberately: the event announces a create that finished,
+        # links included, following the journal tag service's ordering. It reads
+        # the *persisted* task because the id it carries exists only after the
+        # save, and that id is what the history projection files rows under.
+        await self.event_publisher.publish(
+            TaskCreated(
+                task_id=created.id,
+                user_id=created.user_id,
+                text=created.text,
+                status=created.status,
+                creating_journal_id=created.creating_journal_id,
+                due_journal_id=created.due_journal_id,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
         return created
 
     @transactional
@@ -395,7 +439,13 @@ class TaskService:
 
     @transactional
     async def delete_task(
-        self, *, user_id: str, task_id: int, transaction: AsyncConnection
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> None:
         """Hard-delete one of the user's tasks.
 
@@ -416,21 +466,42 @@ class TaskService:
         **No read precedes it.** Unlike :meth:`update_task` this decides nothing
         from what it read: the single owner-scoped statement either removes a row
         or does not, and reports which. A locking read would add a round trip and
-        a second way for the two to disagree.
+        a second way for the two to disagree. The published event is a *marker*
+        for the same reason — naming the task's text in it would have bought
+        exactly the read this method exists without.
+
+        **The event outlives the row.** Everything else about a task can be
+        recovered by reading the task; once it is hard-deleted, this event is the
+        only record that it existed, which is why it carries ``user_id``: a
+        task-scoped history read has to answer "is this yours?" with no row left
+        to ask.
 
         Args:
             user_id: The acting user; a task belonging to anyone else is not
                 found, exactly as one that never existed is not
             task_id: The task to delete
             transaction: The request connection; the unit of work commits here
+            source: Where the deletion came from, recorded on the event
+            changed_by: The actor, as the other domains write it
 
         Raises:
             TaskNotFoundError: When the task does not exist or is not the acting
                 user's. Reporting success for a task that was not there would
                 tell a caller a commitment is gone when it may still be sitting
-                on somebody's journal.
+                on somebody's journal. A refused delete publishes nothing, so a
+                repeated one cannot write a second deletion into history.
         """
         await self.task_repo.delete(task_id, user_id)
+
+        await self.event_publisher.publish(
+            TaskDeleted(
+                task_id=task_id,
+                user_id=user_id,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
 
     @transactional
     async def retarget_due_journal(
@@ -575,12 +646,19 @@ class TaskService:
         text: str,
         transaction: AsyncConnection,
         contact_ids: Sequence[int] | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> tuple[Task, list[int]]:
         """:meth:`create_task`, and the journals the new task has passed through.
 
         Always empty in practice — creation writes no intermediate link — but
         read rather than assumed, so the field has one definition across every
         surface instead of an assumption here and a query elsewhere.
+
+        ``source`` and ``changed_by`` are forwarded rather than defaulted here:
+        a task an assistant created has to read as one an assistant created, and
+        a wrapper that swallowed them would silently relabel every MCP creation
+        as ``SYSTEM`` in the user's own history.
         """
         created = await self.create_task(
             user_id=user_id,
@@ -589,6 +667,8 @@ class TaskService:
             text=text,
             transaction=transaction,
             contact_ids=contact_ids,
+            source=source,
+            changed_by=changed_by,
         )
         return created, await self._trail_within_unit_of_work(created, user_id)
 

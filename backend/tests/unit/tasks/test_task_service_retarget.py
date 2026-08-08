@@ -172,13 +172,20 @@ def service(
     mock_journal_repo: AsyncMock,
     mock_contact_repo: AsyncMock,
     date_resolver: JournalDateResolver,
+    mock_event_publisher: AsyncMock,
 ) -> TaskService:
-    """The service under test."""
+    """The service under test.
+
+    ``mock_event_publisher`` comes from ``conftest.py``: retargeting gets its own
+    event type in a later phase, and until then the service needs a publisher it
+    never reaches.
+    """
     return TaskService(
         task_repo=mock_task_repo,
         journal_repo=mock_journal_repo,
         contact_repo=mock_contact_repo,
         date_resolver=date_resolver,
+        event_publisher=mock_event_publisher,
     )
 
 
