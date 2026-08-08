@@ -177,7 +177,10 @@ the *creating* journal where it arose and the *due* journal where it matters.
   below. The date semantics the future-dated invariant is judged against are **not** the tasks
   domain's: they live in `JournalDateResolver` (journal domain — see
   *[Journal date resolution (user-local)](#journal-date-resolution-user-local)*), which `TaskService`
-  consumes rather than re-derives
+  consumes rather than re-derives. Its mutation surface is `create_task`, `update_task` (the text, the
+  status, or both, under **one** locking read and one write so a `PATCH` carrying both can never be
+  half-applied), `set_status` (a thin delegation to `update_task`, kept as a named intent for the MCP
+  tool) and `delete_task`
 - **Repository contract**: **owner scoping is part of the port, not an implementation detail.** Every
   method takes the acting user's id and every statement filters on it, so a task belonging to
   somebody else is indistinguishable from one that never existed: `find_by_id` returns `None` and

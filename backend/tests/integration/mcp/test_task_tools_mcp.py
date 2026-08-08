@@ -47,6 +47,8 @@ from tests.integration.tasks.task_seeding import (
     link_intermediate_journal,
     linked_contact_ids,
     stored_status,
+    stored_text,
+    task_exists,
 )
 
 
@@ -79,6 +81,22 @@ async def _set_task_status(
     client: Any, session_id: str, **arguments: Any
 ) -> dict[str, Any]:
     response = await _raw_call(client, session_id, "set_task_status", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _update_task_text(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "update_task_text", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _delete_task(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "delete_task", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -958,6 +976,324 @@ class TestIdsOutsideTheColumnsRange:
 
         assert '"isError":true' in response.text
         assert await linked_contact_ids(clean_database, task_id) == []
+
+
+@pytest.mark.integration
+class TestUpdateTaskTextTool:
+    """Rewording over MCP, asserted against the same rules as the endpoint."""
+
+    @pytest.mark.parametrize("status", ["not_done", "done", "cancelled"])
+    async def test_the_text_is_editable_in_every_status(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        status: str,
+    ):
+        """An agent's call changes the same row an HTTP client's would."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus(status),
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _update_task_text(
+                client, session_id, task_id=task_id, text="reworded"
+            )
+
+        assert "error" not in payload
+        assert payload["id"] == task_id
+        assert payload["text"] == "reworded"
+        assert payload["status"] == status
+        assert await stored_text(clean_database, task_id) == "reworded"
+        assert await stored_status(clean_database, task_id) == status
+
+    async def test_a_lapsed_task_can_still_be_reworded(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """The due journal is not re-read, so its date cannot block a typo fix."""
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=past_id, due_journal_id=past_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _update_task_text(
+                client, session_id, task_id=task_id, text="reworded"
+            )
+
+        assert "error" not in payload
+        assert await stored_text(clean_database, task_id) == "reworded"
+
+    async def test_no_journal_link_is_created(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Intermediate links are explicit only; an agent's edit infers none."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _update_task_text(
+                client, session_id, task_id=task_id, text="reworded"
+            )
+
+        assert "error" not in payload
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    async def test_blank_text_is_rejected_and_names_the_field(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The same refusal creation gives, so neither surface is the lenient one."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _update_task_text(
+                client, session_id, task_id=task_id, text="   "
+            )
+
+        assert "text" in payload["message"]
+        assert await stored_text(clean_database, task_id) == "print the permit"
+
+    async def test_another_users_task_is_reported_as_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Indistinguishable from an absent one, and the row does not move."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            text="not yours",
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _update_task_text(
+                client, session_id, task_id=foreign_task, text="reworded"
+            )
+            absent = await _update_task_text(
+                client, session_id, task_id=999_999, text="reworded"
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(foreign_task), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await stored_text(clean_database, foreign_task) == "not yours"
+
+    async def test_a_call_carrying_a_status_is_rejected_by_the_tool_schema(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Two tools, two decisions: rewording is not a way to change a status.
+
+        The combined write exists for the ``PATCH`` body that genuinely carries
+        both. A model gets one tool per intent, so smuggling a status through
+        this one is refused by the transport before the service is reached.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "update_task_text",
+                {"task_id": task_id, "text": "reworded", "status": "done"},
+            )
+
+        assert '"isError":true' in response.text
+        assert "unexpected_keyword_argument" in response.text
+        assert await stored_status(clean_database, task_id) == "not_done"
+
+
+@pytest.mark.integration
+class TestDeleteTaskTool:
+    """Deleting over MCP: the exception, and its blast radius.
+
+    The tool exists because an agent that can create a task by mistake must be
+    able to undo that mistake — the specification's MCP list omits delete while
+    listing everything else, and principle 1 (no meaningful UI-only behaviour)
+    settles it the other way. Recorded as open decision 4 in the iteration
+    document.
+    """
+
+    async def test_deleting_removes_the_row_and_confirms_it(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A tool must say something, so it says which task is gone."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _delete_task(client, session_id, task_id=task_id)
+
+        assert "error" not in payload
+        assert payload["deleted"] is True
+        assert payload["task_id"] == task_id
+        assert not await task_exists(clean_database, task_id)
+
+    async def test_the_link_rows_go_and_the_journals_and_contacts_stay(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The acceptance criterion, through the surface an agent reaches."""
+        creating_id, due_id = task_anchors
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up", days_offset=3
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await create_contact(clean_database)
+        await link_intermediate_journal(
+            clean_database, task_id=task_id, journal_id=mentioned_id
+        )
+        await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _delete_task(client, session_id, task_id=task_id)
+
+        assert "error" not in payload
+        assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+        assert await count(clean_database, COUNT_CONTACT_LINKS, {}) == 0
+        for journal_id in (creating_id, due_id, mentioned_id):
+            assert await journal_repository.find_by_id(journal_id) is not None
+        assert (
+            await count(
+                clean_database,
+                "SELECT COUNT(*) FROM contacts WHERE id = :contact_id",
+                {"contact_id": contact_id},
+            )
+            == 1
+        )
+
+    async def test_deleting_twice_is_not_found_the_second_time(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A success on a task that was not there would mislead a retrying agent."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            first = await _delete_task(client, session_id, task_id=task_id)
+            second = await _delete_task(client, session_id, task_id=task_id)
+
+        assert first["deleted"] is True
+        assert second["error"] == "Not found"
+
+    async def test_another_users_task_is_reported_as_not_found_and_survives(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Indistinguishable — and intact, which a message alone would not show."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _delete_task(client, session_id, task_id=foreign_task)
+            absent = await _delete_task(client, session_id, task_id=999_999)
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(foreign_task), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await task_exists(clean_database, foreign_task)
+
+    async def test_other_tasks_are_untouched(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A sibling sharing both anchors is not collateral damage."""
+        creating_id, due_id = task_anchors
+        doomed = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        survivor = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="somebody else's problem",
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _delete_task(client, session_id, task_id=doomed)
+
+        assert "error" not in payload
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 1
+        assert await stored_text(clean_database, survivor) == "somebody else's problem"
 
 
 async def _attach_journal(

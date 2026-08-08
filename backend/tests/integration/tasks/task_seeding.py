@@ -220,6 +220,55 @@ async def stored_status(conn: AsyncConnection, task_id: int) -> str:
     )
 
 
+async def stored_text(conn: AsyncConnection, task_id: int) -> str:
+    """The text column as the database holds it, bypassing every layer above."""
+    return str(
+        (
+            await conn.execute(
+                text("SELECT text FROM tasks WHERE id = :task_id"),
+                {"task_id": task_id},
+            )
+        ).scalar_one()
+    )
+
+
+async def backdate_updated_at(conn: AsyncConnection, task_id: int) -> datetime:
+    """Move a task's ``updated_at`` into the past, and return where it was put.
+
+    **A no-op test needs this to mean anything.** PostgreSQL's ``now()`` is
+    ``transaction_timestamp()`` — constant for a whole transaction — and the
+    integration fixture runs each test inside one. So the ``DEFAULT now()`` the
+    seed row was inserted with and the ``updated_at = now()`` an update writes
+    are the *identical* value, and "``updated_at`` did not move" holds whether
+    or not a write happened. Review caught exactly that: the assertion passed
+    against a service with the no-op short-circuit deleted.
+
+    Backdating breaks the tie. The stored timestamp is now something ``now()``
+    cannot produce, so a write that did happen is visible as a change and a
+    write that did not is visible as this value surviving.
+    """
+    moved_to = FIXED_PAST_INSTANT
+    await conn.execute(
+        text("UPDATE tasks SET updated_at = :moved_to WHERE id = :task_id"),
+        {"moved_to": moved_to, "task_id": task_id},
+    )
+    return moved_to
+
+
+async def task_exists(conn: AsyncConnection, task_id: int) -> bool:
+    """Whether a task row is still there at all.
+
+    Distinct from ``stored_status`` and ``stored_text``, which both assume the
+    row exists and raise if it does not: a deletion test needs to ask the
+    question rather than trip over the answer.
+    """
+    return (
+        await conn.execute(
+            text("SELECT 1 FROM tasks WHERE id = :task_id"), {"task_id": task_id}
+        )
+    ).scalar_one_or_none() is not None
+
+
 async def stored_anchors(conn: AsyncConnection, task_id: int) -> tuple[int, int]:
     """The task's two anchor columns as ``(creating, due)``, straight from the row.
 
