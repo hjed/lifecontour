@@ -4,10 +4,14 @@ from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.repositories import ContactRepository
-from app.core.journal.models.repositories import JournalRepository
+from app.core.journal.models.repositories import (
+    CalendarInfoRepository,
+    JournalRepository,
+)
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.repositories import TaskRepository
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
@@ -59,4 +63,30 @@ class TaskProvider(Provider):
             contact_repo=contact_repo,
             date_resolver=date_resolver,
             event_publisher=event_publisher,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def task_read_service(
+        self,
+        task_repo: TaskRepository,
+        journal_repo: JournalRepository,
+        contact_repo: ContactRepository,
+        calendar_info_repo: CalendarInfoRepository,
+        date_resolver: JournalDateResolver,
+    ) -> TaskReadService:
+        """Provide a TaskReadService instance.
+
+        Separate from ``TaskService`` rather than more methods on it: this one
+        writes nothing, so it takes no event publisher and opens no unit of
+        work, and a caller that only needs to read a task should not be handed
+        the ability to change one. It is the only consumer of
+        ``CalendarInfoRepository`` outside the journal domain, which is where
+        the cancelled-journal lapse cause comes from.
+        """
+        return TaskReadService(
+            task_repo=task_repo,
+            journal_repo=journal_repo,
+            contact_repo=contact_repo,
+            calendar_info_repo=calendar_info_repo,
+            date_resolver=date_resolver,
         )

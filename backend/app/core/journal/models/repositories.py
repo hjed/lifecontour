@@ -562,6 +562,34 @@ class CalendarInfoRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def find_cancelled_journal_ids(self, journal_ids: list[int]) -> set[int]:
+        """Which of these journals are cancelled events.
+
+        Batched rather than answered one journal at a time because the callers
+        ask about a whole set at once — a task's three journal roles, or every
+        task due in one journal — and the tasks read model derives *lapsed* from
+        the answer on every read. One ``find_by_journal_id`` per journal there
+        would be the N+1 that read model exists to avoid.
+
+        Only ``EventState.CANCELLED`` counts. ``invited`` and ``tentative`` are
+        not cancellations: a meeting the user has not yet accepted is still
+        going ahead as far as the calendar is concerned.
+
+        A journal with no calendar-info row is simply absent from the result
+        rather than an error — cancellation is per-event-type data, so a plain
+        note journal is *not cancelled* rather than unknown. Ids that do not
+        exist at all are absent for the same reason, and this method performs no
+        ownership check: callers reach it with ids they have already scoped.
+
+        Args:
+            journal_ids: The journals to ask about; an empty list queries nothing
+
+        Returns:
+            The subset of ``journal_ids`` whose event state is cancelled.
+        """
+        pass
+
 
 class MoodDataRepository(ABC):
     """

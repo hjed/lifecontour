@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.repositories import TaskRepository
+from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
@@ -415,7 +416,7 @@ class TestVanishedTask:
         with pytest.raises(TaskNotFoundError):
             await task_repository.list_contact_ids(task_id, USER_ID)
 
-    async def test_ownership_check_locks_the_task_against_deletion(
+    async def test_a_link_write_locks_the_task_against_deletion(
         self, task_repository: SqlTaskRepository, async_connection: AsyncConnection
     ):
         """The guard takes a row lock, which is what holds the window shut.
@@ -424,6 +425,11 @@ class TestVanishedTask:
         locking transaction's id when a row is locked, and leaves it zero
         otherwise. Locking is the mechanism, so a test that only re-checked the
         returned value would pass just as well with the lock removed.
+
+        ``remove_contact`` is the vehicle because its own statement deletes a
+        *child* row, which needs no lock on the parent. An insert would take one
+        for its foreign-key check whether the guard ran or not, so the xmax
+        would be stamped either way and the test would prove nothing.
         """
         journal_repository = SqlJournalRepository(async_connection)
         journal_id = await create_journal(journal_repository, title="Anchor")
@@ -436,18 +442,140 @@ class TestVanishedTask:
             )
         )
         assert task.id is not None
+        contact_id = await create_contact(async_connection, first_name="Priya")
         read_xmax = text("SELECT xmax::text::bigint FROM tasks WHERE id = :task_id")
 
         unlocked = (
             await async_connection.execute(read_xmax, {"task_id": task.id})
         ).scalar_one()
-        await task_repository.list_contact_ids(task.id, USER_ID)
+        await task_repository.remove_contact(task.id, contact_id, USER_ID)
         locked = (
             await async_connection.execute(read_xmax, {"task_id": task.id})
         ).scalar_one()
 
         assert unlocked == 0
         assert locked != 0
+
+    async def test_listing_links_does_not_lock_the_task(
+        self, task_repository: SqlTaskRepository, async_connection: AsyncConnection
+    ):
+        """A read scopes itself without taking the write path's row lock.
+
+        The mirror of the case above, and the reason the two reads no longer go
+        through the guard at all: reading a task's links has no window to hold
+        shut, and a lock taken here would block a concurrent writer for as long
+        as the reading transaction lived. Pinned so a later "just reuse the
+        guard" tidy-up cannot quietly reintroduce it.
+        """
+        journal_repository = SqlJournalRepository(async_connection)
+        journal_id = await create_journal(journal_repository, title="Anchor")
+        task = await task_repository.save(
+            Task(
+                user_id=USER_ID,
+                text="read without locking",
+                creating_journal_id=journal_id,
+                due_journal_id=journal_id,
+            )
+        )
+        assert task.id is not None
+        read_xmax = text("SELECT xmax::text::bigint FROM tasks WHERE id = :task_id")
+
+        await task_repository.list_contact_ids(task.id, USER_ID)
+        await task_repository.list_intermediate_journal_ids(task.id, USER_ID)
+
+        assert (
+            await async_connection.execute(read_xmax, {"task_id": task.id})
+        ).scalar_one() == 0
+
+    async def test_listing_links_costs_one_statement(
+        self, task_repository: SqlTaskRepository, async_connection: AsyncConnection
+    ):
+        """Each read is a single round trip, owner scoping included.
+
+        The read used to pay a separate ownership statement before its own —
+        two round trips to answer one question, on a path the task-write
+        responses take as well. The count is the whole of what changed, so it is
+        the thing to assert.
+        """
+        journal_repository = SqlJournalRepository(async_connection)
+        journal_id = await create_journal(journal_repository, title="Anchor")
+        task = await task_repository.save(
+            Task(
+                user_id=USER_ID,
+                text="one statement",
+                creating_journal_id=journal_id,
+                due_journal_id=journal_id,
+            )
+        )
+        assert task.id is not None
+
+        with recorded_statements(async_connection) as statements:
+            await task_repository.list_contact_ids(task.id, USER_ID)
+
+        assert len(statements) == 1
+
+
+@pytest.mark.integration
+class TestTheTwoEmptyResults:
+    """ "No links" and "not your task" both return no rows, and must not read alike.
+
+    A single statement now has to separate them, so each is asserted for each
+    read method. Written as its own class because the pair is the guarantee: a
+    join that lost its ``LEFT`` would raise on a task with no links, and one
+    that lost its ``user_id`` predicate would hand another user's links back as
+    an ordinary empty list.
+    """
+
+    async def test_a_task_with_no_intermediate_journals_returns_empty(
+        self, task_repository: SqlTaskRepository, saved_task: Task
+    ):
+        """A task that has never been linked to anything is not an error."""
+        assert saved_task.id is not None
+
+        assert (
+            await task_repository.list_intermediate_journal_ids(saved_task.id, USER_ID)
+            == []
+        )
+
+    async def test_a_task_with_no_contacts_returns_empty(
+        self, task_repository: SqlTaskRepository, saved_task: Task
+    ):
+        """The same for contacts, which most tasks have none of."""
+        assert saved_task.id is not None
+
+        assert await task_repository.list_contact_ids(saved_task.id, USER_ID) == []
+
+    async def test_another_users_unlinked_task_still_raises(
+        self,
+        task_repository: SqlTaskRepository,
+        other_users_task: Task,
+    ):
+        """A foreign task with no links raises rather than reading as empty.
+
+        The sharpest case for the ``user_id`` predicate: a foreign task that
+        *has* links would come back non-empty and be caught by any assertion,
+        but one with none returns exactly what a legitimately empty task
+        returns, so only the error tells them apart.
+        """
+        assert other_users_task.id is not None
+
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.list_intermediate_journal_ids(
+                other_users_task.id, USER_ID
+            )
+
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.list_contact_ids(other_users_task.id, USER_ID)
+
+    async def test_an_absent_task_raises_for_both_reads(
+        self, task_repository: SqlTaskRepository
+    ):
+        """An id that never existed is refused the same way as a foreign one."""
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.list_intermediate_journal_ids(999_999, USER_ID)
+
+        with pytest.raises(TaskNotFoundError):
+            await task_repository.list_contact_ids(999_999, USER_ID)
 
 
 @pytest.mark.integration

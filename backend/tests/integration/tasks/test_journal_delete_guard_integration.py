@@ -21,15 +21,11 @@ The seeding goes through raw inserts (``task_seeding.create_task``) rather than
 a journal that has since passed — are ones a task reaches after creation.
 """
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from typing import Any
-
 import pytest
 import pytest_asyncio
 from core_shared.models.journals import BlockingTask, JournalHasAnchoredTasksError
 from core_shared.models.tasks import TaskStatus
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -38,6 +34,7 @@ from app.core.journal.services.journal_service import JournalService
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
     create_journal,
     create_task,
@@ -81,36 +78,6 @@ async def journal_service(
 
 async def count(conn: AsyncConnection, sql: str, params: dict[str, int]) -> int:
     return int((await conn.execute(text(sql), params)).scalar_one())
-
-
-@contextmanager
-def recorded_statements(conn: AsyncConnection) -> Iterator[list[str]]:
-    """Record every statement the connection sends while the block runs.
-
-    Counted at the cursor rather than by wrapping ``AsyncConnection.execute``,
-    which cannot be patched — and this is the stronger claim anyway: it counts
-    round trips to PostgreSQL, so a repository that looped internally would be
-    caught however it issued the queries.
-    """
-    statements: list[str] = []
-
-    def record(
-        _conn: Any,
-        _cursor: Any,
-        statement: str,
-        _parameters: Any,
-        _context: Any,
-        _executemany: bool,
-    ) -> None:
-        statements.append(statement)
-
-    sync_connection = conn.sync_connection
-    assert sync_connection is not None
-    event.listen(sync_connection, "before_cursor_execute", record)
-    try:
-        yield statements
-    finally:
-        event.remove(sync_connection, "before_cursor_execute", record)
 
 
 @pytest.mark.integration

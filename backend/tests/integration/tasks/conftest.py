@@ -14,12 +14,16 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.journal.adapters.sql.calendar_info_repository import (
+    SqlCalendarInfoRepository,
+)
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
@@ -44,4 +48,27 @@ async def service(
         contact_repo=SqlContactRepository(async_connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
         event_publisher=OutboxEventPublisher(async_connection),
+    )
+
+
+@pytest_asyncio.fixture
+async def read_service(
+    async_connection: AsyncConnection,
+    task_repository: SqlTaskRepository,
+    journal_repository: SqlJournalRepository,
+    user_settings_repository: SqlUserSettingsRepository,
+) -> TaskReadService:
+    """The read service over real adapters on the test's single connection.
+
+    No publisher and no transaction: this one reads, so there is nothing for
+    either to do. It shares the ``task_repository`` fixture with ``service`` so
+    a test can write through one and read back through the other on the same
+    connection.
+    """
+    return TaskReadService(
+        task_repo=task_repository,
+        journal_repo=journal_repository,
+        contact_repo=SqlContactRepository(async_connection),
+        calendar_info_repo=SqlCalendarInfoRepository(async_connection),
+        date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
     )

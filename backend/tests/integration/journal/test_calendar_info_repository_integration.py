@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime, time, timedelta
 import pytest
 import pytest_asyncio
 from core_shared.models.journals import Calendar, CalendarInfo, EventDateRange, Journal
+from core_shared.models.journals.event_state import EventState
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -13,6 +14,7 @@ from app.core.journal.adapters.sql.calendar_info_repository import (
 )
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from tests.integration.statement_recorder import recorded_statements
 
 
 @pytest_asyncio.fixture
@@ -510,3 +512,136 @@ class TestCalendarInfoRepositoryGetByCalendarId:
         assert len(events) == 1
         assert events[0].journal_id == test_journal.id
         assert events[0].calendar_id == second_calendar.id
+
+
+@pytest.mark.integration
+class TestCalendarInfoRepositoryFindCancelledJournalIds:
+    """The batch cancellation read the tasks read model derives *lapsed* from.
+
+    Batched rather than per-journal because the caller asks about a whole set at
+    once — a task's three roles, or a journal's twenty tasks — and one
+    ``find_by_journal_id`` per journal is exactly the N+1 the read model exists
+    to avoid.
+    """
+
+    async def _event_journal(
+        self,
+        journal_repository: SqlJournalRepository,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        calendar: Calendar,
+        *,
+        title: str,
+        event_state: EventState,
+    ) -> int:
+        """A real event journal in ``event_state``, returning its id."""
+        now = datetime.now(UTC)
+        journal = await journal_repository.save(
+            Journal(
+                user_id="test-user-123",
+                title=title,
+                content="content",
+                event_date_range=EventDateRange(
+                    start=now, end=now + timedelta(hours=1)
+                ),
+            )
+        )
+        assert journal.id is not None
+        assert calendar.id is not None
+        await calendar_info_repository.save(
+            CalendarInfo(
+                journal_id=journal.id,
+                calendar_id=calendar.id,
+                event_state=event_state,
+            )
+        )
+        return journal.id
+
+    async def test_returns_only_the_cancelled_journals_from_a_mixed_set(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        journal_repository: SqlJournalRepository,
+        test_calendar: Calendar,
+    ):
+        """Asked about four journals in four states, it names the cancelled one.
+
+        The three survivors are the point: ``invited`` and ``tentative`` are not
+        cancellations, and treating any non-confirmed state as one would lapse
+        every task due in a meeting the user had not yet accepted.
+        """
+        journal_ids: dict[EventState, int] = {}
+        for state in EventState:
+            journal_ids[state] = await self._event_journal(
+                journal_repository,
+                calendar_info_repository,
+                test_calendar,
+                title=f"{state.value} event",
+                event_state=state,
+            )
+
+        cancelled = await calendar_info_repository.find_cancelled_journal_ids(
+            list(journal_ids.values())
+        )
+
+        assert cancelled == {journal_ids[EventState.CANCELLED]}
+
+    async def test_a_journal_with_no_calendar_info_is_simply_absent(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        journal_repository: SqlJournalRepository,
+        test_calendar: Calendar,
+    ):
+        """A plain note journal has no event state, so it is not cancelled.
+
+        Cancellation is per-event-type data. A journal that was never an event
+        must come back as *not cancelled* rather than as missing information the
+        caller has to interpret.
+        """
+        now = datetime.now(UTC)
+        note = await journal_repository.save(
+            Journal(
+                user_id="test-user-123",
+                title="Just a note",
+                content="content",
+                event_date_range=EventDateRange(start=now, end=now),
+            )
+        )
+        cancelled_id = await self._event_journal(
+            journal_repository,
+            calendar_info_repository,
+            test_calendar,
+            title="Called off",
+            event_state=EventState.CANCELLED,
+        )
+        assert note.id is not None
+
+        cancelled = await calendar_info_repository.find_cancelled_journal_ids(
+            [note.id, cancelled_id]
+        )
+
+        assert cancelled == {cancelled_id}
+
+    async def test_an_unknown_journal_id_is_absent_rather_than_an_error(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+    ):
+        """Asking about an id that does not exist answers nothing, not a failure."""
+        assert (
+            await calendar_info_repository.find_cancelled_journal_ids([987654]) == set()
+        )
+
+    async def test_an_empty_request_asks_the_database_nothing(
+        self,
+        calendar_info_repository: SqlCalendarInfoRepository,
+        async_connection: AsyncConnection,
+    ):
+        """No ids means no query.
+
+        A task read model with no intermediate journals reaches this with an
+        empty list on every single read, so the short-circuit is the common
+        path rather than an edge case.
+        """
+        with recorded_statements(async_connection) as statements:
+            found = await calendar_info_repository.find_cancelled_journal_ids([])
+
+        assert found == set()
+        assert statements == []

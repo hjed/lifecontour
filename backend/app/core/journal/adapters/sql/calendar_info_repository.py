@@ -19,6 +19,19 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.models.repositories import CalendarInfoRepository
 
+# The cancellation state is compared against the enum's own value rather than a
+# literal, so renaming the member cannot leave this query silently matching
+# nothing. Journals with no row here are absent from the result, which is the
+# answer the caller wants: a note journal is not a cancelled event.
+_FIND_CANCELLED = text(
+    """
+    SELECT journal_id
+    FROM journal_calendar_info
+    WHERE journal_id = ANY(:ids)
+      AND event_state = :cancelled
+    """
+).bindparams(cancelled=EventState.CANCELLED.value)
+
 
 def project_calendar_info_to_linked_calendar(
     calendar_info: CalendarInfo,
@@ -247,6 +260,21 @@ class SqlCalendarInfoRepository(CalendarInfoRepository):
         )
         query = text("DELETE FROM journal_calendar_info WHERE journal_id = :journal_id")
         await self.conn.execute(query, {"journal_id": journal_id})
+
+    async def find_cancelled_journal_ids(self, journal_ids: list[int]) -> set[int]:
+        """Which of these journals are cancelled events.
+
+        One statement over the whole set. The ids go in as a single
+        ``integer[]`` rather than as a bind parameter each, following the
+        batched contact insert in ``SqlTaskRepository``: the parameter count
+        stays at one whatever the caller asks about, so a journal with hundreds
+        of tasks cannot walk into asyncpg's argument limit.
+        """
+        if not journal_ids:
+            return set()
+
+        result = await self.conn.execute(_FIND_CANCELLED, {"ids": journal_ids})
+        return {int(row[0]) for row in result.fetchall()}
 
     async def get_by_calendar_id(self, calendar_id: UUID) -> list[CalendarInfo]:
         """Get all calendar info entries for a calendar."""
