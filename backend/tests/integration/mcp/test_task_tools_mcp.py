@@ -1419,6 +1419,81 @@ class TestTheToolsRecordMcpProvenance:
         assert event.payload["source"] == Provenance.MCP.value
         assert event.payload["changed_by"] == "mcp"
 
+    async def test_a_retarget_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """An agent deferring a commitment on the user's behalf.
+
+        Provenance crosses an extra hop here — the tool calls
+        ``retarget_due_journal_with_trail``, not the write that publishes — and
+        a wrapper that accepted the pair and forwarded neither would pass every
+        other retarget test in this file.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client, session_id, task_id=task_id, due_journal_id=later_id
+            )
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskDueJournalRetargeted"
+        assert event.payload["changed_fields"] == {"due_journal_id": [due_id, later_id]}
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_an_agent_reopening_a_done_task_is_recorded_as_the_agent(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The change this distinction exists for.
+
+        An assistant undoing somebody's completion is exactly the event that is
+        only comprehensible if the history says who did it — and the status
+        change has to be in the stream at all for the question to arise.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _retarget_task(
+                client,
+                session_id,
+                task_id=task_id,
+                due_journal_id=later_id,
+                acknowledge_reopen=True,
+            )
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.payload["changed_fields"]["status"] == ["done", "not_done"]
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
     async def test_a_refused_status_change_records_nothing(
         self,
         authenticated_lifespan_client,

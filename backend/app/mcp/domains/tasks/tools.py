@@ -389,6 +389,8 @@ async def retarget_task(
         due_journal_id=due_journal_id,
         transaction=db_connection,
         acknowledge_reopen=acknowledge_reopen,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(_task_to_dict(retargeted, trail), indent=2)
 

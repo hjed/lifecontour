@@ -2614,6 +2614,77 @@ class TestTheEndpointRecordsUiProvenance:
             "status": ["not_done", "done"],
         }
 
+    async def test_a_retarget_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The endpoint's own hop, which no service test can stand in for.
+
+        This one crosses an extra wrapper — ``retarget_due_journal_with_trail``
+        — before it reaches the write that publishes, and the wrapper is the
+        ideal place to lose provenance: the task still moves, an event is still
+        written, and the only symptom is the user's own deferral being filed
+        under "system".
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(later_id)
+        )
+        assert response.status_code == 200
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskDueJournalRetargeted"
+        assert event.payload["changed_fields"] == {"due_journal_id": [due_id, later_id]}
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_reopening_a_done_task_records_the_reopen_as_the_users(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The status change reaches the stream, attributed to the person.
+
+        Reopening a completion is the case the UI has to confirm before it
+        happens, so it is also the case where "who did this?" matters most in
+        the history that follows.
+        """
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="A fortnight out", days_offset=14
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json=_retarget_body(later_id, acknowledge_reopen=True),
+        )
+        assert response.status_code == 200
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.payload["changed_fields"]["status"] == ["done", "not_done"]
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
     async def test_a_patch_that_changes_nothing_records_nothing(
         self,
         authenticated_client: AsyncClient,

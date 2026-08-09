@@ -26,8 +26,10 @@ from datetime import UTC, datetime
 import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
+    TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskNotFoundError,
+    TaskReopenNotAcknowledgedError,
     TaskStatus,
     TaskStatusTransitionError,
 )
@@ -40,8 +42,12 @@ from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.tasks.task_seeding import (
     COUNT_TASKS,
     USER_ID,
+    TaskEventRow,
     count,
     create_journal,
+    intermediate_journal_ids,
+    stored_anchors,
+    stored_status,
     stored_text,
     task_events,
 )
@@ -93,6 +99,33 @@ async def _create(
     )
     assert created.id is not None
     return created.id
+
+
+async def _retarget(
+    service: TaskService,
+    connection: AsyncConnection,
+    task_id: int,
+    due_journal_id: int,
+    *,
+    acknowledge_reopen: bool = False,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+) -> None:
+    """Move a task onto a new due journal through the service."""
+    await service.retarget_due_journal(
+        user_id=USER_ID,
+        task_id=task_id,
+        due_journal_id=due_journal_id,
+        transaction=connection,
+        acknowledge_reopen=acknowledge_reopen,
+        source=source,
+        changed_by=changed_by,
+    )
+
+
+def _retarget_events(events: list[TaskEventRow]) -> list[TaskEventRow]:
+    """Just the retarget rows, so a trail assertion can name its own subject."""
+    return [event for event in events if event.event_type == "TaskDueJournalRetargeted"]
 
 
 @pytest.mark.integration
@@ -762,6 +795,605 @@ class TestTheEventAndTheWriteAreOneUnitOfWork:
 
 
 @pytest.mark.integration
+class TestARetargetLeavesOneOutboxRow:
+    """One retarget, one row — carrying the move, the auto-link and any reopen.
+
+    The unit tests own the payload's shape. What only a database shows is that
+    the *decision* reaches ``outbox_events`` as a single row, and what a
+    consumer reads back out of the JSON column: pairs arrive as lists, and the
+    auto-link's boolean arrives as a boolean rather than as the string
+    ``"False"``, which is truthy.
+    """
+
+    @pytest.mark.asyncio
+    async def test_exactly_one_retarget_row_is_appended(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Not a retarget row *and* a ``TaskUpdated`` for the forced status."""
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        await _retarget(service, async_connection, task_id, later_id)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskCreated",
+            "TaskDueJournalRetargeted",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_payload_describes_the_row_that_was_saved(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Compared against the ``tasks`` row and the link table, not the request.
+
+        A whole-payload comparison, as the create's is: the journal the event
+        says the task is now due in is read back out of the anchor columns, and
+        the journal it says was retained is read back out of
+        ``task_intermediate_journals``. A service that published one journal
+        while writing another could not pass.
+        """
+        _, due_id = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        await _retarget(service, async_connection, task_id, later_id)
+
+        _, stored_due_id = await stored_anchors(async_connection, task_id)
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        assert event.aggregate_id == task_id
+        assert event.payload == {
+            "task_id": task_id,
+            "user_id": USER_ID,
+            "changed_fields": {"due_journal_id": [due_id, stored_due_id]},
+            "auto_linked_journal_id": (
+                await intermediate_journal_ids(async_connection, task_id)
+            )[0],
+            "auto_link_created": True,
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_due_journal_pair_reads_back_as_an_indexable_two_list(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The form ``_rows_from_changed_fields`` applies its guard to.
+
+        A payload shaped any other way — a dict with ``old``/``new`` keys, a
+        bare id — does not raise in that helper. It silently projects **no rows
+        at all**, so the retarget would be missing from the user's history with
+        nothing anywhere reporting a failure.
+        """
+        _, due_id = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        await _retarget(service, async_connection, task_id, later_id)
+
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        change = event.payload["changed_fields"]["due_journal_id"]
+        assert isinstance(change, list)
+        assert len(change) == 2
+        assert change[0] == due_id
+        assert change[1] == later_id
+
+    @pytest.mark.asyncio
+    async def test_the_journal_named_as_auto_linked_really_is_linked(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The event's claim, checked against the link table that backs it."""
+        _, due_id = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        await _retarget(service, async_connection, task_id, later_id)
+
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        assert event.payload["auto_linked_journal_id"] == due_id
+        assert event.payload["auto_link_created"] is True
+        assert await intermediate_journal_ids(async_connection, task_id) == [due_id]
+
+    @pytest.mark.asyncio
+    async def test_a_journal_already_in_the_trail_is_recorded_as_not_newly_linked(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A→B→A→C: the second time the task leaves A, A is already attached.
+
+        Reachable precisely because a **retarget** only ever adds an intermediate
+        link and never removes one — a due anchor that is also an intermediate
+        link is a shape retargeting produces on its own. Other operations do
+        remove links (`detach_intermediate_journal`, a merge, a cascading journal
+        delete), and none of them runs in this sequence, which is why the
+        sequence is performed here rather than mocked: the claim is about what
+        three consecutive retargets leave behind, and only a real one can show
+        it. Without the flag, Phase 7 would write "linked A" into the user's
+        history twice for one link.
+        """
+        _, journal_a = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+        journal_b = await create_journal(journal_repository, title="B", days_offset=14)
+        journal_c = await create_journal(journal_repository, title="C", days_offset=21)
+
+        await _retarget(service, async_connection, task_id, journal_b)
+        await _retarget(service, async_connection, task_id, journal_a)
+        await _retarget(service, async_connection, task_id, journal_c)
+
+        third = _retarget_events(await task_events(async_connection, task_id=task_id))[
+            -1
+        ]
+        assert third.payload["auto_linked_journal_id"] == journal_a
+        assert third.payload["auto_link_created"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_row_records_when_the_change_happened(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """``occurred_at`` is the event's clock, which Phase 7 dates rows from.
+
+        Bracketing the call is the assertion, for the reason the create's
+        equivalent gives: the column is ``NOT NULL``, so "it is present" would
+        also pass for a value a database default supplied.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        before = datetime.now(UTC).replace(tzinfo=None)
+        await _retarget(service, async_connection, task_id, later_id)
+        after = datetime.now(UTC).replace(tzinfo=None)
+
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        assert before <= event.occurred_at <= after
+
+
+@pytest.mark.integration
+class TestRetargetsReadAsAnOrderedTrail:
+    """The phase's ordering criterion, over the column order a consumer reads.
+
+    ``task_events`` orders by ``(occurred_at, id)`` — the same order the relay
+    hands rows to the stream — so a repeatedly-deferred task's events have to
+    come back in the order they happened, and each one's "from" has to be the
+    previous one's "to". A trail that did not chain would render as a set of
+    unrelated moves.
+    """
+
+    @pytest.mark.asyncio
+    async def test_repeated_deferrals_chain_end_to_end(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        _, journal_a = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+        journal_b = await create_journal(journal_repository, title="B", days_offset=14)
+        journal_c = await create_journal(journal_repository, title="C", days_offset=21)
+
+        await _retarget(service, async_connection, task_id, journal_b)
+        await _retarget(service, async_connection, task_id, journal_c)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskCreated",
+            "TaskDueJournalRetargeted",
+            "TaskDueJournalRetargeted",
+        ]
+        first, second = (
+            event.payload["changed_fields"]["due_journal_id"]
+            for event in _retarget_events(events)
+        )
+        assert first == [journal_a, journal_b]
+        assert second == [journal_b, journal_c]
+
+    @pytest.mark.asyncio
+    async def test_a_reopen_appends_one_row_rather_than_two(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A completion and a deferral in one write are one announcement.
+
+        The whole trail is asserted rather than the last row, so an
+        implementation that published a ``TaskUpdated`` beside the retarget
+        fails here instead of passing a test that only checked the retarget was
+        present.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        await _retarget(
+            service, async_connection, task_id, later_id, acknowledge_reopen=True
+        )
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated", "TaskUpdated", "TaskDueJournalRetargeted"]
+
+
+@pytest.mark.integration
+class TestAReopenReachesTheStoredPayload:
+    """The phase's third criterion, in the column a consumer reads it from."""
+
+    @pytest.mark.asyncio
+    async def test_reopening_a_done_task_stores_the_status_pair(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        await _retarget(
+            service, async_connection, task_id, later_id, acknowledge_reopen=True
+        )
+
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        assert event.payload["changed_fields"]["status"] == ["done", "not_done"]
+        assert await stored_status(async_connection, task_id) == "not_done"
+
+    @pytest.mark.asyncio
+    async def test_reopening_a_cancelled_task_stores_the_status_pair(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The documented way out of cancelled, and no acknowledgement needed."""
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.CANCELLED,
+            transaction=async_connection,
+        )
+
+        await _retarget(service, async_connection, task_id, later_id)
+
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        assert event.payload["changed_fields"]["status"] == ["cancelled", "not_done"]
+
+    @pytest.mark.asyncio
+    async def test_a_deferral_that_changed_no_status_stores_no_status_pair(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The common case: moving a date on an open task changed one thing."""
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        await _retarget(service, async_connection, task_id, later_id)
+
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        assert list(event.payload["changed_fields"]) == ["due_journal_id"]
+
+
+@pytest.mark.integration
+class TestARetargetThatDidNotHappenLeavesNoRow:
+    """Each way a retarget can decline, and the silence it has to leave."""
+
+    @pytest.mark.asyncio
+    async def test_retargeting_onto_the_current_due_journal_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        _, due_id = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _retarget(service, async_connection, task_id, due_id)
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_journal_that_is_not_in_the_future_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Refused before anything is written — the cheaper half of the guarantee."""
+        task_id = await _create(service, async_connection, task_anchors)
+        past_id = await create_journal(
+            journal_repository, title="Already gone", days_offset=-3
+        )
+
+        with pytest.raises(TaskDueJournalNotFutureError):
+            await _retarget(service, async_connection, task_id, past_id)
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_an_unacknowledged_reopen_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The 409, and the link it must not leave behind either.
+
+        The acknowledgement is checked **last**, after the journal has been
+        resolved and validated, so this refusal gets further through the method
+        than any other before deciding to write nothing.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        with pytest.raises(TaskReopenNotAcknowledgedError):
+            await _retarget(service, async_connection, task_id, later_id)
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated", "TaskUpdated"]
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+
+    @pytest.mark.asyncio
+    async def test_a_due_journal_that_is_not_the_users_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Somebody else's journal is not found, and a 404 is not a change.
+
+        The journal is real and future-dated, so the only thing refusing this
+        retarget is the owner-scoped read — which is the half a test using a
+        merely absent id would not reach.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        foreign_id = await create_journal(
+            journal_repository,
+            title="Theirs, later",
+            days_offset=14,
+            user_id="other-user-456",
+        )
+
+        with pytest.raises(TaskAnchorJournalNotFoundError):
+            await _retarget(service, async_connection, task_id, foreign_id)
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_another_users_task_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        with pytest.raises(TaskNotFoundError):
+            await service.retarget_due_journal(
+                user_id="somebody-else",
+                task_id=task_id,
+                due_journal_id=later_id,
+                transaction=async_connection,
+            )
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+
+@pytest.mark.integration
+class TestTheRetargetAndItsEventAreOneUnitOfWork:
+    """A retarget writes three things; a rollback has to take all three.
+
+    The anchor move, the automatic link and the event go together or not at
+    all. This is the one write in the domain where a partial survival has a
+    visible shape: an event without its link would tell the user their task
+    passed through a journal that has no record of it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_retarget_leaves_the_old_journal_link_and_event_alone(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        _, due_id = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await _retarget(service, async_connection, task_id, later_id)
+                raise RuntimeError("the caller failed after the task was retargeted")
+
+        assert (await stored_anchors(async_connection, task_id))[1] == due_id
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_reopen_leaves_the_task_done_and_unannounced(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The task stays completed, so no reopen may be recorded against it."""
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await _retarget(
+                    service,
+                    async_connection,
+                    task_id,
+                    later_id,
+                    acknowledge_reopen=True,
+                )
+                raise RuntimeError("the caller failed after the task was reopened")
+
+        assert await stored_status(async_connection, task_id) == "done"
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated", "TaskUpdated"]
+
+
+@pytest.mark.integration
+class TestProvenanceReachesTheRetargetRow:
+    """Who moved the date, as the stored JSON records it."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "changed_by"),
+        [(Provenance.UI, "ui"), (Provenance.MCP, "mcp")],
+    )
+    async def test_the_callers_origin_is_stored(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        await _retarget(
+            service,
+            async_connection,
+            task_id,
+            later_id,
+            source=source,
+            changed_by=changed_by,
+        )
+
+        (event,) = _retarget_events(
+            await task_events(async_connection, task_id=task_id)
+        )
+        assert event.payload["source"] == source.value
+        assert event.payload["changed_by"] == changed_by
+
+
+@pytest.mark.integration
 class TestNoOtherDomainIsDisturbed:
     """Task events go in the shared outbox without becoming anyone else's problem."""
 
@@ -824,6 +1456,46 @@ class TestNoOtherDomainIsDisturbed:
         ).scalar_one()
 
         await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+
+        assert len(await task_events(async_connection, task_id=task_id)) == 2
+        after = (
+            await async_connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbox_events WHERE event_type NOT LIKE 'Task%'"
+                )
+            )
+        ).scalar_one()
+        assert after == before
+
+    @pytest.mark.asyncio
+    async def test_a_retarget_publishes_for_the_task_and_nothing_else(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The write that touches a *journal* link table, and still says nothing
+        on the journals' behalf.
+
+        Worth asserting separately from the reword rather than assumed from it:
+        this is the only task write that inserts a row naming another domain's
+        entity, so it is the one where a cascade would be plausible. Both halves
+        again, so a service that published nothing cannot pass.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+        before = (
+            await async_connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbox_events WHERE event_type NOT LIKE 'Task%'"
+                )
+            )
+        ).scalar_one()
+
+        await _retarget(service, async_connection, task_id, later_id)
 
         assert len(await task_events(async_connection, task_id=task_id)) == 2
         after = (

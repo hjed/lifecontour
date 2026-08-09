@@ -30,6 +30,16 @@ OTHER_USER_ID = "other-user-456"
 TASK_ID = 7
 CREATING_JOURNAL_ID = 11
 DUE_JOURNAL_ID = 22
+# Where a retarget moves the task to, for the event tests.
+# ``test_task_service_retarget.py`` and
+# ``test_task_service_intermediate_journals.py`` each declare their own constant
+# of the same name and value rather than importing this one — they predate this
+# module and keep a self-contained constants block — so these are three literals
+# that happen to agree, not one shared definition. Kept equal because reading the
+# three files side by side is easier when the same journal has the same number;
+# nothing breaks if they diverge, unlike ``UPDATED_TEXT``, which is genuinely
+# shared because the event tests assert the pair the service tests produce.
+NEW_DUE_JOURNAL_ID = 33
 
 ORIGINAL_TEXT = "return Sarah's book"
 # What a reword moves it to. Shared rather than redeclared per file because the
