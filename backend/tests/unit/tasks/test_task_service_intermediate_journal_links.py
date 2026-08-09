@@ -30,12 +30,21 @@ journal that is only an intermediate link is permitted.
 Repositories are mocked. The SQL these methods lean on — the idempotent insert,
 the owner-scoped guard, the cascade — is proved against a real database in
 ``tests/integration/tasks/test_task_intermediate_journal_links_integration.py``.
+
+**Both methods now publish**, which turns the second property above into a rule
+about events as well as rows: a call that moved no row announces nothing, so an
+idempotent repeat and every refusal are silent. The link event also carries an
+``origin``, distinguishing a link asked for here from the one a retarget derives
+— the derived half is asserted in ``test_task_service_retarget.py``, beside the
+write that produces it.
 """
 
 import datetime
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.journals import EventDateRange, Journal, JournalNotFoundError
 from core_shared.models.tasks import (
     Task,
@@ -49,6 +58,7 @@ from app.core.journal.models.repositories import JournalRepository
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.models.repositories import TaskRepository
 from app.core.tasks.services.task_service import TaskService
+from tests.unit.tasks.task_doubles import published_events
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
@@ -160,10 +170,11 @@ def service(
 ) -> TaskService:
     """The service under test.
 
-    ``mock_event_publisher`` comes from ``conftest.py``, on the same terms the
-    contact links take it: journal links get their own event type in a later
-    ITER18-003 phase, and until then the service needs a publisher it never
-    reaches. That it is never reached is asserted rather than assumed.
+    ``mock_event_publisher`` comes from ``conftest.py``. Both methods now reach
+    it — a link and an unlink each have their own event type — so this double
+    records what the operation announced rather than standing in for a
+    collaborator that is never touched. What it announced *and what it did not*:
+    a write that moved no row is still expected to be silent.
     """
     return TaskService(
         task_repo=mock_task_repo,
@@ -174,6 +185,21 @@ def service(
     )
 
 
+def _provenance(source: Provenance | None, changed_by: str | None) -> dict[str, Any]:
+    """The provenance arguments a caller actually passed, and only those.
+
+    Omitted rather than filled in with the service's own defaults, so the tests
+    that assert "a caller who says nothing is filed as ``system``" exercise the
+    default instead of restating it at the call site.
+    """
+    given: dict[str, Any] = {}
+    if source is not None:
+        given["source"] = source
+    if changed_by is not None:
+        given["changed_by"] = changed_by
+    return given
+
+
 async def attach(
     service: TaskService,
     transaction: AsyncMock,
@@ -181,6 +207,8 @@ async def attach(
     user_id: str = USER_ID,
     task_id: int = TASK_ID,
     journal_id: int = JOURNAL_ID,
+    source: Provenance | None = None,
+    changed_by: str | None = None,
 ) -> bool:
     """Call ``attach_intermediate_journal`` with the ordinary arguments."""
     return await service.attach_intermediate_journal(
@@ -188,6 +216,7 @@ async def attach(
         task_id=task_id,
         journal_id=journal_id,
         transaction=transaction,
+        **_provenance(source, changed_by),
     )
 
 
@@ -198,6 +227,8 @@ async def detach(
     user_id: str = USER_ID,
     task_id: int = TASK_ID,
     journal_id: int = JOURNAL_ID,
+    source: Provenance | None = None,
+    changed_by: str | None = None,
 ) -> bool:
     """Call ``detach_intermediate_journal`` with the ordinary arguments."""
     return await service.detach_intermediate_journal(
@@ -205,6 +236,7 @@ async def detach(
         task_id=task_id,
         journal_id=journal_id,
         transaction=transaction,
+        **_provenance(source, changed_by),
     )
 
 
@@ -460,27 +492,6 @@ class TestAttachingAnIntermediateJournal:
         assert mock_contact_repo.mock_calls == []
         assert mock_settings_repo.mock_calls == []
 
-    @pytest.mark.asyncio
-    async def test_no_domain_event_is_published(
-        self,
-        service: TaskService,
-        mock_event_publisher: AsyncMock,
-        mock_transaction: AsyncMock,
-    ) -> None:
-        """This phase announces nothing, and the silence is deliberate.
-
-        ITER18-003 Phase 1 gave tasks *created* and *deleted* events while this
-        phase was in flight, and the specification lists "journal linked or
-        unlinked" among the events tasks should eventually emit — but that type
-        belongs to the ITER18-003 phase that adds it, budgeted there at two event
-        types per phase. Publishing one here would ship an event with no
-        projection behind it. Asserted so the absence is a decision on record
-        rather than an oversight the next phase has to guess at.
-        """
-        await attach(service, mock_transaction)
-
-        assert mock_event_publisher.mock_calls == []
-
 
 @pytest.mark.unit
 class TestDetachingAnIntermediateJournal:
@@ -626,17 +637,392 @@ class TestDetachingAnIntermediateJournal:
         assert mock_contact_repo.mock_calls == []
         assert mock_settings_repo.mock_calls == []
 
+
+@pytest.mark.unit
+class TestAttachingAnnouncesTheLink:
+    """The event a manual attach publishes, and the cases it stays silent for.
+
+    The specification lists *"journal linked or unlinked"* among the events a
+    task emits, each carrying provenance and the actor. Until this phase these
+    two methods published nothing, and the file asserted that silence
+    deliberately; those two tests are replaced by what follows rather than
+    deleted, because the silence is still the rule for every write that moved
+    no row.
+    """
+
     @pytest.mark.asyncio
-    async def test_no_domain_event_is_published(
+    async def test_publishes_exactly_one_journal_linked_event(
         self,
         service: TaskService,
         mock_event_publisher: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """The same deliberate silence the attach path keeps."""
+        """Counted, not searched for: two would double the history line."""
+        await attach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskJournalLinked"
+
+    @pytest.mark.asyncio
+    async def test_the_event_names_the_task_the_owner_and_the_journal(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The journal in particular: nothing else on the event identifies it."""
+        await attach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.aggregate_id == TASK_ID
+        assert event.event_data["task_id"] == TASK_ID
+        assert event.event_data["user_id"] == USER_ID
+        assert event.event_data["journal_id"] == JOURNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_a_link_asked_for_here_is_recorded_as_manual(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The half of ``origin`` this surface owns.
+
+        The other half — a link a retarget derived — is asserted in
+        ``test_task_service_retarget.py``. Splitting them is deliberate: each
+        file states what its own write path announces, so a change to one cannot
+        be waved through by the other's test.
+        """
+        await attach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["origin"] == "manual"
+
+    @pytest.mark.asyncio
+    async def test_an_attach_that_wrote_nothing_announces_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Idempotent, so a repeat is a no-op — and a no-op is not news.
+
+        The insert is ``ON CONFLICT DO NOTHING`` and the boolean is the only
+        thing that separates the two calls. An event here would put a second
+        "linked this journal" line in the user's history for a link that did not
+        change.
+        """
+        mock_task_repo.add_intermediate_journal.return_value = False
+
+        await attach(service, mock_transaction)
+
+        assert mock_event_publisher.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_the_event_is_published_after_the_link_is_written(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Announce what happened, not what is about to.
+
+        Both go into one unit of work, so nothing observable depends on the
+        order — which is exactly why it needs a test rather than a comment. The
+        publisher is inspected *from inside* the write, so this fails if the
+        publish is hoisted above it.
+        """
+        published_at_write: list[int] = []
+
+        async def record(*_args: object) -> bool:
+            published_at_write.append(len(mock_event_publisher.mock_calls))
+            return True
+
+        mock_task_repo.add_intermediate_journal.side_effect = record
+
+        await attach(service, mock_transaction)
+
+        assert published_at_write == [0]
+        assert len(published_events(mock_event_publisher)) == 1
+
+    @pytest.mark.asyncio
+    async def test_provenance_is_threaded_from_the_caller(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await attach(service, mock_transaction, source=Provenance.UI, changed_by="ui")
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == "ui"
+        assert event.event_data["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_a_caller_that_says_nothing_is_recorded_as_the_system(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The default is a silent success, so it is pinned here as well.
+
+        An endpoint that forgot to say where it was calling from would pass
+        every other test in its file while filing a change a person made under
+        "system" in their own history. The surfaces assert their own provenance
+        against a real database; this states what the service does when nobody
+        says.
+        """
+        await attach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_task_announces_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.find_by_id.return_value = None
+
+        with pytest.raises(TaskNotFoundError):
+            await attach(service, mock_transaction)
+
+        assert mock_event_publisher.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_journal_announces_nothing(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_journal_repo.find_by_ids_for_user.return_value = []
+
+        with pytest.raises(JournalNotFoundError):
+            await attach(service, mock_transaction, journal_id=UNKNOWN_JOURNAL_ID)
+
+        assert mock_event_publisher.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_an_anchor_announces_nothing(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_journal_repo.find_by_ids_for_user.return_value = [
+            make_journal(DUE_JOURNAL_ID)
+        ]
+
+        with pytest.raises(TaskJournalIsAnchorError):
+            await attach(service, mock_transaction, journal_id=DUE_JOURNAL_ID)
+
+        assert mock_event_publisher.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_a_vanished_journal_announces_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The write raised, so there is nothing to announce.
+
+        The transaction would roll the event back regardless — it rides the same
+        connection — but a publish before a raise is still a bug: the caller is
+        told the journal is gone while the outbox briefly claims it was linked.
+        """
+        mock_task_repo.add_intermediate_journal.side_effect = integrity_error(
+            "task_intermediate_journals_journal_id_fkey"
+        )
+
+        with pytest.raises(JournalNotFoundError):
+            await attach(service, mock_transaction)
+
+        assert mock_event_publisher.mock_calls == []
+
+
+@pytest.mark.unit
+class TestDetachingAnnouncesTheRemoval:
+    """The unlink event, and the no-ops that stay silent."""
+
+    @pytest.mark.asyncio
+    async def test_publishes_exactly_one_journal_unlinked_event(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await detach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskJournalUnlinked"
+
+    @pytest.mark.asyncio
+    async def test_the_event_names_the_task_the_owner_and_the_journal(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await detach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.aggregate_id == TASK_ID
+        assert event.event_data["task_id"] == TASK_ID
+        assert event.event_data["user_id"] == USER_ID
+        assert event.event_data["journal_id"] == JOURNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_the_event_carries_no_origin(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """An unlink has one cause, so there is nothing to choose between.
+
+        A merge collapsing redundant links and a journal delete cascading both
+        remove rows without publishing anything at all today, so a key here
+        would have exactly one value and would advertise a case that does not
+        exist.
+        """
+        await detach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert "origin" not in event.event_data
+
+    @pytest.mark.asyncio
+    async def test_a_detach_that_removed_nothing_announces_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """A ``DELETE`` matching no rows is not a write.
+
+        This is the ordinary repeat-detach, which the method answers ``False``
+        for rather than raising — so it is the case most likely to publish by
+        accident, since nothing about it looks like a refusal.
+        """
+        mock_task_repo.remove_intermediate_journal.return_value = False
+        mock_task_repo.find_by_id.return_value = make_task()
+
         await detach(service, mock_transaction)
 
         assert mock_event_publisher.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_the_event_is_published_after_the_row_is_removed(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        published_at_write: list[int] = []
+
+        async def record(*_args: object) -> bool:
+            published_at_write.append(len(mock_event_publisher.mock_calls))
+            return True
+
+        mock_task_repo.remove_intermediate_journal.side_effect = record
+
+        await detach(service, mock_transaction)
+
+        assert published_at_write == [0]
+        assert len(published_events(mock_event_publisher)) == 1
+
+    @pytest.mark.asyncio
+    async def test_provenance_is_threaded_from_the_caller(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await detach(service, mock_transaction, source=Provenance.MCP, changed_by="mcp")
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_caller_that_says_nothing_is_recorded_as_the_system(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await detach(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_task_announces_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.find_by_id.return_value = None
+
+        with pytest.raises(TaskNotFoundError):
+            await detach(service, mock_transaction)
+
+        assert mock_event_publisher.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_an_anchor_refusal_announces_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Nothing was removed, and the caller was told to retarget instead."""
+        mock_task_repo.remove_intermediate_journal.return_value = False
+
+        with pytest.raises(TaskJournalIsAnchorError):
+            await detach(service, mock_transaction, journal_id=DUE_JOURNAL_ID)
+
+        assert mock_event_publisher.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_removing_a_link_that_is_also_an_anchor_announces_it(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The legitimate half of the anchor case still publishes.
+
+        A journal can be both the due anchor and an intermediate link — attach
+        it, then retarget onto it — and removing that link is permitted. The
+        refusal above applies only when the delete removed nothing, so the two
+        cases must not be collapsed into "anchors are silent".
+        """
+        mock_task_repo.remove_intermediate_journal.return_value = True
+
+        await detach(service, mock_transaction, journal_id=DUE_JOURNAL_ID)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskJournalUnlinked"
+        assert event.event_data["journal_id"] == DUE_JOURNAL_ID
 
 
 @pytest.mark.unit

@@ -40,6 +40,11 @@ DUE_JOURNAL_ID = 22
 # nothing breaks if they diverge, unlike ``UPDATED_TEXT``, which is genuinely
 # shared because the event tests assert the pair the service tests produce.
 NEW_DUE_JOURNAL_ID = 33
+# A journal the task is merely *mentioned* in — neither anchor. The link events
+# need a journal that holds no anchor role, because a payload built over
+# ``DUE_JOURNAL_ID`` would read as correct while describing a link the service
+# refuses to write.
+INTERMEDIATE_JOURNAL_ID = 44
 
 ORIGINAL_TEXT = "return Sarah's book"
 # What a reword moves it to. Shared rather than redeclared per file because the

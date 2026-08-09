@@ -202,7 +202,8 @@ the *creating* journal where it arose and the *due* journal where it matters.
   actually created. The singular `add_contact` it replaced made the guard the expensive half — *N*
   contacts cost *2N* statements — and the batch is what `TaskService.create_task` and the
   single-contact link surface both use. `remove_contact` stays singular: nothing removes in bulk.
-- **Domain Events**: `TaskCreated`, `TaskUpdated`, `TaskDueJournalRetargeted` and `TaskDeleted`
+- **Domain Events**: `TaskCreated`, `TaskUpdated`, `TaskDueJournalRetargeted`, `TaskJournalLinked`,
+  `TaskJournalUnlinked` and `TaskDeleted`
   (`backend/app/core/tasks/models/events.py`), published by `TaskService` through
   `OutboxEventPublisher` **inside the same unit of work as the write**, so an event can never exist
   for a write that rolled back and a rejected write publishes nothing — the activity-history
@@ -221,16 +222,26 @@ the *creating* journal where it arose and the *due* journal where it matters.
   per field, because a single `PATCH` may move both and that is one write in one unit of work;
   `HistoryService._rows_from_changed_fields` fans the dict out into one `field_history` row per
   field, so a reader still gets a distinct line each.
-  **A retarget likewise publishes one event**, `TaskDueJournalRetargeted`, carrying the due-journal
-  pair, the reopen (only when the retarget actually moved the status, since retargeting always lands
-  a task *not done*) and the **automatic intermediate link** — the previous due journal, plus whether
-  a link row was newly written for it, since the add is idempotent and a retarget only ever adds a
-  link — never removes one — so a task returning to a journal it has already left finds it still
-  attached. (Links are removable, by `detach_intermediate_journal`, by a merge collapsing redundant
-  ones, and by a journal delete cascading; none of those is a retarget.) The
-  auto-link travels in this payload only until the phase that gives journal links their own event
-  type; the write order it must inherit is the link first, then the anchor move.
-  The remaining event types the specification names — journal and contact linked/unlinked — and the
+  **A retarget publishes two events, and is the only task write that publishes more than one.**
+  `TaskDueJournalRetargeted` carries the due-journal pair and the reopen (only when the retarget
+  actually moved the status, since retargeting always lands a task *not done*); the **automatic
+  intermediate link** it retains — the previous due journal — is a `TaskJournalLinked` of its own,
+  the same type a manual attach publishes. The order is **the link first, then the anchor move**,
+  which holds by construction because each event is published directly behind the write it
+  announces rather than beside the other's publish call.
+  **Both link events are published only when a row actually moved.** `add_intermediate_journal` is
+  idempotent and a retarget only ever adds a link — never removes one — so a task returning to a
+  journal it has already left finds it still attached and announces nothing; likewise a repeat
+  attach, a detach of a link that is not there, and every refusal. (Links are removable, by
+  `detach_intermediate_journal`, by a merge collapsing redundant ones, and by a journal delete
+  cascading; only the first of those publishes anything today.)
+  **`TaskJournalLinked` carries an `origin`** (`manual` or `retarget`) because two writes produce
+  the same fact. That is deliberately *not* the same question as provenance: `source` records who
+  acted, and a retarget is something the **user** did, so a link derived from one performed in the
+  browser is `ui` — the same actor as the retarget event beside it — rather than `system`, which is
+  reserved for writes no person triggered. `TaskJournalUnlinked` carries no `origin`: it has one
+  cause today, and a key with a single possible value would advertise a case that does not exist.
+  The remaining event types the specification names — contact linked/unlinked — and the
   history projection that consumes all of them arrive in later phases of
   [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md). Until then **no consumer group
   subscribes to a task event**: `SearchIndexerConsumer` and `HistoryProjectionConsumer` match event

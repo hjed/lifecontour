@@ -537,6 +537,8 @@ async def attach_intermediate_journal_to_task(
         task_id=task_id,
         journal_id=journal_id,
         transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(
         _journal_link_to_dict(task_id, journal_id, attached=True, changed=changed),
@@ -594,6 +596,8 @@ async def detach_intermediate_journal_from_task(
         task_id=task_id,
         journal_id=journal_id,
         transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(
         _journal_link_to_dict(task_id, journal_id, attached=False, changed=changed),

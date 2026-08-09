@@ -18,9 +18,11 @@ error). Delivery rule 9 is satisfied for both shipped journal operations; **the 
 next**, per the Sequencing Strategy. ITER18-002's remaining phases (4: cancellation as a lapse reason,
 5: the delete-failure UI and its e2e, 6: the retarget/merge lock order) depend on later ITER18-001
 phases.
-**ITER18-003 Phases 1, 2 and 3 complete** (task created and deleted; text updated and status changed as
-one `TaskUpdated`; and the due-journal retarget, which carries the automatic intermediate link and any
-reopen in a single event). Every task event so far is published inside its write's unit of work and
+**ITER18-003 Phases 1–4 complete** (task created and deleted; text updated and status changed as
+one `TaskUpdated`; the due-journal retarget, carrying any reopen; and journal linked/unlinked, which
+took the automatic link out of the retarget's payload and gave it its own event — so a retarget now
+publishes **two** events, the link it retains and then the anchor move).
+Every task event so far is published inside its write's unit of work and
 carries provenance from the caller. Nothing is user-visible yet — the projection lands in Phases 6–7 and
 the first surface that reads it in Phase 9. Phase 3's review added **Phase 10**: a journal merge
 re-points task anchors and publishes no task event.
@@ -189,7 +191,10 @@ and made that false**, exposing `intermediate_journal_ids` on every task-returni
 `GET` or list (Phase 13), so the trail is read from a write's answer rather than asked for directly.
 The two link routes here deliberately do **not** join that set: they answer 204 and `attached`/`changed`
 respectively, because re-reading the trail on a link call would report something the caller did not ask
-about and bury the one thing it did. Still no domain event for a link change (ITER18-003).
+about and bury the one thing it did. **Since ITER18-003 Phase 4** both routes publish: a
+`TaskJournalLinked` or `TaskJournalUnlinked` inside the write's unit of work, carrying `ui`/`mcp`
+provenance and — on the link — an `origin` separating what a person asked for from the link a retarget
+retains.
 
 ### The home page
 
@@ -4570,15 +4575,32 @@ the miss survived the plan as well as Phase 2.
   first time a lesson from an earlier phase in this iteration paid for itself, and because the same trap
   is still waiting for Phases 4 and 5.
 
-#### Phase 4: Events — Journal Linked and Unlinked
+#### Phase 4: Events — Journal Linked and Unlinked ✅ COMPLETE
 
 **Prerequisites:** Phase 3, ITER18-001 Phase 10.
 **Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Actual:** **252 production → 1,759 tests** (events module 189, service 101, controller 4, MCP 4 —
+figures include the docstrings each carries, plus ~30 docs outside this entry). **Production ran to
+~1.9× the estimate and tests to ~3.4× it**, i.e. the ×4 multiplier was low for the fifth phase
+running — the same finding Phases 1–3 each recorded, and the estimate was left unrevised here
+against delivery rule 3, which is the process miss worth naming.
+
+Where production went is not the two new classes: it is that this phase is the first to touch
+**three** write paths — attach, detach and retarget — and each of the two link-publishing sites
+carries the reason it publishes *conditionally*, which is the phase's whole subject. The
+`origin` enum is a fourth documented decision. *Calibration addition to Phase 2's:* estimate a
+phase that gives an existing operation an event from the number of **write paths that reach the
+new type**, not the number of types. Two types cost ~190 lines here; the third publisher cost as
+much again in service code and half the test suite.
 
 **Acceptance Criteria:**
 
-- [ ] Event classes and publishing for intermediate journal linked and unlinked.
-- [ ] The automatic link created by a retarget publishes the same event type as a manual attach, with
+- [x] Event classes and publishing for intermediate journal linked and unlinked. —
+      `TaskJournalLinked` and `TaskJournalUnlinked` in `backend/app/core/tasks/models/events.py`,
+      published from `attach_intermediate_journal` and `detach_intermediate_journal` **only when the
+      repository reports a row moved**. Whole-key payload assertions on both, as on the other four
+      types, plus a JSON round trip.
+- [x] The automatic link created by a retarget publishes the same event type as a manual attach, with
       provenance distinguishing system-derived from user-initiated. **This phase therefore removes the
       two keys Phase 3 put in the retarget payload** — `auto_linked_journal_id` and `auto_link_created`
       — because the fact they carry becomes an event of its own. `auto_link_created` is the one to think
@@ -4587,22 +4609,100 @@ the miss survived the plan as well as Phase 2.
       departure. (Links are removable — by `detach_intermediate_journal`, by a merge, by a journal
       delete cascading — but none of those is a retarget.) Publishing a "linked" event for that would
       write the link into history twice, so **the derived event is published only when a row was
-      actually written**, which is the same question Phase 3's boolean answers.
-- [ ] The two events a retarget now publishes go out in a **deterministic order, the link before the
+      actually written**, which is the same question Phase 3's boolean answers. — done, and both keys
+      are gone; **but the distinction is carried by a new payload key, `origin`, not by provenance,
+      and that divergence is recorded below.** The A→B→A→C sequence is performed against a real
+      database and asserted as the *absence* of a third link row.
+- [x] The two events a retarget now publishes go out in a **deterministic order, the link before the
       retarget**, matching the order `TaskService.retarget_due_journal` performs the writes in. Phase 3
       pinned that write order with a unit test precisely so this phase has something to inherit rather
-      than a docstring to trust.
-- [ ] Same-unit-of-work publishing and provenance threading.
-- [ ] **Phase 5's completeness criterion is amended by this phase, not by Phase 5.** *"Every task write
-      path publishes exactly one event"* stops being true the moment a retarget publishes two, which is
-      what the second criterion above requires. Phase 3 deferred that rather than avoiding it (see
-      *Decisions taken (Phase 3)*); this phase should restate the completeness rule as **every task
-      write path publishes at least one event, and a retarget publishes exactly two**, and say so in
-      Phase 5's entry so its test is written to the right rule.
+      than a docstring to trust. — inherited, and each event is published **directly behind its own
+      write** rather than beside the other's publish call, so the order follows from the code's shape.
+      Asserted at the service *and* over the stored rows in `(occurred_at, id)` order, which is the
+      order the relay hands them to the stream.
+- [x] Same-unit-of-work publishing and provenance threading. — rollback asserted against a real
+      database for both attach and detach, by failing inside a **caller's** unit of work: the link row
+      and the outbox row go together in both directions. Provenance is threaded through both REST
+      endpoints and both MCP tools, which had none before this phase, and asserted per surface against
+      the stored row.
+- [x] **Phase 5's completeness criterion is amended by this phase, not by Phase 5.** — done; see
+      Phase 5's entry, which now reads *"every task write path publishes at least one event, and a
+      retarget publishes exactly two"*.
 
 **Required Test Coverage:** unit — payloads and the provenance distinction. Integration — outbox rows for
 manual attach/detach and for the retarget-derived link, and their ordering relative to the retarget
 event. No e2e.
+
+**Delivered: 53 unit tests and 17 integration tests.** 27 unit tests for the two event classes
+(`tests/unit/tasks/test_task_events.py`, 57 → 84), 19 for attach/detach publishing and silence
+(`test_task_service_intermediate_journal_links.py`, 29 → 48) and 7 for the retarget-derived link
+(`test_task_service_retarget.py`, 51 → 58); 13 integration tests in
+`tests/integration/tasks/test_task_events_integration.py` (50 → 63) and 4 surface tests split
+between `tests/integration/api/test_task_endpoints.py` and
+`tests/integration/mcp/test_task_tools_mcp.py`. **No e2e**, and the absence is a checked fact rather
+than an assumption: `grep -rn "intermediate-journals" frontend/src` returns nothing, so no UI reaches
+these endpoints and nothing on screen changes. Phase 9 builds the surface that makes any of this
+visible.
+
+**Documentation.** `docs/architecture/domain-architecture.md` — the tasks event list, and the
+paragraph describing the auto-link payload keys this phase deletes, which now describes the two
+events a retarget publishes and how `origin` and `source` split the question between them.
+
+**Decisions taken (Phase 4):**
+
+- **The criterion's "with provenance" was not followed, and this is the divergence.** The derived
+  link carries the provenance of the **user action that caused it** — `ui` when a person retargeted
+  in the browser, `mcp` when an assistant did — and names its cause in a new payload key,
+  `origin: "manual" | "retarget"`. Provenance answers *who acted*; a retarget is something the user
+  did, and the retained link is a consequence of their action rather than a background job.
+  Stamping it `system` would have one action produce two events disagreeing about who performed it,
+  and would tell a person reading their own history that half of what they did was not theirs.
+  `SYSTEM` stays what it has always been here: a write no person triggered, such as an integration
+  sync. Two tests hold the line — one asserting the derived link carries the caller's actor, one
+  asserting the **pair agree** — and the second is the one that catches a "fix" applied to the
+  retarget event instead. Same shape as Phase 2's divergence from *"event classes"* plural.
+- **`origin` is not `auto_link_created` under another name.** That key answered *"was a row
+  written?"*, which this phase answers by publishing an event or not publishing one — the fact
+  moved from a payload key to the existence of a row, where a consumer can act on it without
+  parsing. `origin` answers *"why does this link exist?"*, which nothing else on the event carries
+  and which no other key could be derived from once both causes publish the same type.
+- **`origin` has no default, deliberately.** Every other optional argument on these events defaults
+  to the safest reading; there is no safe default here, because whichever value were chosen the
+  *other* caller would silently publish a lie about why the link exists. A unit test asserts the
+  `TypeError`.
+- **`TaskJournalUnlinked` carries no `origin`.** An unlink has exactly one cause today — a user
+  asking for it — because the other two things that remove a link publish nothing at all: a journal
+  **merge** collapsing redundant links (Phase 10) and a journal **delete** cascading, which removes
+  the row without anyone acting on the task. A key with one possible value would advertise a case
+  that does not exist. Pinned by a whole-key payload assertion rather than left implicit.
+- **`event_id` names the journal as well as the task**, unlike the other four types. They are
+  *about* the task, so two of a kind are separated by the clock; two links are not, because one task
+  can gain several journals — and Phase 6 writes history rows `ON CONFLICT DO NOTHING` over
+  `event_id`, so a same-microsecond collision would silently drop one link from a user's history as
+  a redelivery of the other. Unreachable today (no write path publishes two link events in one unit
+  of work) and cheap to make impossible.
+- **Each event is published behind its own write, which is what makes the ordering structural.** The
+  alternative — both publishes adjacent after the save — passes the same ordering test today and
+  leaves the order resting on two statements a refactor can swap. The consequence is recorded rather
+  than smoothed over: a retarget whose `_save` fails has *already* published the link event, and the
+  test that used to assert "nothing was published" now asserts exactly `["TaskJournalLinked"]` and
+  says why — the link's own write finished, both rows ride the connection the failure rolls back, and
+  what the test is really about is that the **anchor** event never precedes the anchor write.
+- **Mutation-checked, eleven mutations, all caught.** Removing each of the three publish calls fails
+  6, 7 and 10 tests; publishing unconditionally — ignoring the repository's "did a row move?" —
+  fails **exactly one** test each for attach and for retarget, which is the pair of silence tests
+  doing their job; stamping the derived link `system` fails 4; forcing `origin=manual` fails exactly
+  1; swapping the two retarget publishes fails 7 across unit and integration. Dropping
+  `source`/`changed_by` at each of the four surfaces fails **exactly the one surface test for it**,
+  which is the useful result: it says those tests exercise the surface rather than the service behind
+  it. *The harness itself needed a correction worth recording:* the first ordering mutation anchored
+  on `"        return saved\n"` and matched the wrong method, failing 82 tests — a mutation that
+  fails everything proves nothing, and the number was the only signal that it had not tested what it
+  claimed.
+- **Phase 2's `committed_task` trap did not fire again**, for the third phase running. The cleanup it
+  added — deleting a task's events by `aggregate_id` — covers the new types without change, because
+  it matches on the `Task%` prefix rather than an enumerated list. Recorded because Phase 3 predicted
+  this phase would meet it.
 
 #### Phase 5: Events — Contact Linked and Unlinked
 
@@ -4616,17 +4716,25 @@ event. No e2e.
 - [ ] With this phase the specification's full event set is published: created, text updated, status
       changed, due journal retargeted, journal linked/unlinked, contact linked/unlinked, deleted.
       **"Full" means the set the specification names, not every write that reaches a task row.** Two
-      things sit outside it and are not this phase's to close: a retarget publishes **two** events once
-      Phase 4 lands (see Phase 4's amended criteria), and a **journal merge** re-points task anchors and
-      links while publishing nothing task-scoped, which is **Phase 10**.
+      things sit outside it and are not this phase's to close: a retarget publishes **two** events since
+      Phase 4 landed, and a **journal merge** re-points task anchors and links while publishing nothing
+      task-scoped, which is **Phase 10**.
+- [ ] **The completeness rule, as Phase 4 restated it:** *every task write path publishes **at least
+      one** event, and a retarget publishes **exactly two** — the journal it retains, then the anchor
+      move, in that order.* The original wording, "exactly one event per write path", stopped being true
+      the moment the derived link got its own type; Phase 3 deferred the exception and Phase 4 delivered
+      it, so this phase's test is written to the rule above rather than to the one it inherited. The
+      "at least one" is not a licence for two elsewhere: **no other write path may publish more than
+      one**, and that is the half of the rule worth asserting, since it is what stops the exception
+      spreading.
 
 **Required Test Coverage:** unit — payloads. Integration — outbox rows per operation; a completeness test
-asserting every task write path publishes at least one event. **Write the completeness test against the
-write paths rather than against `TaskService`'s method list** — the merge re-point (Phase 10) is a task
-write performed from the journal domain, and a test enumerating service methods would pass while that gap
-is open, which is how it went unnoticed until ITER18-003 Phase 3's review. It is legitimate for this
-phase's test to record the merge as a **known, named exclusion**; it is not legitimate for it to be
-invisible. No e2e.
+asserting every task write path publishes at least one event, with the retarget's two named as the one
+exception. **Write the completeness test against the write paths rather than against `TaskService`'s
+method list** — the merge re-point (Phase 10) is a task write performed from the journal domain, and a
+test enumerating service methods would pass while that gap is open, which is how it went unnoticed until
+ITER18-003 Phase 3's review. It is legitimate for this phase's test to record the merge as a **known,
+named exclusion**; it is not legitimate for it to be invisible. No e2e.
 
 #### Phase 6: History Projection — Lifecycle Events
 

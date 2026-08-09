@@ -44,6 +44,7 @@ from core_shared.models.tasks import (
 from sqlalchemy.exc import IntegrityError
 
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.tasks.models.events import DomainEvent
 from app.core.tasks.services.task_service import TaskService
 from tests.unit.tasks.task_doubles import published_events
 
@@ -211,6 +212,33 @@ async def retarget(
         transaction=transaction,
         now=now,
     )
+
+
+def retarget_event(publisher: AsyncMock) -> DomainEvent:
+    """The anchor-move event from the pair a successful retarget publishes.
+
+    A retarget publishes two events since the phase that gave intermediate links
+    their own type: the link it retains, then the anchor move. Most of the tests
+    below are about the second, and pick it by type rather than by index so a
+    change in the order fails the one test that is *about* the order rather than
+    every test in the file at once.
+    """
+    (event,) = [
+        event
+        for event in published_events(publisher)
+        if event.event_type == "TaskDueJournalRetargeted"
+    ]
+    return event
+
+
+def link_event(publisher: AsyncMock) -> DomainEvent:
+    """The derived-link event from that same pair."""
+    (event,) = [
+        event
+        for event in published_events(publisher)
+        if event.event_type == "TaskJournalLinked"
+    ]
+    return event
 
 
 def acknowledgement_for(status: TaskStatus) -> bool:
@@ -983,32 +1011,59 @@ class TestNothingElseIsTouched:
 
 @pytest.mark.unit
 class TestARetargetAnnouncesItself:
-    """One write, one event — and everything a reader of it needs.
+    """Two events, one for each thing a retarget does.
 
     The specification lists "due journal retargeted" in the minimum event set,
     and a retarget is the one task operation that does two things at once: it
-    moves the due anchor and retains the journal it left. Both are one write in
-    one unit of work, so they are one event; the auto-link travels in this
-    payload until Phase 4 gives the link its own type.
+    moves the due anchor and retains the journal it left. Each is now announced
+    by its own type — the link by a ``TaskJournalLinked``, the same type a manual
+    attach publishes, and the move by this one — in the order the writes happen.
+
+    **The status change stays inside the retarget payload.** Two events here
+    means one per *write*, not one per fact: a reopen is part of the anchor move,
+    not a separate thing that happened.
     """
 
     @pytest.mark.asyncio
-    async def test_exactly_one_event_is_published(
+    async def test_the_link_and_the_move_are_published_in_that_order(
         self,
         service: TaskService,
         mock_transaction: AsyncMock,
         mock_event_publisher: AsyncMock,
     ) -> None:
-        """Not a retarget event *and* a ``TaskUpdated`` for the status.
+        """The phase's third criterion, at the service.
 
-        Two events would announce two changes where one write happened, and
-        would need Phase 5's "every write path publishes exactly one event" to
-        carry an exception for this path alone.
+        Asserted as an ordered list of types rather than by looking each one up:
+        it has to fail both when an event goes missing and when the two swap, and
+        a lookup-by-type assertion cannot see the second.
         """
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
-        assert event.event_type == "TaskDueJournalRetargeted"
+        assert [
+            event.event_type for event in published_events(mock_event_publisher)
+        ] == [
+            "TaskJournalLinked",
+            "TaskDueJournalRetargeted",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_task_updated_event_rides_along_for_the_status(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """A reopen is part of the move, not a third announcement.
+
+        The pair above is the whole of what a retarget publishes, and a reopen —
+        the case with the most facts to report — must not grow it to three.
+        """
+        mock_task_repo.find_by_id_for_update.return_value = make_task(TaskStatus.DONE)
+
+        await retarget(service, mock_transaction, acknowledge_reopen=True)
+
+        assert len(published_events(mock_event_publisher)) == 2
 
     @pytest.mark.asyncio
     async def test_the_event_names_the_task_it_is_about(
@@ -1019,7 +1074,7 @@ class TestARetargetAnnouncesItself:
     ) -> None:
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         assert event.aggregate_id == TASK_ID
         assert event.event_data["task_id"] == TASK_ID
         assert event.event_data["user_id"] == USER_ID
@@ -1039,49 +1094,33 @@ class TestARetargetAnnouncesItself:
         """
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         change = event.event_data["changed_fields"]["due_journal_id"]
         assert change[0] == OLD_DUE_JOURNAL_ID
         assert change[1] == NEW_DUE_JOURNAL_ID
 
     @pytest.mark.asyncio
-    async def test_the_payload_names_the_journal_kept_as_intermediate(
+    async def test_the_payload_says_nothing_about_the_retained_link(
         self,
         service: TaskService,
         mock_transaction: AsyncMock,
         mock_event_publisher: AsyncMock,
     ) -> None:
-        """The model's one automatic link, carried rather than inferred."""
-        await retarget(service, mock_transaction)
+        """The two keys that stood in for the link event are gone.
 
-        (event,) = published_events(mock_event_publisher)
-        assert event.event_data["auto_linked_journal_id"] == OLD_DUE_JOURNAL_ID
-        assert event.event_data["auto_link_created"] is True
-
-    @pytest.mark.asyncio
-    async def test_a_journal_that_was_already_linked_is_recorded_as_such(
-        self,
-        service: TaskService,
-        mock_task_repo: AsyncMock,
-        mock_transaction: AsyncMock,
-        mock_event_publisher: AsyncMock,
-    ) -> None:
-        """``add_intermediate_journal`` already answers this; the event keeps it.
-
-        Reachable whenever a task is retargeted back onto a journal it has
-        already passed through. Discarding the answer would have Phase 7 write
-        "linked journal 22" into the user's history a second time for a link
-        that was already there.
+        They were here only while ``TaskJournalLinked`` did not exist. Leaving
+        them would put the same link in front of a reader twice — once as a key
+        and once as an event — with nothing saying which to believe if a future
+        change made them disagree.
         """
-        mock_task_repo.add_intermediate_journal.return_value = False
-
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
-        assert event.event_data["auto_link_created"] is False
+        payload = retarget_event(mock_event_publisher).event_data
+        assert "auto_linked_journal_id" not in payload
+        assert "auto_link_created" not in payload
 
     @pytest.mark.asyncio
-    async def test_the_event_is_published_after_the_write(
+    async def test_the_retarget_event_is_published_after_the_anchor_moves(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,
@@ -1091,15 +1130,22 @@ class TestARetargetAnnouncesItself:
         """So it announces a change that finished, not one that was attempted.
 
         The save can still fail — a journal deleted between the read and the
-        write surfaces as a 404 — and an event published first would have
-        announced a retarget that never happened.
+        write surfaces as a 404 — and a retarget event published first would have
+        announced a move that never happened.
+
+        **The link event is already out at this point, and that is correct.** Its
+        own write finished before the save was attempted, and both rows ride the
+        connection the failure rolls back, so nothing survives either way. What
+        this pins is that the *anchor* event never precedes the anchor write.
         """
         mock_task_repo.save.side_effect = TaskDomainError("the write failed")
 
         with pytest.raises(TaskDomainError):
             await retarget(service, mock_transaction)
 
-        assert published_events(mock_event_publisher) == []
+        assert [
+            event.event_type for event in published_events(mock_event_publisher)
+        ] == ["TaskJournalLinked"]
 
     @pytest.mark.asyncio
     async def test_the_link_is_written_before_the_anchor_moves(
@@ -1141,8 +1187,181 @@ class TestARetargetAnnouncesItself:
     ) -> None:
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
-        assert event.transaction is mock_transaction
+        assert retarget_event(mock_event_publisher).transaction is mock_transaction
+
+
+@pytest.mark.unit
+class TestARetargetAnnouncesTheLinkItRetains:
+    """The derived link, published as the same type a manual attach publishes.
+
+    The phase's second criterion. Before it, the retained journal travelled as
+    two keys on the retarget payload; now it is an event of its own, so a
+    consumer treats "this journal became a link" the same way whether a person
+    asked for it or a deferral produced it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_link_event_names_the_journal_the_task_left(
+        self,
+        service: TaskService,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """The *previous* due journal, not the new one.
+
+        The two are one substitution apart in the source and produce a history
+        claiming the task was linked to the journal it just moved *to* — which
+        is not a link at all, it is the anchor.
+        """
+        await retarget(service, mock_transaction)
+
+        event = link_event(mock_event_publisher)
+        assert event.aggregate_id == TASK_ID
+        assert event.event_data["task_id"] == TASK_ID
+        assert event.event_data["user_id"] == USER_ID
+        assert event.event_data["journal_id"] == OLD_DUE_JOURNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_the_link_records_that_a_retarget_caused_it(
+        self,
+        service: TaskService,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """Half of the criterion's distinction; the actor is the other half."""
+        await retarget(service, mock_transaction)
+
+        assert link_event(mock_event_publisher).event_data["origin"] == "retarget"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "changed_by"),
+        [(Provenance.UI, "ui"), (Provenance.MCP, "mcp")],
+    )
+    async def test_the_derived_link_is_attributed_to_the_person_who_retargeted(
+        self,
+        service: TaskService,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        """The recorded divergence from the criterion's wording, pinned.
+
+        That criterion says the derived link is separated from a manual one "with
+        provenance", which would make this ``system``. It does not, deliberately:
+        a retarget is something the **user** did, and the link is a consequence
+        of their action rather than a background job. Filing it under ``system``
+        would have one user action produce two events disagreeing about who
+        performed it, and would tell a person reading their own history that half
+        of what they did was not theirs. ``SYSTEM`` is for writes nobody
+        triggered — an integration sync — and ``origin`` carries the derivation.
+
+        This is the test that fails if someone later "corrects" it back.
+        """
+        await service.retarget_due_journal(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            due_journal_id=NEW_DUE_JOURNAL_ID,
+            transaction=mock_transaction,
+            now=NOW,
+            source=source,
+            changed_by=changed_by,
+        )
+
+        link = link_event(mock_event_publisher)
+        assert link.event_data["source"] == source.value
+        assert link.event_data["changed_by"] == changed_by
+
+    @pytest.mark.asyncio
+    async def test_both_events_of_one_retarget_agree_on_the_actor(
+        self,
+        service: TaskService,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """Stated as an agreement, because that is the property that matters.
+
+        The test above would still pass if the retarget event were the one that
+        went wrong. This compares the pair, which is what a reader of the history
+        actually sees: two lines, one action, one name against both.
+        """
+        await service.retarget_due_journal(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            due_journal_id=NEW_DUE_JOURNAL_ID,
+            transaction=mock_transaction,
+            now=NOW,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        link = link_event(mock_event_publisher).event_data
+        move = retarget_event(mock_event_publisher).event_data
+        assert (link["source"], link["changed_by"]) == (
+            move["source"],
+            move["changed_by"],
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_link_that_was_already_there_announces_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """Where ``auto_link_created`` went: no row written, no event.
+
+        Reachable whenever a task is retargeted back onto a journal it has
+        already passed through — A→B→A→C leaves A a second time while A is still
+        linked from the first departure. Publishing here would write "linked
+        journal 22" into the user's history twice for one link.
+        """
+        mock_task_repo.add_intermediate_journal.return_value = False
+
+        await retarget(service, mock_transaction)
+
+        assert [
+            event.event_type for event in published_events(mock_event_publisher)
+        ] == ["TaskDueJournalRetargeted"]
+
+    @pytest.mark.asyncio
+    async def test_the_link_event_is_published_after_the_link_is_written(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """Each event sits behind its own write, which is what fixes the order.
+
+        The publisher is inspected from inside the link write, so this fails if
+        the publish is hoisted above it — and with it goes the guarantee that
+        the pair reaches a consumer link-first.
+        """
+        published_at_write: list[int] = []
+
+        async def record(*_args: object) -> bool:
+            published_at_write.append(len(mock_event_publisher.mock_calls))
+            return True
+
+        mock_task_repo.add_intermediate_journal.side_effect = record
+
+        await retarget(service, mock_transaction)
+
+        assert published_at_write == [0]
+
+    @pytest.mark.asyncio
+    async def test_the_link_event_carries_the_callers_transaction(
+        self,
+        service: TaskService,
+        mock_transaction: AsyncMock,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        await retarget(service, mock_transaction)
+
+        assert link_event(mock_event_publisher).transaction is mock_transaction
 
 
 @pytest.mark.unit
@@ -1167,7 +1386,7 @@ class TestAReopenIsVisibleInTheEventStream:
 
         await retarget(service, mock_transaction, acknowledge_reopen=True)
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         change = event.event_data["changed_fields"]["status"]
         assert change[0] == TaskStatus.DONE.value
         assert change[1] == TaskStatus.NOT_DONE.value
@@ -1187,25 +1406,30 @@ class TestAReopenIsVisibleInTheEventStream:
 
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         change = event.event_data["changed_fields"]["status"]
         assert change[0] == TaskStatus.CANCELLED.value
         assert change[1] == TaskStatus.NOT_DONE.value
 
     @pytest.mark.asyncio
-    async def test_a_reopen_is_still_one_event(
+    async def test_the_move_and_the_reopen_share_one_payload(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
         mock_event_publisher: AsyncMock,
     ) -> None:
-        """Both facts in one payload, rather than a retarget plus an update."""
+        """Both facts in one payload, rather than a retarget plus an update.
+
+        The retained link is a second *event* now, but the reopen is not: it is
+        part of the anchor move, and splitting it out would announce two things
+        where the row changed once.
+        """
         mock_task_repo.find_by_id_for_update.return_value = make_task(TaskStatus.DONE)
 
         await retarget(service, mock_transaction, acknowledge_reopen=True)
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         assert set(event.event_data["changed_fields"]) == {"due_journal_id", "status"}
 
     @pytest.mark.asyncio
@@ -1223,7 +1447,7 @@ class TestAReopenIsVisibleInTheEventStream:
         """
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         assert list(event.event_data["changed_fields"]) == ["due_journal_id"]
 
 
@@ -1337,7 +1561,7 @@ class TestProvenanceReachesTheRetargetEvent:
     ) -> None:
         await retarget(service, mock_transaction)
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         assert event.event_data["source"] == Provenance.SYSTEM.value
         assert event.event_data["changed_by"] == "system"
 
@@ -1364,6 +1588,6 @@ class TestProvenanceReachesTheRetargetEvent:
             changed_by=changed_by,
         )
 
-        (event,) = published_events(mock_event_publisher)
+        event = retarget_event(mock_event_publisher)
         assert event.event_data["source"] == source.value
         assert event.event_data["changed_by"] == changed_by

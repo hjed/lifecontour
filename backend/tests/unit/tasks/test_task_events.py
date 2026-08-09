@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 
@@ -35,11 +36,15 @@ from app.core.tasks.models.events import (
     TaskCreated,
     TaskDeleted,
     TaskDueJournalRetargeted,
+    TaskJournalLinked,
+    TaskJournalLinkOrigin,
+    TaskJournalUnlinked,
     TaskUpdated,
 )
 from tests.unit.tasks.task_doubles import (
     CREATING_JOURNAL_ID,
     DUE_JOURNAL_ID,
+    INTERMEDIATE_JOURNAL_ID,
     NEW_DUE_JOURNAL_ID,
     ORIGINAL_TEXT,
     TASK_ID,
@@ -95,7 +100,6 @@ def make_updated(
 def make_retargeted(
     *,
     previous_status: TaskStatus = TaskStatus.NOT_DONE,
-    auto_link_created: bool = True,
     source: Provenance = Provenance.SYSTEM,
     changed_by: str = "system",
     transaction: AsyncMock | None = None,
@@ -103,8 +107,9 @@ def make_retargeted(
     """A ``TaskDueJournalRetargeted`` over the shared task constants.
 
     The default is the ordinary case: a not-done task moved from
-    ``DUE_JOURNAL_ID`` to ``NEW_DUE_JOURNAL_ID``, with the journal it left newly
-    retained as an intermediate link.
+    ``DUE_JOURNAL_ID`` to ``NEW_DUE_JOURNAL_ID``. The journal it left is retained
+    as an intermediate link, but that is announced by its own
+    ``TaskJournalLinked`` rather than carried here.
     """
     return TaskDueJournalRetargeted(
         task_id=TASK_ID,
@@ -112,7 +117,48 @@ def make_retargeted(
         previous_due_journal_id=DUE_JOURNAL_ID,
         due_journal_id=NEW_DUE_JOURNAL_ID,
         previous_status=previous_status,
-        auto_link_created=auto_link_created,
+        source=source,
+        changed_by=changed_by,
+        transaction=transaction,
+    )
+
+
+def make_linked(
+    *,
+    journal_id: int = INTERMEDIATE_JOURNAL_ID,
+    origin: TaskJournalLinkOrigin = TaskJournalLinkOrigin.MANUAL,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+    transaction: AsyncMock | None = None,
+) -> TaskJournalLinked:
+    """A ``TaskJournalLinked`` over the shared task constants.
+
+    The default is the case the user drives: somebody attached a journal the task
+    is merely mentioned in.
+    """
+    return TaskJournalLinked(
+        task_id=TASK_ID,
+        user_id=USER_ID,
+        journal_id=journal_id,
+        origin=origin,
+        source=source,
+        changed_by=changed_by,
+        transaction=transaction,
+    )
+
+
+def make_unlinked(
+    *,
+    journal_id: int = INTERMEDIATE_JOURNAL_ID,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+    transaction: AsyncMock | None = None,
+) -> TaskJournalUnlinked:
+    """A ``TaskJournalUnlinked`` over the shared task constants."""
+    return TaskJournalUnlinked(
+        task_id=TASK_ID,
+        user_id=USER_ID,
+        journal_id=journal_id,
         source=source,
         changed_by=changed_by,
         transaction=transaction,
@@ -370,14 +416,16 @@ class TestTaskUpdated:
 
 
 class TestTaskDueJournalRetargeted:
-    """The single event a successful retarget publishes.
+    """The anchor half of what a successful retarget publishes.
 
-    **One event, not two.** A retarget does two things — moves the due anchor and
-    retains the journal it left as an intermediate link — but they are one write
-    in one unit of work, so the auto-link is carried *in this payload* rather
-    than as a second event. Phase 4 gives the manual attach and detach their own
-    type and may then publish the derived link separately; the ordering it
-    inherits is the write order the service already has, link before anchor.
+    **One of two events now.** A retarget does two things — moves the due anchor
+    and retains the journal it left as an intermediate link — and this event
+    announces only the first. The link is a ``TaskJournalLinked`` of its own,
+    published before this one because the service writes the link first. The two
+    payload keys that stood in for it while that type did not exist,
+    ``auto_linked_journal_id`` and ``auto_link_created``, are gone: the first is
+    the link event's ``journal_id`` and the second is answered by whether a link
+    event exists at all.
 
     **The event builds its own ``changed_fields``**, unlike ``TaskUpdated``,
     which is handed one. Retargeting's "always lands not done" is a property of
@@ -407,10 +455,11 @@ class TestTaskDueJournalRetargeted:
     def test_payload_carries_exactly_the_documented_keys(self) -> None:
         """A whole-key comparison, as on the other three types.
 
-        This one matters more than most: ``auto_linked_journal_id`` and
-        ``auto_link_created`` are here *because* Phase 4's event does not exist
-        yet, so the phase that adds it has to remove them deliberately rather
-        than leave a payload advertising a link nobody publishes twice.
+        The two auto-link keys the previous phase put here are **absent**, and
+        their absence is the point of this assertion rather than a tidy-up: a
+        retarget that carried them *and* published a ``TaskJournalLinked`` would
+        put the same link into a reader's hands twice, in two shapes, and only
+        one of them would be an event the projection knows how to read.
         """
         event = make_retargeted()
 
@@ -418,8 +467,6 @@ class TestTaskDueJournalRetargeted:
             "task_id": TASK_ID,
             "user_id": USER_ID,
             "changed_fields": {"due_journal_id": (DUE_JOURNAL_ID, NEW_DUE_JOURNAL_ID)},
-            "auto_linked_journal_id": DUE_JOURNAL_ID,
-            "auto_link_created": True,
             "source": Provenance.SYSTEM.value,
             "changed_by": "system",
         }
@@ -504,18 +551,19 @@ class TestTaskDueJournalRetargeted:
         assert type(change[0]) is str
         assert type(change[1]) is str
 
-    def test_records_that_the_journal_was_already_linked(self) -> None:
-        """``add_intermediate_journal`` is idempotent, so this is reachable.
+    def test_says_nothing_about_the_link_the_retarget_retained(self) -> None:
+        """The auto-link keys are gone, named rather than merely dropped.
 
-        A journal can be both the due anchor and an intermediate link — nothing
-        cleans that up — so a task retargeted A→B→A→C finds A already attached
-        when it leaves it the second time. Without this flag, Phase 7 would
-        write "linked journal A" into the user's history for a link that was
-        already there.
+        The whole-key assertion above already fails if either comes back, but it
+        fails as "the payload changed". This one says *which* keys must not
+        return and why: the retained journal is announced by its own
+        ``TaskJournalLinked``, so a reader that found it here as well would have
+        to decide which of the two to believe when they disagreed.
         """
-        event = make_retargeted(auto_link_created=False)
+        payload = make_retargeted().event_data
 
-        assert event.event_data["auto_link_created"] is False
+        assert "auto_linked_journal_id" not in payload
+        assert "auto_link_created" not in payload
 
     def test_defaults_to_system_provenance(self) -> None:
         event = TaskDueJournalRetargeted(
@@ -524,7 +572,6 @@ class TestTaskDueJournalRetargeted:
             previous_due_journal_id=DUE_JOURNAL_ID,
             due_journal_id=NEW_DUE_JOURNAL_ID,
             previous_status=TaskStatus.NOT_DONE,
-            auto_link_created=True,
         )
 
         assert event.event_data["source"] == Provenance.SYSTEM.value
@@ -558,6 +605,235 @@ class TestTaskDueJournalRetargeted:
 
     def test_transaction_defaults_to_none(self) -> None:
         assert make_retargeted().transaction is None
+
+
+class TestTaskJournalLinked:
+    """The event published when a journal becomes an intermediate link.
+
+    **Two ways in, one type.** A person attaches a journal the task was
+    discussed in, or a retarget retains the journal the task has just left —
+    the model's one automatic link. Both are the same fact about the task, so
+    both publish this, and ``origin`` says which happened.
+
+    **``origin`` is not provenance.** ``source`` records *who acted*, and a
+    retarget is something the user did: a link derived from a retarget somebody
+    performed in the browser is ``ui``, not ``system``, because filing it under
+    the system would tell that user's own history that half of one action was
+    not theirs. ``SYSTEM`` is for a write no person triggered — an integration
+    sync — which a retarget is not. What is genuinely derived is the link's
+    *cause*, and that is what ``origin`` carries.
+    """
+
+    def test_identifies_itself_as_a_journal_linked_event(self) -> None:
+        event = make_linked()
+
+        assert event.event_type == "TaskJournalLinked"
+        assert event.event_id.startswith(
+            f"task_journal_linked_{TASK_ID}_{INTERMEDIATE_JOURNAL_ID}_"
+        )
+
+    def test_aggregate_id_is_the_integer_task_id(self) -> None:
+        """The task, not the journal that was linked to it.
+
+        The tempting alternative is real: this event names a journal, and a
+        journal is an aggregate elsewhere in this codebase. Filing it there
+        would put a task's trail on the journal's history page and leave the
+        task's own read surface (Phase 8) unable to find it at all.
+        """
+        event = make_linked()
+
+        assert event.aggregate_id == TASK_ID
+        assert type(event.aggregate_id) is int
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """A whole-key comparison, as on every other type in this module."""
+        event = make_linked()
+
+        assert event.event_data == {
+            "task_id": TASK_ID,
+            "user_id": USER_ID,
+            "journal_id": INTERMEDIATE_JOURNAL_ID,
+            "origin": "manual",
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_a_retarget_derived_link_names_its_cause(self) -> None:
+        """The one thing separating the two ways this event is reached.
+
+        Without it a reader has an event saying "this journal became a link"
+        and no way to tell a deliberate attach from the automatic retention a
+        deferral performed — which is the distinction the phase's second
+        criterion exists to preserve.
+        """
+        event = make_linked(origin=TaskJournalLinkOrigin.RETARGET)
+
+        assert event.event_data["origin"] == "retarget"
+
+    def test_a_derived_link_keeps_the_actor_that_triggered_it(self) -> None:
+        """A ``ui`` retarget produces a ``ui`` link. The divergence, asserted.
+
+        The phase's criterion words this distinction as being carried "with
+        provenance", which would make this ``system``. It is not, deliberately:
+        the retarget event published alongside says ``ui``, and two events of
+        one user action disagreeing about who performed it is worse than the
+        wording being followed literally. This is the test that fails if someone
+        later "corrects" it back.
+        """
+        event = make_linked(
+            origin=TaskJournalLinkOrigin.RETARGET,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert event.event_data["source"] == "ui"
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_origin_reaches_the_payload_as_a_plain_string(self) -> None:
+        """``type() is str``, not ``isinstance``, for the ``StrEnum`` reason.
+
+        ``TaskJournalLinkOrigin`` is a ``StrEnum``, so a member left in the
+        payload is ``isinstance(..., str)``, serialises to the same JSON and
+        compares equal to its value — the whole-key assertion above would not
+        catch it either. The payload is a wire format: a member in it hands an
+        in-process subscriber a domain type where a reader coming back through
+        Redis gets a bare string.
+        """
+        for origin in TaskJournalLinkOrigin:
+            assert type(make_linked(origin=origin).event_data["origin"]) is str
+
+    def test_origin_has_no_default(self) -> None:
+        """A caller that forgets must fail loudly, not file a retarget as manual.
+
+        Every other optional argument on these events defaults to the safest
+        reading. There is no safe default here: whichever value were chosen,
+        the *other* caller would silently publish a lie about why the link
+        exists, and nothing downstream could recover it.
+        """
+        with pytest.raises(TypeError):
+            TaskJournalLinked(  # type: ignore[call-arg]
+                task_id=TASK_ID,
+                user_id=USER_ID,
+                journal_id=INTERMEDIATE_JOURNAL_ID,
+            )
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = TaskJournalLinked(
+            task_id=TASK_ID,
+            user_id=USER_ID,
+            journal_id=INTERMEDIATE_JOURNAL_ID,
+            origin=TaskJournalLinkOrigin.MANUAL,
+        )
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_records_ui_provenance_from_the_caller(self) -> None:
+        event = make_linked(source=Provenance.UI, changed_by="ui")
+
+        assert event.event_data["source"] == "ui"
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_records_mcp_provenance_from_the_caller(self) -> None:
+        event = make_linked(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_occurred_at_is_timezone_aware_utc(self) -> None:
+        event = make_linked()
+
+        assert isinstance(event.occurred_at, datetime)
+        assert event.occurred_at.tzinfo is not None
+        assert event.occurred_at.utcoffset() == timedelta(0)
+
+    def test_carries_the_transaction_it_was_given(self) -> None:
+        transaction = AsyncMock()
+
+        event = make_linked(transaction=transaction)
+
+        assert event.transaction is transaction
+
+    def test_transaction_defaults_to_none(self) -> None:
+        assert make_linked().transaction is None
+
+
+class TestTaskJournalUnlinked:
+    """The event published when an intermediate link is removed.
+
+    **No ``origin``, deliberately.** The linked event has two causes and needs
+    to name one. This has exactly one — a user asking for the link to go —
+    because the other two things that remove a link publish nothing at all
+    today: a journal merge collapsing redundant links, which is a later phase's
+    to give an event to, and a journal delete cascading, which removes the row
+    from underneath the task without anyone acting on the task. A key with a
+    single possible value would advertise a second case that does not exist.
+    """
+
+    def test_identifies_itself_as_a_journal_unlinked_event(self) -> None:
+        event = make_unlinked()
+
+        assert event.event_type == "TaskJournalUnlinked"
+        assert event.event_id.startswith(
+            f"task_journal_unlinked_{TASK_ID}_{INTERMEDIATE_JOURNAL_ID}_"
+        )
+
+    def test_aggregate_id_is_the_integer_task_id(self) -> None:
+        event = make_unlinked()
+
+        assert event.aggregate_id == TASK_ID
+        assert type(event.aggregate_id) is int
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """A whole-key comparison — and the one that pins ``origin``'s absence."""
+        event = make_unlinked()
+
+        assert event.event_data == {
+            "task_id": TASK_ID,
+            "user_id": USER_ID,
+            "journal_id": INTERMEDIATE_JOURNAL_ID,
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = TaskJournalUnlinked(
+            task_id=TASK_ID,
+            user_id=USER_ID,
+            journal_id=INTERMEDIATE_JOURNAL_ID,
+        )
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_records_ui_provenance_from_the_caller(self) -> None:
+        event = make_unlinked(source=Provenance.UI, changed_by="ui")
+
+        assert event.event_data["source"] == "ui"
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_records_mcp_provenance_from_the_caller(self) -> None:
+        event = make_unlinked(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_occurred_at_is_timezone_aware_utc(self) -> None:
+        event = make_unlinked()
+
+        assert isinstance(event.occurred_at, datetime)
+        assert event.occurred_at.tzinfo is not None
+        assert event.occurred_at.utcoffset() == timedelta(0)
+
+    def test_carries_the_transaction_it_was_given(self) -> None:
+        transaction = AsyncMock()
+
+        event = make_unlinked(transaction=transaction)
+
+        assert event.transaction is transaction
+
+    def test_transaction_defaults_to_none(self) -> None:
+        assert make_unlinked().transaction is None
 
 
 class TestTaskDeleted:
@@ -636,22 +912,16 @@ class TestEventIdentity:
         id would let the second be dropped as a redelivery of the first, so a
         task's deletion could vanish from its own history.
         """
-        created = make_created()
-        updated = make_updated()
-        retargeted = make_retargeted()
-        deleted = make_deleted()
+        ids = {
+            make_created().event_id,
+            make_updated().event_id,
+            make_retargeted().event_id,
+            make_linked().event_id,
+            make_unlinked().event_id,
+            make_deleted().event_id,
+        }
 
-        assert (
-            len(
-                {
-                    created.event_id,
-                    updated.event_id,
-                    retargeted.event_id,
-                    deleted.event_id,
-                }
-            )
-            == 4
-        )
+        assert len(ids) == 6
 
     def test_an_id_is_separated_from_its_neighbours_by_its_own_timestamp(self) -> None:
         """Two events of one type on one task are told apart by ``occurred_at``.
@@ -686,6 +956,44 @@ class TestEventIdentity:
             event.event_id
             == f"task_due_journal_retargeted_{TASK_ID}_{event.occurred_at.isoformat()}"
         )
+
+    def test_a_link_id_names_the_journal_as_well_as_the_task(self) -> None:
+        """The one type whose id needs more than the task and the clock.
+
+        Every other event on a task is *about* the task, so two of a kind on one
+        task are separated by time alone. Two links are not: a task can gain
+        several journals, and if two of those writes ever shared a microsecond
+        the pair would collide — and Phase 6's ``ON CONFLICT DO NOTHING`` over
+        ``event_id`` would silently drop one link from the user's history as a
+        redelivery of the other. The journal id costs nothing and removes the
+        question.
+        """
+        event = make_linked()
+
+        assert event.event_id == (
+            f"task_journal_linked_{TASK_ID}_{INTERMEDIATE_JOURNAL_ID}_"
+            f"{event.occurred_at.isoformat()}"
+        )
+
+    def test_an_unlink_id_is_composed_the_same_way(self) -> None:
+        event = make_unlinked()
+
+        assert event.event_id == (
+            f"task_journal_unlinked_{TASK_ID}_{INTERMEDIATE_JOURNAL_ID}_"
+            f"{event.occurred_at.isoformat()}"
+        )
+
+    def test_links_to_two_journals_are_told_apart_by_the_id_alone(self) -> None:
+        """Deterministic, unlike constructing two and racing the clock.
+
+        Both ids are built here from *one* event's timestamp, so the assertion
+        is about the journal id doing the separating rather than about how fast
+        two constructions happen to run.
+        """
+        event = make_linked()
+        other = f"task_journal_linked_{TASK_ID}_{INTERMEDIATE_JOURNAL_ID + 1}_"
+
+        assert not event.event_id.startswith(other)
 
 
 class TestPayloadSurvivesTheStream:
@@ -766,16 +1074,37 @@ class TestPayloadSurvivesTheStream:
             "status": ["done", "not_done"],
         }
 
-    def test_the_auto_link_keys_survive_the_stream(self) -> None:
-        """Scalars, so they round trip to something equal to themselves.
+    def test_linked_payload_round_trips_through_json_unchanged(self) -> None:
+        """All scalars, so it arrives equal to what was sent — pairs excepted.
 
-        Worth stating because ``auto_link_created`` is a bool: a payload that
-        carried it as a Python object rather than a JSON scalar would reach
-        Phase 7 as a string, and ``"False"`` is truthy.
+        Asserted for the *derived* link with a user's provenance on it, because
+        that combination is the one this phase invented and the one a reader
+        will meet in the outbox.
         """
-        event = make_retargeted(auto_link_created=False)
+        event = make_linked(
+            origin=TaskJournalLinkOrigin.RETARGET,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
 
-        round_tripped = json.loads(json.dumps(event.event_data))
+        assert json.loads(json.dumps(event.event_data)) == event.event_data
 
-        assert round_tripped["auto_linked_journal_id"] == DUE_JOURNAL_ID
-        assert round_tripped["auto_link_created"] is False
+    def test_unlinked_payload_round_trips_through_json_unchanged(self) -> None:
+        event = make_unlinked(source=Provenance.MCP, changed_by="mcp")
+
+        assert json.loads(json.dumps(event.event_data)) == event.event_data
+
+    def test_origin_arrives_as_a_bare_string_rather_than_a_member(self) -> None:
+        """What the projection actually reads, after Redis.
+
+        The round trip above cannot catch a ``StrEnum`` member left in the
+        payload — it serialises identically and compares equal to its value — so
+        the type is asserted on the *arrived* object, which is where a consumer
+        matching ``origin == "retarget"`` will look.
+        """
+        event = make_linked(origin=TaskJournalLinkOrigin.RETARGET)
+
+        arrived = json.loads(json.dumps(event.event_data))["origin"]
+
+        assert type(arrived) is str
+        assert arrived == "retarget"
