@@ -28,6 +28,7 @@ from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
+    TaskJournalIsAnchorError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -123,9 +124,54 @@ async def _retarget(
     )
 
 
+async def _attach(
+    service: TaskService,
+    connection: AsyncConnection,
+    task_id: int,
+    journal_id: int,
+    *,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+) -> bool:
+    """Link a journal to a task as an intermediate journal, through the service."""
+    return await service.attach_intermediate_journal(
+        user_id=USER_ID,
+        task_id=task_id,
+        journal_id=journal_id,
+        transaction=connection,
+        source=source,
+        changed_by=changed_by,
+    )
+
+
+async def _detach(
+    service: TaskService,
+    connection: AsyncConnection,
+    task_id: int,
+    journal_id: int,
+    *,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+) -> bool:
+    """Remove an intermediate-journal link, through the service."""
+    return await service.detach_intermediate_journal(
+        user_id=USER_ID,
+        task_id=task_id,
+        journal_id=journal_id,
+        transaction=connection,
+        source=source,
+        changed_by=changed_by,
+    )
+
+
 def _retarget_events(events: list[TaskEventRow]) -> list[TaskEventRow]:
     """Just the retarget rows, so a trail assertion can name its own subject."""
     return [event for event in events if event.event_type == "TaskDueJournalRetargeted"]
+
+
+def _link_events(events: list[TaskEventRow]) -> list[TaskEventRow]:
+    """Just the journal-linked rows, for the same reason."""
+    return [event for event in events if event.event_type == "TaskJournalLinked"]
 
 
 @pytest.mark.integration
@@ -795,25 +841,29 @@ class TestTheEventAndTheWriteAreOneUnitOfWork:
 
 
 @pytest.mark.integration
-class TestARetargetLeavesOneOutboxRow:
-    """One retarget, one row — carrying the move, the auto-link and any reopen.
+class TestARetargetLeavesTwoOutboxRows:
+    """One retarget, two rows — the link it retains, then the move.
 
-    The unit tests own the payload's shape. What only a database shows is that
-    the *decision* reaches ``outbox_events`` as a single row, and what a
-    consumer reads back out of the JSON column: pairs arrive as lists, and the
-    auto-link's boolean arrives as a boolean rather than as the string
-    ``"False"``, which is truthy.
+    The unit tests own the payloads' shape. What only a database shows is that
+    the two reach ``outbox_events`` as separate rows **in the order the writes
+    happened**, since that order is what a consumer reads them back in, and what
+    survives the JSON column: the pairs arrive as lists.
     """
 
     @pytest.mark.asyncio
-    async def test_exactly_one_retarget_row_is_appended(
+    async def test_the_link_and_the_move_are_appended_in_that_order(
         self,
         service: TaskService,
         async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
         journal_repository: SqlJournalRepository,
     ) -> None:
-        """Not a retarget row *and* a ``TaskUpdated`` for the forced status."""
+        """The phase's ordering criterion, over the column order a consumer reads.
+
+        ``task_events`` orders by ``(occurred_at, id)`` — the order the relay
+        hands rows to the stream — so this is the ordering as it will actually be
+        observed, not as the service happened to call its publisher.
+        """
         task_id = await _create(service, async_connection, task_anchors)
         later_id = await create_journal(
             journal_repository, title="Where it matters now", days_offset=14
@@ -824,6 +874,7 @@ class TestARetargetLeavesOneOutboxRow:
         events = await task_events(async_connection, task_id=task_id)
         assert [event.event_type for event in events] == [
             "TaskCreated",
+            "TaskJournalLinked",
             "TaskDueJournalRetargeted",
         ]
 
@@ -835,13 +886,13 @@ class TestARetargetLeavesOneOutboxRow:
         task_anchors: tuple[int, int],
         journal_repository: SqlJournalRepository,
     ) -> None:
-        """Compared against the ``tasks`` row and the link table, not the request.
+        """Compared against the ``tasks`` row, not the request.
 
         A whole-payload comparison, as the create's is: the journal the event
-        says the task is now due in is read back out of the anchor columns, and
-        the journal it says was retained is read back out of
-        ``task_intermediate_journals``. A service that published one journal
-        while writing another could not pass.
+        says the task is now due in is read back out of the anchor columns, so a
+        service that published one journal while writing another could not pass.
+        The retained link is no longer in here — it is the row before this one —
+        and the whole-key form is what keeps it from creeping back.
         """
         _, due_id = task_anchors
         task_id = await _create(service, async_connection, task_anchors)
@@ -860,10 +911,6 @@ class TestARetargetLeavesOneOutboxRow:
             "task_id": task_id,
             "user_id": USER_ID,
             "changed_fields": {"due_journal_id": [due_id, stored_due_id]},
-            "auto_linked_journal_id": (
-                await intermediate_journal_ids(async_connection, task_id)
-            )[0],
-            "auto_link_created": True,
             "source": Provenance.SYSTEM.value,
             "changed_by": "system",
         }
@@ -901,14 +948,19 @@ class TestARetargetLeavesOneOutboxRow:
         assert change[1] == later_id
 
     @pytest.mark.asyncio
-    async def test_the_journal_named_as_auto_linked_really_is_linked(
+    async def test_the_derived_link_row_describes_a_link_that_really_exists(
         self,
         service: TaskService,
         async_connection: AsyncConnection,
         task_anchors: tuple[int, int],
         journal_repository: SqlJournalRepository,
     ) -> None:
-        """The event's claim, checked against the link table that backs it."""
+        """The event's claim, checked against the link table that backs it.
+
+        A whole-payload comparison, so the derived link's shape is pinned in the
+        stored form as well as in memory — including ``origin``, which is the
+        only thing separating this row from one a person asked for.
+        """
         _, due_id = task_anchors
         task_id = await _create(service, async_connection, task_anchors)
         later_id = await create_journal(
@@ -917,15 +969,20 @@ class TestARetargetLeavesOneOutboxRow:
 
         await _retarget(service, async_connection, task_id, later_id)
 
-        (event,) = _retarget_events(
-            await task_events(async_connection, task_id=task_id)
-        )
-        assert event.payload["auto_linked_journal_id"] == due_id
-        assert event.payload["auto_link_created"] is True
+        (event,) = _link_events(await task_events(async_connection, task_id=task_id))
+        assert event.aggregate_id == task_id
+        assert event.payload == {
+            "task_id": task_id,
+            "user_id": USER_ID,
+            "journal_id": due_id,
+            "origin": "retarget",
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
         assert await intermediate_journal_ids(async_connection, task_id) == [due_id]
 
     @pytest.mark.asyncio
-    async def test_a_journal_already_in_the_trail_is_recorded_as_not_newly_linked(
+    async def test_a_journal_already_in_the_trail_is_not_announced_again(
         self,
         service: TaskService,
         async_connection: AsyncConnection,
@@ -941,8 +998,12 @@ class TestARetargetLeavesOneOutboxRow:
         delete), and none of them runs in this sequence, which is why the
         sequence is performed here rather than mocked: the claim is about what
         three consecutive retargets leave behind, and only a real one can show
-        it. Without the flag, Phase 7 would write "linked A" into the user's
+        it. Announcing the third departure would write "linked A" into the user's
         history twice for one link.
+
+        This is where the ``auto_link_created`` flag went: the same question,
+        answered by whether a row exists at all rather than by a boolean on
+        somebody else's payload.
         """
         _, journal_a = task_anchors
         task_id = await _create(service, async_connection, task_anchors)
@@ -953,11 +1014,26 @@ class TestARetargetLeavesOneOutboxRow:
         await _retarget(service, async_connection, task_id, journal_a)
         await _retarget(service, async_connection, task_id, journal_c)
 
-        third = _retarget_events(await task_events(async_connection, task_id=task_id))[
-            -1
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskCreated",
+            # A→B retains A
+            "TaskJournalLinked",
+            "TaskDueJournalRetargeted",
+            # B→A retains B
+            "TaskJournalLinked",
+            "TaskDueJournalRetargeted",
+            # A→C retains A, which is still linked from the first departure, so
+            # there is no link row to announce — only the move.
+            "TaskDueJournalRetargeted",
         ]
-        assert third.payload["auto_linked_journal_id"] == journal_a
-        assert third.payload["auto_link_created"] is False
+        assert [event.payload["journal_id"] for event in _link_events(events)] == [
+            journal_a,
+            journal_b,
+        ]
+        assert sorted(await intermediate_journal_ids(async_connection, task_id)) == (
+            sorted([journal_a, journal_b])
+        )
 
     @pytest.mark.asyncio
     async def test_the_row_records_when_the_change_happened(
@@ -1018,7 +1094,9 @@ class TestRetargetsReadAsAnOrderedTrail:
         events = await task_events(async_connection, task_id=task_id)
         assert [event.event_type for event in events] == [
             "TaskCreated",
+            "TaskJournalLinked",
             "TaskDueJournalRetargeted",
+            "TaskJournalLinked",
             "TaskDueJournalRetargeted",
         ]
         first, second = (
@@ -1029,7 +1107,7 @@ class TestRetargetsReadAsAnOrderedTrail:
         assert second == [journal_b, journal_c]
 
     @pytest.mark.asyncio
-    async def test_a_reopen_appends_one_row_rather_than_two(
+    async def test_a_reopen_appends_no_row_of_its_own(
         self,
         service: TaskService,
         async_connection: AsyncConnection,
@@ -1041,7 +1119,9 @@ class TestRetargetsReadAsAnOrderedTrail:
         The whole trail is asserted rather than the last row, so an
         implementation that published a ``TaskUpdated`` beside the retarget
         fails here instead of passing a test that only checked the retarget was
-        present.
+        present. The ``TaskJournalLinked`` in the middle is the journal the
+        retarget retained, which is a second *write* rather than a second way of
+        saying the same thing.
         """
         task_id = await _create(service, async_connection, task_anchors)
         later_id = await create_journal(
@@ -1061,7 +1141,12 @@ class TestRetargetsReadAsAnOrderedTrail:
         assert [
             event.event_type
             for event in await task_events(async_connection, task_id=task_id)
-        ] == ["TaskCreated", "TaskUpdated", "TaskDueJournalRetargeted"]
+        ] == [
+            "TaskCreated",
+            "TaskUpdated",
+            "TaskJournalLinked",
+            "TaskDueJournalRetargeted",
+        ]
 
 
 @pytest.mark.integration
@@ -1392,6 +1477,357 @@ class TestProvenanceReachesTheRetargetRow:
         assert event.payload["source"] == source.value
         assert event.payload["changed_by"] == changed_by
 
+    @pytest.mark.asyncio
+    async def test_the_derived_link_is_stored_under_the_same_actor(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """One action, two rows, one name against both — in the stored JSON.
+
+        The criterion for the derived link words its distinction as being carried
+        "with provenance", which would make this row ``system`` while the
+        retarget beside it said ``ui``. It does not, deliberately: a retarget is
+        something the **user** did, and a person reading their own history should
+        not be told that half of one action was performed by the system. What is
+        derived is the link's cause, and ``origin`` carries that instead.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        later_id = await create_journal(
+            journal_repository, title="Where it matters now", days_offset=14
+        )
+
+        await _retarget(
+            service,
+            async_connection,
+            task_id,
+            later_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        events = await task_events(async_connection, task_id=task_id)
+        (link,) = _link_events(events)
+        (move,) = _retarget_events(events)
+        assert link.payload["source"] == Provenance.UI.value
+        assert link.payload["changed_by"] == "ui"
+        assert link.payload["origin"] == "retarget"
+        assert (link.payload["source"], link.payload["changed_by"]) == (
+            move.payload["source"],
+            move.payload["changed_by"],
+        )
+
+
+@pytest.mark.integration
+class TestAttachingLeavesAnOutboxRow:
+    """The manual half of the link event, against a real outbox.
+
+    The specification lists *"journal linked or unlinked"* among a task's events.
+    Everything here is about what reaches ``outbox_events``: that a link a person
+    asked for is distinguishable from one a retarget derived, and that a call
+    which wrote no row leaves no row behind either.
+    """
+
+    @pytest.mark.asyncio
+    async def test_exactly_one_linked_row_is_appended(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+
+        await _attach(service, async_connection, task_id, mentioned_id)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskCreated",
+            "TaskJournalLinked",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_payload_describes_the_link_that_was_written(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A whole-payload comparison, checked against the link table.
+
+        ``origin`` is ``manual`` here and ``retarget`` on the derived row, and
+        that difference is the whole of what tells a consumer which happened —
+        so it is asserted in the stored form, where a consumer will read it.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+
+        await _attach(service, async_connection, task_id, mentioned_id)
+
+        (event,) = _link_events(await task_events(async_connection, task_id=task_id))
+        assert event.aggregate_id == task_id
+        assert event.payload == {
+            "task_id": task_id,
+            "user_id": USER_ID,
+            "journal_id": mentioned_id,
+            "origin": "manual",
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+        assert await intermediate_journal_ids(async_connection, task_id) == [
+            mentioned_id
+        ]
+
+    @pytest.mark.asyncio
+    async def test_attaching_the_same_journal_again_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The idempotent insert, seen from the outbox.
+
+        Asserted against a real ``ON CONFLICT DO NOTHING`` rather than a mocked
+        boolean: the repository's answer is the only thing separating the two
+        calls, and this is the only place it is a real answer.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+
+        assert await _attach(service, async_connection, task_id, mentioned_id) is True
+        assert await _attach(service, async_connection, task_id, mentioned_id) is False
+
+        assert (
+            len(_link_events(await task_events(async_connection, task_id=task_id))) == 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_callers_origin_is_stored(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+
+        await _attach(
+            service,
+            async_connection,
+            task_id,
+            mentioned_id,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = _link_events(await task_events(async_connection, task_id=task_id))
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_refused_attach_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """An anchor cannot be an intermediate link, and says so without writing."""
+        _, due_id = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+
+        with pytest.raises(TaskJournalIsAnchorError):
+            await _attach(service, async_connection, task_id, due_id)
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_attach_leaves_neither_the_link_nor_the_event(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The acceptance criterion, from the caller's unit of work.
+
+        ``@transactional`` is re-entrant, so the service joins the enclosing unit
+        of work; failing inside it has to take the link row and the outbox row
+        together, or a user's history would claim a link their task does not
+        have.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await _attach(service, async_connection, task_id, mentioned_id)
+                raise RuntimeError("the caller failed after the journal was linked")
+
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+
+@pytest.mark.integration
+class TestDetachingLeavesAnOutboxRow:
+    """The unlink event, and the deletes that write nothing to announce."""
+
+    @pytest.mark.asyncio
+    async def test_exactly_one_unlinked_row_is_appended(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+        await _attach(service, async_connection, task_id, mentioned_id)
+
+        await _detach(service, async_connection, task_id, mentioned_id)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskCreated",
+            "TaskJournalLinked",
+            "TaskJournalUnlinked",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_payload_describes_the_link_that_was_removed(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A whole-payload comparison — and the one that pins ``origin`` away."""
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+        await _attach(service, async_connection, task_id, mentioned_id)
+
+        await _detach(
+            service,
+            async_connection,
+            task_id,
+            mentioned_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = [
+            row
+            for row in await task_events(async_connection, task_id=task_id)
+            if row.event_type == "TaskJournalUnlinked"
+        ]
+        assert event.aggregate_id == task_id
+        assert event.payload == {
+            "task_id": task_id,
+            "user_id": USER_ID,
+            "journal_id": mentioned_id,
+            "source": Provenance.UI.value,
+            "changed_by": "ui",
+        }
+        assert await intermediate_journal_ids(async_connection, task_id) == []
+
+    @pytest.mark.asyncio
+    async def test_detaching_a_link_that_is_not_there_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A ``DELETE`` matching no rows is not a write, so it is not news."""
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+
+        assert await _detach(service, async_connection, task_id, mentioned_id) is False
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_refused_detach_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """An anchor with no link row: refused, and nothing written either way."""
+        _, due_id = task_anchors
+        task_id = await _create(service, async_connection, task_anchors)
+
+        with pytest.raises(TaskJournalIsAnchorError):
+            await _detach(service, async_connection, task_id, due_id)
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_detach_leaves_the_link_and_announces_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The other direction of the same criterion.
+
+        The link has to come back *and* the removal has to be unrecorded: an
+        event surviving a rolled-back delete would tell the user a link went
+        away while the row is still there.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+        await _attach(service, async_connection, task_id, mentioned_id)
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await _detach(service, async_connection, task_id, mentioned_id)
+                raise RuntimeError("the caller failed after the journal was unlinked")
+
+        assert await intermediate_journal_ids(async_connection, task_id) == [
+            mentioned_id
+        ]
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated", "TaskJournalLinked"]
+
 
 @pytest.mark.integration
 class TestNoOtherDomainIsDisturbed:
@@ -1497,7 +1933,54 @@ class TestNoOtherDomainIsDisturbed:
 
         await _retarget(service, async_connection, task_id, later_id)
 
-        assert len(await task_events(async_connection, task_id=task_id)) == 2
+        # Three: the create, the link the retarget retained, and the move.
+        assert len(await task_events(async_connection, task_id=task_id)) == 3
+        after = (
+            await async_connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbox_events WHERE event_type NOT LIKE 'Task%'"
+                )
+            )
+        ).scalar_one()
+        assert after == before
+
+    @pytest.mark.asyncio
+    async def test_a_journal_link_publishes_for_the_task_and_nothing_else(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The event names a journal, and still says nothing on its behalf.
+
+        The most plausible cascade in this phase: a ``TaskJournalLinked`` carries
+        a journal id, and a projection that filed it under the journal — or a
+        service that also published a journal event for the same link — would put
+        a task's history on somebody else's page. Both halves, as above.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+        before = (
+            await async_connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbox_events WHERE event_type NOT LIKE 'Task%'"
+                )
+            )
+        ).scalar_one()
+
+        await _attach(service, async_connection, task_id, mentioned_id)
+        await _detach(service, async_connection, task_id, mentioned_id)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskCreated",
+            "TaskJournalLinked",
+            "TaskJournalUnlinked",
+        ]
+        assert {event.aggregate_id for event in events} == {task_id}
         after = (
             await async_connection.execute(
                 text(

@@ -2644,11 +2644,18 @@ class TestTheEndpointRecordsUiProvenance:
         )
         assert response.status_code == 200
 
-        (event,) = await task_events(async_connection, task_id=task_id)
+        link, event = await task_events(async_connection, task_id=task_id)
         assert event.event_type == "TaskDueJournalRetargeted"
         assert event.payload["changed_fields"] == {"due_journal_id": [due_id, later_id]}
         assert event.payload["source"] == Provenance.UI.value
         assert event.payload["changed_by"] == "ui"
+        # The journal the retarget retained, announced separately and attributed
+        # to the same person: one action, two rows, one actor.
+        assert link.event_type == "TaskJournalLinked"
+        assert link.payload["journal_id"] == due_id
+        assert link.payload["origin"] == "retarget"
+        assert link.payload["source"] == Provenance.UI.value
+        assert link.payload["changed_by"] == "ui"
 
     async def test_reopening_a_done_task_records_the_reopen_as_the_users(
         self,
@@ -2680,8 +2687,79 @@ class TestTheEndpointRecordsUiProvenance:
         )
         assert response.status_code == 200
 
-        (event,) = await task_events(async_connection, task_id=task_id)
+        _, event = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskDueJournalRetargeted"
         assert event.payload["changed_fields"]["status"] == ["done", "not_done"]
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_attaching_a_journal_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A link a person asked for, recorded as theirs and as ``manual``.
+
+        ``origin`` is what separates this row from the one a retarget derives,
+        and both reach the outbox through the same event type — so the endpoint
+        has to be asserted on both keys or a link filed under the wrong cause
+        would still look correct.
+        """
+        creating_id, due_id = task_anchors
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(mentioned_id),
+        )
+        assert response.status_code == 204
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskJournalLinked"
+        assert event.payload["journal_id"] == mentioned_id
+        assert event.payload["origin"] == "manual"
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_detaching_a_journal_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        mentioned_id = await create_journal(
+            journal_repository, title="Where it came up again", days_offset=3
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+        attached = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals",
+            json=_journal_link_body(mentioned_id),
+        )
+        assert attached.status_code == 204
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/intermediate-journals/{mentioned_id}"
+        )
+        assert response.status_code == 204
+
+        _, event = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskJournalUnlinked"
+        assert event.payload["journal_id"] == mentioned_id
         assert event.payload["source"] == Provenance.UI.value
         assert event.payload["changed_by"] == "ui"
 

@@ -57,6 +57,9 @@ from app.core.tasks.models.events import (
     TaskCreated,
     TaskDeleted,
     TaskDueJournalRetargeted,
+    TaskJournalLinked,
+    TaskJournalLinkOrigin,
+    TaskJournalUnlinked,
     TaskUpdated,
 )
 from app.infrastructure.unit_of_work import savepoint, transactional
@@ -484,6 +487,8 @@ class TaskService:
         task_id: int,
         journal_id: int,
         transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> bool:
         """Link one of the user's journals to a task as an intermediate journal.
 
@@ -512,6 +517,12 @@ class TaskService:
         slip into a window between the question and the answer. Phase 7 made the
         same choice for the automatic link.
 
+        **A ``TaskJournalLinked`` is published only when a row was written**, so
+        the repeat above announces nothing. The event carries
+        ``origin=MANUAL``, distinguishing a link the user asked for from the one
+        :meth:`retarget_due_journal` derives, and it goes out *after* the write
+        so it announces something that happened.
+
         **Editable in any status**, like a contact link. No status is read and
         none is written, so a done or cancelled task takes a link exactly as an
         open one does.
@@ -533,6 +544,9 @@ class TaskService:
             task_id: The task to link
             journal_id: The journal it was discussed or revisited in
             transaction: The request connection; the unit of work commits here
+            source: Where the link was asked for; defaults to ``SYSTEM`` so a
+                caller that says nothing is never mistaken for a person
+            changed_by: The actor recorded on the event
 
         Returns:
             ``True`` when a link row was created, ``False`` when it was already
@@ -553,7 +567,7 @@ class TaskService:
         _refuse_anchor_role(task, task_id, journal_id)
 
         try:
-            return await self.task_repo.add_intermediate_journal(
+            created = await self.task_repo.add_intermediate_journal(
                 task_id, journal_id, user_id
             )
         except IntegrityError as error:
@@ -576,6 +590,23 @@ class TaskService:
                 raise
             raise JournalNotFoundError(journal_id) from error
 
+        # Only when a row was written. The insert is idempotent, so a repeat
+        # changes nothing, and announcing it would put a second "linked this
+        # journal" line in the user's history for a link that did not move.
+        if created:
+            await self.event_publisher.publish(
+                TaskJournalLinked(
+                    task_id=task_id,
+                    user_id=user_id,
+                    journal_id=journal_id,
+                    origin=TaskJournalLinkOrigin.MANUAL,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
+        return created
+
     @transactional
     async def detach_intermediate_journal(
         self,
@@ -584,6 +615,8 @@ class TaskService:
         task_id: int,
         journal_id: int,
         transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> bool:
         """Remove an intermediate-journal link from one of the user's tasks.
 
@@ -640,6 +673,8 @@ class TaskService:
             task_id: The task to unlink
             journal_id: The intermediate journal to stop referencing
             transaction: The request connection; the unit of work commits here
+            source: Where the removal was asked for; defaults to ``SYSTEM``
+            changed_by: The actor recorded on the event
 
         Returns:
             ``True`` when a link row was removed, ``False`` when there was none.
@@ -657,6 +692,21 @@ class TaskService:
         )
         if not removed:
             _refuse_anchor_role(task, task_id, journal_id)
+            return removed
+
+        # Reached only when a row actually went, which is why it sits after the
+        # refusal rather than beside the delete: a ``DELETE`` matching no rows is
+        # not a write, whether the caller is retrying or naming an anchor.
+        await self.event_publisher.publish(
+            TaskJournalUnlinked(
+                task_id=task_id,
+                user_id=user_id,
+                journal_id=journal_id,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
         return removed
 
     @transactional
@@ -827,13 +877,21 @@ class TaskService:
         does not move, **no event is published** and no acknowledgement is
         needed. This mirrors :meth:`set_status`'s same-status no-op.
 
-        **One write publishes one** ``TaskDueJournalRetargeted``, after the save,
-        carrying both of the things that happened: the due-journal pair and — for
-        a task that was *done* or *cancelled* — the reopen, so the status change
-        reaches the event stream rather than only the task row. The auto-link
-        travels in the same payload, which is why this publishes one event and
-        not two; see the event's own docstring for the shape and for the ordering
-        a later per-link event type inherits from the write order below.
+        **This publishes two events, one behind each write**, and it is the only
+        task operation that publishes more than one:
+
+        - a :class:`~app.core.tasks.models.events.TaskJournalLinked` for the
+          retained journal — the same type a manual attach publishes, marked
+          ``origin=RETARGET`` — and **only when a link row was actually
+          written**, since the add is idempotent and a task returning to a
+          journal it has already left finds it still attached;
+        - a ``TaskDueJournalRetargeted`` after the save, carrying the due-journal
+          pair and — for a task that was *done* or *cancelled* — the reopen, so
+          the status change reaches the event stream rather than only the task
+          row.
+
+        The order is the write order, link before anchor, because each publish
+        sits directly behind its own write rather than beside the other's.
 
         **The read takes a row lock**, for the reason Phase 6 found on
         :meth:`set_status` and this method inherits: it decides from the status
@@ -904,11 +962,33 @@ class TaskService:
             raise TaskReopenNotAcknowledgedError(task_id)
 
         # The answer is kept rather than discarded: the link is idempotent, and
-        # whether a row was actually written is the difference between the event
-        # announcing a new link and announcing one that was already there.
+        # whether a row was actually written is the difference between announcing
+        # a new link and announcing one that was already there.
         auto_link_created = await self.task_repo.add_intermediate_journal(
             task_id, previous_due_journal_id, user_id
         )
+        # Published here rather than beside the retarget event below, so each
+        # event sits behind the write it announces. That is what makes the pair
+        # reach a consumer link-first without depending on two adjacent publish
+        # calls staying in order.
+        #
+        # ``source`` is the caller's, not ``SYSTEM``: a retarget is something the
+        # **user** did, and this link is a consequence of their action rather
+        # than a background job. Filing it under the system would have one action
+        # produce two events disagreeing about who performed it. What is derived
+        # is the link's *cause*, and ``origin`` carries that.
+        if auto_link_created:
+            await self.event_publisher.publish(
+                TaskJournalLinked(
+                    task_id=task_id,
+                    user_id=user_id,
+                    journal_id=previous_due_journal_id,
+                    origin=TaskJournalLinkOrigin.RETARGET,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
         # Through ``_save`` rather than straight to the repository, for the race
         # its docstring describes. The window is wider here than on creation: the
         # journal-delete guard refuses to delete a journal that *already* anchors
@@ -940,7 +1020,6 @@ class TaskService:
                 previous_due_journal_id=previous_due_journal_id,
                 due_journal_id=due_journal_id,
                 previous_status=task.status,
-                auto_link_created=auto_link_created,
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,

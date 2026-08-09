@@ -352,6 +352,11 @@ class TestTheTrailIsReadInsideTheWritesUnitOfWork:
         write where losing provenance costs most: it is the only way a done task
         is reopened, so an assistant undoing somebody's completion would be
         recorded as the system having done it.
+
+        A retarget publishes **two** events — the journal it retains, then the
+        anchor move — and the provenance is asserted on *both*, because they are
+        two lines of one person's history and a wrapper that dropped the argument
+        on only one of them would still read as half correct.
         """
         await retargeting_service.retarget_due_journal_with_trail(
             user_id=USER_ID,
@@ -362,10 +367,14 @@ class TestTheTrailIsReadInsideTheWritesUnitOfWork:
             changed_by="mcp",
         )
 
-        (event,) = published_events(mock_event_publisher)
-        assert event.event_type == "TaskDueJournalRetargeted"
-        assert event.event_data["source"] == Provenance.MCP.value
-        assert event.event_data["changed_by"] == "mcp"
+        events = published_events(mock_event_publisher)
+        assert [event.event_type for event in events] == [
+            "TaskJournalLinked",
+            "TaskDueJournalRetargeted",
+        ]
+        for event in events:
+            assert event.event_data["source"] == Provenance.MCP.value
+            assert event.event_data["changed_by"] == "mcp"
 
     async def test_the_wrapper_reads_the_trail_owner_scoped(
         self, service: TaskService, mock_task_repo: AsyncMock

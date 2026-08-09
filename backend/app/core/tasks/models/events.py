@@ -5,9 +5,9 @@ events through the same transactional outbox and stream that contacts and
 journals use, and those events project into field history exactly as contact and
 journal events do", each carrying provenance and the actor.
 
-This module holds creation, change, due-journal retargeting and hard deletion.
-The rest (journal and contact linked/unlinked) land in later phases, and the
-history projection that reads these payloads lands after them.
+This module holds creation, change, due-journal retargeting, intermediate
+journal links and hard deletion. Contact linked/unlinked lands in a later phase,
+and the history projection that reads these payloads lands after it.
 
 **A task's text and status changes share one event**, ``TaskUpdated``, carrying
 ``changed_fields`` — not one event type per field. The phase that added it was
@@ -40,6 +40,7 @@ it is recorded here as known duplication rather than repeated silently.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from core_shared.models.history import Provenance
@@ -178,35 +179,31 @@ class TaskUpdated(DomainEvent):
 class TaskDueJournalRetargeted(DomainEvent):
     """Event raised when a task's due journal moves to a different journal.
 
-    **One event, not two.** A retarget does two things — it moves the due anchor
-    and retains the journal being left as an *intermediate* journal, the model's
-    one automatic link — but they are a single write in a single unit of work.
-    So the auto-link travels in this payload rather than as a second event, and
-    "every task write path publishes exactly one event" stays true for now with
-    no exception attached to it. The phase that gives manual attach and detach
-    their own event type is required to publish the derived link as that same
-    type, so the exception is **deferred rather than avoided** — and the
-    ordering that phase inherits is the write order
-    :meth:`TaskService.retarget_due_journal` already has: the intermediate link
-    first, then the anchor move, so a consumer reading the pair renders the trail
-    in the order it happened.
+    **One of the two events a retarget publishes.** A retarget does two things —
+    it moves the due anchor and retains the journal being left as an
+    *intermediate* journal, the model's one automatic link — and this announces
+    only the anchor move. The link is a :class:`TaskJournalLinked` of its own,
+    the same type a manual attach publishes, carrying
+    ``origin=TaskJournalLinkOrigin.RETARGET``.
 
-    **The payload names two facts about that link, not one.**
-    ``auto_linked_journal_id`` is the journal retained, and
-    ``auto_link_created`` says whether a row was actually written for it.
-    The second is reachable rather than theoretical: **a retarget only ever adds
-    an intermediate link and never removes one**, so a journal can be both the
-    due anchor and an intermediate link, and a task retargeted A→B→A→C finds A
-    still attached when it leaves it the second time. Links *are* removable —
-    :meth:`TaskService.detach_intermediate_journal` removes one on request, a
-    journal merge collapses the redundant ones, and deleting a journal cascades
-    — but none of those is a retarget, so none of them is what puts this branch
-    on the reachable side. Without the flag the projection would write "linked A"
-    into the user's history twice for one link. The two cannot disagree with
-    ``changed_fields["due_journal_id"][0]``, because both come from the same
-    argument; the id is named separately so a consumer reads a link as a link
-    rather than by indexing into a field change, and so the phase that replaces
-    it has one key to remove.
+    **The link goes out first, and this event second**, because
+    :meth:`TaskService.retarget_due_journal` writes the link before it moves the
+    anchor and each event is published directly after the write it announces. A
+    consumer reading the pair therefore renders the trail in the order it
+    happened. Pinned by
+    ``test_the_link_and_the_move_are_published_in_that_order`` and, over the
+    stored rows a consumer actually reads, by
+    ``test_the_link_and_the_move_are_appended_in_that_order``.
+
+    **The two keys that used to stand in for that link are gone.** While the link
+    type did not exist, this payload carried ``auto_linked_journal_id`` (the
+    journal retained) and ``auto_link_created`` (whether a row was written for
+    it). The first is now the link event's ``journal_id``. The second is now the
+    difference between publishing a link event and publishing none — which is the
+    same fact expressed where a consumer can act on it, since a retarget only
+    ever *adds* an intermediate link and never removes one, so a task retargeted
+    A→B→A→C finds A still attached when it leaves it the second time and must not
+    have "linked A" written into its history twice.
 
     **``changed_fields`` is built here, unlike** ``TaskUpdated``\\ **'s.** That
     event is handed a dict because its caller decides, field by field, what
@@ -225,7 +222,6 @@ class TaskDueJournalRetargeted(DomainEvent):
         previous_due_journal_id: int,
         due_journal_id: int,
         previous_status: TaskStatus,
-        auto_link_created: bool,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
@@ -257,8 +253,135 @@ class TaskDueJournalRetargeted(DomainEvent):
                 "task_id": task_id,
                 "user_id": user_id,
                 "changed_fields": changed_fields,
-                "auto_linked_journal_id": previous_due_journal_id,
-                "auto_link_created": auto_link_created,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+class TaskJournalLinkOrigin(StrEnum):
+    """Why an intermediate-journal link exists.
+
+    Two writes produce the same fact about a task — a person attached a journal
+    it was discussed in, or a retarget retained the journal it has just left, the
+    model's one automatic link — so both publish :class:`TaskJournalLinked` and
+    this says which happened.
+
+    **This is not provenance, and the difference is the point.** ``source``
+    records *who acted*; a retarget is something the user did, so a link derived
+    from one performed in the browser is ``Provenance.UI``. ``SYSTEM`` is for a
+    write no person triggered, such as an integration sync. What is derived is
+    the link's *cause*, and naming it here lets a consumer separate the two
+    without being told the wrong thing about the actor.
+
+    Lives beside the events rather than in ``core_shared.models.tasks``: it is
+    payload vocabulary, not part of the task model, and nothing outside this
+    backend reads it.
+    """
+
+    MANUAL = "manual"
+    RETARGET = "retarget"
+
+
+@dataclass(frozen=True)
+class TaskJournalLinked(DomainEvent):
+    """Event raised when a journal becomes one of a task's intermediate links.
+
+    The specification's *"journal linked or unlinked"*. Only *intermediate*
+    journals are linked this way, so the name needs no qualifier: the creating
+    anchor is set once and never changes, and the due anchor moves by retargeting
+    — which publishes :class:`TaskDueJournalRetargeted` for the move and this for
+    the journal it retains.
+
+    **Published only when a row was actually written.**
+    ``add_intermediate_journal`` is idempotent, and a retarget only ever adds a
+    link, so a task retargeted A→B→A→C leaves A a second time while A is still
+    linked from the first departure. Announcing that would write the same link
+    into the user's history twice, so the service publishes nothing when the
+    repository reports no row was created. This is where the previous phase's
+    ``auto_link_created`` flag went: the same fact, expressed as whether the
+    event exists.
+
+    **No journal title travels.** The service holds an id, and reading a title
+    would add a query to a method that deliberately performs none.
+    ``JournalTagAssigned`` projects as ``old_value=None, new_value=<the thing
+    linked>``, a shape an id satisfies.
+
+    **``event_id`` names the journal as well as the task**, unlike every other
+    event here. Those are about the task, so two of a kind are separated by the
+    clock; two links are not, because one task can gain several journals — and
+    the history projection writes ``ON CONFLICT DO NOTHING`` over ``event_id``,
+    so a collision would drop one link as a redelivery of the other.
+    """
+
+    def __init__(
+        self,
+        task_id: int,
+        user_id: str,
+        journal_id: int,
+        origin: TaskJournalLinkOrigin,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"task_journal_linked_{task_id}_{journal_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=task_id,
+            event_type="TaskJournalLinked",
+            event_data={
+                "task_id": task_id,
+                "user_id": user_id,
+                "journal_id": journal_id,
+                # ``.value`` for the reason the status pairs carry it: the
+                # payload is a wire format, and a ``StrEnum`` member in it hands
+                # an in-process subscriber a domain type where a reader coming
+                # back through Redis gets a bare string.
+                "origin": origin.value,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TaskJournalUnlinked(DomainEvent):
+    """Event raised when an intermediate-journal link is removed from a task.
+
+    **No ``origin``**, unlike its counterpart. That event has two causes and has
+    to name one; this has exactly one — a user asking for the link to go —
+    because the other two ways a link row disappears announce nothing at all: a
+    journal merge collapsing redundant links, which belongs to the phase that
+    gives the merge its task-scoped events, and a journal delete cascading, which
+    removes the row without anybody acting on the task. A key with one possible
+    value would advertise a second case that does not exist.
+
+    **Published only when a row was actually removed**, so a detach of a link
+    that was not there is silent, as is the refusal a detach of an anchor raises.
+    """
+
+    def __init__(
+        self,
+        task_id: int,
+        user_id: str,
+        journal_id: int,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"task_journal_unlinked_{task_id}_{journal_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=task_id,
+            event_type="TaskJournalUnlinked",
+            event_data={
+                "task_id": task_id,
+                "user_id": user_id,
+                "journal_id": journal_id,
                 "source": source.value,
                 "changed_by": changed_by,
             },

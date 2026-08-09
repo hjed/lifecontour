@@ -410,6 +410,8 @@ async def attach_task_intermediate_journal(
         task_id=task_id,
         journal_id=link_request.data.journal_id,
         transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
     )
 
 
@@ -456,4 +458,6 @@ async def detach_task_intermediate_journal(
         task_id=task_id,
         journal_id=journal_id,
         transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
     )

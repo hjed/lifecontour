@@ -1448,11 +1448,18 @@ class TestTheToolsRecordMcpProvenance:
             )
 
         assert "error" not in payload
-        (event,) = await task_events(clean_database, task_id=task_id)
+        link, event = await task_events(clean_database, task_id=task_id)
         assert event.event_type == "TaskDueJournalRetargeted"
         assert event.payload["changed_fields"] == {"due_journal_id": [due_id, later_id]}
         assert event.payload["source"] == Provenance.MCP.value
         assert event.payload["changed_by"] == "mcp"
+        # The retained journal, announced separately and attributed to the same
+        # assistant: the derivation is in ``origin``, not in the provenance.
+        assert link.event_type == "TaskJournalLinked"
+        assert link.payload["journal_id"] == due_id
+        assert link.payload["origin"] == "retarget"
+        assert link.payload["source"] == Provenance.MCP.value
+        assert link.payload["changed_by"] == "mcp"
 
     async def test_an_agent_reopening_a_done_task_is_recorded_as_the_agent(
         self,
@@ -1489,8 +1496,72 @@ class TestTheToolsRecordMcpProvenance:
             )
 
         assert "error" not in payload
-        (event,) = await task_events(clean_database, task_id=task_id)
+        _, event = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskDueJournalRetargeted"
         assert event.payload["changed_fields"]["status"] == ["done", "not_done"]
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_attaching_a_journal_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A link an agent asked for: ``mcp``, and ``manual`` rather than derived.
+
+        The tool and the retarget publish the same event type, so ``origin`` is
+        asserted alongside the provenance — a link filed under the wrong cause
+        would otherwise look identical to a correct one.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskJournalLinked"
+        assert event.payload["journal_id"] == mentioned
+        assert event.payload["origin"] == "manual"
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_detaching_a_journal_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mentioned = await create_journal(journal_repository, title="Came up again")
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            attached = await _attach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+            payload = await _detach_journal(
+                client, session_id, task_id=task_id, journal_id=mentioned
+            )
+
+        assert "error" not in attached
+        assert "error" not in payload
+        _, event = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskJournalUnlinked"
+        assert event.payload["journal_id"] == mentioned
         assert event.payload["source"] == Provenance.MCP.value
         assert event.payload["changed_by"] == "mcp"
 
