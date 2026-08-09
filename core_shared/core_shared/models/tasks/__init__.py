@@ -13,6 +13,11 @@ from .exceptions import (
     TaskValidationError,
 )
 from .lapse import LapseReason, derive_lapse_reason
+from .link_role import (
+    JournalTaskGroups,
+    TaskLinkRole,
+    group_tasks_by_link_role,
+)
 from .read_model import (
     TaskContactRef,
     TaskJournalRef,
@@ -22,6 +27,7 @@ from .read_model import (
 from .task_status import TaskStatus, is_status_transition_allowed
 
 __all__ = [
+    "JournalTaskGroups",
     "LapseReason",
     "Task",
     "TaskAnchorJournalNotFoundError",
@@ -31,6 +37,7 @@ __all__ = [
     "TaskJournalAnchor",
     "TaskJournalIsAnchorError",
     "TaskJournalRef",
+    "TaskLinkRole",
     "TaskNotFoundError",
     "TaskReadModel",
     "TaskReopenNotAcknowledgedError",
@@ -39,5 +46,6 @@ __all__ = [
     "TaskValidationError",
     "build_task_read_model",
     "derive_lapse_reason",
+    "group_tasks_by_link_role",
     "is_status_transition_allowed",
 ]

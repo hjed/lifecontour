@@ -237,6 +237,83 @@ class TaskRepository(ABC):
             TaskNotFoundError: When no such task belongs to the user.
         """
 
+    @abstractmethod
+    async def find_tasks_for_journal(self, journal_id: int, user_id: str) -> list[Task]:
+        """Find every one of the user's tasks linked to a journal, in any role.
+
+        A task is linked to a journal when the journal is its creating anchor,
+        its due anchor, or one of its intermediate journals. **Which** role a
+        task holds is not returned and is not this query's business: both anchors
+        are columns on the task and the mentions are read in the batch beside
+        this one, so the roles are derived from data the caller already has
+        rather than being a second answer that could disagree with the first.
+
+        A task holding two of the journal's roles — the same journal as both
+        anchors, or a retarget onto a journal it already mentioned — is returned
+        **once**. The three link shapes are unioned rather than joined for that
+        reason: a join would return such a task twice and it would be assembled
+        twice.
+
+        Args:
+            journal_id: The journal being viewed. No ownership check is made on
+                it here — this is scoped to the caller's *tasks*, and a journal
+                that is not theirs simply anchors none of them. The surfaces
+                resolve the journal itself, owner-scoped, and 404 on it.
+            user_id: The acting user
+
+        Returns:
+            The linked tasks, ordered by id. The read surfaces re-order by due
+            date before showing them, so this order exists only to be
+            deterministic.
+        """
+
+    @abstractmethod
+    async def list_intermediate_journal_ids_for_tasks(
+        self, task_ids: list[int], user_id: str
+    ) -> dict[int, list[int]]:
+        """List several tasks' intermediate journals in one statement.
+
+        The batched form of :meth:`list_intermediate_journal_ids`, and the
+        reason a journal's task list is not an N+1: a read surface assembling
+        *N* tasks calls this once instead of once per task.
+
+        It **returns rather than raises** for a task that is absent or not the
+        caller's, unlike its singular form. The singular one answers a caller
+        that named one task and must be told it was wrong; this one is given a
+        set that an owner-scoped query produced, so a missing key means "no
+        links", and raising would make one deleted task fail a whole page.
+
+        Args:
+            task_ids: The tasks to read. An empty list reads nothing at all.
+            user_id: The acting user; another user's links are never returned
+
+        Returns:
+            A mapping of task id to its linked journal ids, oldest link first
+            with ties broken by journal id. **Tasks with no links are absent**
+            from the mapping rather than present with an empty list, so callers
+            read through ``.get(task_id, [])``.
+        """
+
+    @abstractmethod
+    async def list_contact_ids_for_tasks(
+        self, task_ids: list[int], user_id: str
+    ) -> dict[int, list[int]]:
+        """List several tasks' contact links in one statement.
+
+        The batched form of :meth:`list_contact_ids`, with the same contract as
+        :meth:`list_intermediate_journal_ids_for_tasks`: absent rather than
+        empty for a task with no links, and no raising for a task that is not
+        the caller's.
+
+        Args:
+            task_ids: The tasks to read. An empty list reads nothing at all.
+            user_id: The acting user; another user's links are never returned
+
+        Returns:
+            A mapping of task id to its linked contact ids, oldest link first
+            with ties broken by contact id.
+        """
+
 
 class TaskAnchorRepository(ABC):
     """The tasks a journal anchors, for the journal domain's two anchor rules.

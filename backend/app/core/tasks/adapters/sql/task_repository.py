@@ -252,6 +252,66 @@ class SqlTaskRepository(TaskRepository):
             user_id=user_id,
         )
 
+    async def find_tasks_for_journal(self, journal_id: int, user_id: str) -> list[Task]:
+        """Find every one of the user's tasks linked to a journal, in any role.
+
+        One statement for all three link shapes. The mention arm is an
+        ``EXISTS`` rather than a join precisely so a task that is both an anchor
+        and a mention — which a retarget onto an already-attached journal
+        produces — comes back as one row instead of two; a join would duplicate
+        it and the read model would be assembled twice for the same task.
+
+        Owner scoping is on ``tasks`` itself, which is the only table here that
+        carries a ``user_id``. The journal id is not checked for ownership: a
+        journal that is not the caller's anchors none of the caller's tasks, so
+        the filter is redundant, and the surfaces resolve the journal separately
+        anyway to tell "no tasks here" from "not your journal".
+        """
+        query = text(
+            f"""
+            SELECT {_TASK_COLUMNS}
+            FROM tasks t
+            WHERE t.user_id = :user_id
+              AND (
+                    t.creating_journal_id = :journal_id
+                 OR t.due_journal_id = :journal_id
+                 OR EXISTS (
+                        SELECT 1
+                        FROM task_intermediate_journals link
+                        WHERE link.task_id = t.id
+                          AND link.journal_id = :journal_id
+                    )
+              )
+            ORDER BY t.id
+            """
+        )
+        result = await self.conn.execute(
+            query, {"journal_id": journal_id, "user_id": user_id}
+        )
+        return [_row_to_task(row) for row in result.fetchall()]
+
+    async def list_intermediate_journal_ids_for_tasks(
+        self, task_ids: list[int], user_id: str
+    ) -> dict[int, list[int]]:
+        """List several tasks' intermediate journals in one statement."""
+        return await self._list_links_for_tasks(
+            table="task_intermediate_journals",
+            column="journal_id",
+            task_ids=task_ids,
+            user_id=user_id,
+        )
+
+    async def list_contact_ids_for_tasks(
+        self, task_ids: list[int], user_id: str
+    ) -> dict[int, list[int]]:
+        """List several tasks' contact links in one statement."""
+        return await self._list_links_for_tasks(
+            table="task_contacts",
+            column="contact_id",
+            task_ids=task_ids,
+            user_id=user_id,
+        )
+
     async def _require_task_owned(self, task_id: int, user_id: str) -> None:
         """Fail unless the task exists and belongs to the acting user.
 
@@ -420,3 +480,57 @@ class SqlTaskRepository(TaskRepository):
         if not rows:
             raise TaskNotFoundError(task_id)
         return [int(row[0]) for row in rows if row[0] is not None]
+
+    async def _list_links_for_tasks(
+        self,
+        *,
+        table: str,
+        column: str,
+        task_ids: list[int],
+        user_id: str,
+    ) -> dict[int, list[int]]:
+        """List many tasks' link ids in one statement, keyed by task.
+
+        An **inner** join, unlike the singular read's ``LEFT JOIN``. That one
+        drives from ``tasks`` so it can tell an unowned task from an owned one
+        with no links, because it must raise for the first and return ``[]`` for
+        the second. This one owes no such distinction: it is given ids an
+        owner-scoped query produced, and a task with no links is simply absent
+        from the mapping. So the join exists only to reach the owner — the link
+        tables carry no ``user_id`` of their own — and an unowned id contributes
+        no rows and therefore no key.
+
+        **The ids travel as one array parameter**, for the reason
+        ``_add_contact_links`` does: a placeholder per id hits asyncpg's 32,767
+        argument limit as an ``InterfaceError``, and a journal's task list has
+        no ceiling of its own. ``= ANY`` over a single ``integer[]`` costs two
+        parameters whatever the count.
+
+        The order is ``created_at`` then the linked id, matching the singular
+        read exactly. The second term is what makes it a **total** order:
+        ``created_at`` defaults to ``transaction_timestamp()``, so every link
+        written in one request ties, and a batch returning them in whatever
+        order PostgreSQL found would let the same read answer differently
+        between runs.
+        """
+        if not task_ids:
+            return {}
+
+        query = text(
+            f"""
+            SELECT link.task_id, link.{column}
+            FROM {table} link
+            JOIN tasks t ON t.id = link.task_id
+            WHERE t.user_id = :user_id
+              AND link.task_id = ANY(CAST(:task_ids AS integer[]))
+            ORDER BY link.task_id, link.created_at, link.{column}
+            """
+        )
+        result = await self.conn.execute(
+            query, {"task_ids": list(dict.fromkeys(task_ids)), "user_id": user_id}
+        )
+
+        links: dict[int, list[int]] = {}
+        for task_id, linked_id in result.fetchall():
+            links.setdefault(int(task_id), []).append(int(linked_id))
+        return links

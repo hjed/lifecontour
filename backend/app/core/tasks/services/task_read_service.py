@@ -27,11 +27,13 @@ from typing import TYPE_CHECKING
 
 from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.tasks import (
+    JournalTaskGroups,
     TaskContactRef,
     TaskJournalRef,
     TaskNotFoundError,
     TaskReadModel,
     build_task_read_model,
+    group_tasks_by_link_role,
 )
 
 from app.core.journal.services.journal_date_resolver import journal_date, today_in
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
     from zoneinfo import ZoneInfo
 
     from core_shared.models.journals import Journal
-    from core_shared.models.tasks import Task
+    from core_shared.models.tasks import Task, TaskLinkRole
 
     from app.core.contacts.models.repositories import ContactRepository
     from app.core.journal.models.repositories import (
@@ -129,33 +131,183 @@ class TaskReadService:
         )
         contact_ids = await self.task_repo.list_contact_ids(task_id, user_id)
 
+        models, _ = await self._assemble(
+            user_id,
+            [task],
+            mentions={task_id: intermediate_ids},
+            contacts={task_id: contact_ids},
+            now=now,
+        )
+        return models[0]
+
+    async def read_models_for_journal(
+        self,
+        user_id: str,
+        journal_id: int,
+        *,
+        role: TaskLinkRole | None = None,
+        now: datetime.datetime | None = None,
+    ) -> JournalTaskGroups:
+        """Every task linked to a journal, grouped by the role its link holds.
+
+        The specification asks a journal's detail view for the tasks it is
+        linked to, in three groups — due here, created here, mentioned here.
+        This assembles all of them and hands them to the pure grouping rule.
+
+        **Every linked task is returned, in every status.** The dashboard's
+        tasks section hides done, cancelled and lapsed ones; a journal does not.
+        Lapsed tasks "remain visible on every journal they are linked to", which
+        is how a user finds one again, and a done task's link to the journal it
+        arose in is part of the record. The lapse is therefore a *marker on the
+        row* here rather than a filter.
+
+        **Ownership costs no extra statement.** The journal is resolved through
+        the same owner-scoped fetch the read models already need, so an unknown
+        journal and another user's produce the same absence and the same error.
+        A journal of the caller's with nothing linked to it is a different
+        answer — three empty groups — which is the distinction that check buys.
+
+        Args:
+            user_id: The acting user; every read below is scoped to them
+            journal_id: The journal being viewed
+            role: Narrow the answer to one role, leaving the other two groups
+                empty. Applied in the grouping rather than in SQL: a role is
+                derived from anchors and mentions the read model already
+                carries, so filtering in the query would be a second definition
+                of it — and the query would still have to fetch the anchors.
+            now: The instant to judge "today" from, for tests that need a
+                specific side of a day boundary. Production omits it.
+
+        Returns:
+            The three groups, each ordered by due-journal date then task id.
+
+        Raises:
+            JournalNotFoundError: The journal does not exist or is not this
+                user's — the two are deliberately indistinguishable.
+        """
+        tasks = await self.task_repo.find_tasks_for_journal(journal_id, user_id)
+        task_ids = [task.id for task in tasks if task.id is not None]
+
+        mentions = await self.task_repo.list_intermediate_journal_ids_for_tasks(
+            task_ids, user_id
+        )
+        contacts = await self.task_repo.list_contact_ids_for_tasks(task_ids, user_id)
+
+        models, journal_refs = await self._assemble(
+            user_id,
+            tasks,
+            mentions=mentions,
+            contacts=contacts,
+            now=now,
+            # The viewed journal joins the batch rather than getting a lookup of
+            # its own. It is almost always in there already — it anchors or is
+            # mentioned by every task returned — and including it explicitly is
+            # what makes the answer for a journal with *no* tasks a 200 with
+            # three empty groups rather than a 404.
+            extra_journal_ids=[journal_id],
+        )
+        if journal_id not in journal_refs:
+            raise JournalNotFoundError(journal_id)
+
+        return group_tasks_by_link_role(journal_id, models, role=role)
+
+    async def _assemble(
+        self,
+        user_id: str,
+        tasks: Sequence[Task],
+        *,
+        mentions: dict[int, list[int]],
+        contacts: dict[int, list[int]],
+        now: datetime.datetime | None,
+        extra_journal_ids: Sequence[int] = (),
+    ) -> tuple[list[TaskReadModel], dict[int, TaskJournalRef]]:
+        """Turn already-fetched tasks and their link ids into read models.
+
+        **One read per collection, whatever the task count.** The timezone is
+        resolved once, every journal across every role of every task arrives in
+        one query, cancellation in one more, and every contact name in one. That
+        is what lets the single-task read and a journal's whole task list share
+        this method: the single read is simply the batch with one task in it,
+        and its seven statements are the same seven. Seven is the *ceiling*
+        rather than a constant: the contact-name lookup is skipped when nothing
+        references anyone, and a journal with no tasks skips both batched link
+        reads as well, so the floor is four. The invariance in the **task
+        count** is the part that matters, and the part the tests pin.
+
+        Args:
+            user_id: The acting user
+            tasks: The tasks to assemble, in the order they should come back
+            mentions: Each task's intermediate journal ids, keyed by task id.
+                A task with no links may be absent rather than empty.
+            contacts: Each task's contact ids, on the same terms
+            now: The instant to judge "today" from
+            extra_journal_ids: Journals to resolve beside the tasks' own — the
+                journal a listing is *about*, which must be resolved even when
+                nothing is linked to it
+
+        Returns:
+            The models, and the journal refs they were built from. The refs come
+            back because a caller may need to know whether a journal of its own
+            was among them, and re-fetching to find out would undo the batching.
+
+        Raises:
+            JournalNotFoundError: An anchor journal is missing.
+        """
         timezone = await self.date_resolver.timezone_for(user_id)
+
         journal_refs = await self._journal_refs(
             user_id,
             _ordered_unique(
-                [task.creating_journal_id, task.due_journal_id, *intermediate_ids]
+                [
+                    *extra_journal_ids,
+                    *(
+                        journal_id
+                        for task in tasks
+                        for journal_id in (
+                            task.creating_journal_id,
+                            task.due_journal_id,
+                            *mentions.get(task.id or 0, []),
+                        )
+                    ),
+                ]
             ),
             timezone,
         )
-
-        return build_task_read_model(
-            task=task,
-            creating_journal=self._require_ref(journal_refs, task, "creating"),
-            due_journal=self._require_ref(journal_refs, task, "due"),
-            # A mention whose journal is missing is dropped rather than fatal.
-            # The asymmetry with the anchors is deliberate: the due journal is
-            # what the lapse rule reads, so losing it would make the answer a
-            # guess, while losing a mention only loses a mention — and a task
-            # the user can no longer open is worse than one showing one fewer
-            # journal.
-            intermediate_journals=[
-                journal_refs[journal_id]
-                for journal_id in intermediate_ids
-                if journal_id in journal_refs
-            ],
-            contacts=await self._contact_refs(contact_ids),
-            today=today_in(timezone, now),
+        contact_refs = await self._contact_refs_by_id(
+            _ordered_unique(
+                contact_id
+                for task in tasks
+                for contact_id in contacts.get(task.id or 0, [])
+            )
         )
+
+        today = today_in(timezone, now)
+        models = [
+            build_task_read_model(
+                task=task,
+                creating_journal=self._require_ref(journal_refs, task, "creating"),
+                due_journal=self._require_ref(journal_refs, task, "due"),
+                # A mention whose journal is missing is dropped rather than
+                # fatal. The asymmetry with the anchors is deliberate: the due
+                # journal is what the lapse rule reads, so losing it would make
+                # the answer a guess, while losing a mention only loses a
+                # mention — and a task the user can no longer open is worse than
+                # one showing one fewer journal.
+                intermediate_journals=[
+                    journal_refs[journal_id]
+                    for journal_id in mentions.get(task.id or 0, [])
+                    if journal_id in journal_refs
+                ],
+                contacts=[
+                    contact_refs[contact_id]
+                    for contact_id in contacts.get(task.id or 0, [])
+                    if contact_id in contact_refs
+                ],
+                today=today,
+            )
+            for task in tasks
+        ]
+        return models, journal_refs
 
     async def _journal_refs(
         self, user_id: str, journal_ids: Sequence[int], timezone: ZoneInfo
@@ -217,28 +369,32 @@ class TaskReadService:
             raise JournalNotFoundError(journal_id)
         return ref
 
-    async def _contact_refs(self, contact_ids: Sequence[int]) -> list[TaskContactRef]:
-        """The task's contacts, in link order, from one name lookup.
+    async def _contact_refs_by_id(
+        self, contact_ids: Sequence[int]
+    ) -> dict[int, TaskContactRef]:
+        """Every contact across every task, keyed by id, from one name lookup.
 
-        An id with no row is skipped: ``task_contacts`` cascades from the
+        Keyed rather than ordered because the order belongs to each *task's*
+        links, not to this set: a listing de-duplicates the ids across tasks to
+        ask once, then re-reads each task's own link order out of this mapping.
+
+        An id with no row is simply absent: ``task_contacts`` cascades from the
         contact side, so a deleted contact takes its link with it and this is
         only reachable through a race.
         """
         if not contact_ids:
-            return []
+            return {}
 
         names = await self.contact_repo.find_names_by_ids(list(contact_ids))
-        refs = []
+        refs: dict[int, TaskContactRef] = {}
         for contact_id in contact_ids:
             found = names.get(contact_id)
             if found is None:
                 continue
             first_name, last_name, photo_url = found
-            refs.append(
-                TaskContactRef(
-                    id=contact_id,
-                    display_name=_display_name(first_name, last_name, contact_id),
-                    photo_url=photo_url,
-                )
+            refs[contact_id] = TaskContactRef(
+                id=contact_id,
+                display_name=_display_name(first_name, last_name, contact_id),
+                photo_url=photo_url,
             )
         return refs

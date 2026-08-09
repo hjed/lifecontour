@@ -2,14 +2,17 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **63 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–12 complete** (task tables + domain entity; task repository; journal-date
+**ITER18-001 Phases 1–13 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
 MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
 one automatic link, and its only way back out of a terminal status — and then retargeting over REST and
 MCP, which also makes a task's journal trail visible in every task response; text update and delete over
-both surfaces; intermediate journal links over both surfaces; contact links over both surfaces; and the
-read model with the lapsed derivation — which is where a task first becomes readable *whole*, though
-still with no endpoint or tool to ask for it).
+both surfaces; intermediate journal links over both surfaces; contact links over both surfaces; the
+read model with the lapsed derivation — which is where a task first becomes readable *whole* — and now
+the two surfaces that ask for it: `GET /api/tasks/{id}` and a journal's tasks grouped by link role, with
+`get_task` and `list_journal_tasks` beside them, over batched reads that cost one query per collection
+however many tasks a journal holds. **A task is now readable, not only writable**; what remains before
+the frontend is the upcoming-window listing the dashboard consumes.)
 **ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
 for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
 blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
@@ -3155,34 +3158,298 @@ a real past-dated journal. No e2e.
   `tests/integration/api/` and `tests/integration/mcp/` together (**1,716** tests). No frontend or e2e
   gates — the phase changes no frontend file.
 
-#### Phase 13: Get and List-by-Journal — REST and MCP
+#### Phase 13: Get and List-by-Journal — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 12.
-**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple · **Actual:** ~1,206
+production → **5,463 tracked** (5,463 insertions, 85 deletions across 20 files: 1,206 production,
+3,708 tests, 549 docs — the last inflated by this entry, whose review section is a third of it).
 
-**Acceptance Criteria:**
+**The estimate missed production by ~8×, and the multiplier was right again.** 5,463 against 600 is
+9.1×, but against *production* it is **4.5×** — calibration rule 1's plain ×4, for the second phase
+running. Phase 12 recorded exactly this shape and proposed an amendment for *vocabulary* phases;
+this one shows the amendment is not specific to vocabularies. "Capability triple" was read as
+service + REST + MCP over a read model that already existed, which is why 150 looked reasonable.
+What it left out is that a triple over a **collection** is not a triple over an entity: the phase
+added a new `core_shared` module with its own enum, dataclass and pure rule (217); three port methods
+whose ABC docstrings cost as much as the SQL under them (191 for both halves); a second service
+method plus the refactor that put the single read on the same assembly (186); and — the part that is
+easiest to miss — **a second resource shape** on each surface, because a listing envelope is not a
+detail envelope (292 schema lines and 196 MCP lines against 106 in the controllers). **Suggested
+amendment, sharpening rule 1 rather than adding to it:** estimate a capability triple's production
+from the number of *response shapes* it introduces, not the number of surfaces. One shape over three
+surfaces is a triple; two shapes over three surfaces has been twice that here.
 
-- [ ] `GET /api/tasks/{id}` returns the task with its journals (by role) and contacts, including the lapsed
-      flag and reason; MCP `get_task` matches. Another user's task 404s on both.
-- [ ] `GET /api/journals/{id}/tasks` returns the journal's tasks **grouped by link role** — due here,
-      created here, mentioned here; MCP `list_journal_tasks` matches, with an optional role filter.
-- [ ] Nested journals and contacts are fetched in **one query per collection**, not per task — an N+1 here
-      is a correctness concern at journal scale.
+**Acceptance criteria, ticked:**
 
-**Inherited from Phase 12, and what it leaves to do here:** the read model, the lapse rule and
-`TaskReadService.read_model` exist and are tested — this phase adds the two surfaces over them, plus the
-*list* half. Two follow-ups Phase 12 recorded land here:
+- [x] `GET /api/tasks/{id}` returns the task with its journals (by role) and contacts, including the lapsed
+      flag and reason; MCP `get_task` matches. Another user's task 404s on both. — The endpoint answers
+      resource type `tasks` with a **superset** of the write responses' attributes (below); `get_task`
+      returns the same fields. Both 404s are byte-identical to an absent id apart from the id itself,
+      asserted on both surfaces.
+- [x] `GET /api/journals/{id}/tasks` returns the journal's tasks **grouped by link role** — due here,
+      created here, mentioned here; MCP `list_journal_tasks` matches, with an optional role filter. —
+      `group_tasks_by_link_role` in `core_shared/models/tasks/link_role.py`; the filter is offered on
+      **both** surfaces rather than only MCP, since the asymmetry would have been the only one on this
+      API.
+- [x] Nested journals and contacts are fetched in **one query per collection**, not per task — an N+1 here
+      is a correctness concern at journal scale. — Seven statements for a journal with two tasks and
+      **still seven** with six, asserted against the driver; and at the unit level against the doubles,
+      where the per-task link methods are additionally asserted *never awaited*.
 
-- **The batched link reads.** `list_intermediate_journal_ids` and `list_contact_ids` are per-task and
-  cost one statement each; the third criterion above needs them per *set* of tasks. Phase 12's
-  assembler is a pure function over already-fetched pieces precisely so this phase reuses it under a
-  batch fetch rather than re-deriving the rule.
-- **Ordering.** Phase 10 recorded that `created_at` ties for links written in one transaction, so
-  "oldest link first" is a partial order. This phase owns whatever ordering its read surfaces promise.
+**Decisions taken (Phase 13):**
+
+- **A link role is derived, never stored.** No role column, no fourth link table, and no role in the
+  query: `due` is the task's due anchor, `created` its creating anchor, `mentioned` its intermediate
+  refs — all three already on Phase 12's read model. So the grouping is a pure function over assembled
+  models, and the role *filter* is applied there rather than in SQL. Pushing it into the query would
+  have been a second definition of "mentioned here" able to drift from this one, and the query would
+  still have had to fetch the anchors to answer it.
+- **A task holds two roles at once, and both groups list it.** Invariant 6's shared journal and a
+  retarget onto an already-mentioned journal are the two shapes; both are asserted at unit and
+  integration level. This is what forced the envelope decision below, and `find_tasks_for_journal`
+  unions the three link shapes with an `EXISTS` rather than a join precisely so such a task is one row
+  and is assembled once.
+- **Two envelopes, one answer.** JSON:API forbids the same resource twice in `data`, so REST lists each
+  task **once** with every role it holds in `link_roles`, and puts the grouping in `meta.groups` as
+  ordered id lists. MCP has no such rule and an agent asked to list "by link role" wants the roles as
+  the structure, so the tool nests whole tasks under `groups.due` / `.created` / `.mentioned` and
+  repeats a two-role task in both — carrying `link_roles` on each copy so a nested one still says what
+  it is, and saying so in the tool description so a counting agent does not report a duplicate as a
+  bug. Same data, same ordering, same 404s.
+- **The read resource is a superset, not a second type.** `GET` keeps `intermediate_journal_ids`
+  beside the resolved `intermediate_journals`, so the "one renderer for the resource" rule the write
+  responses were built around survives the read. The same choice on MCP, for the same reason: an agent
+  that learned the shape from `create_task` should not need a second one to read the task back.
+- **`meta` is a listing-specific model.** The shared `JsonApiMeta` is the paginated one; a journal's
+  tasks are bounded by the journal, so borrowing it would have advertised page controls that do not
+  exist. Unpaginated by design, like the incomplete-activities review before it.
+- **The `self` link arrives, as the write path said it would.** `_to_resource` carried a comment that
+  a link that 404s is worse than an absent one and that it "arrives with the read model". It does, on
+  every task resource, and the write endpoints' tests were not touched to accommodate it.
+- **Ownership costs no extra statement.** The viewed journal joins the same owner-scoped journal fetch
+  the read models already need, and the 404 is raised when it comes back absent. So an unknown journal
+  and another user's are one answer, while a journal of the caller's with nothing linked to it is a
+  200 with three empty groups — the distinction the check exists for. The alternative, a dedicated
+  ownership query, would have made the listing cost eight statements to say something the batch
+  already knew.
+- **The listing's 404 is the journal domain's `Journal not found`**, not the task domain's bare
+  `Not found`. What the caller named wrongly was a journal; the tasks are not the problem. The same
+  distinction the intermediate-journal tools already carry, and it needed no change to the error
+  mapping — both surfaces inherit it.
+- **Every linked task is listed, in every status — the dashboard's exclusions are not this surface's.**
+  Read as a scope question at the start of the phase and worth recording, because the specification
+  states the exclusions (§*Tasks*, "Done and cancelled tasks do not appear. Lapsed tasks do not
+  appear.") only a few lines from the display rule. They belong to the **dashboard**: §*Lapsed tasks*
+  is explicit that lapsed tasks "remain visible on every journal they are linked to … clearly marked",
+  and §*Where tasks appear* asks a journal for "the tasks it is linked to", unqualified. So the lapse
+  is a marker on the row here and there is deliberately **no status filter** on either surface — one
+  would let an agent rebuild the "everything still outstanding" browser the specification refuses.
+  Asserted rather than left to reading: done, cancelled and lapsed tasks are each shown listed.
+- **The ordering follow-up Phase 10 handed here, closed with total orders.** Groups are ordered by
+  due-journal date then **task id**; a task's mentions and contacts by link `created_at` then **the
+  linked id**. Neither tie-break is defensive: in the *due* group every task shares the journal's date,
+  so the id is the whole of that group's order, and `created_at` is `transaction_timestamp()` so every
+  link written in one request ties. Both are asserted against rows constructed to tie — links attached
+  in *descending* id order inside one transaction — rather than against rows that might happen to.
+- **The batched link reads return rather than raise for an unowned task**, unlike their singular forms.
+  The singular ones answer a caller who named one task and must be told it was wrong; the batch is
+  given ids an owner-scoped query produced, so a missing key means "no links", and raising would let
+  one concurrently-deleted task fail a whole page. A task with no links is *absent* from the mapping
+  rather than present with an empty list, which is also why the batch uses an inner join where the
+  singular read needs a `LEFT JOIN` to tell an unowned task from a linkless one.
+- **The single read now runs on the batch.** `read_model` is the batch with one task in it, so there
+  is one assembly path rather than two that could diverge. Its seven-statement cost is unchanged and
+  is re-asserted in the new file as well as the old one, because the refactor is exactly the kind of
+  change that could have quietly made it eight.
+- **The `role` query parameter answers 400, not 422.** The application renders validation failures
+  through its own JSON:API handler, so a bad query parameter reads like a bad body. Found by the test,
+  which had assumed FastAPI's bare 422; the endpoint's published docs say 400.
 
 **Required Test Coverage:** unit — role grouping and serialisation. Integration — both surfaces against real
 journals including a cancelled event journal; the cross-user 404; a query-count assertion proving the nested
 collections do not N+1. E2E deferred to Phase 22.
+
+**Delivered:** **175** tests — **96** unit and **79** integration. The unit half is three new files
+(69) and two extended ones (27); the integration half is one new file (34) and two extended ones (45).
+
+- `tests/unit/tasks/test_task_link_role_grouping.py` (**21**, new) — the pure rule: each role in
+  isolation; a task linked in *no* role appearing nowhere; both two-role shapes; `roles_for` in a fixed
+  order; ordering by due date, and by id over a **constructed** tie supplied out of order; the unique
+  list de-duplicating; the filter keeping a two-role task under either of its roles; three empty groups
+  for an empty journal; the three wire values pinned against the specification's own words; and that
+  the models handed out are the *same objects* handed in, by identity, so a grouping cannot re-derive a
+  lapse the assembler decided.
+- `tests/unit/tasks/test_task_read_service_list.py` (**24**, new) — the batch against doubles: one call
+  per collection at **2 and 6** tasks; the per-task link methods asserted **never awaited**; no contact
+  lookup when nothing references anyone; the batched reads scoped to the acting user; links keyed to
+  the task that owns them; a missing mention dropped and a missing anchor still fatal; both lapse
+  causes and the status gate through the batch; done and cancelled tasks still listed; Sydney's
+  midnight against UTC's; the filter reaching the grouping without narrowing the fetch; and the journal
+  404 with its "no second lookup" half.
+- `tests/unit/api/test_task_read_serialisation.py` (**24**, new) — the REST rendering: the superset,
+  including the trail surviving as ids; the self link; journals by role with title, date and cancelled;
+  a date asserted *not* to be a datetime; contacts carrying exactly three fields, so a role or
+  attendance cannot creep in; `lapsed` taken from the model rather than recomputed; both reason wire
+  values and `null` present rather than omitted; and the listing envelope — once in `data`, both roles
+  named, `meta.groups`, an empty journal, and a filtered listing keeping the same shape.
+- `tests/unit/mcp/domains/test_task_tools_schema.py` (**+22**) — both tools' contracts: the id bounds,
+  the absence of `now`, a date, a `user_id` or a status filter, and what each description must *say* —
+  that a task can appear in more than one group, that lapsed and finished tasks are included, that both
+  lapse causes exist and that retargeting is the remedy. `_enum_values` grew a branch for an
+  `anyOf`-wrapped optional enum, which is how an optional one is generated.
+- `tests/unit/api/test_task_endpoint_docs.py` (**+5**) — the two endpoints' published documentation:
+  their 404s, the three group names, and the two-role warning. FastAPI publishes these verbatim as the
+  OpenAPI descriptions, so they are the contract a generated client reads.
+- `tests/integration/tasks/test_task_journal_listing_integration.py` (**34**, new) — against real rows:
+  the three roles from three genuinely different link shapes; both two-role shapes; a task linked
+  elsewhere absent; the journal 404 for a **real** journal owned by somebody else and for an unknown
+  id; another user's task never listed though both users have one; the **cancelled event journal**, a
+  confirmed one lapsing nothing, the passed date, and both terminal statuses neither lapsed nor hidden;
+  the ordering trio — by date, by id within the *due* group, and the two link tie-breaks over links
+  written in one transaction in descending order; the statement counts at 2 and 6 plus the single
+  read's seven; the filter for each role; the timezone pair; and the batched repository methods on
+  their own terms, including an unowned task's links and an empty id list.
+- `tests/integration/api/test_task_endpoints.py` (**+27**) — both endpoints end to end: the full read
+  shape, both lapse causes, a done task with an old journal, the self link, the two 404s and the id
+  bounds; and for the listing, the grouping, the two-role task **once** in `data` with two roles,
+  `meta.groups`, the filter and its rejection, the empty journal, the two 404s, another user's task
+  never listed, and the ordering to the wire.
+- `tests/integration/mcp/test_task_tools_mcp.py` (**+18**) — `get_task`'s shape including the trail and
+  a date rendered in Kiritimati's zone, both lapse causes, and the pair of 404s asserted
+  byte-identically; `list_journal_tasks`' nested groups, the two-role task in both, the full read shape
+  per row, the filter and its rejection, lapsed and finished tasks listed, the empty journal, the pair
+  of 404s and the ordering.
+
+**Mutation checks.** Four mutations were run against the finished suite, each reverted after:
+removing the `data` de-duplication fails **2** (one unit, one serialisation); dropping the task-id
+tie-break from the group order fails **1** and dropping the linked-id tie-break from the batched link
+order fails **2** more, at integration level, which is the pair that proves both halves of the ordering
+promise are load-bearing; replacing the batched mention read with a per-task loop fails **8** — six unit
+and two statement-count — so an N+1 cannot be reintroduced quietly; and removing the journal-ownership
+check fails **6** across all three levels. The first attempt at the de-duplication mutation failed to
+fail, because the dict it deleted a guard from still de-duplicated; that is recorded because a mutation
+check that passes is only evidence when the mutation is real.
+
+**Acted on from the local review, before the gates were re-run.** Six findings, in descending order
+of what they cost:
+
+- **21 tests would never have run in CI.** `test_task_link_role_grouping.py` carried no
+  `pytest.mark.unit`, and CI's backend unit job selects by marker (`uv run pytest -m unit`), not by
+  path — so the whole pure grouping rule, including both two-role shapes and the ordering tie-break,
+  collected locally and would have been silently deselected there. A module-level `pytestmark` fixes
+  it. **Worth recording beyond this phase:** the marker selects only **1,326** of the backend's
+  **3,422** unit tests, so this is a repo-wide gap rather than a slip in one file — tracked
+  separately rather than swept up inside a feature phase.
+- **`link_roles` under a `role` filter was described wrongly in three places.** `roles_for` reads
+  from the groups it holds, so a filtered listing reports only the filtered role — while the
+  controller docstring, `api-design.md` and the MCP helper all promised "every role it holds". The
+  *behaviour* is the right one and is kept: roles read from the groups can never contradict
+  `meta.groups`, so no client can be told a task belongs to a group the same response reports as
+  empty. The three wordings were corrected instead, and `roles_for`'s own docstring now says which
+  question it answers and which call answers the other one.
+- **A stale docstring the write-up had claimed was fixed.** `_task_to_dict` still said "there is no
+  tool that reads a task back". The rewrite had landed in `api-design.md` but not in the docstring it
+  was quoting — corrected, and the correction is the reason to state this here rather than quietly.
+- **`_list_links_for_tasks` named the wrong operator**, describing `unnest` where the query uses
+  `= ANY`. The substantive claim — one array parameter rather than a placeholder per id, so asyncpg's
+  32,767-argument limit is unreachable — was right; only the name was wrong.
+- **"Seven statements" was stated as a constant and is a ceiling.** The contact-name lookup and both
+  batched link reads skip a query they have nothing to ask, so a listing where no task references a
+  contact costs six and an empty journal four. Every count test seeds a contact, so what was asserted
+  was true; the docs and `_assemble`'s docstring now say ceiling, and say that invariance in the
+  *task count* is the load-bearing half.
+- **One near-vacuous test.** `lapsed is model.lapsed` could not fail, since `lapsed` is defined as
+  "there is a reason" — any implementation deriving it from the reason passes. Replaced with a
+  parametrized assertion over all three cases on the **rendered payload**: both keys present, and
+  the flag agreeing with the reason. That one fails if a renderer drops either field.
+
+The review also noted that the cancelled-event-journal fixture reached the *listing* only at service
+level, the endpoint and tool cases using a passed date. The iteration doc's requirement is satisfied
+either way by the `get_task` cases, but the batch is a different code path from the single read and
+the cancellation marker is what a user is meant to spot on the row — so one test was added to each
+listing surface (**+2**, included in the counts above).
+
+**Acted on from the PR review** (`augment review` on #1285 — which declined the first request as too
+large and had to be opted into explicitly). Three findings:
+
+- **The write-up's own review section had been pasted into five unrelated phases.** The edit that
+  added it anchored on `**E2E:** none — deferral taken as the phase states.`, a string Phases 3, 4, 8,
+  11 and 12 all end with, and a plain string replace hits every occurrence — so five phases gained a
+  block about Phase 13's findings, each one also breaking the list item it displaced. Removed, and the
+  five list items restored; the doc now differs from the branch point only in the header line and this
+  entry, which is the check that should have been run when the block went in. **The lesson is about
+  the tool, not the text:** an anchored insert into a long document needs an anchor unique to the
+  section, or a count assertion afterwards.
+- **The `self` link was root-relative** where every other `links.self` in this API is absolute and
+  base-URL prefixed. Not a deliberate divergence — just a path written without checking the
+  convention. Now built from the request's base URL like `ContactConverter.to_resource` and
+  `JournalConverter`, with `base_url` passed as a **parameter defaulting to empty** so the renderer
+  stays a pure function of its arguments and its unit tests still need no request. It applies to the
+  write responses too, so all five task routes emit one shape. Recorded in `api-design.md`.
+- **A documentation test asserted less than its name claimed.** It was called
+  *"says the lapse is derived on every read"* but only checked that the word `lapsed` appeared
+  somewhere — which the neighbouring 404 test already implied. Now asserted on the phrases it exists
+  to pin, `derived on every read` and `never stored`.
+
+**A second review round found two more, both about the first round's own fixes reaching everywhere they
+claimed to:**
+
+- **The absolute `self` link was asserted on the read surfaces but not the write ones**, while the
+  claim being made was that *all five* task routes emit one shape. A regression dropping `base_url`
+  from `_to_resource` would have left the read tests green. Now driven through create, `PATCH` and
+  retarget in one test, and mutation-checked: removing `base_url` from the write renderer fails it.
+- **The `link_roles` field description still promised every role unconditionally.** The filtered-narrowing
+  caveat had been corrected in the controller docstring, `api-design.md` and the MCP helper, but a
+  Pydantic `Field` description is published in the OpenAPI schema — a fourth place a generated client
+  reads the contract from, and the one most likely to be read by a machine.
+
+Both are small, and both are the same failure: a correction applied to the places it was noticed
+rather than to every place the statement appears.
+
+**Two further rounds found three more, each smaller than the last — and one of them found a real
+behaviour, not just wording:**
+
+- **`task.id or 0` made a resource identify itself two ways.** A task without an id would have
+  rendered `id="None"` beside a `self` link ending `/api/tasks/0` — a task that cannot exist.
+  Replaced with `persisted_task_id`, which raises, matching
+  `ContactConverter._validate_entity_id`. **Writing its test found the worse half:** the listing did
+  not disagree, it *silently dropped* such a task, because `JournalTaskGroups.tasks` de-duplicates by
+  id and skips models without one. A row missing from a journal's tasks is worse than an error — the
+  caller cannot tell it was dropped — so the response builder now validates all three groups rather
+  than only the de-duplicated set. Unreachable through the service either way, which is the reason to
+  fail rather than paper over.
+- **Two documentation tests asserted less than their names claimed**, both the same shape as the one
+  the first round caught: the journal listing's 404 case checked only that `404` appeared, not
+  `yours` — the part that actually documents "unowned and absent are one answer".
+- **The `_assemble` docstring named one statement-count skip where `domain-architecture.md` names
+  three**, so the floor is four rather than six. Matched, since two descriptions of the same number
+  drift.
+
+**Six of the eight PR findings were the same failure**: a statement corrected, or a claim made, in the
+place it was noticed rather than in every place it appears — docstring, field description, architecture
+doc, test name. Worth carrying forward as a review habit rather than a one-off: when a phase corrects a
+sentence that exists in more than one artefact, the correction is not done until it has been grepped
+for.
+
+**E2E:** none — deferral taken as the phase states. The phase changes no frontend file and ships no
+user-visible surface; ITER18-001's e2e lands in Phase 22.
+
+**Docs:** `api-design.md` gained the two endpoints in the *Task Endpoints* table and eight conventions
+they pin — the superset resource, the resolved-date rule, the arriving `self` link, the two envelopes
+and why `meta` is listing-specific, the total orders, every-status listing, the no-extra-statement 404,
+and that reads open no transaction — plus the two new tools in the MCP list, whose "no tool reads a task
+back" clause is now out of date and was rewritten rather than left. `domain-architecture.md` gained
+*A journal's tasks, by link role* — role derivation, the two-role shapes, the batched reads and their
+deliberate return-rather-than-raise contract, the free ownership check, the total orders and the
+every-status rule — and the Tasks Domain entry links to it.
+
+**Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` and `core_shared`;
+`mypy .` clean over **897** backend files and **130** in `core_shared`; and the full `tests/unit/`
+suite together with `tests/integration/tasks/`, `tests/integration/api/`, `tests/integration/mcp/`
+and `tests/integration/journal/` — **5,242** tests, all passing, of which **3,422** are unit. Re-run
+in full after the review fixes rather than trusting the pass that preceded them. No frontend or e2e
+gates — the phase changes no frontend file.
 
 #### Phase 14: Upcoming-Window Listing — REST and MCP
 

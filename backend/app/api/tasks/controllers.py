@@ -47,44 +47,59 @@ wrappers put both inside one unit of work. Raised by the pull request's automate
 review.
 """
 
+from typing import Annotated
+
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import Task, TaskValidationError
+from core_shared.models.tasks import Task, TaskLinkRole, TaskValidationError
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import DatabaseIdPath
+from app.api.common.schemas import JsonApiLinks, get_request_base_url
 from app.api.tasks.schemas import (
+    JournalTasksResponse,
     TaskAttributes,
     TaskContactLinkRequest,
     TaskCreateRequest,
     TaskIntermediateJournalLinkRequest,
+    TaskReadResponse,
     TaskResource,
     TaskResponse,
     TaskRetargetRequest,
     TaskUpdateRequest,
+    persisted_task_id,
+    task_self_link,
+    to_journal_tasks_response,
+    to_task_read_resource,
 )
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(tags=["tasks"])
 
 
-def _to_resource(task: Task, intermediate_journal_ids: list[int]) -> TaskResource:
+def _to_resource(
+    task: Task, intermediate_journal_ids: list[int], base_url: str = ""
+) -> TaskResource:
     """Render a task as a JSON:API resource.
 
-    No ``self`` link is emitted: there is still no endpoint to *read* a task
-    back — a ``PATCH`` target is not a ``GET`` target — and a link that 404s is
-    worse than an absent one. It arrives with the read model.
+    The ``self`` link is emitted now that ``GET /api/tasks/{task_id}`` exists.
+    It was deliberately absent while it would have 404ed — a ``PATCH`` target is
+    not a ``GET`` target — and it arrives here, with the read model, exactly as
+    that omission said it would.
 
     The trail is a parameter rather than something read here, because a renderer
     that queried would make every caller's cost invisible. Every route that
     returns a task passes one: the resource has a single attribute set whichever
-    route produced it, so a client can write one renderer for it.
+    route produced it, so a client can write one renderer for it. ``base_url``
+    travels the same way, so the link is absolute like every other resource's.
     """
+    task_id = persisted_task_id(task)
     return TaskResource(
-        id=str(task.id),
+        id=str(task_id),
         attributes=TaskAttributes(
             text=task.text,
             status=task.status,
@@ -94,7 +109,102 @@ def _to_resource(task: Task, intermediate_journal_ids: list[int]) -> TaskResourc
             created_at=task.created_at,
             updated_at=task.updated_at,
         ),
+        links=JsonApiLinks(self=task_self_link(task_id, base_url)),
     )
+
+
+@router.get("/tasks/{task_id}")
+@inject
+async def get_task(
+    task_id: DatabaseIdPath,
+    request: Request,
+    task_read_service: FromDishka[TaskReadService],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskReadResponse:
+    """Read one task whole: its journals by role, its contacts, and its lapse.
+
+    This is the first route that reads a task back. Every write response has
+    carried the journal trail as bare ids because there was nowhere to resolve
+    them; here each journal arrives with its title and its date — a **date**,
+    already in your timezone, so a client cannot re-derive it in the browser's
+    zone and disagree with the rule that judged the task.
+
+    **`lapsed` is derived on every read and never stored.** A task is lapsed
+    when it is still not done and its due journal has either passed or been
+    cancelled. `lapse_reason` says which, because the two ask you for different
+    things: a passed date invites retargeting the task onto a new future
+    journal, while a cancelled meeting may mean the commitment is moot. Only the
+    due journal decides it — the journal a task arose in is almost always in the
+    past.
+
+    A lapsed task is not invalid and stays fully editable: it can be completed,
+    reworded, cancelled, or **retargeted** onto a new future journal, which is
+    how it is resurrected.
+
+    No transaction is opened on this path.
+
+    Raises:
+        400: A path id that is not an integer, or one outside the range an
+             ``INTEGER`` column can hold.
+        404: The task does not exist or is not yours; the two are the same
+             answer by design, so a 404 here never means "it was deleted".
+    """
+    model = await task_read_service.read_model(user.id, task_id)
+    return TaskReadResponse(
+        data=to_task_read_resource(model, get_request_base_url(request))
+    )
+
+
+@router.get("/journals/{journal_id}/tasks")
+@inject
+async def list_journal_tasks(
+    journal_id: DatabaseIdPath,
+    request: Request,
+    task_read_service: FromDishka[TaskReadService],
+    user: FromDishka[SessionUser],  # Require authentication
+    role: Annotated[
+        TaskLinkRole | None,
+        Query(description="Return only tasks holding this role in the journal"),
+    ] = None,
+) -> JournalTasksResponse:
+    """List a journal's tasks, grouped by the role each link holds.
+
+    A journal shows three groups: tasks **due** here, tasks **created** here,
+    and tasks **mentioned** here through an intermediate link. A task may hold
+    **more than one group** — the same journal can be both its anchors, and
+    retargeting onto a journal it already mentioned leaves that mention in
+    place — so it appears **once** in `data`, carrying in `link_roles` every
+    role it holds among the groups returned, with the grouping itself in
+    `meta.groups`. JSON:API forbids the same resource twice in `data`, which is
+    why the roles are an attribute rather than the structure. Under a `role`
+    filter `link_roles` narrows with the groups, so it never names a group that
+    `meta.groups` reports as empty.
+
+    **Every linked task is listed, in every status.** Done, cancelled and lapsed
+    tasks all appear: a journal is where a lapsed task is meant to be found
+    again, and a done task's link to the journal it arose in is part of the
+    record. Lapsed ones carry the marker and the reason rather than being
+    filtered out. (The home dashboard's task section is the surface that hides
+    them.)
+
+    Rows are ordered by due-journal date, soonest first, with ties broken by
+    task id. In the *due* group every task shares this journal's date, so that
+    group is ordered by id.
+
+    Unpaginated by design: a journal's tasks are bounded by the journal.
+
+    Raises:
+        400: A path id that is not an integer, one outside the range an
+             ``INTEGER`` column can hold, or an unknown `role`.
+        404: The journal does not exist or is not yours; the two are the same
+             answer, so a rejection cannot be used to probe for other users'
+             journals. A journal of yours with nothing linked to it answers 200
+             with three empty groups.
+    """
+    groups = await task_read_service.read_models_for_journal(
+        user.id, journal_id, role=role
+    )
+    return to_journal_tasks_response(groups, get_request_base_url(request))
 
 
 @router.post("/journals/{journal_id}/tasks", status_code=status.HTTP_201_CREATED)
@@ -102,6 +212,7 @@ def _to_resource(task: Task, intermediate_journal_ids: list[int]) -> TaskResourc
 async def create_task(
     journal_id: DatabaseIdPath,
     task_request: TaskCreateRequest,
+    request: Request,
     task_service: FromDishka[TaskService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
@@ -140,7 +251,9 @@ async def create_task(
         source=Provenance.UI,
         changed_by="ui",
     )
-    return TaskResponse(data=_to_resource(created, trail))
+    return TaskResponse(
+        data=_to_resource(created, trail, get_request_base_url(request))
+    )
 
 
 @router.patch("/tasks/{task_id}")
@@ -148,6 +261,7 @@ async def create_task(
 async def update_task(
     task_id: DatabaseIdPath,
     task_request: TaskUpdateRequest,
+    request: Request,
     task_service: FromDishka[TaskService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
@@ -198,7 +312,9 @@ async def update_task(
         source=Provenance.UI,
         changed_by="ui",
     )
-    return TaskResponse(data=_to_resource(updated, trail))
+    return TaskResponse(
+        data=_to_resource(updated, trail, get_request_base_url(request))
+    )
 
 
 @router.post("/tasks/{task_id}/retarget")
@@ -206,6 +322,7 @@ async def update_task(
 async def retarget_task(
     task_id: DatabaseIdPath,
     retarget_request: TaskRetargetRequest,
+    request: Request,
     task_service: FromDishka[TaskService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
@@ -250,7 +367,9 @@ async def retarget_task(
         source=Provenance.UI,
         changed_by="ui",
     )
-    return TaskResponse(data=_to_resource(retargeted, trail))
+    return TaskResponse(
+        data=_to_resource(retargeted, trail, get_request_base_url(request))
+    )
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

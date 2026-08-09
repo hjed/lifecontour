@@ -290,12 +290,15 @@ export.
 Tasks are commitments anchored to two journals — the one a task arose in and the
 future-dated one it is due in — so creation hangs off the journal path rather
 than a top-level collection. There is deliberately **no `/api/tasks` collection**:
-no endpoint lists tasks, because no screen does. Member routes under `/api/tasks/`
-do exist for operations that involve no journal at all.
+no endpoint lists *all* tasks, because no screen does. A task's own member routes
+under `/api/tasks/` exist for operations that involve no journal at all, and the
+only listing there is is a *journal's* tasks.
 
 | Verb + path | Purpose | Status |
 |---|---|---|
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
+| `GET /api/tasks/{task_id}` | Read one task whole: its journals **by role** (each with title, date and whether it is a cancelled event), its contacts, and `lapsed` with `lapse_reason` | 200; 400 an out-of-range id; 404 task unknown/not-owned |
+| `GET /api/journals/{journal_id}/tasks` | The journal's tasks, **grouped by link role** — due here, created here, mentioned here. Optional `?role=due\|created\|mentioned` | 200 (a journal with no tasks answers three empty groups); 400 an out-of-range id or an unknown `role`; 404 journal unknown/not-owned |
 | `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
 | `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
@@ -430,6 +433,67 @@ Conventions this surface pins down:
   attributes — one convention, not two — and it is read through the service
   rather than in the controller, since controllers resolve services and never
   repositories.
+- **The read resource is a superset of the written one, not a second type.**
+  `GET` answers type `tasks` with every attribute the write routes return —
+  `intermediate_journal_ids` included — plus the resolved `creating_journal`,
+  `due_journal` and `intermediate_journals`, the `contacts`, and `lapsed` with
+  `lapse_reason`. Replacing the id list with the objects would break the one
+  renderer the rule above exists to make possible. `lapsed` is taken from the
+  read model rather than recomputed from the reason, so the flag and the reason
+  cannot disagree; the reason is structured rather than pre-worded, because "the
+  day went by" and "the meeting was called off" ask the user for different
+  things and the wording is the UI's.
+- **A journal reference carries a resolved `date`, never an instant.** The lapse
+  verdict was reached in the acting user's timezone, so sending a timestamp
+  would let a browser re-derive the day in its own zone and disagree with the
+  verdict it was sent alongside.
+- **The `self` link arrives with the read, and it is absolute.** The write
+  responses deliberately emitted none while `GET /api/tasks/{id}` did not exist —
+  a `PATCH` target is not a `GET` target, and a link that 404s is worse than an
+  absent one. Now that the route exists, every task resource carries one, built
+  from the request's base URL exactly as `ContactConverter.to_resource`,
+  `JournalConverter` and `create_pagination_links` build theirs. The base URL is
+  a **parameter with an empty default** rather than something the renderer reads
+  from a request, which keeps `to_task_read_resource` a pure function of its
+  arguments — testable without a request — while the controller supplies
+  `get_request_base_url(request)`. A relative `self` would have given a client
+  resolving links uniformly two different shapes from the same API.
+- **A journal's listing groups by link role, and a task can hold two roles.**
+  One journal can be a task's creating *and* due anchor (invariant 6), and
+  retargeting onto a journal the task already mentioned leaves that mention
+  beside the new due anchor. JSON:API forbids the same resource appearing twice
+  in `data`, so each task appears **once** carrying in `link_roles` every role it
+  holds *among the groups returned*, with the grouping itself as ordered id lists
+  in `meta.groups`. Under a `role` filter the two narrow together, so
+  `link_roles` can never name a group the same response reports as empty; the
+  unfiltered call is the one that answers "every role this task holds here".
+  The matching MCP tool has no such rule and nests whole tasks under the three
+  roles instead — the same data, the same ordering, the same 404s, a different
+  envelope. `meta` is a listing-specific model rather than the shared paginated
+  one: a journal's tasks are bounded by the journal, so advertising page
+  controls that do not exist would be worse than having none.
+- **Ordering is a total order the surface promises.** Rows come back by due-journal
+  date ascending, then by task id. The tie-break is not defensive: every task in
+  the *due* group shares the journal and therefore its date, so id order is the
+  whole of that group's order. The same reasoning applies inside a task —
+  `intermediate_journals` and `contacts` are ordered by link `created_at` then by
+  the linked id, because `created_at` is `transaction_timestamp()` and every link
+  written in one request ties on it.
+- **Every linked task is listed, in every status.** Done, cancelled and lapsed
+  tasks all appear on a journal: the specification keeps lapsed tasks "visible on
+  every journal they are linked to", which is how a user finds one again, and a
+  done task's link to the journal it arose in is part of the record. The
+  dashboard's tasks section is the surface that hides them, and there is
+  deliberately no status filter here — one would reconstruct the
+  "everything outstanding" browser the specification refuses.
+- **The listing's 404 is the journal domain's**, and it costs no extra query:
+  the journal is resolved through the same owner-scoped fetch the read models
+  already need. An unknown journal and another user's are the same answer, while
+  a journal of the caller's with nothing linked to it is a 200 with three empty
+  groups — the distinction that check buys.
+- **Reads open no transaction.** Both controllers await `TaskReadService`, which
+  carries no `@transactional`, takes no lock and publishes no event: a read that
+  opened a unit of work would hold a transaction for the length of a page render.
 - **A journal relationship is named for the role it holds, not for the resource
   it points at.** A task has three journal relationships — creating, due and
   intermediate — and only the last is a row in a link table, so the route is
@@ -463,17 +527,21 @@ Conventions this surface pins down:
   specification permits deleting a journal that is only an intermediate link.
 - The matching MCP tools are `create_task`, `set_task_status`, `retarget_task`,
   `update_task_text`, `delete_task`, `link_task_to_contact`,
-  `unlink_task_from_contact`, `attach_intermediate_journal_to_task` and
-  `detach_intermediate_journal_from_task` (documented in their docstrings and
+  `unlink_task_from_contact`, `attach_intermediate_journal_to_task`,
+  `detach_intermediate_journal_from_task`, `get_task` and `list_journal_tasks`
+  (documented in their docstrings and
   parameter schemas, per the MCP documentation convention). `update_task_text`
   offers no `status` parameter and `set_task_status` no `text`: a model gets one
   tool per intent, so it never has to reason about what leaving a field out will
   do — the combined write exists for the `PATCH` body that genuinely carries
   both. The four link tools return the resulting state — `linked` or `attached` —
   beside `changed` (whether a row moved), which is the one thing the 204
-  withholds and an agent may want. The trail matters more over MCP than over
-  HTTP: no tool reads a task back, so a trail left out of these answers would be
-  unreachable rather than inconvenient.
+  withholds and an agent may want. The trail is on every task-returning answer,
+  which mattered more over MCP than over HTTP while nothing read a task back —
+  `get_task` now does, and it keeps `intermediate_journal_ids` beside the
+  resolved journals for the same reason the endpoint does: an agent that learned
+  the shape from `create_task` should not have to learn a second one to read the
+  same task back.
 
 ## Authentication Guidelines
 

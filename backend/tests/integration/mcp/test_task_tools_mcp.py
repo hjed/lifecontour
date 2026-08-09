@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 from core_shared.models.history import Provenance
+from core_shared.models.journals.event_state import EventState
 from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -48,6 +49,7 @@ from tests.integration.tasks.task_seeding import (
     link_contact,
     link_intermediate_journal,
     linked_contact_ids,
+    mark_journal_as_event,
     stored_anchors,
     stored_status,
     stored_text,
@@ -2633,3 +2635,556 @@ class TestIntermediateJournalToolRejections:
 
         assert '"isError":true' in response.text
         assert await intermediate_journal_ids(clean_database, task_id) == []
+
+
+async def _get_task(client: Any, session_id: str, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "get_task", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _list_journal_tasks(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "list_journal_tasks", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+@pytest.mark.integration
+class TestGetTaskTool:
+    """The tool the write tools have been compensating for.
+
+    Every task-returning tool carries the journal trail because until now no
+    tool read a task back. This one does, and it has to give an agent the same
+    answer the endpoint gives a browser — including the lapse, which is the one
+    thing an agent cannot derive for itself: it would need the user's timezone
+    and the due journal's event state.
+    """
+
+    async def test_it_returns_the_task_with_its_journals_and_contacts(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        mention_id = await create_journal(journal_repository, title="Revisited")
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+        await link_intermediate_journal(
+            clean_database, task_id=task_id, journal_id=mention_id
+        )
+        contact_id = await create_contact(clean_database, first_name="Sarah")
+        await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task(client, session_id, task_id=task_id)
+
+        assert "error" not in payload
+        assert payload["text"] == "print the permit"
+        assert payload["status"] == "not_done"
+        assert payload["creating_journal"]["id"] == creating_id
+        assert payload["due_journal"]["id"] == due_id
+        assert [ref["id"] for ref in payload["intermediate_journals"]] == [mention_id]
+        assert [contact["id"] for contact in payload["contacts"]] == [contact_id]
+
+    async def test_it_keeps_the_trail_the_write_tools_promise(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """``intermediate_journal_ids`` survives beside the resolved journals.
+
+        An agent that learned the shape from ``create_task`` must not have to
+        learn a second one to read the same task back.
+        """
+        creating_id, due_id = task_anchors
+        mention_id = await create_journal(journal_repository, title="Revisited")
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await link_intermediate_journal(
+            clean_database, task_id=task_id, journal_id=mention_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task(client, session_id, task_id=task_id)
+
+        assert payload["intermediate_journal_ids"] == [mention_id]
+        assert payload["creating_journal_id"] == creating_id
+        assert payload["due_journal_id"] == due_id
+
+    async def test_a_journal_ref_carries_a_date_rather_than_an_instant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        user_settings_repository: SqlUserSettingsRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Dated in the user's zone, so an agent cannot re-derive it wrongly.
+
+        Kiritimati is +14, so an instant at midday UTC on 1 January 2020 is
+        already the 2nd there — a date no UTC reading produces.
+        """
+        creating_id, _ = task_anchors
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone="Pacific/Kiritimati")
+        )
+        due_id = await create_journal(
+            journal_repository, title="Fixed", start=FIXED_PAST_INSTANT
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task(client, session_id, task_id=task_id)
+
+        assert payload["due_journal"]["date"] == "2020-01-02"
+
+    async def test_a_cancelled_due_journal_reports_its_own_lapse_reason(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The distinction an agent needs to choose what to do next.
+
+        "The day went by" suggests retargeting; "the meeting was called off"
+        may mean the commitment is moot.
+        """
+        creating_id, _ = task_anchors
+        cancelled_id = await create_journal(
+            journal_repository, title="Cancelled meeting", days_offset=7
+        )
+        await mark_journal_as_event(
+            clean_database, cancelled_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=cancelled_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task(client, session_id, task_id=task_id)
+
+        assert payload["lapsed"] is True
+        assert payload["lapse_reason"] == "due_journal_cancelled"
+        assert payload["due_journal"]["cancelled"] is True
+
+    async def test_a_passed_due_journal_reports_the_other_reason(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, _ = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=passed_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task(client, session_id, task_id=task_id)
+
+        assert payload["lapse_reason"] == "date_passed"
+
+    async def test_a_task_that_has_not_lapsed_reports_no_reason(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task(client, session_id, task_id=task_id)
+
+        assert payload["lapsed"] is False
+        assert payload["lapse_reason"] is None
+
+    async def test_another_users_task_and_an_absent_one_answer_identically(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """The tool inherits the endpoint's 404 rather than deciding its own.
+
+        The two answers differ **only in the id the caller supplied**, which is
+        what stops a read being used to probe for other users' tasks — the same
+        hedge every other task tool carries, asserted the same way.
+        """
+        theirs_journal = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        theirs = await create_task(
+            clean_database,
+            creating_journal_id=theirs_journal,
+            due_journal_id=theirs_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _get_task(client, session_id, task_id=theirs)
+            absent = await _get_task(client, session_id, task_id=999_999)
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(theirs), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+
+
+@pytest.mark.integration
+class TestListJournalTasksTool:
+    """A journal's tasks, nested under the role each link holds."""
+
+    async def test_it_nests_the_tasks_under_the_three_groups(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The roles are the structure here, unlike the JSON:API envelope.
+
+        An agent asked to list "by link role" wants to read the roles off the
+        answer rather than reassemble them from an attribute.
+        """
+        viewed_id, elsewhere_id = task_anchors
+        due_here = await create_task(
+            clean_database,
+            creating_journal_id=elsewhere_id,
+            due_journal_id=viewed_id,
+        )
+        created_here = await create_task(
+            clean_database,
+            creating_journal_id=viewed_id,
+            due_journal_id=elsewhere_id,
+        )
+        mentioned_here = await create_task(
+            clean_database,
+            creating_journal_id=elsewhere_id,
+            due_journal_id=elsewhere_id,
+        )
+        await link_intermediate_journal(
+            clean_database, task_id=mentioned_here, journal_id=viewed_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        assert payload["journal_id"] == viewed_id
+        assert [task["id"] for task in payload["groups"]["due"]] == [due_here]
+        assert [task["id"] for task in payload["groups"]["created"]] == [created_here]
+        assert [task["id"] for task in payload["groups"]["mentioned"]] == [
+            mentioned_here
+        ]
+
+    async def test_a_task_in_two_roles_appears_in_both_groups(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """No uniqueness rule applies here, so the nesting can repeat it.
+
+        Which is why the tool says so in its description: an agent counting
+        rows across the groups would otherwise report a task twice as a bug.
+        """
+        viewed_id, _ = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=viewed_id, due_journal_id=viewed_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        assert [task["id"] for task in payload["groups"]["due"]] == [task_id]
+        assert [task["id"] for task in payload["groups"]["created"]] == [task_id]
+        assert payload["groups"]["due"][0]["link_roles"] == ["due", "created"]
+
+    async def test_each_listed_task_carries_the_full_read_shape(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The same fields ``get_task`` gives, so one reader serves both."""
+        viewed_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=viewed_id,
+            due_journal_id=due_id,
+            text="return Sarah's book",
+        )
+        contact_id = await create_contact(clean_database, first_name="Sarah")
+        await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        (task,) = payload["groups"]["created"]
+        assert task["text"] == "return Sarah's book"
+        assert task["status"] == "not_done"
+        assert task["lapsed"] is False
+        assert [contact["id"] for contact in task["contacts"]] == [contact_id]
+        assert task["due_journal"]["id"] == due_id
+
+    async def test_the_role_filter_returns_only_that_group(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        viewed_id, elsewhere_id = task_anchors
+        due_here = await create_task(
+            clean_database,
+            creating_journal_id=elsewhere_id,
+            due_journal_id=viewed_id,
+        )
+        await create_task(
+            clean_database,
+            creating_journal_id=viewed_id,
+            due_journal_id=elsewhere_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id, role="due"
+            )
+
+        assert [task["id"] for task in payload["groups"]["due"]] == [due_here]
+        assert payload["groups"]["created"] == []
+        assert payload["groups"]["mentioned"] == []
+
+    async def test_an_unknown_role_is_refused(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A misspelled filter must not quietly widen to everything."""
+        viewed_id, _ = task_anchors
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "list_journal_tasks",
+                {"journal_id": viewed_id, "role": "overdue"},
+            )
+
+        assert '"isError":true' in response.text
+
+    async def test_lapsed_and_finished_tasks_are_listed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A journal is where a lapsed task is meant to be found again."""
+        viewed_id, due_id = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        lapsed = await create_task(
+            clean_database, creating_journal_id=viewed_id, due_journal_id=passed_id
+        )
+        done = await create_task(
+            clean_database,
+            creating_journal_id=viewed_id,
+            due_journal_id=due_id,
+            status=TaskStatus.DONE,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        listed = {task["id"]: task for task in payload["groups"]["created"]}
+        assert set(listed) == {lapsed, done}
+        assert listed[lapsed]["lapsed"] is True
+        assert listed[done]["status"] == "done"
+
+    async def test_a_cancelled_due_journal_is_marked_on_the_listed_row(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The cancellation cause through the batch, not only the single read.
+
+        An agent listing a journal's tasks has to be able to see *why* one
+        lapsed without a follow-up ``get_task`` per row.
+        """
+        viewed_id, _ = task_anchors
+        cancelled_id = await create_journal(
+            journal_repository, title="Cancelled meeting", days_offset=7
+        )
+        await mark_journal_as_event(
+            clean_database, cancelled_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=viewed_id,
+            due_journal_id=cancelled_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        (task,) = payload["groups"]["created"]
+        assert task["id"] == task_id
+        assert task["lapse_reason"] == "due_journal_cancelled"
+        assert task["due_journal"]["cancelled"] is True
+
+    async def test_a_journal_with_no_tasks_answers_three_empty_groups(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """An empty journal is a normal answer with the normal shape."""
+        viewed_id, _ = task_anchors
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        assert payload["groups"] == {"due": [], "created": [], "mentioned": []}
+
+    async def test_another_users_journal_and_an_absent_one_answer_identically(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """The journal domain's own 404, inherited rather than re-decided.
+
+        And indistinguishable from an absent journal, so a listing cannot be
+        used to discover which journal ids belong to somebody else.
+
+        The error is the journal domain's *"Journal not found"* rather than the
+        task domain's bare *"Not found"*, which is the more useful answer: what
+        the caller named wrongly was a journal, and the tasks are not the
+        problem. The same distinction the intermediate-journal tools carry.
+        """
+        theirs = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _list_journal_tasks(client, session_id, journal_id=theirs)
+            absent = await _list_journal_tasks(client, session_id, journal_id=999_999)
+
+        assert foreign["error"] == absent["error"] == "Journal not found"
+        assert foreign["message"].replace(str(theirs), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+
+    async def test_another_users_task_is_never_listed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        viewed_id, _ = task_anchors
+        mine = await create_task(
+            clean_database, creating_journal_id=viewed_id, due_journal_id=viewed_id
+        )
+        theirs_journal = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        theirs = await create_task(
+            clean_database,
+            creating_journal_id=theirs_journal,
+            due_journal_id=theirs_journal,
+            user_id=OTHER_USER_ID,
+        )
+        await link_intermediate_journal(
+            clean_database, task_id=theirs, journal_id=viewed_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        assert [task["id"] for task in payload["groups"]["due"]] == [mine]
+        assert payload["groups"]["mentioned"] == []
+
+    async def test_rows_are_ordered_soonest_first(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The same ordering the endpoint promises, so the two agree."""
+        viewed_id, _ = task_anchors
+        far_id = await create_journal(journal_repository, title="Far", days_offset=30)
+        near_id = await create_journal(journal_repository, title="Near", days_offset=2)
+        far_task = await create_task(
+            clean_database, creating_journal_id=viewed_id, due_journal_id=far_id
+        )
+        near_task = await create_task(
+            clean_database, creating_journal_id=viewed_id, due_journal_id=near_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_journal_tasks(
+                client, session_id, journal_id=viewed_id
+            )
+
+        assert [task["id"] for task in payload["groups"]["created"]] == [
+            near_task,
+            far_task,
+        ]
