@@ -26,6 +26,7 @@ from typing import Any
 from uuid import uuid4
 
 from core_shared.models.journals import EventDateRange, Journal
+from core_shared.models.journals.event_state import EventState
 from core_shared.models.tasks import TaskStatus
 from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
 from sqlalchemy import text
@@ -73,6 +74,15 @@ _INSERT_INTERMEDIATE = text("""
 _INSERT_CONTACT_LINK = text("""
     INSERT INTO task_contacts (task_id, contact_id)
     VALUES (:task_id, :contact_id)
+""")
+_INSERT_CALENDAR = text("""
+    INSERT INTO calendars (user_id, name, color)
+    VALUES (:user_id, 'Task fixtures', '#FF5733')
+    RETURNING id
+""")
+_INSERT_CALENDAR_INFO = text("""
+    INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day, event_state)
+    VALUES (:journal_id, :calendar_id, false, :event_state)
 """)
 _DELETE_CONTACT = text("DELETE FROM contacts WHERE id = :contact_id")
 _DELETE_JOURNAL = text("DELETE FROM journals WHERE id = :journal_id")
@@ -194,6 +204,37 @@ async def delete_journal(conn: AsyncConnection, journal_id: int) -> None:
     constraint could.
     """
     await conn.execute(_DELETE_JOURNAL, {"journal_id": journal_id})
+
+
+async def mark_journal_as_event(
+    conn: AsyncConnection,
+    journal_id: int,
+    *,
+    event_state: EventState = EventState.CONFIRMED,
+    user_id: str = USER_ID,
+) -> None:
+    """Give a journal the EVENT type in ``event_state``.
+
+    A journal is an event because a ``journal_calendar_info`` row exists for it,
+    and that row needs a real calendar to point at — so one is created here per
+    call rather than shared, which keeps each test's rows its own.
+
+    Inserted directly rather than through ``SqlCalendarInfoRepository.save``
+    because that path also seeds an external-event link and its sync metadata,
+    none of which the lapse rule reads. What is being arranged is a journal in a
+    given event state, and the shortest arrangement is the clearest one.
+    """
+    calendar_id = (
+        await conn.execute(_INSERT_CALENDAR, {"user_id": user_id})
+    ).scalar_one()
+    await conn.execute(
+        _INSERT_CALENDAR_INFO,
+        {
+            "journal_id": journal_id,
+            "calendar_id": calendar_id,
+            "event_state": event_state.value,
+        },
+    )
 
 
 async def create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") -> int:

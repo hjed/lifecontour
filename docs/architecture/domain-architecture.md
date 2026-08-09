@@ -170,6 +170,8 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `TaskAnchorRepository` in the same module, implemented by `SqlTaskAnchorRepository`
   (`backend/app/core/tasks/adapters/sql/task_anchor_repository.py`) — see
   *[The journal delete guard](#the-journal-delete-guard)* below
+- **Read model**: `TaskReadModel` and the *lapsed* derivation — see
+  *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below.
 - **Domain Services**: `TaskService`
   (`backend/app/core/tasks/services/task_service.py`), provided at request scope by `TaskProvider`.
   It is where the specification's *core invariants* are enforced, so REST and MCP both inherit them
@@ -185,10 +187,16 @@ the *creating* journal where it arose and the *due* journal where it matters.
   method takes the acting user's id and every statement filters on it, so a task belonging to
   somebody else is indistinguishable from one that never existed: `find_by_id` returns `None` and
   every other method raises `TaskNotFoundError`. The link tables carry no `user_id` of their own, so
-  link operations reach the owner through the task they belong to, and that check takes
-  `FOR KEY SHARE` so a concurrent delete cannot turn the promised `TaskNotFoundError` into a raw
-  foreign-key violation. The repository is responsible for persistence and task ownership only; every
-  other invariant is the service layer's.
+  link operations reach the owner through the task they belong to — but the **writes** and the
+  **reads** do that differently, and the difference is a lock rather than a filter. A link write
+  runs a separate `SELECT … FOR KEY SHARE` on the task first, so a concurrent delete cannot turn the
+  promised `TaskNotFoundError` into a raw foreign-key violation. A link **read** has no such window —
+  it writes nothing — so it scopes itself inside its own statement with a `LEFT JOIN` from `tasks`:
+  no rows means the task is absent or not the caller's, one row with a null id means it is theirs
+  with no links. That distinction is the only thing the separate guard bought a read, and paying a
+  round trip for it cost every task-returning response an extra statement, because the journal trail
+  on a create, `PATCH` or retarget answer is one of these reads. The repository is responsible for
+  persistence and task ownership only; every other invariant is the service layer's.
   **Contact links are written in batch.** `add_contacts(task_id, contact_ids, user_id)` takes the
   ownership guard once and inserts every link in one statement, returning the ids for which a row was
   actually created. The singular `add_contact` it replaced made the guard the expensive half — *N*
@@ -538,6 +546,71 @@ user" is not enforceable at the data layer; the service enforces contact **exist
 as a divergence in [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md), matching the same
 finding in iteration 13's contact merge. If contacts ever gain ownership, `TaskService._resolve_contacts`
 is the single place the rule lands.
+
+### Task read model and lapsed derivation
+
+Every surface that *reads* a task hands out the same shape: the task, its journals **by role**, its
+contacts, and whether it has lapsed and why. The
+[specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#where-tasks-appear)
+asks each of those surfaces for "the task text, its status, its linked contacts, and — for lapsed
+tasks — a clear lapsed marker", so the shape is defined once rather than per controller.
+
+**Lapsed is derived on every read and never stored.** A task is lapsed when it is still *not done*
+and either its due journal's date has **passed** in the acting user's timezone or that journal is a
+**cancelled** event. A stored flag would need something to notice midnight passing in every user's
+zone and would be wrong until it next ran, for a property that costs one date comparison. This is
+also why the future-dated invariant is only a *write-time* rule: nothing re-validates it on read,
+which is exactly what keeps a lapsed task loadable.
+
+The pieces:
+
+- **`LapseReason`** (`core_shared/models/tasks/lapse.py`) — `DATE_PASSED` or
+  `DUE_JOURNAL_CANCELLED`, with `derive_lapse_reason(status, due_journal_date,
+  due_journal_cancelled, today)` beside it. Pure, and it takes **dates rather than journals or a
+  timezone**, so a caller deriving this for many tasks resolves the timezone once. The *reason* is
+  returned rather than a boolean because "the day went by" and "the meeting was cancelled" ask the
+  user for different things; the wording is the UI's, and ITER18-002 Phase 4 pins the cancellation
+  path end to end.
+- **`TaskReadModel`, `TaskJournalRef`, `TaskContactRef`** (`core_shared/models/tasks/read_model.py`),
+  built by the pure `build_task_read_model(...)`. A journal ref carries a resolved **`date`**, not an
+  instant, so no surface can re-derive it in the browser's zone and disagree with the rule that
+  judged the task. `TaskReadModel.lapsed` is defined as "there is a reason" rather than computed a
+  second way.
+- **`TaskReadService`** (`backend/app/core/tasks/services/task_read_service.py`), request-scoped
+  from `TaskProvider`. It is **read-only** — no `@transactional`, no lock, no domain event — because
+  a read that opened a unit of work would hold a transaction for the length of a page render.
+
+Four rules the derivation applies, each a deliberate reading of the specification:
+
+| Case | Answer | Why |
+|---|---|---|
+| Cancelled **and** past | `DUE_JOURNAL_CANCELLED` | The more specific and more actionable of the two |
+| Cancelled but still **future**-dated | `DUE_JOURNAL_CANCELLED` | The cancellation rule carries no date condition |
+| Due **today** | not lapsed | Mirrors `is_future_dated`'s strictly-after, so the read-time and write-time rules agree about the same journal |
+| Task **done** or **cancelled** | not lapsed | A commitment that was met or called off cannot then be let slide |
+
+Only the **due** journal decides it. The creating journal is almost always in the past — that is what
+"the journal the commitment arose in" means — so consulting it would lapse nearly every task the day
+after it was written.
+
+**Cancellation is read in batch.** A journal is cancelled when its `journal_calendar_info.event_state`
+is `EventState.CANCELLED`; `invited` and `tentative` are not cancellations, and a journal with no
+calendar-info row at all is simply not an event. `CalendarInfoRepository.find_cancelled_journal_ids`
+answers that for a whole set in one statement, because the per-journal `find_by_journal_id` would be
+an N+1 the moment a journal's task list is rendered. It performs no ownership check: callers reach it
+with ids an owner-scoped query has already filtered.
+
+**One read per collection**, for the same reason: the read model's assembler is a *pure function over
+pieces already fetched*, so a list surface can load *N* tasks' journals in one query and call it once
+per task. The single-task path costs a fixed **seven** statements regardless of how many journals or
+contacts a task has — the task, its mentions, its contact links, the timezone, the journals for all
+three roles together, the cancellation lookup, and the contact names. One per thing that has to be
+known, and nothing repeated.
+
+A missing **anchor** journal raises `JournalNotFoundError` rather than being papered over: the due
+journal is what the rule reads, so losing it would make the verdict a guess. A missing **mention** is
+skipped, because a task the user cannot open is worse than one showing one fewer journal. Both
+anchors are `ON DELETE RESTRICT`, so neither branch is reachable in practice.
 
 ### The journal delete guard
 

@@ -214,9 +214,11 @@ class SqlTaskRepository(TaskRepository):
         self, task_id: int, user_id: str
     ) -> list[int]:
         """List the ids of the task's intermediate journals."""
-        await self._require_task_owned(task_id, user_id)
         return await self._list_links(
-            table="task_intermediate_journals", column="journal_id", task_id=task_id
+            table="task_intermediate_journals",
+            column="journal_id",
+            task_id=task_id,
+            user_id=user_id,
         )
 
     async def add_contacts(
@@ -243,18 +245,25 @@ class SqlTaskRepository(TaskRepository):
 
     async def list_contact_ids(self, task_id: int, user_id: str) -> list[int]:
         """List the ids of the contacts the task references."""
-        await self._require_task_owned(task_id, user_id)
         return await self._list_links(
-            table="task_contacts", column="contact_id", task_id=task_id
+            table="task_contacts",
+            column="contact_id",
+            task_id=task_id,
+            user_id=user_id,
         )
 
     async def _require_task_owned(self, task_id: int, user_id: str) -> None:
         """Fail unless the task exists and belongs to the acting user.
 
         The link tables carry no ``user_id`` of their own, so this is where
-        owner scoping enters every link operation. It runs before the statement
+        owner scoping enters every link **write**. It runs before the statement
         it guards, which is what lets those statements report "already linked"
         with a plain ``False``.
+
+        The read methods do not come through here. They scope themselves inside
+        their own statement (see :meth:`_list_links`), because the lock below is
+        the only thing this adds that a read cannot get from a join — and a read
+        has nothing to lock against.
 
         ``FOR KEY SHARE`` closes the window between this check and the statement
         it guards. Without it a concurrent transaction could delete the task in
@@ -375,15 +384,39 @@ class SqlTaskRepository(TaskRepository):
         )
         return result.rowcount > 0
 
-    async def _list_links(self, *, table: str, column: str, task_id: int) -> list[int]:
-        """List a task's link ids, oldest link first."""
+    async def _list_links(
+        self, *, table: str, column: str, task_id: int, user_id: str
+    ) -> list[int]:
+        """List a task's link ids, oldest link first, in one statement.
+
+        Unlike the methods that *write* a link, this does its own owner scoping
+        rather than calling :meth:`_require_task_owned` first. The guard exists
+        to hold a window shut with ``FOR KEY SHARE``, and a read has no window:
+        it writes nothing, so there is no foreign-key violation for a concurrent
+        delete to turn the promised ``TaskNotFoundError`` into.
+
+        What the guard also did here was tell two empty results apart — the link
+        tables carry no ``user_id``, so a bare ``WHERE task_id = ?`` returns
+        nothing both for a task that is not the caller's and for one of theirs
+        with no links, and the port must raise for the first and return ``[]``
+        for the second. The ``LEFT JOIN`` answers that from one round trip:
+        driving from ``tasks`` means an unowned or absent task produces **no**
+        rows, while an owned one with no links produces exactly one, with a null
+        id.
+        """
         query = text(
             f"""
-            SELECT {column}
-            FROM {table}
-            WHERE task_id = :task_id
-            ORDER BY created_at, {column}
+            SELECT link.{column}
+            FROM tasks t
+            LEFT JOIN {table} link ON link.task_id = t.id
+            WHERE t.id = :task_id AND t.user_id = :user_id
+            ORDER BY link.created_at, link.{column}
             """
         )
-        result = await self.conn.execute(query, {"task_id": task_id})
-        return [int(row[0]) for row in result.fetchall()]
+        result = await self.conn.execute(
+            query, {"task_id": task_id, "user_id": user_id}
+        )
+        rows = result.fetchall()
+        if not rows:
+            raise TaskNotFoundError(task_id)
+        return [int(row[0]) for row in rows if row[0] is not None]

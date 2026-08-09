@@ -2,12 +2,14 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **63 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–9 and 11 complete** (task tables + domain entity; task repository; journal-date
+**ITER18-001 Phases 1–12 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
 MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
 one automatic link, and its only way back out of a terminal status — and then retargeting over REST and
 MCP, which also makes a task's journal trail visible in every task response; text update and delete over
-both surfaces; and contact links over both surfaces).
+both surfaces; intermediate journal links over both surfaces; contact links over both surfaces; and the
+read model with the lapsed derivation — which is where a task first becomes readable *whole*, though
+still with no endpoint or tool to ask for it).
 **ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
 for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
 blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
@@ -166,6 +168,19 @@ retarget onto a previously-attached journal produces, keeps its intermediate lin
 task is read *without* a lock here, unlike the status and retarget paths. No port or adapter changed:
 Phase 2's `add_intermediate_journal` and `remove_intermediate_journal` already carried the ownership
 guard and the idempotence.
+
+**Since ITER18-001 Phase 12:** a task can be **read back whole**, and *lapsed* exists.
+`TaskReadService.read_model(user_id, task_id, now=None)`
+(`backend/app/core/tasks/services/task_read_service.py`, request-scoped from `TaskProvider`) assembles
+a `TaskReadModel` — the task, its journals by role, its contacts — and derives whether it has lapsed
+and why. The rule is pure and lives in `core_shared/models/tasks/lapse.py`
+(`LapseReason.DATE_PASSED` / `DUE_JOURNAL_CANCELLED`), the shape in
+`core_shared/models/tasks/read_model.py`; the dates come from Phase 3's resolver with the user's
+timezone taken **once** per read, and the cancellation from the new batch
+`CalendarInfoRepository.find_cancelled_journal_ids`. The service is **read-only** — no transaction, no
+lock, no domain event. Two things it is not: there is still **no endpoint and no MCP tool** that
+returns it (Phase 13), so it has no caller outside its tests; and it assembles **one** task at a time,
+because the batched link reads that make a list of them cheap belong with the list that needs them.
 
 **The trail is readable, though not through these two routes.** An earlier draft of this paragraph said
 there was still no way to read a task's journals back; **Phase 8 landed while this phase was in flight
@@ -2931,26 +2946,214 @@ deletion behaviour, cross-user rejection, both surfaces. E2E deferred to Phase 2
   **999**, both green. No frontend or e2e gates — the phase changes no frontend file and ships no
   user-visible surface.
 
-#### Phase 12: Read Model and Lapsed Derivation
+#### Phase 12: Read Model and Lapsed Derivation ✅ COMPLETE
 
 **Prerequisites:** Phases 3 and 10.
-**Estimated diff:** ~120 production → **~480 tracked** (×4)
+**Estimated diff:** ~120 production → **~480 tracked** (×4) · **Overrun recorded before work started
+(delivery rule 3): ~300 production → ~1,200–1,400 tracked.** Calibration rule 14 applies at full force
+and the original figure predates it. This phase's deliverable is a *decision* — is this task lapsed, and
+why — whose acceptance criteria read as a matrix, which is exactly the shape that took Phase 3 to ×6.6
+against production. Three things beyond the rule itself: the read model is three dataclasses and a pure
+assembler, not a boolean; the derivation needs a fact no existing port can answer (whether a journal is
+cancelled), so a port method and its adapter come with it; and "done and cancelled tasks are never
+lapsed" crossed with two lapse causes and a timezone boundary is a matrix before a single journal is
+seeded. · **Actual:** ~643 production → **2,870 tracked** (2,870 insertions, 69 deletions across 20
+files: 643 production, 1,924 tests, 303 docs).
 
-**Acceptance Criteria:**
+**The pre-recorded overrun undershot, and for the opposite reason to Phase 3's.** 2,870 against 480 is
+6.0× on the estimate, and 2.2× on the pre-recorded one — but against *production* it is **4.5×**, which is
+calibration rule 1's plain ×4, near enough. **The multiplier was right and the production estimate was
+half what the work cost.** That is a different failure from Phase 3's, where 123 production lines bought ×6.6, and the
+two together sharpen the rules rather than contradicting them. What the 300-line estimate missed was not
+test volume: it was that a *shape* is expensive to write down in this codebase. Three frozen dataclasses
+whose fields each need a sentence saying why they are there, a pure assembler, an enum, a service, a port
+method and its adapter came to 643 lines of which perhaps 260 are executable — the rest is the
+documentation convention rule 13 already noticed for port ABCs ("a port ABC costs roughly as much as its
+adapter in a codebase that documents every abstract method"), applied to every artefact rather than only
+to ports. **Suggested amendment:** when a phase's deliverable is a *vocabulary* — types other phases will
+consume rather than logic one phase will run — estimate its production at roughly twice the executable
+lines, then apply ×4 as usual. ITER18-004's dashboard projection types are the next phase this catches.
 
-- [ ] `lapsed` is **derived in the read model, never stored**: a not-done task whose due journal's date has
+**Acceptance criteria, ticked:**
+
+**Scope boundary taken with Phase 13, recorded here because it moves work between two phases.** This
+phase ships the read model for **one** task and a **pure** assembler over already-fetched pieces. The
+batched link reads that let *N* tasks be assembled without an N+1 stay in Phase 13, whose own third
+criterion is "one query per collection, not per task" — so Phase 13 reuses this assembler under a batch
+fetch rather than re-deriving the rule. Splitting it the other way would have put a batch API in a phase
+with no list to serve.
+
+- [x] `lapsed` is **derived in the read model, never stored**: a not-done task whose due journal's date has
       passed in the user's timezone (Phase 3's predicate), **or** whose due journal is cancelled
-      (`EventState.CANCELLED`).
-- [ ] The derivation reports **why** a task lapsed — date passed vs due journal cancelled — as structured
+      (`EventState.CANCELLED`). — `derive_lapse_reason(status, due_journal_date, due_journal_cancelled,
+      today)` in `core_shared/models/tasks/lapse.py`, called by the assembler on **every** read. No
+      column, no migration, no job. The dates arrive resolved by Phase 3's module —
+      `journal_date(journal, tz)` against `today_in(tz, now)` — with the timezone taken **once** per
+      read through `timezone_for`, which is the batch shape that module was split for.
+- [x] The derivation reports **why** a task lapsed — date passed vs due journal cancelled — as structured
       data, so surfaces can word it differently. ITER18-002 Phase 4 depends on this distinction; the UI
-      wording itself lives in Phase 16.
-- [ ] Done and cancelled tasks are never lapsed.
-- [ ] The read model carries the task with its journals by role and its contacts, in the shape both read
-      surfaces (Phase 13) and the dashboard (ITER18-004) consume.
+      wording itself lives in Phase 16. — `LapseReason.DATE_PASSED` / `DUE_JOURNAL_CANCELLED`, a
+      `StrEnum` whose two wire values are pinned by a test, carried on `TaskReadModel.lapse_reason`.
+      No pre-worded string reaches a surface.
+- [x] Done and cancelled tasks are never lapsed. — The status gate is the rule's first branch, checked
+      before either cause rather than folded into them, and asserted at all three levels: the bare rule,
+      the assembled model, and against rows read back from PostgreSQL in each terminal status against
+      both a passed and a cancelled due journal.
+- [x] The read model carries the task with its journals by role and its contacts, in the shape both read
+      surfaces (Phase 13) and the dashboard (ITER18-004) consume. — `TaskReadModel` with
+      `creating_journal`, `due_journal`, `intermediate_journals` and `contacts`
+      (`core_shared/models/tasks/read_model.py`), assembled by `TaskReadService.read_model`.
+
+**Decisions taken (Phase 12):**
+
+- **Cancellation is reported ahead of a passed date.** A not-done task whose due journal is *both*
+  cancelled and past reads as `DUE_JOURNAL_CANCELLED`. It is the more specific and more actionable of
+  the two — the meeting was called off, rather than merely that time went by — and it is the reason
+  ITER18-002 Phase 4 pins end to end. Asserted at the rule *and* against real rows, because a single
+  test would let a later reordering of the two branches pass the unit suite.
+- **A cancelled *future* due journal still lapses its task.** The specification's cancellation rule
+  carries no date condition, and the moment the commitment was pinned to is not going to happen
+  whenever it was scheduled for. This is also the case that makes the reason worth reporting at all:
+  the date cause demonstrably cannot be what fired.
+- **A journal dated exactly today is not lapsed**, mirroring Phase 3's strictly-after `is_future_dated`.
+  An inclusive boundary would lapse every task created for a journal earlier the same day, the moment
+  it was made, and would leave the read-time and write-time rules disagreeing about one journal.
+- **`invited` and `tentative` are not cancellations, and a journal with no calendar-info row is not an
+  event.** Treating any non-confirmed state as cancelled would lapse every task due in a meeting the
+  user had not yet accepted. The four-state fixture is what makes the cancellation query
+  non-vacuous — without it the same test passes against a query matching *any* event journal.
+- **Only the due journal decides the lapse.** The creating journal is almost always in the past — that
+  is what "the journal the commitment arose in" means — so consulting it would lapse nearly every task
+  the day after it was written. A cancelled creating journal is *marked* on its ref and changes no
+  verdict, which is ITER18-002 Phase 4's third criterion checked at the layer where it would first go
+  wrong.
+- **The rule and the read model live in `core_shared/models/tasks/`, taking primitives.** The precedent
+  is `BlockingTask` / `blocking_task_from_anchors` in `core_shared/models/journals/task_anchor.py`: a
+  pure rule beside its frozen dataclasses, with no journal-domain or backend import. A journal ref
+  therefore carries a resolved **`date`**, not an instant — so no surface can re-derive it in the
+  browser's zone and disagree with the rule that judged the task, which is the divergence Phase 3
+  recorded and this shape closes for tasks.
+- **The assembler takes the two anchors as arguments, not as ids to look up.** A read model without its
+  due journal could not answer whether the task lapsed, so the signature makes that state
+  unrepresentable and leaves "what does a missing journal mean" with the service that did the fetching.
+- **A missing anchor raises `JournalNotFoundError`; a missing mention is skipped.** The asymmetry is
+  deliberate: losing the due journal makes the verdict a guess, while losing a mention only loses a
+  mention, and a task the user can no longer open is worse than one showing one fewer journal. Both
+  anchors are `ON DELETE RESTRICT`, so neither branch is reachable today.
+- **`TaskReadService` is separate from `TaskService`, not more methods on it.** It writes nothing, so it
+  takes no event publisher and opens no unit of work — `OutdoorDashboardService` is the precedent — and
+  a caller that only needs to read a task is not handed the ability to change one. It is the only
+  consumer of `CalendarInfoRepository` outside the journal domain.
+- **Cancellation is read in batch, by the journal domain's own port.** `find_cancelled_journal_ids`
+  went on `CalendarInfoRepository` rather than into a new tasks-side read port: "is this journal
+  cancelled" is journal knowledge, the port already exists and has exactly one implementation, and a
+  new port + adapter pair is a ×6 phase by calibration rule 13. The ids pass as one `integer[]`,
+  following Phase 11's batched insert, so the parameter count stays at one whatever *N* is.
+- **The read model for *one* task ships here; the batched link reads stay in Phase 13.** Recorded above
+  as a scope boundary before work started. The assembler is pure, so Phase 13 reuses it under a batch
+  fetch rather than re-deriving the rule.
+- **The two link *reads* stopped paying the write path's ownership statement, and a read now costs
+  seven statements rather than nine.** `list_intermediate_journal_ids` and `list_contact_ids` each
+  opened with the port's separate `SELECT … FOR KEY SHARE` guard, one statement after the task had
+  already been read owner-scoped. **This was first recorded as a follow-up for Phase 13 and the
+  deferral was wrong**, for a reason worth keeping: the argument was that Phase 13's batched reads
+  would absorb the cost, which is true of the read model and false of the other three call sites —
+  `TaskService`'s trail wrappers call `list_intermediate_journal_ids` on every create, `PATCH` and
+  retarget response, and those never get batched. So the waste would have outlived the phase that
+  was supposed to remove it.
+  **The fix is a `LEFT JOIN` from `tasks` inside `_list_links`,** which answers in one statement what
+  the guard answered in two: driving from `tasks` means an unowned or absent task yields no rows,
+  while an owned one with no links yields exactly one row with a null id. The guard *keeps* its
+  `FOR KEY SHARE` and keeps guarding all four link **writes**, where the lock is load-bearing — it is
+  what stops a concurrent delete turning the promised `TaskNotFoundError` into a raw foreign-key
+  violation. A read has no such window, and a lock taken there would block a writer for the length of
+  the reading transaction. **Mutation-checked:** turning the join into an inner one fails **20** tests
+  (every "no links" case across the repository and the read model), dropping the `user_id` predicate
+  fails the **3** cross-user cases, and removing the guard from a write still fails its own **2**. The
+  case that carries the most weight is a foreign task with *no* links: one with links would come back
+  non-empty and be caught by anything, so only that one shows the predicate is doing the work.
+- **The contact display-name formatter was duplicated rather than extracted.** The only other copy is
+  inline in `_enrich_journal_data` (`app/api/journals/controllers.py`); lifting it would rewrite a
+  shipped endpoint from inside a tasks phase, which is the ITER17-003 P1 mistake calibration rule 8
+  exists for. Both produce the same `"Contact {id}"` fallback so a person reads the same on a task as
+  on a journal. **Follow-up recorded:** consolidate when a phase has another reason to open that
+  controller.
+- **`recorded_statements` was *moved*, not copied**, to `backend/tests/integration/statement_recorder.py`.
+  Three suites now count round trips, and a second copy of a listener whose correctness is not obvious
+  is the kind of duplication that drifts.
 
 **Required Test Coverage:** unit — both lapse causes, across a day boundary in a non-UTC timezone, and
 non-application to done/cancelled tasks. Integration — derivation against a real cancelled event journal and
 a real past-dated journal. No e2e.
+
+**Delivered: 49 unit tests and 31 integration tests.**
+
+- **Unit (12):** `backend/tests/unit/tasks/test_task_lapse_derivation.py` — the rule at every boundary.
+  Yesterday, **today** and tomorrow; a cancelled journal dated in the future and one dated in the past
+  (the precedence case); both terminal statuses against both causes, parametrised, plus a done task due
+  in the future so the statuses are not only tested on the lapsing side; and the enum's two wire values
+  and the fact that there are exactly two, because a third cause is a surface decision rather than a
+  quiet addition.
+- **Unit (13):** `backend/tests/unit/tasks/test_task_read_model.py` — the assembler. The three roles kept
+  apart; invariant 6's shared journal reported under both; the retarget-onto-an-attached-journal shape
+  where the due anchor is a mention as well; mention order preserved rather than re-sorted; contacts in
+  link order with names and photos; empty tuples rather than `None`; **only the due journal decides the
+  lapse**, proved with a passed creating journal and a cancelled *mention* beside it; and `lapsed`
+  being exactly "there is a reason", both ways.
+- **Unit (24):** `backend/tests/unit/tasks/test_task_read_service.py` — the fetching half over mocked
+  ports, keeping its own doubles as `test_task_service_create.py` does. **The timezone cases are the
+  centre of the file and each has its UTC control:** Sydney has crossed local midnight while UTC has
+  not, so the task has lapsed there and not in UTC; New York has *not* crossed it while UTC has, so the
+  task has lapsed in UTC and not there. Either alone would prove only that something lapsed; the pair
+  in both directions is what proves the configured zone is the one in use, and neither can be
+  satisfied by "fixing" the rule into UTC. Beyond those: one settings read for three journals; one
+  journal query for all three roles, de-duplicated when a journal holds two of them; one contact
+  lookup; the unknown and foreign task both answering `TaskNotFoundError`; a vanished anchor raising;
+  a cancelled *creating* journal marked and inert; `now` omitted reading the real clock rather than
+  never lapsing; and the two contact-name fallbacks.
+- **Integration (20):** `backend/tests/integration/tasks/test_task_read_model_integration.py` — the
+  same rules against real rows. A real past-dated journal and a real **cancelled event journal** (a
+  real `calendars` row and `journal_calendar_info`), each with its negative — a `confirmed` event and
+  a plain future note journal — because the cancellation test alone would pass against a query that
+  treated any event journal as cancelled. Both causes at once. Both terminal statuses against both
+  causes. A real Sydney `user_settings` row against the same rows with no settings row at all, giving
+  opposite verdicts from one fixed `now`. Titles, mentions in link order and contacts read back from
+  their own tables; the shared-journal shape under every role it holds. A real second user's task and
+  an absent id answering identically. And **the round-trip count**: seven statements for a task with
+  two mentions and two contacts, and still seven with six of each — the doubling is the part that
+  matters, since a fixed number alone would pass against a loop that ran a fixed number of times.
+- **Integration (7 new):** `backend/tests/integration/tasks/test_task_repository_integration.py` — the
+  link reads' own contract, which the separate guard used to cover. Each read returns `[]` for a task
+  that has never been linked to anything and raises for a foreign one and for an absent id: the four
+  cases one statement now has to separate by itself. Plus one statement per read, counted; the reads
+  taking **no** row lock, asserted through `xmax`, so a later "just reuse the guard" tidy-up cannot
+  reintroduce one; and the pre-existing lock test moved onto `remove_contact`, which deletes a *child*
+  row and so takes no parent lock of its own — an insert stamps `xmax` whether the guard ran or not,
+  which would have made that assertion vacuous.
+- **Integration (4):** `backend/tests/integration/journal/test_calendar_info_repository_integration.py`
+  — `find_cancelled_journal_ids` over a set covering **all four** event states, a note journal with no
+  calendar-info row, an id that does not exist, and an empty request proved to issue **no query** at
+  all (the common path: most tasks have no mentions).
+- **Mutation checks, run rather than argued.** Measured over this phase's three unit files and its
+  integration file (73 tests). Neutering `derive_lapse_reason` to `return None` fails **14** across all
+  four files. Dropping the status gate fails **11**. Loosening the today boundary from `<` to `<=`
+  fails **4**. Reversing the cancellation/date precedence fails **2** — one per level, which is the
+  count that made the second one worth adding: before it, the phase's central *decision* was held by a
+  single unit test.
+- **E2E:** none — deferral taken as the phase states. The phase changes no frontend file and ships no
+  user-visible surface; ITER18-001's e2e lands in Phase 22.
+- **Docs:** `docs/architecture/domain-architecture.md` gained *Task read model and lapsed derivation* —
+  why lapsed is derived and never stored, the four cases as a table, why only the due journal decides
+  it, how cancellation is read in batch and why `invited`/`tentative` are not it, the one-read-per-
+  collection rule with the seven statements accounted for, and the anchor/mention asymmetry. The Tasks
+  Domain entry links to it. Its repository-contract paragraph gained the write/read split — the guard
+  is a *write-path lock*, and the reads scope themselves in their own join. `api-design.md`
+  deliberately untouched — this phase adds no endpoint.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` and `core_shared`;
+  `mypy .` clean over **893** backend files and **129** in `core_shared`; the full `tests/unit/` suite
+  (**3,285** tests); and `tests/integration/tasks/`, `tests/integration/journal/`,
+  `tests/integration/api/` and `tests/integration/mcp/` together (**1,716** tests). No frontend or e2e
+  gates — the phase changes no frontend file.
 
 #### Phase 13: Get and List-by-Journal — REST and MCP
 
@@ -2965,6 +3168,17 @@ a real past-dated journal. No e2e.
       created here, mentioned here; MCP `list_journal_tasks` matches, with an optional role filter.
 - [ ] Nested journals and contacts are fetched in **one query per collection**, not per task — an N+1 here
       is a correctness concern at journal scale.
+
+**Inherited from Phase 12, and what it leaves to do here:** the read model, the lapse rule and
+`TaskReadService.read_model` exist and are tested — this phase adds the two surfaces over them, plus the
+*list* half. Two follow-ups Phase 12 recorded land here:
+
+- **The batched link reads.** `list_intermediate_journal_ids` and `list_contact_ids` are per-task and
+  cost one statement each; the third criterion above needs them per *set* of tasks. Phase 12's
+  assembler is a pure function over already-fetched pieces precisely so this phase reuses it under a
+  batch fetch rather than re-deriving the rule.
+- **Ordering.** Phase 10 recorded that `created_at` ties for links written in one transaction, so
+  "oldest link first" is a partial order. This phase owns whatever ordering its read surfaces promise.
 
 **Required Test Coverage:** unit — role grouping and serialisation. Integration — both surfaces against real
 journals including a cancelled event journal; the cross-user 404; a query-count assertion proving the nested
