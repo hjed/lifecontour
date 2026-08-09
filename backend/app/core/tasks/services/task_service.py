@@ -53,7 +53,12 @@ from app.core.journal.services.journal_date_resolver import (
     journal_date,
     today_in,
 )
-from app.core.tasks.models.events import TaskCreated, TaskDeleted, TaskUpdated
+from app.core.tasks.models.events import (
+    TaskCreated,
+    TaskDeleted,
+    TaskDueJournalRetargeted,
+    TaskUpdated,
+)
 from app.infrastructure.unit_of_work import savepoint, transactional
 
 if TYPE_CHECKING:
@@ -362,9 +367,10 @@ class TaskService:
             if not is_status_transition_allowed(task.status, status):
                 raise TaskStatusTransitionError(task.status, status)
             updated = replace(updated, status=status)
-            # ``.value`` because the payload is serialised into
-            # ``outbox_events.event_data``; ``json.dumps`` refuses an enum
-            # member, which would take the task's own write down with it.
+            # ``.value`` because the payload is a wire format and should carry a
+            # plain ``str``. Not because ``json.dumps`` would refuse the member:
+            # ``TaskStatus`` is a ``StrEnum`` and serialises to the same
+            # ``"done"``, so the comment that used to stand here was wrong.
             changed_fields["status"] = (task.status.value, status.value)
 
         if updated is task:
@@ -782,6 +788,8 @@ class TaskService:
         transaction: AsyncConnection,
         acknowledge_reopen: bool = False,
         now: datetime.datetime | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> Task:
         """Move one of the user's tasks onto a new due journal.
 
@@ -816,8 +824,16 @@ class TaskService:
 
         Asking for the journal the task is already due in is a **no-op**: nothing
         is being set, so nothing is validated, nothing is written, ``updated_at``
-        does not move and no acknowledgement is needed. This mirrors
-        :meth:`set_status`'s same-status no-op.
+        does not move, **no event is published** and no acknowledgement is
+        needed. This mirrors :meth:`set_status`'s same-status no-op.
+
+        **One write publishes one** ``TaskDueJournalRetargeted``, after the save,
+        carrying both of the things that happened: the due-journal pair and — for
+        a task that was *done* or *cancelled* — the reopen, so the status change
+        reaches the event stream rather than only the task row. The auto-link
+        travels in the same payload, which is why this publishes one event and
+        not two; see the event's own docstring for the shape and for the ordering
+        a later per-link event type inherits from the write order below.
 
         **The read takes a row lock**, for the reason Phase 6 found on
         :meth:`set_status` and this method inherits: it decides from the status
@@ -853,6 +869,8 @@ class TaskService:
                 clock. **Never bind this from client input**, for the reason
                 :meth:`create_task` gives: a request that could set it would make
                 invariant 4 opt-out for any caller.
+            source: Where the retarget came from, recorded on the event
+            changed_by: The actor, as the other domains write it
 
         Returns:
             The task on its new due journal and not done — or unchanged, when it
@@ -885,7 +903,10 @@ class TaskService:
         if task.status == TaskStatus.DONE and not acknowledge_reopen:
             raise TaskReopenNotAcknowledgedError(task_id)
 
-        await self.task_repo.add_intermediate_journal(
+        # The answer is kept rather than discarded: the link is idempotent, and
+        # whether a row was actually written is the difference between the event
+        # announcing a new link and announcing one that was already there.
+        auto_link_created = await self.task_repo.add_intermediate_journal(
             task_id, previous_due_journal_id, user_id
         )
         # Through ``_save`` rather than straight to the repository, for the race
@@ -895,7 +916,7 @@ class TaskService:
         # statement below runs — so a delete landing between the read above and
         # this write is permitted, and would otherwise surface as a raw
         # ``IntegrityError`` in place of the 404 this method promises.
-        return await self._save(
+        saved = await self._save(
             replace(
                 task,
                 due_journal_id=due_journal_id,
@@ -904,6 +925,28 @@ class TaskService:
             task.creating_journal_id,
             due_journal_id,
         )
+
+        # After the save, so the event announces a change that finished. Not for
+        # atomicity — the outbox row rides this same connection, so a failing
+        # ``_save`` would abort an event published before it just as surely — but
+        # so the order in the code matches the order of the facts, as it does in
+        # ``create_task`` and ``update_task``. The status the task *was* in comes
+        # from the locking read, which is the only place it still exists once the
+        # row is saved.
+        await self.event_publisher.publish(
+            TaskDueJournalRetargeted(
+                task_id=task_id,
+                user_id=user_id,
+                previous_due_journal_id=previous_due_journal_id,
+                due_journal_id=due_journal_id,
+                previous_status=task.status,
+                auto_link_created=auto_link_created,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return saved
 
     @transactional
     async def create_task_with_trail(
@@ -1007,12 +1050,20 @@ class TaskService:
         due_journal_id: int,
         transaction: AsyncConnection,
         acknowledge_reopen: bool = False,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> tuple[Task, list[int]]:
         """:meth:`retarget_due_journal`, and the trail it just added to.
 
         This is the pairing the retarget surfaces actually want: the journal the
         task has just left is in the trail, and it is the same trail the task in
         the first half of the tuple was written against.
+
+        ``source`` and ``changed_by`` are forwarded rather than defaulted, as on
+        the other three wrappers. This is the write where losing them costs
+        most: retargeting is the only way a *done* task is reopened, so an
+        assistant undoing somebody's completion would otherwise be recorded as
+        the system having done it.
         """
         retargeted = await self.retarget_due_journal(
             user_id=user_id,
@@ -1020,6 +1071,8 @@ class TaskService:
             due_journal_id=due_journal_id,
             transaction=transaction,
             acknowledge_reopen=acknowledge_reopen,
+            source=source,
+            changed_by=changed_by,
         )
         return retargeted, await self._trail_within_unit_of_work(retargeted, user_id)
 

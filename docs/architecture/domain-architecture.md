@@ -194,7 +194,7 @@ the *creating* journal where it arose and the *due* journal where it matters.
   actually created. The singular `add_contact` it replaced made the guard the expensive half — *N*
   contacts cost *2N* statements — and the batch is what `TaskService.create_task` and the
   single-contact link surface both use. `remove_contact` stays singular: nothing removes in bulk.
-- **Domain Events**: `TaskCreated` and `TaskDeleted`
+- **Domain Events**: `TaskCreated`, `TaskUpdated`, `TaskDueJournalRetargeted` and `TaskDeleted`
   (`backend/app/core/tasks/models/events.py`), published by `TaskService` through
   `OutboxEventPublisher` **inside the same unit of work as the write**, so an event can never exist
   for a write that rolled back and a rejected write publishes nothing — the activity-history
@@ -208,9 +208,22 @@ the *creating* journal where it arose and the *due* journal where it matters.
   left to scope its history by. The payloads are plain dictionaries rather than models in
   `core_shared/models/outbox_events.py`: that dispatch map is for **inbound integration-sync**
   payloads, and no core domain event appears in it.
-  The remaining event types the specification names — text updated, status changed, due journal
-  retargeted, journal and contact linked/unlinked — and the history projection that consumes all of
-  them arrive in later phases of
+  **A task's text and status changes share one event** — `TaskUpdated`, carrying `changed_fields` in
+  the `{field: (old, new)}` shape `JournalUpdated` and `ContactUpdated` use — rather than one type
+  per field, because a single `PATCH` may move both and that is one write in one unit of work;
+  `HistoryService._rows_from_changed_fields` fans the dict out into one `field_history` row per
+  field, so a reader still gets a distinct line each.
+  **A retarget likewise publishes one event**, `TaskDueJournalRetargeted`, carrying the due-journal
+  pair, the reopen (only when the retarget actually moved the status, since retargeting always lands
+  a task *not done*) and the **automatic intermediate link** — the previous due journal, plus whether
+  a link row was newly written for it, since the add is idempotent and a retarget only ever adds a
+  link — never removes one — so a task returning to a journal it has already left finds it still
+  attached. (Links are removable, by `detach_intermediate_journal`, by a merge collapsing redundant
+  ones, and by a journal delete cascading; none of those is a retarget.) The
+  auto-link travels in this payload only until the phase that gives journal links their own event
+  type; the write order it must inherit is the link first, then the anchor move.
+  The remaining event types the specification names — journal and contact linked/unlinked — and the
+  history projection that consumes all of them arrive in later phases of
   [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md). Until then **no consumer group
   subscribes to a task event**: `SearchIndexerConsumer` and `HistoryProjectionConsumer` match event
   types exactly and list none, `InboundEventConsumer`'s patterns are all prefixes of other domains,

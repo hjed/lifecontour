@@ -1,6 +1,6 @@
 # Iteration 18: Home Dashboard and Tasks
 
-**Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **62 phases**, one PR each, with per-phase
+**Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **63 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
 **ITER18-001 Phases 1–9 and 11 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
@@ -16,6 +16,12 @@ error). Delivery rule 9 is satisfied for both shipped journal operations; **the 
 next**, per the Sequencing Strategy. ITER18-002's remaining phases (4: cancellation as a lapse reason,
 5: the delete-failure UI and its e2e, 6: the retarget/merge lock order) depend on later ITER18-001
 phases.
+**ITER18-003 Phases 1, 2 and 3 complete** (task created and deleted; text updated and status changed as
+one `TaskUpdated`; and the due-journal retarget, which carries the automatic intermediate link and any
+reopen in a single event). Every task event so far is published inside its write's unit of work and
+carries provenance from the caller. Nothing is user-visible yet — the projection lands in Phases 6–7 and
+the first surface that reads it in Phase 9. Phase 3's review added **Phase 10**: a journal merge
+re-points task anchors and publishes no task event.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -396,7 +402,7 @@ rules below follow from that record and apply to every phase in this document:
    response here is smaller slices, not deferred MCP.
 6. **At most two new domain event types per phase.** Iteration 17's own conclusion, recorded verbatim
    there: *"a future phase adding an event type should budget ~600 test lines per type up front"* — borne
-   out by ITER17-005 P1 (2 types, ~1440) and P2a (1 type, ~1270). This is why ITER18-003 is nine phases,
+   out by ITER17-005 P1 (2 types, ~1440) and P2a (1 type, ~1270). This is why ITER18-003 is ten phases,
    not the three a naive reading would suggest.
 7. **Never touch two domains in one phase.** ITER17-004 P2's 5.8× came entirely from migrating contacts
    and journals together. Phases here that read contact data (ITER18-004 Phases 7–9) do so through new
@@ -459,9 +465,12 @@ rules below follow from that record and apply to every phase in this document:
     follow-up) and 13 (get *and* list-by-journal) are each two capabilities under one heading and should
     be split, or re-estimated at roughly ×9 against production.
 
-**Programme size:** 62 phases — and therefore 62 PRs — across the five iterations
-(ITER18-001: 22, ITER18-002: 6, ITER18-003: 9, ITER18-004: 17, ITER18-005: 8).
-ITER18-002 gained its sixth phase during ITER18-001 Phase 7's review — the retarget/merge lock order. That count is the honest
+**Programme size:** 63 phases — and therefore 63 PRs — across the five iterations
+(ITER18-001: 22, ITER18-002: 6, ITER18-003: 10, ITER18-004: 17, ITER18-005: 8).
+ITER18-002 gained its sixth phase during ITER18-001 Phase 7's review — the retarget/merge lock order, and
+ITER18-003 gained its tenth during its own Phase 3 — the merge re-point publishing no task event. Both
+were found by review rather than by planning, and both are seams **between** two phases' subjects, which
+is where this programme's misses keep turning up. That count is the honest
 consequence of a 500-line PR standard over a new core entity plus a new page; the alternative is fewer,
 larger PRs that review badly. **Expected landing zone:** most phases 400–600 tracked lines, capability
 triples 600–700, and the flagged exceptions up to ~750.
@@ -491,7 +500,7 @@ ITER18-001 (tasks core) ──┬── ITER18-002 (anchor integrity)
                           └──────────────────────────────────┘
 ```
 
-Phase counts: ITER18-001 → 22, ITER18-002 → 6, ITER18-003 → 9, ITER18-004 → 17, ITER18-005 → 8.
+Phase counts: ITER18-001 → 22, ITER18-002 → 6, ITER18-003 → 10, ITER18-004 → 17, ITER18-005 → 8.
 
 0. **A hard ordering constraint cuts across iterations 001 and 002.** ITER18-001 Phase 1 gives the task
    anchors `ON DELETE RESTRICT` foreign keys, and ITER18-001 Phase 5 makes tasks creatable. From that
@@ -3908,11 +3917,18 @@ no change to task behaviour. Nothing else depends on it, but it should not lag I
    settled in **Phase 5**. The specification asks for "a read-only record alongside their journals", which
    the simpler link-based entry satisfies.
 
-> **Why nine phases for "add some events".** Iteration 17 measured it: two event types plus their
+> **Why nine phases for "add some events" — and why it is now ten.** Iteration 17 measured it: two event types plus their
 > projection cost ~1440 lines (ITER17-005 Phase 1) and *one* type plus projection cost ~1270
 > (Phase 2a), and it recorded the conclusion — *"a future phase adding an event type should budget ~600
 > test lines per type up front"*. Tasks need nine event types. Calibration rule 6 therefore caps this
 > iteration at two new types per phase, with the projection split from the publishing.
+>
+> **It became ten during Phase 3.** That phase's local review found a task write nobody had counted: a
+> journal **merge** re-points task anchors and intermediate links and publishes nothing task-scoped, so
+> the projection this iteration builds would show a merged task's history disagreeing with its own row.
+> It is **Phase 10**, added rather than folded into ITER18-002 Phase 3, which is complete and merged.
+> *The estimating lesson is the one worth carrying:* "how many event types does the entity need" counted
+> the writes on the entity's **own** service and missed the one performed on it by another domain.
 
 #### Phase 1: Events — Task Created and Deleted ✅ COMPLETE
 
@@ -4143,7 +4159,8 @@ No e2e, per this entry and because nothing is user-visible until Phases 6 and 9.
   which **CI caught and the local gates did not**, because the local run predated the merge. The fix is
   the one `create_task_with_trail` had already chosen for itself, in a docstring written before this
   phase existed: forward `source` and `changed_by` rather than swallow them. `retarget_due_journal_with_trail`
-  is deliberately left without them, because Phase 3 is what gives a retarget an event to carry them on.
+  is deliberately left without them, because Phase 3 is what gives a retarget an event to carry them on —
+  and **Phase 3 duly added them**, so all four wrappers now forward provenance.
   *The lesson is about the failure mode, not the merge:* a wrapper is the ideal place to lose provenance,
   because doing so is a **silent success** — the task still changes, an event is still published, and the
   only symptom is a person's edit and an assistant's edit becoming indistinguishable in the user's own
@@ -4151,23 +4168,193 @@ No e2e, per this entry and because nothing is user-visible until Phases 6 and 9.
   against a wrapper that *accepts* both arguments and forwards neither — the exact shape a signature-only
   test would wave through.
 
-#### Phase 3: Events — Due Journal Retargeted
+#### Phase 3: Events — Due Journal Retargeted ✅ COMPLETE
 
 **Prerequisites:** Phase 1, ITER18-001 Phase 8.
 **Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Revised before work started (delivery rule 3):** ~110–130 production → **~900–1,200 tracked**. The ×4
+is the figure Phases 1 and 2 both overran, and calibration rule 6 budgets ~600 test lines for a single
+new event type before the provenance matrices are counted. Production is revised *down* from Phase 1's
+actual, for the reason Phase 2's was: no new module, no DI line and no new construction site — one class
+in an existing file, one publish call, and four argument lines across the service wrapper and the two
+surfaces. Tests are the phase, and they inherit the fixtures Phases 1–2 built (`task_events`,
+`committed_task`, `mock_event_publisher`, `published_events`) rather than building their own.
+
+**Shape chosen for criterion 2 (recorded before work started):** **one event carrying the auto-link in
+its payload**, not two. A retarget is one write in one unit of work, and two events would announce two
+things where one happened; Phase 5's completeness criterion — *every task write path publishes exactly
+one event* — would need an exception carved out for this path alone. The payload follows
+`TaskUpdated`'s `changed_fields` convention so Phase 7's handler is the existing
+`_rows_from_changed_fields` plus a marker row:
+
+```text
+{
+  "task_id", "user_id",
+  "changed_fields": {
+      "due_journal_id": (old, new),
+      "status":         (old, "not_done"),   # only when the retarget reopened the task
+  },
+  "auto_linked_journal_id": int,   # the previous due journal, retained as intermediate
+  "auto_link_created": bool,       # False when it was already an intermediate link
+  "source", "changed_by",
+}
+```
+
+`auto_link_created` is not redundant with the journal id. `add_intermediate_journal` is idempotent, and
+a journal can be both the due anchor and an intermediate link — `attach_intermediate_journal`'s docstring
+records that retargeting produces that shape and that nothing cleans it up — so a task retargeted
+A→B→A→C finds A already linked. Without the flag, Phase 7 would write "linked journal A" into history a
+second time for a link that already existed. **The ordering contract Phase 4 inherits** is the write
+order this method already has: the intermediate link first, then the anchor move.
+
+**Actual:** **162 production → 1,580 tests** (events module 97, service 61, controller 2, MCP 2 —
+1,580 test lines, plus ~190 docs of which most is this entry). **Production overran the revised range by
+~25% and the tests by ~32%.** Both figures include the local review's fixes, which is where a third of
+the production overrun came from; the pre-review figures were 141 and 1,513.
+
+The production miss is one place: the event class is 97 lines against a "one class in an existing file"
+budget, because it is the first task event that *computes* part of its payload — the reopen rule — and
+the rule, the two auto-link keys and the corrected `StrEnum` note each carry their reasoning.
+
+The test miss is the reverse of Phase 2's lesson rather than a repeat of it. This phase adds a **variant
+of an existing shape**, so the estimate was made from behaviour count as Phase 2 recommended — and the
+count itself was short. It counted the ways a retarget can *succeed* and not the **five** ways it can
+decline (no-op, unknown task, unreachable journal, past-dated journal, unacknowledged reopen), each of
+which needs its own silence test at the unit level *and* against a real outbox, where the earlier phases
+had one or two apiece. *Calibration addition:* count an operation's **refusal paths** alongside its
+success paths when estimating a phase that gives it an event. Silence is as much a behaviour as
+publication and costs the same per case, and a retarget — which validates a journal, a date, ownership
+and an acknowledgement — has more of them than any other write in this domain.
 
 **Acceptance Criteria:**
 
-- [ ] Event class and publishing for the due-journal retarget, carrying old and new due journal.
-- [ ] A retarget publishes **both** its retarget event and the automatic intermediate-link event (whose
-      class lands in Phase 4) in a deterministic order, so the projection can render the trail coherently.
-      Until Phase 4 lands, the auto-link is carried as part of the retarget payload rather than a second
-      event — state which shape is chosen.
-- [ ] A retarget that also reopens a done task makes the status change visible in the event stream, not
-      only in the task row.
+- [x] Event class and publishing for the due-journal retarget, carrying old and new due journal. —
+      `TaskDueJournalRetargeted` in `backend/app/core/tasks/models/events.py`, published from
+      `TaskService.retarget_due_journal` **after** the save, carrying the pair as
+      `changed_fields["due_journal_id"] = (old, new)` in the positional form
+      `_rows_from_changed_fields` indexes. The old value comes from the locking read the method already
+      performs — the only place it still exists once the row is saved.
+- [x] A retarget publishes both the retarget and the automatic intermediate link in a deterministic
+      order; state which shape is chosen. — **one event carrying the auto-link in its payload**, as
+      recorded above before work started. Ordering is deterministic by construction while there is one
+      event, and the write order this method already has — link first, then anchor — is the contract
+      Phase 4 inherits, recorded in the event's docstring rather than only here. The trail is asserted
+      end to end: two deferrals read back in order, with each event's "from" being the previous one's
+      "to".
+- [x] A retarget that also reopens a done task makes the status change visible in the event stream. —
+      `changed_fields["status"] = (old, "not_done")`, and **only when the status actually moved**, so an
+      ordinary deferral does not write "not done → not done" into the user's history. Asserted for
+      *done* and for *cancelled*, at the event, at the service, against the stored JSON, and at both
+      surfaces.
+- [x] Same-unit-of-work publishing and provenance threading, as Phases 1–2. — rollback asserted against
+      a real database by failing inside a **caller's** unit of work, checking all three writes go
+      together: the anchor stays, the auto-link is absent and no event survives. Provenance is threaded
+      through `retarget_due_journal_with_trail` — the fourth wrapper, and the one ITER18-001 Phase 8
+      deliberately left without it — and asserted **per surface** against the stored row.
 
 **Required Test Coverage:** unit — payload including the old/new pair and the reopen case. Integration —
 outbox rows and their ordering. No e2e.
+
+**Delivered: 41 unit tests and 25 integration tests.** 19 unit tests for the event class
+(`tests/unit/tasks/test_task_events.py`, 38 → 57) and 20 for service publishing, ordering, reopens,
+silence and provenance across four new classes in `test_task_service_retarget.py` (52 → 72), plus 2 in
+`test_task_service_intermediate_journals.py` for the wrapper (21 → 23); 21 integration tests in
+`tests/integration/tasks/test_task_events_integration.py` — six new classes plus one case added to the
+existing `TestNoOtherDomainIsDisturbed` (30 → 51) — and 4 surface tests split between
+`tests/integration/api/test_task_endpoints.py` and `tests/integration/mcp/test_task_tools_mcp.py`.
+**No e2e**, per this entry and because nothing is user-visible until Phases 6 and 9 — a retarget looks
+exactly the same on screen as it did before this phase.
+
+**Documentation.** `docs/architecture/domain-architecture.md` listed the tasks domain's events as
+"`TaskCreated` and `TaskDeleted`" and said text-updated, status-changed and due-journal-retargeted
+"arrive in later phases". That went stale when **Phase 2** shipped `TaskUpdated` and was missed then; it
+is corrected here for both phases, and the entry now describes the one-event-per-write shape and the
+auto-link keys. *Two lessons:* a phase adding an event type has a documentation obligation this iteration
+did not write down until Phase 6's consumer-table criterion — and the search that concluded "no
+architecture document names an event type" was a **false negative** taken at face value, which is how
+the miss survived the plan as well as Phase 2.
+
+**Decisions taken (Phase 3):**
+
+- **One event, not two — and the auto-link travels in its payload.** Open by the entry's own wording,
+  settled before work started and repeated here because it is the decision Phase 4 has to read. Two
+  events would announce two things where one write happened, and **Phase 5's completeness criterion** —
+  *every task write path publishes exactly one event* — would need an exception carved out for this path
+  alone. The auto-link is therefore two payload keys, `auto_linked_journal_id` and `auto_link_created`,
+  which Phase 4 removes deliberately when it gives the link its own type.
+  **The exception is deferred, not avoided, and the first draft of this entry overstated it.** Phase 4's
+  second criterion already requires the retarget-derived link to publish *"the same event type as a
+  manual attach"*, so a retarget will publish two events as soon as that phase lands, and the
+  completeness rule will need restating then. What this phase actually buys is that the exception
+  arrives with the event that justifies it rather than a phase early, with a payload key standing in for
+  a type nobody consumes yet. Phase 4's entry has been amended in place to carry the removal, the
+  ordering and the completeness restatement — the same thing Phase 2 did to Phase 6, rather than leaving
+  the next phase to rediscover it.
+- **`auto_link_created` exists because the idempotent add already answers the question.** Nothing ever
+  unlinks, so a journal can be both the due anchor and an intermediate link, and a task retargeted
+  A→B→A→C finds A already attached the second time it leaves it. `add_intermediate_journal` returns
+  which happened and the phase before this one discarded that answer; keeping it is the difference
+  between Phase 7 writing "linked A" once and writing it twice. Pinned by a unit test and by an
+  integration test that performs the actual A→B→A→C sequence rather than mocking the repository's reply.
+- **The event builds its own `changed_fields`, unlike `TaskUpdated`.** That event is *handed* a dict
+  because its caller decides field by field what moved. Retargeting decides nothing of the sort — it
+  always lands the task not done — so whether that is a *change* follows from the status it started in,
+  and putting the rule in the event keeps one definition of it. This is the same shape `TaskCreated`
+  has, so it is a choice between two conventions the module already contains rather than a new one.
+- **`retarget_due_journal_with_trail` gains provenance, closing ITER18-001 Phase 8's deliberate gap.**
+  That phase left the retarget wrapper without `source`/`changed_by` and said why: retargeting published
+  nothing, so there was nothing to carry provenance *for*. The parametrised wrapper test that recorded
+  the exclusion is now four names rather than three, and the paragraph explaining the absence is gone
+  rather than left to read as still true.
+- **The mutation check found nothing wrong in the production code and two problems in the tests.**
+  Removing the publish call fails **32** tests across unit and integration; making the wrapper accept
+  both provenance arguments and forward neither — the exact shape a signature-only test waves through —
+  fails **exactly 5** (the wrapper's own behavioural test, two endpoint, two MCP); dropping
+  `source`/`changed_by` at both surfaces fails **exactly 4**, the surface tests and nothing else, which
+  is the useful result: it says those tests are testing the surfaces rather than the service behind them.
+  Hard-coding `auto_link_created=True` fails **exactly 2**, one unit and one integration, so the flag is
+  pinned behaviourally rather than only in the payload comparison. The two that initially failed to fail
+  — dropping `.value` from the status pair, and swapping the two writes — are the `StrEnum` and ordering
+  findings below; both now have a test that catches them.
+- **The local review found a false claim this domain has been repeating since Phase 2, and it is now
+  corrected in three places.** `TaskStatus` is a **`StrEnum`**, so `json.dumps` serialises the member to
+  `"done"` unchanged — the comments in `update_task`, in `TaskUpdated`'s docstring and (initially) in
+  this phase's event asserting that an enum "would take the task's own write down with it" were simply
+  wrong. Worse, it made a test vacuous: `isinstance(change[0], str)` is true of a `StrEnum` member, and
+  the whole-key payload comparison cannot catch one either, because a `StrEnum` compares equal to its
+  value. Removing `.value` from the new event left the entire unit suite green. `.value` is still right
+  — the payload is a wire format, and a member in it hands an in-process subscriber a domain type where
+  a reader coming back through Redis gets a bare string — so the fix was to state *that* reason and to
+  assert `type(...) is str`, which does fail against the member. **The lesson is about inherited
+  reasoning:** the claim was copied forward twice because it was plausible and already written down, and
+  the test that was supposed to guard it had been written to match the wrong explanation.
+- **The ordering criterion needed a test, not a docstring.** Both writes are in one transaction, so
+  nothing observable depends on the link preceding the anchor move — which is exactly why a refactor
+  could have swapped them and handed Phase 4 a different contract than the one it is told to inherit.
+  Moving `add_intermediate_journal` after `_save` left every test green until
+  `test_the_link_is_written_before_the_anchor_moves` was added. *Worth recording generally:* a contract
+  a phase declares **for a later phase** has no natural test, because nothing in the current phase
+  consumes it — and is therefore the kind most likely to be documented and unpinned.
+- **A journal merge moves a task's anchors and publishes nothing — now Phase 10.**
+  `SqlTaskAnchorRepository.repoint_journal_links` rewrites both anchor columns and the intermediate link
+  rows when journals are merged (ITER18-002 Phase 3), and the merge's own events are journal-aggregated,
+  so no affected task's history mentions it. After Phase 7 a merged task's `field_history` would read
+  `due_journal_id: A → B` while the row says C, and older rows would name absorbed journal ids. That is
+  correctly *not* a retarget and correctly outside this phase — it is another domain's write path, which
+  rule 7 keeps out — so it was **added as a new phase rather than fixed here or folded back into
+  ITER18-002 Phase 3**, which is complete and merged. See *Phase 10* for the gap in full, its two open
+  decisions, and why it is the one phase in this iteration that has to touch two domains.
+  **Worth recording as an estimating lesson:** the "tasks need nine event types" count that shaped this
+  iteration enumerated the writes on `TaskService` and missed the one another domain performs on tasks.
+  Phase 5's completeness test should be written against the write paths, not against the service's
+  method list, or it will pass while this gap is open.
+- **Phase 2's `committed_task` trap did not fire, because Phase 2 had already fixed it.** This phase made
+  another committed path start publishing — the retarget concurrency test in
+  `test_task_service_retarget_integration.py` uses that helper — which is precisely the shape that broke
+  four of Phase 1's tests when `set_status` began publishing. The cleanup Phase 2 added, deleting the
+  task's own events by `aggregate_id`, covered it with no change needed here. Recorded because it is the
+  first time a lesson from an earlier phase in this iteration paid for itself, and because the same trap
+  is still waiting for Phases 4 and 5.
 
 #### Phase 4: Events — Journal Linked and Unlinked
 
@@ -4178,11 +4365,30 @@ outbox rows and their ordering. No e2e.
 
 - [ ] Event classes and publishing for intermediate journal linked and unlinked.
 - [ ] The automatic link created by a retarget publishes the same event type as a manual attach, with
-      provenance distinguishing system-derived from user-initiated.
+      provenance distinguishing system-derived from user-initiated. **This phase therefore removes the
+      two keys Phase 3 put in the retarget payload** — `auto_linked_journal_id` and `auto_link_created`
+      — because the fact they carry becomes an event of its own. `auto_link_created` is the one to think
+      about: the add is idempotent and a retarget only ever adds a link, never removes one, so a task
+      retargeted A→B→A→C leaves A a second time when A is still an intermediate link from the first
+      departure. (Links are removable — by `detach_intermediate_journal`, by a merge, by a journal
+      delete cascading — but none of those is a retarget.) Publishing a "linked" event for that would
+      write the link into history twice, so **the derived event is published only when a row was
+      actually written**, which is the same question Phase 3's boolean answers.
+- [ ] The two events a retarget now publishes go out in a **deterministic order, the link before the
+      retarget**, matching the order `TaskService.retarget_due_journal` performs the writes in. Phase 3
+      pinned that write order with a unit test precisely so this phase has something to inherit rather
+      than a docstring to trust.
 - [ ] Same-unit-of-work publishing and provenance threading.
+- [ ] **Phase 5's completeness criterion is amended by this phase, not by Phase 5.** *"Every task write
+      path publishes exactly one event"* stops being true the moment a retarget publishes two, which is
+      what the second criterion above requires. Phase 3 deferred that rather than avoiding it (see
+      *Decisions taken (Phase 3)*); this phase should restate the completeness rule as **every task
+      write path publishes at least one event, and a retarget publishes exactly two**, and say so in
+      Phase 5's entry so its test is written to the right rule.
 
 **Required Test Coverage:** unit — payloads and the provenance distinction. Integration — outbox rows for
-manual attach/detach and for the retarget-derived link. No e2e.
+manual attach/detach and for the retarget-derived link, and their ordering relative to the retarget
+event. No e2e.
 
 #### Phase 5: Events — Contact Linked and Unlinked
 
@@ -4195,9 +4401,18 @@ manual attach/detach and for the retarget-derived link. No e2e.
 - [ ] Same-unit-of-work publishing and provenance threading.
 - [ ] With this phase the specification's full event set is published: created, text updated, status
       changed, due journal retargeted, journal linked/unlinked, contact linked/unlinked, deleted.
+      **"Full" means the set the specification names, not every write that reaches a task row.** Two
+      things sit outside it and are not this phase's to close: a retarget publishes **two** events once
+      Phase 4 lands (see Phase 4's amended criteria), and a **journal merge** re-points task anchors and
+      links while publishing nothing task-scoped, which is **Phase 10**.
 
 **Required Test Coverage:** unit — payloads. Integration — outbox rows per operation; a completeness test
-asserting every task write path publishes exactly one event. No e2e.
+asserting every task write path publishes at least one event. **Write the completeness test against the
+write paths rather than against `TaskService`'s method list** — the merge re-point (Phase 10) is a task
+write performed from the journal domain, and a test enumerating service methods would pass while that gap
+is open, which is how it went unnoticed until ITER18-003 Phase 3's review. It is legitimate for this
+phase's test to record the merge as a **known, named exclusion**; it is not legitimate for it to be
+invisible. No e2e.
 
 #### Phase 6: History Projection — Lifecycle Events
 
@@ -4238,6 +4453,9 @@ Integration — publish → relay → projection per type, asserting idempotency
       construction because the consumer only sees subscribed patterns — this phase **pins it with a test**
       so a future pattern change cannot silently start indexing tasks.
 - [ ] With this phase every published task event has a projection; none is written and then unread.
+      **Phase 10 adds a type after this one**, so it carries its own handler rather than relying on this
+      criterion having closed the set permanently — and this phase should assert the invariant in a form
+      that *fails* for an unhandled task type, so the next one to arrive cannot land unprojected.
 
 **Required Test Coverage:** unit — projected rows per event type. Integration — end-to-end projection per
 type with idempotency; the `search-indexer` group consumes a task event without indexing or dead-lettering.
@@ -4285,6 +4503,89 @@ and deliberately read-only (calibration rule 7)
 **Required Test Coverage:** unit (RTL) — feed rendering of task entries, provenance labels, absence of
 actions. Integration — the contact history read includes task records with correct provenance. E2E as above,
 on both e2e projects.
+
+#### Phase 10: Events — Anchors Re-pointed by a Journal Merge
+
+**Prerequisites:** Phases 4 and 7, ITER18-002 Phase 3 (complete).
+**Estimated diff:** ~200 production → **~1,000–1,400 tracked** — above the 500-line standard and flagged
+under delivery rule 3, for the reasons under *Why this is its own phase* below.
+
+**Added during Phase 3**, whose local review surfaced it. It is a new phase rather than an amendment to
+ITER18-002 Phase 3 because that phase is complete and merged: a shipped phase's record is not edited to
+absorb work found later, and rule 9 means the merge must keep working exactly as it does until this
+lands.
+
+**The gap.** `JournalMergeService.merge_journals` opens with
+`task_anchor_repo.repoint_journal_links(source, target)`
+(`backend/app/core/journal/services/journal_merge_service.py:143`), which is four set operations over
+the task tables: it collapses duplicate intermediate links, re-points the surviving ones,
+re-points **both anchors** — `creating_journal_id` as well as `due_journal_id` — and drops the links a
+moved anchor has made redundant. **None of it publishes anything task-scoped.** The merge does publish,
+but `JournalUpdated` on the survivor and `JournalDeleted` on the absorbed journal, both aggregated under
+a *journal* id, so Phase 7's projection files them against the journal entity and the affected tasks'
+own histories never mention the change.
+
+Three consequences, none of them visible until Phases 6–7 make task history readable:
+
+- A merged task's `field_history` reads `due_journal_id: A → B` from an earlier retarget while the row
+  says C, and nothing in between explains the jump.
+- Rows written before the merge name **absorbed journal ids**, which no longer resolve to a journal.
+- Deleted intermediate links leave no "unlinked" row, so a task's trail loses a journal it really did
+  pass through with no record of the loss. Phase 4's event type is the one that should have covered it.
+
+It also touches the **one field the specification calls immutable** — *"the creating journal is set once
+and never changes"*. A merge is the sole legitimate exception, which is exactly the kind of exception a
+history exists to record.
+
+**Acceptance Criteria:**
+
+- [ ] A journal merge publishes a task-scoped event **per affected task**, aggregated under the task id,
+      recording which anchors moved, which intermediate links moved, and which were dropped as duplicate
+      or redundant. A merge touching no task publishes nothing.
+- [ ] The event is **not** `TaskDueJournalRetargeted`. A merge is not a retarget: it does not force the
+      status to *not done*, it can move the **creating** anchor, and it can *delete* links. Reusing that
+      type would make a user's history claim they deferred a task they never touched.
+- [ ] Published **inside the merge's existing unit of work**, so a merge that fails leaves no task event,
+      and the events go out in a deterministic order relative to the merge's own `JournalUpdated` and
+      `JournalDeleted`.
+- [ ] Provenance reaches the event from the merge's caller, so a merge performed in the UI and one
+      performed over MCP are distinguishable on the affected tasks. **`JournalMergeService.merge_journals`
+      does not currently take `source`/`changed_by`** — threading them through it and both merge surfaces
+      is part of this phase, and is the larger half of its production cost.
+- [ ] `HistoryService` projects the event into `field_history` under the task entity type, reusing the
+      handlers Phases 6–7 built rather than adding a parallel shape. A row whose value names an absorbed
+      journal is left as it is: rewriting history to point at the survivor would be editing the record of
+      what happened.
+- [ ] Whichever design is chosen for open decision 4, **the journal domain does not construct task
+      events.**
+
+**Why this is its own phase, and why it is oversized.** It is the only phase in this iteration that must
+touch **two domains** — the thing calibration rule 7 singles out as the expensive kind, having measured
+ITER17-004 P2's 5.8× overrun on exactly that shape. It is unavoidable here: the write lives in the journal
+domain's merge and the event belongs to the task domain. What the phase *can* do is keep the seam to one
+call, which is what open decision 4 is about. The estimate is raised accordingly rather than written down
+to 500 and discovered later, per delivery rule 3.
+
+**Open decisions:**
+
+4. **Where the event is published from.** Either (a) `repoint_journal_links` returns what it moved and a
+   **task-domain** service method publishes, with `JournalMergeService` calling that method instead of the
+   repository — one new seam, and task events stay authored by the task domain; or (b) the merge service
+   publishes directly from a returned summary, which is fewer moving parts but puts one domain's service
+   in charge of another's events. (a) matches the ports-and-adapters stance the domain architecture
+   document takes and is the default unless (b) turns out materially smaller.
+5. **One event per affected task, or one event carrying every affected task.** Per-task is the shape
+   `field_history` wants — `entity_id` is a task id, and Phase 6 aggregates under it — but a merge
+   absorbing a heavily-linked journal would publish a row per task in one unit of work. Per-task is the
+   default; if a batch shape is chosen instead, the projection has to fan it out and that cost moves to
+   Phase 7's handler.
+
+**Required Test Coverage:** unit — the payload for each way a merge can move a task (due anchor only,
+creating anchor only, both, intermediate link moved, duplicate collapsed, redundant link dropped), and
+that a merge affecting no task produces none. Integration — merge → outbox rows per affected task with
+the right provenance; publish → relay → projection with idempotency on redelivery; a merge that fails
+leaves no task event; the `search-indexer` group still ignores the new type. **E2E:** none — this is a
+record of something the merge already does, and the merge's own e2e coverage does not change.
 
 ### ITER18-004: The Home Dashboard
 

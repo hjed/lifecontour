@@ -31,10 +31,16 @@ from unittest.mock import AsyncMock
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 
-from app.core.tasks.models.events import TaskCreated, TaskDeleted, TaskUpdated
+from app.core.tasks.models.events import (
+    TaskCreated,
+    TaskDeleted,
+    TaskDueJournalRetargeted,
+    TaskUpdated,
+)
 from tests.unit.tasks.task_doubles import (
     CREATING_JOURNAL_ID,
     DUE_JOURNAL_ID,
+    NEW_DUE_JOURNAL_ID,
     ORIGINAL_TEXT,
     TASK_ID,
     UPDATED_TEXT,
@@ -80,6 +86,33 @@ def make_updated(
         task_id=TASK_ID,
         user_id=USER_ID,
         changed_fields=TEXT_CHANGE if changed_fields is None else changed_fields,
+        source=source,
+        changed_by=changed_by,
+        transaction=transaction,
+    )
+
+
+def make_retargeted(
+    *,
+    previous_status: TaskStatus = TaskStatus.NOT_DONE,
+    auto_link_created: bool = True,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+    transaction: AsyncMock | None = None,
+) -> TaskDueJournalRetargeted:
+    """A ``TaskDueJournalRetargeted`` over the shared task constants.
+
+    The default is the ordinary case: a not-done task moved from
+    ``DUE_JOURNAL_ID`` to ``NEW_DUE_JOURNAL_ID``, with the journal it left newly
+    retained as an intermediate link.
+    """
+    return TaskDueJournalRetargeted(
+        task_id=TASK_ID,
+        user_id=USER_ID,
+        previous_due_journal_id=DUE_JOURNAL_ID,
+        due_journal_id=NEW_DUE_JOURNAL_ID,
+        previous_status=previous_status,
+        auto_link_created=auto_link_created,
         source=source,
         changed_by=changed_by,
         transaction=transaction,
@@ -336,6 +369,197 @@ class TestTaskUpdated:
         assert event.transaction is transaction
 
 
+class TestTaskDueJournalRetargeted:
+    """The single event a successful retarget publishes.
+
+    **One event, not two.** A retarget does two things — moves the due anchor and
+    retains the journal it left as an intermediate link — but they are one write
+    in one unit of work, so the auto-link is carried *in this payload* rather
+    than as a second event. Phase 4 gives the manual attach and detach their own
+    type and may then publish the derived link separately; the ordering it
+    inherits is the write order the service already has, link before anchor.
+
+    **The event builds its own ``changed_fields``**, unlike ``TaskUpdated``,
+    which is handed one. Retargeting's "always lands not done" is a property of
+    the operation rather than a decision the caller makes, so the rule that a
+    ``status`` pair appears only when the status actually moved lives here, in
+    one place, and is asserted directly.
+    """
+
+    def test_identifies_itself_as_a_retarget_event(self) -> None:
+        event = make_retargeted()
+
+        assert event.event_type == "TaskDueJournalRetargeted"
+        assert event.event_id.startswith(f"task_due_journal_retargeted_{TASK_ID}_")
+
+    def test_aggregate_id_is_the_integer_task_id(self) -> None:
+        """The task, not either journal.
+
+        Both journals appear in the payload and neither is the aggregate: the
+        history this projects is the *task's*, and filing it under a journal
+        would put a task's trail on a page that merely hosted one step of it.
+        """
+        event = make_retargeted()
+
+        assert event.aggregate_id == TASK_ID
+        assert isinstance(event.aggregate_id, int)
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """A whole-key comparison, as on the other three types.
+
+        This one matters more than most: ``auto_linked_journal_id`` and
+        ``auto_link_created`` are here *because* Phase 4's event does not exist
+        yet, so the phase that adds it has to remove them deliberately rather
+        than leave a payload advertising a link nobody publishes twice.
+        """
+        event = make_retargeted()
+
+        assert event.event_data == {
+            "task_id": TASK_ID,
+            "user_id": USER_ID,
+            "changed_fields": {"due_journal_id": (DUE_JOURNAL_ID, NEW_DUE_JOURNAL_ID)},
+            "auto_linked_journal_id": DUE_JOURNAL_ID,
+            "auto_link_created": True,
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_the_due_journal_pair_is_old_then_new(self) -> None:
+        """Positionally, for the reason ``TaskUpdated``'s pairs are.
+
+        ``_rows_from_changed_fields`` reads ``change[0]`` as the old value and
+        ``change[1]`` as the new one. Reversed, a user's history would say they
+        moved the task *back* to the journal they had just left.
+        """
+        change = make_retargeted().event_data["changed_fields"]["due_journal_id"]
+
+        assert len(change) == 2
+        assert change[0] == DUE_JOURNAL_ID
+        assert change[1] == NEW_DUE_JOURNAL_ID
+
+    def test_a_retarget_of_a_not_done_task_names_no_status_change(self) -> None:
+        """Nothing moved, so nothing is announced.
+
+        Retargeting always *lands* not done, but a task that was already not
+        done had no status change — and a payload that said otherwise would put
+        a "not done → not done" line in the user's history for every deferral.
+        """
+        event = make_retargeted(previous_status=TaskStatus.NOT_DONE)
+
+        assert list(event.event_data["changed_fields"]) == ["due_journal_id"]
+
+    def test_reopening_a_done_task_puts_the_status_change_in_the_stream(self) -> None:
+        """The phase's third criterion, at the event.
+
+        A retarget that reopens a completed task is the case the specification
+        singles out as "rarely what the user meant", and the one the UI has to
+        confirm before it happens. If the reopen were visible only in the task
+        row, a person reading their own history would see the date move and no
+        record that their completion was undone.
+        """
+        event = make_retargeted(previous_status=TaskStatus.DONE)
+
+        change = event.event_data["changed_fields"]["status"]
+        assert change[0] == TaskStatus.DONE.value
+        assert change[1] == TaskStatus.NOT_DONE.value
+
+    def test_reopening_a_cancelled_task_puts_the_status_change_in_the_stream(
+        self,
+    ) -> None:
+        """The other reopen, which needs no acknowledgement but the same record.
+
+        Retargeting is the documented way out of cancelled, so this path is
+        *ordinary* rather than exceptional — which is exactly why it would be
+        easy to leave out of the payload.
+        """
+        event = make_retargeted(previous_status=TaskStatus.CANCELLED)
+
+        change = event.event_data["changed_fields"]["status"]
+        assert change[0] == TaskStatus.CANCELLED.value
+        assert change[1] == TaskStatus.NOT_DONE.value
+
+    def test_a_reopen_carries_both_pairs_in_one_payload(self) -> None:
+        """One write, one event, both facts."""
+        event = make_retargeted(previous_status=TaskStatus.DONE)
+
+        assert set(event.event_data["changed_fields"]) == {"due_journal_id", "status"}
+
+    def test_status_values_are_plain_strings_not_task_status_members(self) -> None:
+        """``type() is str``, not ``isinstance``, because the enum *is* a ``str``.
+
+        ``TaskStatus`` is a ``StrEnum``, so ``isinstance(TaskStatus.DONE, str)``
+        is true and ``json.dumps`` emits ``"done"`` for the member unchanged —
+        an ``isinstance`` assertion here would pass against a payload carrying
+        the member itself, and so would the whole-key comparison above, since a
+        ``StrEnum`` compares equal to its value.
+
+        The distinction is still worth pinning: the payload is a wire format, and
+        a member reaching it hands an in-process subscriber a domain type where
+        one that read the same event back out of Redis gets a bare string.
+        """
+        change = make_retargeted(previous_status=TaskStatus.DONE).event_data[
+            "changed_fields"
+        ]["status"]
+
+        assert type(change[0]) is str
+        assert type(change[1]) is str
+
+    def test_records_that_the_journal_was_already_linked(self) -> None:
+        """``add_intermediate_journal`` is idempotent, so this is reachable.
+
+        A journal can be both the due anchor and an intermediate link — nothing
+        cleans that up — so a task retargeted A→B→A→C finds A already attached
+        when it leaves it the second time. Without this flag, Phase 7 would
+        write "linked journal A" into the user's history for a link that was
+        already there.
+        """
+        event = make_retargeted(auto_link_created=False)
+
+        assert event.event_data["auto_link_created"] is False
+
+    def test_defaults_to_system_provenance(self) -> None:
+        event = TaskDueJournalRetargeted(
+            task_id=TASK_ID,
+            user_id=USER_ID,
+            previous_due_journal_id=DUE_JOURNAL_ID,
+            due_journal_id=NEW_DUE_JOURNAL_ID,
+            previous_status=TaskStatus.NOT_DONE,
+            auto_link_created=True,
+        )
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_records_ui_provenance_from_the_caller(self) -> None:
+        event = make_retargeted(source=Provenance.UI, changed_by="ui")
+
+        assert event.event_data["source"] == "ui"
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_records_mcp_provenance_from_the_caller(self) -> None:
+        event = make_retargeted(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_occurred_at_is_timezone_aware_utc(self) -> None:
+        event = make_retargeted()
+
+        assert isinstance(event.occurred_at, datetime)
+        assert event.occurred_at.tzinfo is not None
+        assert event.occurred_at.utcoffset() == timedelta(0)
+
+    def test_carries_the_transaction_it_was_given(self) -> None:
+        transaction = AsyncMock()
+
+        event = make_retargeted(transaction=transaction)
+
+        assert event.transaction is transaction
+
+    def test_transaction_defaults_to_none(self) -> None:
+        assert make_retargeted().transaction is None
+
+
 class TestTaskDeleted:
     """The event a successful hard delete publishes."""
 
@@ -414,9 +638,20 @@ class TestEventIdentity:
         """
         created = make_created()
         updated = make_updated()
+        retargeted = make_retargeted()
         deleted = make_deleted()
 
-        assert len({created.event_id, updated.event_id, deleted.event_id}) == 3
+        assert (
+            len(
+                {
+                    created.event_id,
+                    updated.event_id,
+                    retargeted.event_id,
+                    deleted.event_id,
+                }
+            )
+            == 4
+        )
 
     def test_an_id_is_separated_from_its_neighbours_by_its_own_timestamp(self) -> None:
         """Two events of one type on one task are told apart by ``occurred_at``.
@@ -437,6 +672,20 @@ class TestEventIdentity:
         other = TaskDeleted(task_id=TASK_ID + 1, user_id=USER_ID)
 
         assert make_deleted().event_id != other.event_id
+
+    def test_a_retarget_id_is_composed_the_same_way_as_the_others(self) -> None:
+        """Same deterministic composition, asserted rather than raced.
+
+        Two retargets of one task are separated only by ``occurred_at``, and
+        constructing two in a row to compare them is a microsecond-resolution
+        clock race. This says the same thing without one.
+        """
+        event = make_retargeted()
+
+        assert (
+            event.event_id
+            == f"task_due_journal_retargeted_{TASK_ID}_{event.occurred_at.isoformat()}"
+        )
 
 
 class TestPayloadSurvivesTheStream:
@@ -497,3 +746,36 @@ class TestPayloadSurvivesTheStream:
         assert len(change) == 2
         assert change[0] == TaskStatus.NOT_DONE.value
         assert change[1] == TaskStatus.DONE.value
+
+    def test_a_retarget_reaches_the_stream_with_both_pairs_intact(self) -> None:
+        """The reopen case, in the form the projection will actually receive.
+
+        Asserted against the *arrived* shape rather than for equality with the
+        sent one, for the reason the update test gives: the pairs are tuples and
+        JSON has no tuple, so they arrive as lists — which is what
+        ``_rows_from_changed_fields`` indexes into.
+        """
+        event = make_retargeted(
+            previous_status=TaskStatus.DONE, source=Provenance.MCP, changed_by="mcp"
+        )
+
+        round_tripped = json.loads(json.dumps(event.event_data))
+
+        assert round_tripped["changed_fields"] == {
+            "due_journal_id": [DUE_JOURNAL_ID, NEW_DUE_JOURNAL_ID],
+            "status": ["done", "not_done"],
+        }
+
+    def test_the_auto_link_keys_survive_the_stream(self) -> None:
+        """Scalars, so they round trip to something equal to themselves.
+
+        Worth stating because ``auto_link_created`` is a bool: a payload that
+        carried it as a Python object rather than a JSON scalar would reach
+        Phase 7 as a string, and ``"False"`` is truthy.
+        """
+        event = make_retargeted(auto_link_created=False)
+
+        round_tripped = json.loads(json.dumps(event.event_data))
+
+        assert round_tripped["auto_linked_journal_id"] == DUE_JOURNAL_ID
+        assert round_tripped["auto_link_created"] is False

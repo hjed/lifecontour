@@ -21,11 +21,13 @@ service does not re-sort: a trail whose order came from two places would drift
 the moment one of them changed.
 """
 
+import datetime
 import inspect
 from unittest.mock import AsyncMock
 
 import pytest
 from core_shared.models.history import Provenance
+from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
 
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
@@ -36,6 +38,12 @@ USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
 
 TASK_ID = 7
+# Somewhere to retarget *to*. Far enough ahead that the future-dated rule holds
+# against the real clock, which is what the retarget wrapper's own test needs —
+# it is about provenance surviving the hop, not about date arithmetic, so it
+# takes the clock rather than an injected instant.
+NEW_DUE_JOURNAL_ID = 33
+A_WEEK_AHEAD = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(days=7)
 
 
 def _task(status: TaskStatus = TaskStatus.NOT_DONE) -> Task:
@@ -70,6 +78,45 @@ def service(mock_task_repo: AsyncMock, mock_event_publisher: AsyncMock) -> TaskS
         journal_repo=AsyncMock(),
         contact_repo=AsyncMock(),
         date_resolver=JournalDateResolver(AsyncMock()),
+        event_publisher=mock_event_publisher,
+    )
+
+
+@pytest.fixture
+def retargeting_service(
+    mock_task_repo: AsyncMock, mock_event_publisher: AsyncMock
+) -> TaskService:
+    """A service that can complete a **real** retarget, not just the no-op.
+
+    The fixture above leaves the journal repository and the timezone lookup
+    unconfigured, which is right for a trail read and for the same-journal
+    no-op — neither reads a journal. Asserting that the retarget wrapper
+    forwards provenance needs the path that actually publishes, so this one
+    resolves a future-dated journal and a timezone.
+    """
+    settings_repo = AsyncMock()
+    settings_repo.get_timezone.return_value = "UTC"
+
+    journal_repo = AsyncMock()
+    journal_repo.find_by_ids_for_user.return_value = [
+        Journal(
+            id=NEW_DUE_JOURNAL_ID,
+            user_id=USER_ID,
+            title="Where it matters now",
+            content="content",
+            event_date_range=EventDateRange(start=A_WEEK_AHEAD, end=A_WEEK_AHEAD),
+        )
+    ]
+
+    mock_task_repo.find_by_id_for_update.return_value = _task()
+    mock_task_repo.save.side_effect = lambda task: task
+    mock_task_repo.add_intermediate_journal.return_value = True
+
+    return TaskService(
+        task_repo=mock_task_repo,
+        journal_repo=journal_repo,
+        contact_repo=AsyncMock(),
+        date_resolver=JournalDateResolver(settings_repo),
         event_publisher=mock_event_publisher,
     )
 
@@ -213,6 +260,7 @@ class TestTheTrailIsReadInsideTheWritesUnitOfWork:
             "create_task_with_trail",
             "update_task_with_trail",
             "set_status_with_trail",
+            "retarget_due_journal_with_trail",
         ],
     )
     def test_each_wrapper_over_a_publishing_write_takes_provenance(
@@ -226,9 +274,9 @@ class TestTheTrailIsReadInsideTheWritesUnitOfWork:
         and the only symptom is that a person's edit and an assistant's edit
         become indistinguishable in the user's own history.
 
-        ``retarget_due_journal_with_trail`` is deliberately absent: retargeting
-        publishes no event yet, so it has nothing to carry provenance *for*. The
-        phase that gives it one adds it here.
+        **All four wrappers are on this list.** The retarget one was excluded
+        while retargeting published nothing and had nothing to carry provenance
+        *for*; the phase that gave it an event put it here.
         """
         parameters = inspect.signature(
             inspect.unwrap(getattr(TaskService, method))
@@ -290,6 +338,34 @@ class TestTheTrailIsReadInsideTheWritesUnitOfWork:
         (event,) = published_events(mock_event_publisher)
         assert event.event_data["source"] == Provenance.UI.value
         assert event.event_data["changed_by"] == "ui"
+
+    async def test_the_retarget_wrapper_carries_provenance_to_the_event(
+        self,
+        retargeting_service: TaskService,
+        mock_event_publisher: AsyncMock,
+    ) -> None:
+        """The fourth wrapper, over the write this phase gave an event.
+
+        The signature test above would wave through a wrapper that accepts both
+        arguments and forwards neither — which is the exact shape the merge that
+        landed these wrappers produced for the other three. Retargeting is the
+        write where losing provenance costs most: it is the only way a done task
+        is reopened, so an assistant undoing somebody's completion would be
+        recorded as the system having done it.
+        """
+        await retargeting_service.retarget_due_journal_with_trail(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            due_journal_id=NEW_DUE_JOURNAL_ID,
+            transaction=AsyncMock(),
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskDueJournalRetargeted"
+        assert event.event_data["source"] == Provenance.MCP.value
+        assert event.event_data["changed_by"] == "mcp"
 
     async def test_the_wrapper_reads_the_trail_owner_scoped(
         self, service: TaskService, mock_task_repo: AsyncMock

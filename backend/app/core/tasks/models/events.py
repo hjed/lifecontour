@@ -5,8 +5,8 @@ events through the same transactional outbox and stream that contacts and
 journals use, and those events project into field history exactly as contact and
 journal events do", each carrying provenance and the actor.
 
-This module holds creation, change and hard deletion. The rest (due journal
-retargeted, journal and contact linked/unlinked) land in later phases, and the
+This module holds creation, change, due-journal retargeting and hard deletion.
+The rest (journal and contact linked/unlinked) land in later phases, and the
 history projection that reads these payloads lands after them.
 
 **A task's text and status changes share one event**, ``TaskUpdated``, carrying
@@ -139,8 +139,13 @@ class TaskUpdated(DomainEvent):
     ``change[1]`` as the new one — it never looks at a key name — so the order
     is the contract. Values must be JSON-serialisable scalars, because they
     reach that projection through ``outbox_events.event_data`` and a Redis
-    stream: the caller passes ``TaskStatus.value``, not the enum member. The
-    tuples arrive there as lists, which is what the guard already expects.
+    stream: the caller passes ``TaskStatus.value``, not the enum member. **Not
+    because ``json.dumps`` would refuse the member** — ``TaskStatus`` is a
+    ``StrEnum`` and serialises identically, a correction to what this paragraph
+    said before — but because the payload is a wire format, and a member in it
+    hands an in-process subscriber a domain type where one reading the event
+    back out of Redis gets a bare string. The tuples arrive there as lists,
+    which is what the guard already expects.
     """
 
     def __init__(
@@ -162,6 +167,98 @@ class TaskUpdated(DomainEvent):
                 "task_id": task_id,
                 "user_id": user_id,
                 "changed_fields": changed_fields,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TaskDueJournalRetargeted(DomainEvent):
+    """Event raised when a task's due journal moves to a different journal.
+
+    **One event, not two.** A retarget does two things — it moves the due anchor
+    and retains the journal being left as an *intermediate* journal, the model's
+    one automatic link — but they are a single write in a single unit of work.
+    So the auto-link travels in this payload rather than as a second event, and
+    "every task write path publishes exactly one event" stays true for now with
+    no exception attached to it. The phase that gives manual attach and detach
+    their own event type is required to publish the derived link as that same
+    type, so the exception is **deferred rather than avoided** — and the
+    ordering that phase inherits is the write order
+    :meth:`TaskService.retarget_due_journal` already has: the intermediate link
+    first, then the anchor move, so a consumer reading the pair renders the trail
+    in the order it happened.
+
+    **The payload names two facts about that link, not one.**
+    ``auto_linked_journal_id`` is the journal retained, and
+    ``auto_link_created`` says whether a row was actually written for it.
+    The second is reachable rather than theoretical: **a retarget only ever adds
+    an intermediate link and never removes one**, so a journal can be both the
+    due anchor and an intermediate link, and a task retargeted A→B→A→C finds A
+    still attached when it leaves it the second time. Links *are* removable —
+    :meth:`TaskService.detach_intermediate_journal` removes one on request, a
+    journal merge collapses the redundant ones, and deleting a journal cascades
+    — but none of those is a retarget, so none of them is what puts this branch
+    on the reachable side. Without the flag the projection would write "linked A"
+    into the user's history twice for one link. The two cannot disagree with
+    ``changed_fields["due_journal_id"][0]``, because both come from the same
+    argument; the id is named separately so a consumer reads a link as a link
+    rather than by indexing into a field change, and so the phase that replaces
+    it has one key to remove.
+
+    **``changed_fields`` is built here, unlike** ``TaskUpdated``\\ **'s.** That
+    event is handed a dict because its caller decides, field by field, what
+    moved. Retargeting decides nothing of the sort: it always lands the task
+    *not done*, so whether that is a *change* follows from the status it started
+    in. Putting the rule here keeps one definition of it, and keeps a
+    "not done → not done" line out of the user's history on every ordinary
+    deferral — while a reopen, which the specification singles out as rarely
+    what the user meant, reaches the stream rather than only the task row.
+    """
+
+    def __init__(
+        self,
+        task_id: int,
+        user_id: str,
+        previous_due_journal_id: int,
+        due_journal_id: int,
+        previous_status: TaskStatus,
+        auto_link_created: bool,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        changed_fields: dict[str, Any] = {
+            "due_journal_id": (previous_due_journal_id, due_journal_id)
+        }
+        if previous_status is not TaskStatus.NOT_DONE:
+            # ``.value`` puts a plain ``str`` in the payload rather than a
+            # ``TaskStatus``. **Not to keep ``json.dumps`` happy** — ``TaskStatus``
+            # is a ``StrEnum``, so it serialises to the same ``"done"`` either
+            # way, and the claim written the other way round elsewhere in this
+            # module is wrong. The reason is that the payload is a wire format: a
+            # member reaching it would hand an in-process subscriber a domain type
+            # where one reading the same event back out of Redis gets a bare
+            # string, which is exactly the difference this module exists to keep
+            # invisible.
+            changed_fields["status"] = (
+                previous_status.value,
+                TaskStatus.NOT_DONE.value,
+            )
+        super().__init__(
+            event_id=f"task_due_journal_retargeted_{task_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=task_id,
+            event_type="TaskDueJournalRetargeted",
+            event_data={
+                "task_id": task_id,
+                "user_id": user_id,
+                "changed_fields": changed_fields,
+                "auto_linked_journal_id": previous_due_journal_id,
+                "auto_link_created": auto_link_created,
                 "source": source.value,
                 "changed_by": changed_by,
             },

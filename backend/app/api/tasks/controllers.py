@@ -247,6 +247,8 @@ async def retarget_task(
         due_journal_id=attributes.due_journal_id,
         transaction=connection,
         acknowledge_reopen=attributes.acknowledge_reopen,
+        source=Provenance.UI,
+        changed_by="ui",
     )
     return TaskResponse(data=_to_resource(retargeted, trail))
 
