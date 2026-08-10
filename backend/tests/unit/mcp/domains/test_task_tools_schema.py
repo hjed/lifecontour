@@ -126,11 +126,16 @@ class TestTheToolDocumentsItself:
 def _enum_values(input_schema: dict[str, Any], parameter: str) -> list[str]:
     """The values a parameter admits, however the generator chose to express them.
 
-    An enum-typed parameter may be inlined or hoisted into ``$defs`` behind a
-    ``$ref``; both are the same contract to a model, and the test is about the
-    contract rather than the layout.
+    An enum-typed parameter may be inlined, hoisted into ``$defs`` behind a
+    ``$ref``, or — when it is *optional* — wrapped in an ``anyOf`` beside a null
+    branch. All three are the same contract to a model, and the test is about
+    the contract rather than the layout.
     """
     schema = input_schema["properties"][parameter]
+    for branch in schema.get("anyOf", []):
+        if branch.get("type") != "null":
+            schema = branch
+            break
     ref = schema.get("$ref")
     if ref is not None:
         schema = input_schema["$defs"][ref.rsplit("/", 1)[-1]]
@@ -766,3 +771,188 @@ class TestTheJournalLinkToolsDocumentThemselves:
 
         assert "cannot be removed this way" in description
         assert "retarget" in description
+
+
+@pytest.fixture
+async def get_task_schema() -> dict[str, Any]:
+    """The ``get_task`` tool as a client sees it."""
+    return await _tool_schema("get_task")
+
+
+@pytest.fixture
+async def list_journal_tasks_schema() -> dict[str, Any]:
+    """The ``list_journal_tasks`` tool as a client sees it."""
+    return await _tool_schema("list_journal_tasks")
+
+
+@pytest.mark.unit
+class TestGetTaskToolParameters:
+    """The read tool the write tools have been pointing at.
+
+    Every task-returning tool so far carries the journal trail because "no tool
+    reads a task back, so a trail left out of these answers would be unreachable
+    rather than inconvenient". This is the tool that changes that, so its
+    contract is the one an agent will reach for to check its own work.
+    """
+
+    def test_the_task_id_is_the_only_parameter(
+        self, get_task_schema: dict[str, Any]
+    ) -> None:
+        """A read needs the id and nothing else."""
+        input_schema = get_task_schema["input_schema"]
+
+        assert input_schema["required"] == ["task_id"]
+        assert list(input_schema["properties"]) == ["task_id"]
+
+    def test_the_id_is_bounded_to_what_a_column_can_hold(
+        self, get_task_schema: dict[str, Any]
+    ) -> None:
+        """An id no row could have is a bad request, not a 500."""
+        task_id = get_task_schema["input_schema"]["properties"]["task_id"]
+
+        assert task_id["minimum"] == 1
+        assert task_id["maximum"] == 2_147_483_647
+
+    def test_injected_collaborators_are_not_part_of_the_contract(
+        self, get_task_schema: dict[str, Any]
+    ) -> None:
+        """The connection and the service are wiring, not arguments."""
+        properties = get_task_schema["input_schema"]["properties"]
+
+        assert "db_connection" not in properties
+        assert "task_read_service" not in properties
+
+    @pytest.mark.parametrize("unwanted", ["now", "date", "today", "user_id"])
+    def test_the_read_offers_no_seam_and_no_impersonation(
+        self, get_task_schema: dict[str, Any], unwanted: str
+    ) -> None:
+        """ "Today" is the acting user's, resolved from their own settings.
+
+        A tool able to set it could ask whether somebody else's task had
+        lapsed, or whether this one had lapsed on a day of its choosing.
+        """
+        assert unwanted not in get_task_schema["input_schema"]["properties"]
+
+
+@pytest.mark.unit
+class TestGetTaskDocumentsWhatItReturns:
+    """The docstring is the only place a model learns the answer's shape."""
+
+    def test_it_says_the_journals_come_back_by_role(
+        self, get_task_schema: dict[str, Any]
+    ) -> None:
+        """Three journal roles is not something to infer from a key name."""
+        description = get_task_schema["description"].lower()
+
+        assert "creating" in description
+        assert "due" in description
+
+    def test_it_explains_what_lapsed_means(
+        self, get_task_schema: dict[str, Any]
+    ) -> None:
+        """A flag an agent cannot interpret is a flag it will act wrongly on.
+
+        Both causes are named, because "the day went by" and "the meeting was
+        called off" call for different follow-ups.
+        """
+        description = get_task_schema["description"].lower()
+
+        assert "lapsed" in description
+        assert "cancelled" in description
+
+    def test_it_says_how_a_lapsed_task_is_resurrected(
+        self, get_task_schema: dict[str, Any]
+    ) -> None:
+        """The one action that undoes a lapse, named where it is discovered."""
+        assert "retarget" in get_task_schema["description"].lower()
+
+
+@pytest.mark.unit
+class TestListJournalTasksToolParameters:
+    """Listing a journal's tasks, by the role each link holds."""
+
+    def test_the_journal_id_is_required_and_the_role_is_not(
+        self, list_journal_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The default is the whole picture; the filter is opt-in."""
+        input_schema = list_journal_tasks_schema["input_schema"]
+
+        assert input_schema["required"] == ["journal_id"]
+        assert "role" in input_schema["properties"]
+
+    def test_the_role_offers_exactly_the_three_link_roles(
+        self, list_journal_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The specification's own vocabulary, so a model needs no glossary."""
+        assert _enum_values(list_journal_tasks_schema["input_schema"], "role") == [
+            "due",
+            "created",
+            "mentioned",
+        ]
+
+    def test_the_journal_id_is_bounded_to_what_a_column_can_hold(
+        self, list_journal_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The same bound every id on this surface carries."""
+        journal_id = list_journal_tasks_schema["input_schema"]["properties"][
+            "journal_id"
+        ]
+
+        assert journal_id["minimum"] == 1
+        assert journal_id["maximum"] == 2_147_483_647
+
+    @pytest.mark.parametrize("unwanted", ["now", "status", "page", "limit", "user_id"])
+    def test_it_offers_no_seam_and_no_status_filter(
+        self, list_journal_tasks_schema: dict[str, Any], unwanted: str
+    ) -> None:
+        """A journal shows the tasks it is linked to, whatever their status.
+
+        The dashboard hides done, cancelled and lapsed ones; this surface does
+        not, and a status filter here would invite an agent to reproduce the
+        "everything still outstanding" browser the specification refuses.
+        """
+        assert unwanted not in list_journal_tasks_schema["input_schema"]["properties"]
+
+    def test_injected_collaborators_are_not_part_of_the_contract(
+        self, list_journal_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The connection and the service are wiring, not arguments."""
+        properties = list_journal_tasks_schema["input_schema"]["properties"]
+
+        assert "db_connection" not in properties
+        assert "task_read_service" not in properties
+
+
+@pytest.mark.unit
+class TestListJournalTasksDocumentsItself:
+    """What the three groups mean, said before an agent has to guess."""
+
+    def test_it_names_all_three_groups(
+        self, list_journal_tasks_schema: dict[str, Any]
+    ) -> None:
+        """Due here, created here, mentioned here."""
+        description = list_journal_tasks_schema["description"].lower()
+
+        assert "due" in description
+        assert "created" in description
+        assert "mentioned" in description
+
+    def test_it_says_a_task_can_appear_in_two_groups(
+        self, list_journal_tasks_schema: dict[str, Any]
+    ) -> None:
+        """Otherwise a counting agent double-counts and calls it a bug.
+
+        One journal can be a task's creating and due anchor at once, and a
+        retarget onto an already-mentioned journal makes the due anchor a
+        mention as well.
+        """
+        assert "more than one group" in list_journal_tasks_schema["description"].lower()
+
+    def test_it_says_lapsed_and_finished_tasks_are_included(
+        self, list_journal_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The difference from the dashboard, stated where it is acted on."""
+        description = list_journal_tasks_schema["description"].lower()
+
+        assert "lapsed" in description
+        assert "every status" in description

@@ -171,7 +171,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   (`backend/app/core/tasks/adapters/sql/task_anchor_repository.py`) — see
   *[The journal delete guard](#the-journal-delete-guard)* below
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
-  *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below.
+  *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below — and the
+  link-role grouping a journal's task list is built on, see
+  *[A journal's tasks, by link role](#a-journals-tasks-by-link-role)*.
 - **Domain Services**: `TaskService`
   (`backend/app/core/tasks/services/task_service.py`), provided at request scope by `TaskProvider`.
   It is where the specification's *core invariants* are enforced, so REST and MCP both inherit them
@@ -622,6 +624,55 @@ A missing **anchor** journal raises `JournalNotFoundError` rather than being pap
 journal is what the rule reads, so losing it would make the verdict a guess. A missing **mention** is
 skipped, because a task the user cannot open is worse than one showing one fewer journal. Both
 anchors are `ON DELETE RESTRICT`, so neither branch is reachable in practice.
+
+### A journal's tasks, by link role
+
+`TaskReadService.read_models_for_journal` answers the surface a journal's detail view needs: every
+task linked to a journal, grouped as the
+[specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#where-tasks-appear)
+asks — due here, created here, mentioned here.
+
+**A role is derived, never stored.** There is no role column and no fourth link table:
+`group_tasks_by_link_role` (`core_shared/models/tasks/link_role.py`) reads `due` from the task's due
+anchor, `created` from its creating anchor and `mentioned` from its intermediate refs — all three
+already on the read model. Storing the role would be a second copy of the anchors that could disagree
+with them, and filtering by role in SQL would be a second definition of "mentioned here". So the
+filter is applied to the grouping, not to the query.
+
+**A task can hold two roles at once.** Invariant 6 lets one journal be both anchors, and retargeting
+onto a journal the task already mentioned leaves the intermediate row beside the new due anchor. Both
+groups list it, and `JournalTaskGroups.tasks` de-duplicates for the transport that needs each
+resource once.
+
+**The batched reads are what keep this off an N+1.** `find_tasks_for_journal` unions the three link
+shapes with an `EXISTS` rather than a join, so a two-role task is one row;
+`list_intermediate_journal_ids_for_tasks` and `list_contact_ids_for_tasks` read *N* tasks' links in
+one statement each, over a single `integer[]` rather than a placeholder per id. They scope themselves
+through a join back to `tasks` — the link tables carry no `user_id` — and, unlike their singular
+forms, **return rather than raise** for a task that is absent or not the caller's: those are given
+ids an owner-scoped query produced, so a missing key means "no links" and raising would let one
+deleted task fail a whole page. A task with no links is absent from the mapping rather than present
+with an empty list. The whole listing costs the same statements the single read does, **whatever the
+task count** — seven where any task references a contact, six where none does, and four for a journal
+with no tasks at all, since the contact-name lookup and the two batched link reads each skip a query
+they have nothing to ask. Invariance in the task count is the claim that matters and the one the tests
+pin, at two and six. The single read is now literally the batch with one task in it.
+
+**Ownership costs no extra statement.** The viewed journal joins the same owner-scoped journal fetch
+the read models already need. An unknown journal and another user's are the same absence and the same
+`JournalNotFoundError`; a journal of the caller's with nothing linked to it is a 200 with three empty
+groups.
+
+**Ordering is total, and that is the point.** Groups are ordered by due-journal date then task id;
+a task's mentions and contacts by link `created_at` then the linked id. Phase 10 recorded that
+`created_at` defaults to `transaction_timestamp()`, so links written in one request tie — an order
+stopping there would let the same read answer differently between runs. In the *due* group every task
+shares the journal's date, so the id is not a last-resort tie-break but the whole of that group's
+order.
+
+**Every linked task is listed, in every status** — done, cancelled and lapsed included. A journal is
+where a lapsed task is meant to be found again, so the lapse is a marker on the row rather than a
+filter; the dashboard's tasks section is the surface that excludes them.
 
 ### The journal delete guard
 

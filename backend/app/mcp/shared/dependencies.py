@@ -37,6 +37,7 @@ from app.core.journal.services.outdoor_dashboard_service import (
     OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
@@ -268,6 +269,15 @@ async def get_gear_item_service() -> GearItemService:
 async def get_task_service() -> TaskService:
     """Resolve the task service for the current MCP request."""
     return cast(TaskService, await _resolve_dependency(TaskService))
+
+
+async def get_task_read_service() -> TaskReadService:
+    """Resolve the task read service for the current MCP request.
+
+    Separate from the write service so a read tool is never handed the ability
+    to change a task, which is the same split ``TaskProvider`` makes.
+    """
+    return cast(TaskReadService, await _resolve_dependency(TaskReadService))
 
 
 async def get_integration_registry_service() -> Any:

@@ -17,7 +17,12 @@ documentation page and anyone reading `/docs` sees.
 
 import pytest
 
-from app.api.tasks.controllers import delete_task, update_task
+from app.api.tasks.controllers import (
+    delete_task,
+    get_task,
+    list_journal_tasks,
+    update_task,
+)
 
 
 def _description(endpoint: object) -> str:
@@ -81,3 +86,62 @@ class TestTheUpdateEndpointDocumentsItsOptionality:
 
         assert "optional" in description
         assert "at least one" in description
+
+
+@pytest.mark.unit
+class TestTheReadEndpointsDocumentWhatTheyAnswer:
+    """The two reads publish their own contract through FastAPI.
+
+    A read's 404 is worth stating for the reason the write endpoints' are: a
+    task that is not yours and one that never existed answer identically, so a
+    client that does not know that will read the 404 as "deleted" and act on it.
+    """
+
+    def test_the_single_read_documents_its_404(self) -> None:
+        """Unknown and not-yours are one answer, deliberately."""
+        description = _description(get_task)
+
+        assert "404" in description
+        assert "yours" in description
+
+    def test_the_single_read_says_the_lapse_is_derived_on_every_read(self) -> None:
+        """Never stored, so a caller does not go looking for a column.
+
+        Asserted on the phrase rather than on the word "lapsed", which appears
+        in the payload description either way: a rewrite that dropped the
+        "derived on every read and never stored" sentence would otherwise leave
+        this green while removing the only place a client learns there is no
+        column to poll.
+        """
+        description = _description(get_task)
+
+        assert "derived on every read" in description
+        assert "never stored" in description
+
+    def test_the_journal_listing_names_the_three_groups(self) -> None:
+        """The specification's vocabulary, published as the endpoint's own."""
+        description = _description(list_journal_tasks)
+
+        assert "due" in description
+        assert "created" in description
+        assert "mentioned" in description
+
+    def test_the_journal_listing_documents_its_404(self) -> None:
+        """A journal that is not yours is a journal that is not there.
+
+        Asserted on "yours" as well as the status, as the single read's case
+        does: the status alone is near-certain to appear anyway, and the part
+        worth documenting is that an unowned journal and an absent one are one
+        answer — which is what stops a client reading a 404 as "deleted", and
+        what stops a rejection being used to probe for other users' journals.
+        """
+        description = _description(list_journal_tasks)
+
+        assert "404" in description
+        assert "yours" in description
+
+    def test_the_journal_listing_says_a_task_may_hold_two_roles(self) -> None:
+        """Otherwise the once-in-``data`` shape reads as a missing row."""
+        description = _description(list_journal_tasks)
+
+        assert "more than one group" in description

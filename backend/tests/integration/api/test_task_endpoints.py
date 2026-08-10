@@ -39,6 +39,7 @@ race, and a UTC reading fails both.
 import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.journals import JournalNotFoundError
+from core_shared.models.journals.event_state import EventState
 from core_shared.models.tasks import TaskStatus
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -67,6 +68,7 @@ from tests.integration.tasks.task_seeding import (
     link_contact,
     link_intermediate_journal,
     linked_contact_ids,
+    mark_journal_as_event,
     stored_anchors,
     stored_status,
     stored_text,
@@ -3280,3 +3282,643 @@ class TestIntermediateJournalLinkRejections:
         )
 
         assert response.status_code == 400
+
+
+@pytest.mark.integration
+class TestEveryTaskRouteEmitsOneResourceShape:
+    """The `self` link on the routes that *write* a task, not only the read.
+
+    The read arriving is what made the link emittable at all, but the claim the
+    change makes is that **every** route returning a task emits the same shape —
+    so a regression that dropped ``base_url`` (or the link) from ``_to_resource``
+    while the read stayed green is exactly what this exists to catch. Asserted
+    on the shape rather than the exact string: the base URL is the test client's,
+    not something this file should hard-code.
+    """
+
+    async def test_create_patch_and_retarget_all_carry_an_absolute_self_link(
+        self,
+        authenticated_client: AsyncClient,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """One task, driven through all three write routes."""
+        creating_id, due_id = task_anchors
+        later_id = await create_journal(
+            journal_repository, title="Later still", days_offset=21
+        )
+
+        created = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json=_body(text="print the permit", due_journal_id=due_id),
+        )
+        task_id = int(created.json()["data"]["id"])
+        patched = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, text="reworded")
+        )
+        retargeted = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json={
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": later_id},
+                }
+            },
+        )
+
+        for response in (created, patched, retargeted):
+            assert response.status_code in (200, 201)
+            self_link = response.json()["data"]["links"]["self"]
+            assert self_link.startswith("http")
+            assert self_link.endswith(f"/api/tasks/{task_id}")
+
+
+@pytest.mark.integration
+class TestGetTaskEndpoint:
+    """``GET /api/tasks/{task_id}`` — the first route that reads a task back.
+
+    Every write response so far has carried the journal trail as bare ids
+    because there was nowhere to resolve them. This is where a task becomes
+    readable whole: journals by role with their titles and dates, contacts, and
+    the lapse verdict the surfaces are asked to mark.
+    """
+
+    async def test_it_returns_the_task_with_its_journals_resolved(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Both anchors come back as objects, not as ids to look up."""
+        creating_id, due_id = task_anchors
+        mention_id = await create_journal(journal_repository, title="Revisited")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mention_id
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["text"] == "print the permit"
+        assert attributes["status"] == "not_done"
+        assert attributes["creating_journal"]["id"] == creating_id
+        assert attributes["creating_journal"]["title"] == "Where it arose"
+        assert attributes["due_journal"]["id"] == due_id
+        assert [ref["id"] for ref in attributes["intermediate_journals"]] == [
+            mention_id
+        ]
+
+    async def test_the_scalar_attributes_match_the_write_responses(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A superset, so one renderer serves a written task and a read one."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["creating_journal_id"] == creating_id
+        assert attributes["due_journal_id"] == due_id
+        assert attributes["intermediate_journal_ids"] == []
+        assert response.json()["data"]["type"] == "tasks"
+        assert response.json()["data"]["id"] == str(task_id)
+
+    async def test_it_carries_a_self_link(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The link the write responses withheld until this route existed.
+
+        Absolute, like every other ``links.self`` in this API — the base URL is
+        the request's, so a client resolving ``self`` uniformly across resource
+        types gets one shape rather than two.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        self_link = response.json()["data"]["links"]["self"]
+        assert self_link.startswith("http")
+        assert self_link.endswith(f"/api/tasks/{task_id}")
+
+    async def test_it_returns_the_linked_contacts(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Named and pictured, which is what a row showing a person needs."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await create_contact(async_connection, first_name="Sarah")
+        await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        (contact,) = response.json()["data"]["attributes"]["contacts"]
+        assert contact["id"] == contact_id
+        assert contact["display_name"] == "Sarah"
+
+    async def test_a_task_that_has_not_lapsed_says_so(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A future due journal, so neither cause applies."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["lapsed"] is False
+        assert attributes["lapse_reason"] is None
+
+    async def test_a_task_whose_due_journal_has_passed_is_lapsed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The ordinary lapse, reported with its reason."""
+        creating_id, _ = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=passed_id,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["lapsed"] is True
+        assert attributes["lapse_reason"] == "date_passed"
+
+    async def test_a_task_whose_due_journal_was_cancelled_says_which_cause(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A future journal, cancelled — so only the event state lapses it.
+
+        The distinct reason is what lets a surface say "the meeting was called
+        off" rather than "the day went by", which are different news.
+        """
+        creating_id, _ = task_anchors
+        cancelled_id = await create_journal(
+            journal_repository, title="Cancelled meeting", days_offset=7
+        )
+        await mark_journal_as_event(
+            async_connection, cancelled_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=cancelled_id,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["lapse_reason"] == "due_journal_cancelled"
+        assert attributes["due_journal"]["cancelled"] is True
+
+    async def test_a_done_task_is_not_lapsed_however_old_its_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A commitment that was met cannot then be let slide."""
+        creating_id, _ = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=passed_id,
+            status=TaskStatus.DONE,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert response.json()["data"]["attributes"]["lapsed"] is False
+
+    async def test_another_users_task_is_not_found(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """A real task, really owned by somebody else, answers 404."""
+        theirs_journal = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        theirs = await create_task(
+            async_connection,
+            creating_journal_id=theirs_journal,
+            due_journal_id=theirs_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{theirs}")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_NOT_FOUND"
+
+    async def test_an_unknown_task_answers_the_same_way(
+        self, authenticated_client: AsyncClient
+    ):
+        """Indistinguishable from somebody else's, so neither can be probed for.
+
+        The two payloads differ only in the id the caller supplied, which is the
+        same hedge every other task 404 on this surface carries.
+        """
+        response = await authenticated_client.get("/api/tasks/999999")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_NOT_FOUND"
+
+    async def test_an_id_beyond_int32_is_rejected_rather_than_hitting_the_driver(
+        self, authenticated_client: AsyncClient
+    ):
+        """A 400 for an id no row could hold, not a 500 from parameter binding."""
+        response = await authenticated_client.get("/api/tasks/2147483648")
+
+        assert response.status_code == 400
+
+    async def test_a_zero_id_is_rejected(self, authenticated_client: AsyncClient):
+        """Serial columns start at one, so zero identifies nothing."""
+        response = await authenticated_client.get("/api/tasks/0")
+
+        assert response.status_code == 400
+
+
+@pytest.mark.integration
+class TestListJournalTasksEndpoint:
+    """``GET /api/journals/{journal_id}/tasks`` — the journal's three groups."""
+
+    async def test_it_groups_the_journals_tasks_by_link_role(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Due here, created here, mentioned here — the specification's words."""
+        viewed_id, elsewhere_id = task_anchors
+        due_here = await create_task(
+            async_connection,
+            creating_journal_id=elsewhere_id,
+            due_journal_id=viewed_id,
+        )
+        created_here = await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=elsewhere_id,
+        )
+        mentioned_here = await create_task(
+            async_connection,
+            creating_journal_id=elsewhere_id,
+            due_journal_id=elsewhere_id,
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=mentioned_here, journal_id=viewed_id
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert response.status_code == 200
+        groups = response.json()["meta"]["groups"]
+        assert groups["due"] == [due_here]
+        assert groups["created"] == [created_here]
+        assert groups["mentioned"] == [mentioned_here]
+
+    async def test_a_task_in_two_roles_appears_once_in_data_naming_both(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """JSON:API forbids the same resource twice in ``data``.
+
+        So the roles are an attribute and ``meta.groups`` carries the grouping —
+        a task created in the journal it is due in is one resource holding two
+        roles, not two resources.
+        """
+        viewed_id, _ = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=viewed_id,
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        payload = response.json()
+        assert [resource["id"] for resource in payload["data"]] == [str(task_id)]
+        assert payload["data"][0]["attributes"]["link_roles"] == ["due", "created"]
+        assert payload["meta"]["groups"]["due"] == [task_id]
+        assert payload["meta"]["groups"]["created"] == [task_id]
+
+    async def test_each_row_carries_the_full_read_attributes(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A journal's rows show text, status, contacts and the lapse marker.
+
+        The listing is the read model entire rather than a thinner projection of
+        it, which is what the specification asks each entry to show.
+        """
+        viewed_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=due_id,
+            text="return Sarah's book",
+        )
+        contact_id = await create_contact(async_connection, first_name="Sarah")
+        await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        attributes = response.json()["data"][0]["attributes"]
+        assert attributes["text"] == "return Sarah's book"
+        assert attributes["status"] == "not_done"
+        assert attributes["lapsed"] is False
+        assert [contact["id"] for contact in attributes["contacts"]] == [contact_id]
+        assert attributes["due_journal"]["id"] == due_id
+
+    async def test_a_lapsed_task_stays_visible_and_marked(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """ "They remain visible on every journal they are linked to."
+
+        The dashboard drops lapsed tasks silently; a journal must not, because
+        the journal is where the user is meant to find and resurrect them.
+        """
+        viewed_id, _ = task_anchors
+        passed_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=passed_id,
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert response.json()["meta"]["groups"]["created"] == [task_id]
+        assert response.json()["data"][0]["attributes"]["lapsed"] is True
+
+    async def test_a_task_due_in_a_cancelled_event_journal_is_marked_on_the_row(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The cancellation cause, through the *listing* rather than the read.
+
+        The due journal is a week out, so nothing about its date lapses the
+        task — only the ``journal_calendar_info`` row, which the listing reads
+        for the whole set in one statement. Worth asserting here as well as on
+        ``GET /api/tasks/{id}``: the batch is a different code path to the
+        single read's, and this is the row a user is meant to spot the
+        cancellation on.
+        """
+        viewed_id, _ = task_anchors
+        cancelled_id = await create_journal(
+            journal_repository, title="Cancelled meeting", days_offset=7
+        )
+        await mark_journal_as_event(
+            async_connection, cancelled_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=cancelled_id,
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert response.json()["meta"]["groups"]["created"] == [task_id]
+        attributes = response.json()["data"][0]["attributes"]
+        assert attributes["lapsed"] is True
+        assert attributes["lapse_reason"] == "due_journal_cancelled"
+        assert attributes["due_journal"]["cancelled"] is True
+
+    @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
+    async def test_finished_tasks_stay_visible_too(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """A done task's link to the journal it arose in is part of the record."""
+        viewed_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert response.json()["meta"]["groups"]["created"] == [task_id]
+
+    async def test_the_role_filter_narrows_the_answer_without_changing_its_shape(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The other groups are empty rather than missing."""
+        viewed_id, elsewhere_id = task_anchors
+        due_here = await create_task(
+            async_connection,
+            creating_journal_id=elsewhere_id,
+            due_journal_id=viewed_id,
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=elsewhere_id,
+        )
+
+        response = await authenticated_client.get(
+            f"/api/journals/{viewed_id}/tasks", params={"role": "due"}
+        )
+
+        payload = response.json()
+        assert [resource["id"] for resource in payload["data"]] == [str(due_here)]
+        assert payload["meta"]["groups"]["due"] == [due_here]
+        assert payload["meta"]["groups"]["created"] == []
+        assert payload["meta"]["groups"]["mentioned"] == []
+
+    async def test_an_unknown_role_is_rejected(
+        self,
+        authenticated_client: AsyncClient,
+        task_anchors: tuple[int, int],
+    ):
+        """A misspelled filter must fail rather than silently return everything.
+
+        400 rather than FastAPI's bare 422: the application renders validation
+        failures through its own JSON:API handler, so a query-parameter
+        rejection reads the same as a body one.
+        """
+        viewed_id, _ = task_anchors
+
+        response = await authenticated_client.get(
+            f"/api/journals/{viewed_id}/tasks", params={"role": "overdue"}
+        )
+
+        assert response.status_code == 400
+
+    async def test_a_journal_with_no_tasks_answers_empty_groups(
+        self,
+        authenticated_client: AsyncClient,
+        task_anchors: tuple[int, int],
+    ):
+        """An empty journal is a normal answer, not a 404."""
+        viewed_id, _ = task_anchors
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+        assert response.json()["meta"]["groups"] == {
+            "due": [],
+            "created": [],
+            "mentioned": [],
+        }
+
+    async def test_another_users_journal_is_not_found(
+        self,
+        authenticated_client: AsyncClient,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Which is the distinction the empty answer above depends on."""
+        theirs = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{theirs}/tasks")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "JOURNAL_NOT_FOUND"
+
+    async def test_an_unknown_journal_answers_the_same_way(
+        self, authenticated_client: AsyncClient
+    ):
+        """Indistinguishable, so a rejection cannot be used to probe."""
+        response = await authenticated_client.get("/api/journals/999999/tasks")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "JOURNAL_NOT_FOUND"
+
+    async def test_a_journal_id_beyond_int32_is_rejected(
+        self, authenticated_client: AsyncClient
+    ):
+        """The same bound every id on this surface carries."""
+        response = await authenticated_client.get("/api/journals/2147483648/tasks")
+
+        assert response.status_code == 400
+
+    async def test_another_users_task_is_never_listed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Owner scoping reaches the link tables through the task they belong to."""
+        viewed_id, _ = task_anchors
+        mine = await create_task(
+            async_connection,
+            creating_journal_id=viewed_id,
+            due_journal_id=viewed_id,
+        )
+        theirs_journal = await create_journal(
+            journal_repository, title="Theirs", user_id=OTHER_USER_ID
+        )
+        theirs = await create_task(
+            async_connection,
+            creating_journal_id=theirs_journal,
+            due_journal_id=theirs_journal,
+            user_id=OTHER_USER_ID,
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=theirs, journal_id=viewed_id
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [str(mine)]
+
+    async def test_rows_are_ordered_by_due_date_then_task_id(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Soonest first, with a total tie-break, all the way to the wire."""
+        viewed_id, _ = task_anchors
+        far_id = await create_journal(journal_repository, title="Far", days_offset=30)
+        near_id = await create_journal(journal_repository, title="Near", days_offset=2)
+        far_task = await create_task(
+            async_connection, creating_journal_id=viewed_id, due_journal_id=far_id
+        )
+        near_task = await create_task(
+            async_connection, creating_journal_id=viewed_id, due_journal_id=near_id
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert response.json()["meta"]["groups"]["created"] == [near_task, far_task]
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(near_task),
+            str(far_task),
+        ]

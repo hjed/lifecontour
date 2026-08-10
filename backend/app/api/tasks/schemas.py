@@ -28,10 +28,20 @@ status. Those are refused rather than ignored, on the same reasoning as ``now``:
 a field silently dropped is a field a client believes was stored.
 """
 
+from datetime import date as date_type
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import (
+    JournalTaskGroups,
+    LapseReason,
+    Task,
+    TaskContactRef,
+    TaskJournalRef,
+    TaskLinkRole,
+    TaskReadModel,
+    TaskStatus,
+)
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -462,3 +472,333 @@ class TaskResponse(JsonApiResponse[TaskResource]):
     """Response model for a single task."""
 
     pass
+
+
+def persisted_task_id(task: Task) -> int:
+    """The task's id, refusing to render one that has none.
+
+    ``task.id or 0`` was the first version and is worse than it looks: a task
+    without an id would render ``id="None"`` beside a ``self`` link pointing at
+    ``/api/tasks/0`` — a resource identifying itself two ways, neither of them a
+    task that exists. Unreachable through the service, which only ever renders
+    what a repository handed back, so this fails loudly rather than being papered
+    over, matching ``ContactConverter._validate_entity_id``.
+    """
+    if task.id is None:
+        raise ValueError(
+            "Cannot serialize task without ID - task must be persisted first"
+        )
+    return task.id
+
+
+def task_self_link(task_id: int, base_url: str = "") -> str:
+    """The canonical URL of a task resource.
+
+    Built here rather than in a controller so the write responses and the read
+    both emit the same string. Until this phase no route could serve it, and a
+    ``self`` link that 404s is worse than an absent one, which is why the write
+    responses carried none until now.
+
+    ``base_url`` is a parameter with an empty default rather than something read
+    from a request, which is the shape ``ContactConverter.to_resource`` and
+    ``JournalConverter`` already use: the renderer stays a pure function of its
+    arguments — and so stays unit-testable without a request — while the
+    controller passes ``get_request_base_url(request)`` so the emitted link is
+    **absolute**, like every other ``links.self`` in this API. A client that
+    resolves ``self`` uniformly across resource types must not get two shapes.
+    """
+    return f"{base_url}/api/tasks/{task_id}"
+
+
+class TaskJournalRefSchema(BaseModel):
+    """One of a task's journals, as a read surface shows it.
+
+    Enough to render a link without a second request, and nothing more: a task
+    row is not a journal browser.
+    """
+
+    id: int = Field(..., description="The journal's id")
+    title: str = Field(..., description="Its title, so a link needs no follow-up")
+    date: date_type = Field(
+        ...,
+        description=(
+            "Its date, already resolved in your timezone. A date rather than an "
+            "instant, so a client cannot re-derive it in the browser's zone and "
+            "disagree with the rule that judged whether the task lapsed."
+        ),
+    )
+    cancelled: bool = Field(
+        ...,
+        description=(
+            "Whether this is a cancelled event journal. Only the due journal's "
+            "value lapses a task, but the flag is carried on every journal so a "
+            "surface can mark one wherever it shows it."
+        ),
+    )
+
+
+class TaskContactRefSchema(BaseModel):
+    """One of a task's contacts, as a row shows them.
+
+    A plain reference: task-contact links carry no relationship type, no role
+    and no attendance status, so neither does this.
+    """
+
+    id: int = Field(..., description="The contact's id")
+    display_name: str = Field(..., description="The name to show")
+    photo_url: str | None = Field(
+        default=None, description="Their avatar, when they have one"
+    )
+
+
+class TaskReadAttributes(TaskAttributes):
+    """A task as a read surface returns it.
+
+    **A superset of the written task, not a different shape.** Every attribute
+    create, ``PATCH`` and retarget answer with is inherited, ``intermediate_journal_ids``
+    included, and the resolved journals, the contacts and the lapse are added on
+    top. A client that already renders a written task therefore renders a read
+    one, which is the "one renderer for the resource" rule the write responses
+    were built around.
+    """
+
+    creating_journal: TaskJournalRefSchema = Field(
+        ..., description="The journal the commitment arose in"
+    )
+    due_journal: TaskJournalRefSchema = Field(
+        ..., description="The journal it is due in — the only one that can lapse it"
+    )
+    intermediate_journals: list[TaskJournalRefSchema] = Field(
+        default_factory=list,
+        description=(
+            "The journals it has passed through, resolved. Same order and same "
+            "membership as intermediate_journal_ids, which is kept beside this "
+            "so a client written against the write responses still works."
+        ),
+    )
+    contacts: list[TaskContactRefSchema] = Field(
+        default_factory=list, description="The contacts it references, in link order"
+    )
+    lapsed: bool = Field(
+        ...,
+        description=(
+            "Whether the commitment has been let slide: still not done, and its "
+            "due journal has either passed or been cancelled. Derived on every "
+            "read and never stored."
+        ),
+    )
+    lapse_reason: LapseReason | None = Field(
+        default=None,
+        description=(
+            "Why it lapsed, or null. Structured rather than pre-worded, because "
+            "'the day went by' and 'the meeting was called off' ask the user for "
+            "different things and a surface words them differently."
+        ),
+    )
+
+
+class JournalTaskAttributes(TaskReadAttributes):
+    """A task as a *journal's* listing returns it: the read shape, plus its roles.
+
+    ``link_roles`` exists only here. On the single-task read there is no journal
+    in question, so an always-empty field would be a question the payload could
+    not answer rather than one whose answer happened to be nothing.
+    """
+
+    link_roles: list[TaskLinkRole] = Field(
+        default_factory=list,
+        description=(
+            "How this task is linked to the journal being listed, among the "
+            "groups this response returns. More than one when the journal is "
+            "both anchors, or is the due journal of a task that already "
+            "mentioned it. Under a role filter this narrows with the groups, so "
+            "it never names a group meta.groups reports as empty; ask without a "
+            "filter for every role the task holds here."
+        ),
+    )
+
+
+class TaskReadResource(BaseModel):
+    """A task resource carrying the full read shape."""
+
+    type: str = Field(default=TASK_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Task ID")
+    attributes: TaskReadAttributes = Field(..., description="Task attributes")
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+
+
+class JournalTaskResource(BaseModel):
+    """A task resource inside a journal's listing."""
+
+    type: str = Field(default=TASK_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC)
+    id: str = Field(..., description="Task ID")
+    attributes: JournalTaskAttributes = Field(..., description="Task attributes")
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+
+
+class JournalTaskGroupIds(BaseModel):
+    """The journal's tasks by role, as ordered id lists.
+
+    The grouping itself, stated rather than left to be reassembled from
+    ``link_roles``. All three keys are always present — empty groups included —
+    so a client parses one shape whether the journal has tasks, has none, or was
+    asked for a single role.
+    """
+
+    due: list[int] = Field(
+        default_factory=list, description="Tasks due in this journal"
+    )
+    created: list[int] = Field(
+        default_factory=list, description="Tasks created in this journal"
+    )
+    mentioned: list[int] = Field(
+        default_factory=list, description="Tasks that merely mention it"
+    )
+
+
+class JournalTasksMeta(BaseModel):
+    """The listing's metadata: the grouping.
+
+    A model of its own rather than the shared ``JsonApiMeta``, whose fields are
+    the pagination ones. This collection is not paginated — a journal's tasks
+    are bounded by the journal — so borrowing that model would advertise page
+    controls that do not exist.
+    """
+
+    groups: JournalTaskGroupIds = Field(
+        ..., description="The journal's tasks by link role, in display order"
+    )
+
+
+class TaskReadResponse(JsonApiResponse[TaskReadResource]):
+    """Response model for reading a single task."""
+
+    pass
+
+
+class JournalTasksResponse(BaseModel):
+    """Response model for a journal's tasks.
+
+    Each task appears **once** in ``data`` however many of the journal's roles
+    it holds, because JSON:API forbids the same resource twice there — so the
+    roles ride on each resource and the grouping lives in ``meta``. The matching
+    MCP tool, which has no such rule, nests the tasks under the roles instead.
+    """
+
+    data: list[JournalTaskResource] = Field(
+        ..., description="The journal's tasks, each once, in due-date order"
+    )
+    meta: JournalTasksMeta = Field(..., description="The grouping by link role")
+
+
+def _journal_ref(ref: TaskJournalRef) -> TaskJournalRefSchema:
+    """Render one journal ref."""
+    return TaskJournalRefSchema(
+        id=ref.id, title=ref.title, date=ref.date, cancelled=ref.cancelled
+    )
+
+
+def _contact_ref(ref: TaskContactRef) -> TaskContactRefSchema:
+    """Render one contact ref."""
+    return TaskContactRefSchema(
+        id=ref.id, display_name=ref.display_name, photo_url=ref.photo_url
+    )
+
+
+def _read_attributes(model: TaskReadModel) -> dict[str, Any]:
+    """The read attributes shared by the single read and a journal's listing."""
+    return {
+        "text": model.task.text,
+        "status": model.task.status,
+        "creating_journal_id": model.task.creating_journal_id,
+        "due_journal_id": model.task.due_journal_id,
+        "intermediate_journal_ids": [ref.id for ref in model.intermediate_journals],
+        "created_at": model.task.created_at,
+        "updated_at": model.task.updated_at,
+        "creating_journal": _journal_ref(model.creating_journal),
+        "due_journal": _journal_ref(model.due_journal),
+        "intermediate_journals": [
+            _journal_ref(ref) for ref in model.intermediate_journals
+        ],
+        "contacts": [_contact_ref(ref) for ref in model.contacts],
+        # Taken from the model rather than recomputed from the reason, so the
+        # flag and the reason can never disagree about the same task.
+        "lapsed": model.lapsed,
+        "lapse_reason": model.lapse_reason,
+    }
+
+
+def to_task_read_resource(model: TaskReadModel, base_url: str = "") -> TaskReadResource:
+    """Render an assembled read model as a JSON:API resource.
+
+    Pure — no request, no connection, no service — which is why it lives here
+    beside the models it produces rather than inside a controller, and why it
+    can be asserted directly by a unit test.
+
+    Args:
+        model: The assembled read model
+        base_url: Prefix for the ``self`` link, so it is absolute like every
+            other resource's. The controller supplies it from the request.
+
+    Returns:
+        The resource, carrying the ``self`` link this phase makes reachable.
+    """
+    task_id = persisted_task_id(model.task)
+    return TaskReadResource(
+        id=str(task_id),
+        attributes=TaskReadAttributes(**_read_attributes(model)),
+        links=JsonApiLinks(self=task_self_link(task_id, base_url)),
+    )
+
+
+def _journal_task_resource(
+    model: TaskReadModel, groups: JournalTaskGroups, base_url: str
+) -> JournalTaskResource:
+    """One row of a journal's listing, with the roles it holds here."""
+    task_id = persisted_task_id(model.task)
+    return JournalTaskResource(
+        id=str(task_id),
+        attributes=JournalTaskAttributes(
+            **_read_attributes(model),
+            link_roles=list(groups.roles_for(task_id)),
+        ),
+        links=JsonApiLinks(self=task_self_link(task_id, base_url)),
+    )
+
+
+def to_journal_tasks_response(
+    groups: JournalTaskGroups, base_url: str = ""
+) -> JournalTasksResponse:
+    """Render a journal's grouped tasks as the listing response.
+
+    Args:
+        groups: The grouped read models
+        base_url: Prefix for each row's ``self`` link, as above
+
+    Returns:
+        The response: each task once in ``data`` with the roles it holds, and
+        the ordered id lists per role in ``meta``.
+    """
+    # Validated across all three groups rather than only over ``groups.tasks``,
+    # which de-duplicates by id and therefore *skips* a model that has none —
+    # so an unpersisted task would silently vanish from the listing instead of
+    # failing. A row missing from a journal's tasks is worse than an error:
+    # the caller cannot tell it was dropped.
+    for group in (groups.due, groups.created, groups.mentioned):
+        for model in group:
+            persisted_task_id(model.task)
+
+    return JournalTasksResponse(
+        data=[
+            _journal_task_resource(model, groups, base_url) for model in groups.tasks
+        ],
+        meta=JournalTasksMeta(
+            groups=JournalTaskGroupIds(
+                due=[model.task.id for model in groups.due if model.task.id],
+                created=[model.task.id for model in groups.created if model.task.id],
+                mentioned=[
+                    model.task.id for model in groups.mentioned if model.task.id
+                ],
+            )
+        ),
+    )

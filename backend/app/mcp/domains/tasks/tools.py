@@ -23,17 +23,26 @@ import json
 from typing import Annotated, Any
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import Task, TaskStatus
+from core_shared.models.tasks import (
+    JournalTaskGroups,
+    Task,
+    TaskJournalRef,
+    TaskLinkRole,
+    TaskReadModel,
+    TaskStatus,
+)
 from fastmcp import FastMCP
 from pydantic import Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_task_read_service,
     get_task_service,
     mcp_depends,
 )
@@ -87,10 +96,11 @@ def _task_to_dict(task: Task, intermediate_journal_ids: list[int]) -> dict[str, 
     """The answer every task-returning tool gives.
 
     ``intermediate_journal_ids`` is passed in rather than read here, and every
-    caller supplies one, so a task looks the same whichever tool produced it.
-    It matters more over MCP than over HTTP: there is no tool that reads a task
-    back, so a trail left out of these answers would be unreachable rather than
-    merely inconvenient.
+    caller supplies one, so a task looks the same whichever tool produced it —
+    ``get_task`` included, which builds on this dict rather than beside it.
+    Before that tool existed a trail left out of a write's answer was
+    *unreachable* rather than merely inconvenient; it is now readable directly,
+    and the field stays on every answer so an agent needs one shape, not two.
     """
     return {
         "id": task.id,
@@ -605,6 +615,185 @@ async def detach_intermediate_journal_from_task(
     )
 
 
+def _journal_ref_to_dict(ref: TaskJournalRef) -> dict[str, Any]:
+    """One of a task's journals, as a read tool hands it over.
+
+    The date is a **date**, already resolved in the user's timezone — the same
+    one the lapse rule judged the task against. Sending an instant would invite
+    an agent to re-derive the day in UTC and disagree with the verdict beside it.
+    """
+    return {
+        "id": ref.id,
+        "title": ref.title,
+        "date": ref.date.isoformat(),
+        "cancelled": ref.cancelled,
+    }
+
+
+def _read_model_to_dict(model: TaskReadModel) -> dict[str, Any]:
+    """A task as the read tools return it.
+
+    A **superset** of what the write tools return: every field ``_task_to_dict``
+    carries is here, including ``intermediate_journal_ids``, with the resolved
+    journals, the contacts and the lapse added. An agent that learned the shape
+    from ``create_task`` does not have to learn a second one to read the task
+    back.
+    """
+    return {
+        **_task_to_dict(model.task, [ref.id for ref in model.intermediate_journals]),
+        "creating_journal": _journal_ref_to_dict(model.creating_journal),
+        "due_journal": _journal_ref_to_dict(model.due_journal),
+        "intermediate_journals": [
+            _journal_ref_to_dict(ref) for ref in model.intermediate_journals
+        ],
+        "contacts": [
+            {
+                "id": contact.id,
+                "display_name": contact.display_name,
+                "photo_url": contact.photo_url,
+            }
+            for contact in model.contacts
+        ],
+        # Taken from the model rather than recomputed from the reason, so the
+        # flag and the reason can never disagree about the same task.
+        "lapsed": model.lapsed,
+        "lapse_reason": (
+            str(model.lapse_reason) if model.lapse_reason is not None else None
+        ),
+    }
+
+
+def _groups_to_dict(groups: JournalTaskGroups) -> dict[str, Any]:
+    """A journal's tasks, nested under the role each link holds.
+
+    **The roles are the structure here**, unlike the JSON:API endpoint, which
+    lists each task once with its roles as an attribute because the
+    specification forbids a duplicate resource in ``data``. JSON has no such
+    rule, and an agent asked to list tasks "by link role" wants to read the
+    roles off the answer rather than reassemble them — so a task holding two of
+    the journal's roles appears under both, carrying ``link_roles`` so a nested
+    copy still says which groups it is in. Under a ``role`` filter those roles
+    narrow with the groups, so a copy never names a group this answer left
+    empty.
+    """
+    return {
+        "journal_id": groups.journal_id,
+        "groups": {
+            str(role): [
+                {
+                    **_read_model_to_dict(model),
+                    "link_roles": [
+                        str(held) for held in groups.roles_for(model.task.id or 0)
+                    ],
+                }
+                for model in groups.for_role(role)
+            ]
+            for role in TaskLinkRole
+        },
+    }
+
+
+@mcp_unified_error_handler("get_task", "task")
+async def get_task(
+    task_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task to read."),
+    ],
+    task_read_service: TaskReadService = mcp_depends(get_task_read_service),
+) -> str:
+    """
+    Read one task whole: its journals by role, its contacts, and its lapse.
+
+    Use this to check a task's current state before acting on it, or to see what
+    a task you created earlier looks like now. Every journal comes back with its
+    title and its date rather than as a bare id, so no follow-up lookup is needed
+    to describe the task to the user.
+
+    A task is **lapsed** when it is still not done and its due journal has either
+    passed or been **cancelled**. Nothing lapses a done or cancelled task. The
+    reason says which of the two happened, because they call for different
+    follow-ups: a date that went by usually wants the task **retargeted** onto a
+    new future journal, which is also how a lapsed or cancelled task is
+    resurrected, while a cancelled meeting may mean the commitment no longer
+    applies at all. Lapsed is worked out on every read from today's date in the
+    user's own timezone — there is no stored flag, and it is not something to
+    compute yourself.
+
+    A lapsed task is not broken: it can still be completed, reworded, cancelled
+    or retargeted.
+
+    Returns:
+        JSON string with the task's id, text, status and timestamps; its
+        journals by role — the **creating** journal it arose in, the **due**
+        journal it is due in, and the intermediate journals it has passed
+        through, given both as ids and as objects carrying title, date and
+        whether the journal is a cancelled event; its linked contacts; and
+        whether it has lapsed, with the reason.
+    """
+    user_id = await get_current_user_id()
+
+    model = await task_read_service.read_model(user_id, task_id)
+    return json.dumps(_read_model_to_dict(model), indent=2)
+
+
+@mcp_unified_error_handler("list_journal_tasks", "task")
+async def list_journal_tasks(
+    journal_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description="The journal whose tasks to list.",
+        ),
+    ],
+    role: Annotated[
+        TaskLinkRole | None,
+        Field(
+            description=(
+                "Return only tasks holding this role in the journal. Omit for "
+                "all three groups, which is usually what you want."
+            )
+        ),
+    ] = None,
+    task_read_service: TaskReadService = mcp_depends(get_task_read_service),
+) -> str:
+    """
+    List the tasks linked to a journal, grouped by how each one is linked.
+
+    A journal has three groups of tasks: those **due** in it, those **created**
+    in it, and those merely **mentioned** in it through an intermediate link.
+    They are genuinely different things — a task due here is a commitment
+    landing on this day, one created here arose here and is due elsewhere, and a
+    mention is a journal the task passed through.
+
+    A task can appear in **more than one group**: the same journal may be both
+    its anchors, and retargeting a task onto a journal it already mentioned
+    leaves that mention in place. Each copy carries link_roles, so do not count
+    rows across groups as distinct tasks.
+
+    **Every linked task is listed, in every status** — done, cancelled and
+    lapsed included. A journal is where a lapsed task is meant to be found
+    again, so it is marked rather than hidden, and a done task's link to the
+    journal it arose in is part of the record. There is deliberately no status
+    filter: the product has no "everything still outstanding" list, and tasks
+    are worked with on journals and on the home dashboard, nowhere else.
+
+    Tasks are ordered by their due journal's date, soonest first.
+
+    Returns:
+        JSON string with journal_id and a groups object keyed due, created and
+        mentioned, each holding the same task shape get_task returns plus
+        link_roles. A journal of yours with no tasks returns three empty groups;
+        a journal that does not exist or is not yours is an error.
+    """
+    user_id = await get_current_user_id()
+
+    groups = await task_read_service.read_models_for_journal(
+        user_id, journal_id, role=role
+    )
+    return json.dumps(_groups_to_dict(groups), indent=2)
+
+
 def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
@@ -616,3 +805,5 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(unlink_task_from_contact)
     mcp.add_tool(attach_intermediate_journal_to_task)
     mcp.add_tool(detach_intermediate_journal_from_task)
+    mcp.add_tool(get_task)
+    mcp.add_tool(list_journal_tasks)
