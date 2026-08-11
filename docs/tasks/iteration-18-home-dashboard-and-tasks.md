@@ -201,6 +201,22 @@ about and bury the one thing it did. **Since ITER18-003 Phase 4** both routes pu
 provenance and — on the link — an `origin` separating what a person asked for from the link a retarget
 retains.
 
+**Since ITER18-001 Phase 15:** the frontend can reach every task route. `frontend/src/lib/api/tasks.ts`
+exports `taskKeys`, `TaskApiError`, two read hooks (`useTask`, `useJournalTasks`) and eight mutation
+hooks covering the four task writes and both relationship pairs; `frontend/src/types/tasks.ts` mirrors
+the backend schemas, with `TaskReadAttributes extends TaskAttributes` as the API's read shape extends
+its written one. Three things Phases 16–21 inherit rather than re-decide: `details()`, `journalLists()`
+and `upcoming()` are **siblings** under `['tasks']` so a journal's list and the dashboard invalidate
+independently; every mutation refreshes through `invalidateAfterMutation`, and a test forbids a bare
+`invalidateQueries` in the file; every mutation also opts out of the app-wide `mutations.retry: 1`,
+because a create is not idempotent and a refusal here is often the answer rather than a failure; and
+failures carry the JSON:API `code`, so
+`TASK_REOPEN_NOT_ACKNOWLEDGED` is a confirmation to ask for (Phase 18) and
+`TASK_DUE_JOURNAL_NOT_FUTURE` is a field error to render (Phase 20) rather than two toasts telling the
+user something broke. **Nothing renders yet** — no component imports these hooks until Phase 16 — and
+there is no upcoming-window hook, because Phase 14's endpoint does not exist; only its key namespace is
+reserved. See *Task Query Keys* in `docs/architecture/frontend-design.md`.
+
 ### The home page
 
 - `frontend/src/app/page.tsx` renders six static `Card`s (Contacts, Journal, Calendar, Photos, AI
@@ -3499,24 +3515,161 @@ boundary day. Integration — both surfaces with tasks inside, outside, on the b
 cancelled-journal-lapsed; window anchoring for a non-UTC user near midnight; no N+1. E2E deferred to
 Phase 22.
 
-#### Phase 15: Frontend — Task API Client
+#### Phase 15: Frontend — Task API Client ✅ COMPLETE
 
 **Prerequisites:** Phase 13.
-**Estimated diff:** ~90 production → **~360 tracked** (×4)
+**Estimated diff:** ~90 production → **~360 tracked** (×4) · **Actual:** ~866 production →
+**2,406 tracked** (2,406 insertions, 14 deletions across 7 files: 866 production, 1,326 tests,
+207 docs, 7 config — the docs figure counting this entry, as Phase 13's does).
 
-**Acceptance Criteria:**
+**The estimate missed production by ~9.6×, and this time the multiplier was *low*, not high.** 2,406
+against 866 production is **2.8×**, under calibration rule 1's ×4 — a frontend client has one layer to
+test, not the service/REST/MCP three a backend phase multiplies over, so its test share is smaller.
+What the 90 missed is that "a client file plus types" is two files: `types/tasks.ts` (216) has to
+exist before a single hook can be typed, and it mirrors five backend schema shapes rather than one.
+The rest is surface count — the phase reads as "the read surfaces and mutations", which sounds like
+four calls and is **ten routes**: two reads, four task writes, and two relationship pairs.
 
-- [ ] `frontend/src/lib/api/tasks.ts` + types: TanStack Query hooks for the read surfaces and mutations,
-      following the journals client's conventions (query-key factory, error handling, toasts).
-- [ ] **Every mutation routes through `frontend/src/lib/invalidate-after-mutation.ts`**, which cancels
-      in-flight queries before invalidating them. Iteration 17 spent two bug fixes establishing this
-      (issue #1203 and a `fetchNextPage` race) and routed all 77 mutation handlers through it; a new client
-      that reintroduces bare `invalidateQueries` reintroduces the flake.
-- [ ] Query keys are structured so a journal's task list and the dashboard's task section can be
-      invalidated independently.
+**Acceptance criteria, ticked:**
+
+- [x] `frontend/src/lib/api/tasks.ts` + `frontend/src/types/tasks.ts`: `taskKeys`, module-level
+      fetchers, two `useQuery` hooks (`useTask`, `useJournalTasks`) and **eight** `useMutation` hooks
+      covering every write route — create, update, retarget, delete, contact link/unlink and
+      intermediate-journal attach/detach — with the journals client's toasts, `credentials: 'include'`
+      and JSON:API envelopes.
+- [x] Every mutation routes through `invalidateAfterMutation`. **The criterion names
+      `frontend/src/lib/invalidate-after-mutation.ts`; the helper is at
+      `frontend/src/lib/api/invalidate-after-mutation.ts`** — recorded rather than silently corrected,
+      because the wrong path in a criterion is what sends the next reader looking for a second helper.
+      A source-level test asserts the file contains no `invalidateQueries(` call at all, so a later
+      edit cannot reintroduce the race by hand.
+- [x] `details()`, `journalLists()` and `upcoming()` are **siblings** under `['tasks']`, never nested,
+      so a journal's task list and the dashboard's task section invalidate independently. Two tests
+      assert it in both directions rather than leaving it to inspection.
+
+**Decisions taken (Phase 15):**
+
+1. **Failures throw `TaskApiError`, not a bare `Error`.** Every other client in `lib/api/` collapses a
+   response to `errors[0].detail` and discards the `code` beside it. Two later phases cannot work
+   without that code — Phase 18 has to tell `TASK_REOPEN_NOT_ACKNOWLEDGED` from a real failure to
+   offer *"reopen it anyway"*, and Phase 20 has to put `TASK_DUE_JOURNAL_NOT_FUTURE` against the
+   due-journal field — and the alternative is matching on prose. The error carries `status`, `code`
+   and the refusal's `meta`. Scoped to this client; nothing else was retro-fitted.
+2. **`useRetargetTask` raises no toast for `TASK_REOPEN_NOT_ACKNOWLEDGED`.** That 409 is the service
+   asking whether reopening a completed task was intended — a confirmation gate, not a failure. A red
+   toast under the Phase 18 confirmation dialog would tell the user something went wrong when nothing
+   has. Every other retarget failure still toasts, which is asserted separately so the exception
+   cannot widen by accident.
+3. **No `setTimeout` before invalidating.** `useCreateJournal`/`useUpdateJournal`/`useDeleteJournal`
+   delay theirs by 150ms; the journal-tag client (#1204) already dropped the timer and explains why in
+   its docstring — the write commits in the service layer before the response is sent, so there is no
+   read-after-write race to wait out. This follows the newer of the two conventions.
+4. **`journalLists()` is invalidated as a prefix, not per journal id.** A retarget changes *two*
+   journals' lists — the new due journal and the one being left, which becomes an intermediate link —
+   and the journal being left is only knowable from the response. Reconstructing the set per mutation
+   would be a second definition of what changed, free to drift from the first; these collections are
+   unpaginated and bounded by their journal, and only mounted ones refetch.
+5. **A mention link leaves `upcoming()` alone.** That listing selects on the *due* journal, so
+   attaching or detaching an intermediate link cannot move a task in or out of a forward date window.
+   Asserted as a negative — the test fails if `upcoming()` appears among the invalidated key sets —
+   because an over-broad invalidation is invisible in a passing suite otherwise.
+6. **No upcoming-window hook.** Phase 14 is not built, so the endpoint would 404. The key namespace is
+   reserved anyway, because the third criterion is about the *shape* of the keys and retrofitting a
+   sibling namespace later is exactly the change that quietly nests it.
+7. **`frontend/.gitignore`'s `types/` rule was anchored to `/types/`.** Unanchored, it matched
+   `frontend/src/types/` as well as the `frontend/types/` declaration tree `.design-sync/prepare.mjs`
+   emits, so `src/types/tasks.ts` was **silently untracked** — `git add -A` reported six files and
+   staged five. The existing modules under `src/types/` are unaffected only because they predate the
+   rule, which is why nobody had hit it. `index.d.ts` was anchored with it: same defect, same commit,
+   one line away.
+8. **Task mutations opt out of the app-wide `retry: 1`.** `lib/providers.tsx` retries every failed
+   mutation once, a second later. That is wrong here twice over: **`POST` create is not idempotent**,
+   so a request that succeeded on the server but lost its response records the same commitment twice;
+   and **a refusal on this surface is often the answer rather than a failure**, so retrying a
+   `TASK_REOPEN_NOT_ACKNOWLEDGED` would put Phase 18's confirmation dialog a retry-delay behind the
+   click and log a second refusal for every one the user resolves. Found in review — decision 2 was
+   written as though the 409 reached `onError` directly, and it does not. The two tests that pin it
+   build a client carrying the *app's* mutation defaults rather than the suite's `retry: false`, or
+   they would assert nothing.
+9. **A deleted task's detail is removed from the cache, not invalidated.** The first version omitted
+   the detail key from the delete refresh, reasoning that refetching a deleted task would only 404.
+   True, and an argument against *invalidating* rather than for doing nothing: the entry stays fresh
+   for the app-wide five-minute `staleTime` and resident for the ten-minute `gcTime`, so a `useTask`
+   mounting after the delete would render the deleted task from cache without issuing a request.
+   `removeQueries` is the right tool and is not an invalidation, so the no-bare-`invalidateQueries`
+   rule is untouched.
 
 **Required Test Coverage:** unit — hook behaviour against a mocked client, and a test pinning that
 mutations cancel before invalidating, in that order.
+
+**Delivered:** **52** unit tests, all in `frontend/src/lib/api/__tests__/tasks.test.ts`, following the
+`contact-tag-mutations.test.ts` / `tag-management-mutations.test.ts` idiom — mocked `fetch`, mocked
+`sonner`, mocked constants, a real `QueryClient`. The ordering requirement is a table-driven
+`it.each` over all eight mutation hooks asserting
+`lastCallOrder(cancelSpy) < firstCallOrder(invalidateSpy)`, **guarded by an equal-call-count
+assertion**: without it a hook using bare `invalidateQueries` would leave `cancelSpy` with no calls,
+`Math.max()` of nothing is `-Infinity`, and the ordering assertion would pass vacuously.
+
+**Mutation checks.** Six deliberate breakages across two rounds, each reverted after confirming it was
+caught: swapping one refresh helper to `queryClient.invalidateQueries` failed 4 tests; adding
+`upcoming()` to the mention-link refresh failed the negative assertion; deleting the retarget's
+no-toast branch failed its test; and after the review, dropping the two `NO_RETRY` opt-outs and the
+`forgetTask` call failed 3 more. These are the assertions the acceptance criteria and the two review
+fixes rest on, so a green suite that could not fail on them would have been worth less than it looked.
+
+**Acted on from the review, before the gates were re-run.** Seven findings; the first two are defects
+in the client's behaviour rather than in its presentation.
+
+- **The app-wide `mutations.retry: 1` had been overlooked entirely** — see decision 8. The suite's own
+  `QueryClient` sets `retry: false`, so nothing in 46 passing tests could have surfaced it. This is
+  the second time this phase that a test's *fixture* was the reason a defect was invisible.
+- **`useDeleteTask` left the deleted task's detail cached and fresh** — see decision 9. The docstring
+  read as though the case had been considered and closed, which is worse than not mentioning it.
+- **`TaskUpdateInput` stated a constraint its type did not encode.** The doc comment said a caller
+  must send text or status, while both fields were plain optionals, so `mutate({ taskId })` compiled
+  and produced a 400. Now a union of two arms, each requiring one attribute — the three legitimate
+  shapes still type-check and the empty one does not.
+- **`contact_ids` and its own comment disagreed about `[]`.** The guard tested truthiness and an empty
+  array is truthy, so a picker left empty sent `contact_ids: []` beside a comment saying "no contacts
+  is the absence of the field". Guarded on length, with a test.
+- **Three weak spots in the suite.** A `useJournalTasks` test asserted only that two key factories
+  differ — a fact an earlier test already pins exactly — and never rendered the hook; it now proves
+  the two listings issue two requests rather than one serving the other from cache. The source check's
+  `toMatch(/invalidateAfterMutation\(/)` half was trivially true and was dropped. `useUnlinkTaskContact`
+  and `useDetachTaskIntermediateJournal` had no key-set assertions of their own, protected only by
+  sharing a helper with their twins; both now have one, including the `upcoming()` negative.
+- **Two claims in `frontend-design.md` were wrong.** It said `TaskApiError` carries status/code/meta
+  "rather than collapsing the response to its `detail` string" — it does both, `message` *is* the
+  detail — and it listed `upcomingWindow` as feeding the dashboard with no note that nothing consumes
+  it yet, sending a reader of the architecture doc alone to look for a hook that does not exist.
+
+**Known limit, recorded rather than fixed.** `frontend/src/types/tasks.ts` is a hand transcription of
+`backend/app/api/tasks/schemas.py`, and every fixture in the suite is typed *from those types*. So the
+read-shape and listing tests assert that a hand-written object survives `response.json()` unchanged,
+which any pass-through implementation satisfies: if the backend renamed `lapse_reason`, added a
+required attribute or changed `date` to a datetime, this suite would stay green. The transcription was
+checked against the schemas by hand and against the three `core_shared` enums value-for-value, and
+Phase 22's e2e is the eventual backstop, but **there is no mechanism keeping the two in step** and a
+generated client or a contract test is out of scope for a phase this size.
+
+**E2E:** none, and not a deferral of convenience — no component mounts these hooks until Phase 16, so
+there is no page for Playwright to drive. ITER18-001's e2e lands in Phase 22, which owns the
+`TestDataManager` task helpers and the lapsed-fixture recipe. **Integration:** none either; the phase
+adds no Python, and the routes these hooks call already carry their own integration coverage from
+Phases 5–13.
+
+**Docs:** `frontend-design.md` gained *Task Query Keys* — the three sibling namespaces in a table,
+why the arrangement is a contract rather than a naming choice, the rule that a mutation names only the
+namespaces its change can reach (with the mention-link exception as the worked example), `TaskApiError`
+and the codes surfaces branch on, and the no-timer rule. `api-design.md` is unchanged: it documents the
+backend surface, and no backend file was touched.
+
+**Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
+clean, 0 errors (the 112 remaining warnings are pre-existing Playwright-plugin ones in `tests/e2e/`).
+The full Jest suite rather than the new file alone, because `lib/constants.ts` is imported app-wide:
+**166** suites and **1,810** tests, all passing. Re-run in full after the review fixes rather than
+trusting the pass that preceded them. No backend gates and no e2e — no Python file and no rendered
+surface changed.
 
 #### Phase 16: Frontend — Journal Task Display
 

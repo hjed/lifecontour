@@ -32,6 +32,20 @@ export const API_ENDPOINTS = {
       `/api/journals/incomplete-outdoor-activities/${journalId}/undismiss`,
     OUTDOOR_DASHBOARD: '/api/journals/outdoor-dashboard',
   },
+  // Tasks hang off a journal path to create and list, but are reached by their
+  // own id for everything else — there is deliberately no task collection.
+  TASKS: {
+    BY_ID: (id: string) => `/api/tasks/${id}`,
+    FOR_JOURNAL: (journalId: string) => `/api/journals/${journalId}/tasks`,
+    RETARGET: (id: string) => `/api/tasks/${id}/retarget`,
+    CONTACTS: (id: string) => `/api/tasks/${id}/relationships/contacts`,
+    CONTACT: (id: string, contactId: string) =>
+      `/api/tasks/${id}/relationships/contacts/${contactId}`,
+    INTERMEDIATE_JOURNALS: (id: string) =>
+      `/api/tasks/${id}/relationships/intermediate-journals`,
+    INTERMEDIATE_JOURNAL: (id: string, journalId: string) =>
+      `/api/tasks/${id}/relationships/intermediate-journals/${journalId}`,
+  },
   TEMPLATES: {
     BASE: '/api/templates',
     BY_ID: (id: string) => `/api/templates/${id}`,
@@ -181,6 +195,14 @@ export const SUCCESS_MESSAGES = {
   TAG_CREATED: 'Tag created successfully',
   TAG_UPDATED: 'Tag updated successfully',
   TAG_DELETED: 'Tag deleted successfully',
+  TASK_CREATED: 'Task created successfully',
+  TASK_UPDATED: 'Task updated successfully',
+  TASK_DELETED: 'Task deleted successfully',
+  TASK_RETARGETED: 'Task moved to its new due journal',
+  TASK_CONTACT_LINKED: 'Contact linked successfully',
+  TASK_CONTACT_UNLINKED: 'Contact unlinked successfully',
+  TASK_JOURNAL_ATTACHED: 'Journal linked successfully',
+  TASK_JOURNAL_DETACHED: 'Journal unlinked successfully',
   CREATE_SUCCESS: 'Created successfully',
   UPDATE_SUCCESS: 'Updated successfully',
   DELETE_SUCCESS: 'Deleted successfully',
