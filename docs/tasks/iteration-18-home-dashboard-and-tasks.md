@@ -17,14 +17,16 @@ that same batched assembly. **A task is now readable, not only writable, and the
 is built on exists**; every task *surface* the frontend needs is now served, and what remains is the
 frontend itself (15–20), the journal-list indicator whose backend half is still to come (21), and the
 e2e (22).)
-**ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
-for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
-blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
-survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw integrity
-error). Delivery rule 9 is satisfied for both shipped journal operations; **the rest of ITER18-001 is
-next**, per the Sequencing Strategy. ITER18-002's remaining phases (4: cancellation as a lapse reason,
-5: the delete-failure UI and its e2e, 6: the retarget/merge lock order) depend on later ITER18-001
-phases.
+**ITER18-002 Phases 1, 2, 3 and 4 complete** (the delete guard: journal deletion is refused,
+explanatorily, for any journal anchoring a task, and that refusal now reaches REST and MCP callers as
+machine-readable blockers alongside the prose; merge, which is never refused — it re-points task links
+onto the survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw
+integrity error; and cancellation, the third journal operation, now pinned end to end — a journal
+really cancelled, by a user editing its event status or by either calendar-sync route, lapses the
+not-done tasks due in it with the cancellation reason, while touching none of their links and never
+being refused). Delivery rule 9 is satisfied for all three shipped journal operations; **the rest of
+ITER18-001 is next**, per the Sequencing Strategy. ITER18-002's remaining phases are 5 (the
+delete-failure UI and its e2e) and 6 (the retarget/merge lock order).
 **ITER18-003 Phases 1–4 complete** (task created and deleted; text updated and status changed as
 one `TaskUpdated`; the due-journal retarget, carrying any reopen; and journal linked/unlinked, which
 took the automatic link out of the retarget's payload and gave it its own event — so a retarget now
@@ -3275,6 +3277,17 @@ surfaces is a triple; two shapes over three surfaces has been twice that here.
   through its own JSON:API handler, so a bad query parameter reads like a bad body. Found by the test,
   which had assumed FastAPI's bare 422; the endpoint's published docs say 400.
 
+**Settled with ITER18-002 Phase 4 — the cancellation assertions on these surfaces.** This phase
+asserts, on both, that a not-done task whose due journal is cancelled comes back lapsed with
+`lapse_reason` = `due_journal_cancelled` — not merely lapsed, since a passed-date journal would
+satisfy that too. It arranges that with `mark_journal_as_event`, which is the right level for a
+phase whose subject is *serialisation*. **The matching assertions after a real cancellation live in
+ITER18-002 Phase 4**, which ran in parallel and merged second: `GET /api/tasks/{id}` and
+`GET /api/journals/{id}/tasks` after a user's type-data edit, and `get_task` after a sync
+cancellation, all in
+`tests/integration/tasks/test_journal_cancellation_lapse_integration.py` and
+`tests/integration/mcp/test_task_tools_mcp.py`. Nothing is outstanding here.
+
 **Required Test Coverage:** unit — role grouping and serialisation. Integration — both surfaces against real
 journals including a cancelled event journal; the cross-user 404; a query-count assertion proving the nested
 collections do not N+1. E2E deferred to Phase 22.
@@ -3475,6 +3488,15 @@ gates — the phase changes no frontend file.
 - [x] MCP `list_upcoming_tasks` with the same default and semantics, in the same PR.
 - [x] The response carries task text, due journal id/title/date and linked contacts, in one query per
       collection. This is the query ITER18-004's tasks section consumes, so its shape is settled here.
+
+**Inherited from ITER18-002 Phase 4 — the exclusion assertion this phase owes.** That phase's required
+coverage names "the upcoming-window listing (where it must be excluded)", and the listing did not exist
+when it ran. The required fixture above is that assertion, and the cancelled journal must be cancelled
+**by the sync processor**, not by writing `journal_calendar_info` — a test that seeds the post-condition
+of an operation has tested one side of a seam and assumed the other. Reuse
+`tests/integration/core/integrations/journal_sync_seeding.py`. Note the interaction with the fixture's
+own constraint: a journal inside a forward window is near-future, so the single-instance cancellation
+marks it cancelled rather than attempting a delete.
 
 **Required Test Coverage:** unit — window arithmetic and ordering, including a task due exactly on the
 boundary day. Integration — both surfaces with tasks inside, outside, on the boundary, done, cancelled and
@@ -4415,27 +4437,234 @@ future-dated rule is a creation-time invariant, so the service cannot produce a 
 to merge around. **No e2e and no frontend code**, as the phase specifies — the delete-failure UI and its
 e2e are Phase 5.
 
-#### Phase 4: Cancellation as a Lapse Reason
+#### Phase 4: Cancellation as a Lapse Reason ✅ COMPLETE
 
 **Prerequisites:** ITER18-001 Phase 12.
-**Estimated diff:** ~100 production → **~400 tracked** (×4)
+**Estimated diff:** ~100 production → **~400 tracked** (×4) · **Actual:** **~16 production** →
+**~1,135 tracked** across 7 files (1,135 insertions against 263 deletions: production 16, of which 3
+are executable and the rest the docstring explaining the contract; tests 908 — 535 the new
+integration file, 192 the extracted harness, 122 re-pointing the sync suite at it against 243 lines
+lifted out of it, 59 two unit tests; docs 211, of which 23 architecture and the rest this entry).
+
+**The multiplier is meaningless here and the estimate was wrong in an interesting way: this phase had
+almost no production code left to write.** Its four acceptance criteria are all *properties of code
+Phases 1–3 already shipped* — the delete guard's cancel-instead-of-delete fallback, and Phase 12's
+lapse rule. The ~100-line production estimate was made before any of that existed and quietly assumed
+Phase 4 would build the cancellation path; by the time the phase ran, the path was there and the only
+thing missing was **proof that its ends meet**. Well over a thousand tracked lines against 16 of
+production is not a test-volume overrun, it is what a **seam phase** costs — and the size is set by
+the number of independent routes into the seam, which review showed was three rather than the two
+the phase first counted.
+
+**Suggested calibration amendment (rule 16).** A phase whose criteria are all "X already does Y"
+should be estimated as **tests + harness + docs, with production at or near zero**, and its size
+driven by *how many independent routes reach the seam*. Here there are two — the single-instance
+cancellation and the series fan-out — and neither is evidence for the other, so the central journey
+is written twice. The tell that a phase is this shape: every acceptance criterion can be phrased as
+an assertion rather than an instruction. ITER18-003 Phase 10 (a merge re-points anchors and publishes
+no task event) is the next phase this catches.
 
 **Acceptance Criteria:**
 
-- [ ] Cancelling a journal changes no task links.
-- [ ] A not-done task whose **due** journal is cancelled reads as lapsed with the cancellation reason
-      through every read surface — the behaviour derived in ITER18-001 Phase 12, pinned here end to end
-      against real journal cancellation rather than a constructed read model.
-- [ ] Cancelling a journal that is a task's **creating** journal changes nothing about the task.
-- [ ] Cancelling a journal that anchors a task is never blocked — cancellation is the escape hatch the
-      delete guard steers users toward.
-- [ ] The UI wording for the two lapse reasons ships in ITER18-001 Phase 16; this phase adds no frontend
-      code.
+- [x] Cancelling a journal changes no task links. — asserted from the tables rather than the read
+      model, over every link a task can hold: both anchors, `status`, `text`, an intermediate journal
+      and a contact. The cancellation writes only `journal_calendar_info` and the external link, so
+      there is nothing for it to disturb; the test exists because that is a property of the current
+      implementation rather than of the schema.
+- [x] A not-done task whose **due** journal is cancelled reads as lapsed with the cancellation reason
+      through every read surface — pinned end to end against real journal cancellation rather than a
+      constructed read model. — every *act* of cancelling goes through one of the **three** real
+      write paths (a user's `PUT` to the EVENT type data, and calendar sync's single-instance and
+      whole-series routes), and the verdict is read back through `TaskReadService.read_model` **and
+      through all three shipped read surfaces**: `GET /api/tasks/{id}`, `GET /api/journals/{id}/tasks`
+      and MCP `get_task`. The one test that seeds an already-cancelled journal is the
+      **un**-cancellation test, where that is the starting position rather than the assertion. Only
+      the upcoming-window listing is still deferred, because it does not exist yet — see below.
+- [x] Cancelling a journal that is a task's **creating** journal changes nothing about the task. —
+      the ref is marked `cancelled` and the verdict is unchanged. Also asserted for a **mentioned**
+      journal, which the criteria do not name but the rule has the same obligation toward.
+- [x] Cancelling a journal that anchors a task is never blocked. — asserted with a not-done, a done
+      **and** a cancelled task anchored to the same journal: the event reports success, the journal
+      survives, and it ends up cancelled rather than deleted.
+- [x] The UI wording for the two lapse reasons ships in ITER18-001 Phase 16; this phase adds no
+      frontend code. — no frontend file changed, and no e2e, as stated.
+
+**A deviation that opened and closed inside the phase, which is worth recording as a sequencing
+lesson.** The required coverage names `get_task`, `list_journal_tasks` and the upcoming-window
+listing. When this phase was written **none of the three existed** — no read route, no read tool, and
+`TaskReadService` with no production caller at all — because they are ITER18-001 Phases 13 and 14,
+while this phase's own prerequisite is Phase 12. So the seam was pinned one layer down at
+`TaskReadService.read_model` and the surface halves were written into Phases 13 and 14.
+
+**Then Phase 13 merged while this PR was in review, and the deviation's justification evaporated.**
+`GET /api/tasks/{id}`, `GET /api/journals/{id}/tasks`, `get_task` and `list_journal_tasks` all exist
+now. Phase 13 does assert the cancellation lapse on each of them — but against a journal it cancels
+by writing `journal_calendar_info` directly, which proves the *serialisation* and assumes the write:
+precisely the split this phase exists to close. **So the deviation is closed here rather than left
+open**, with three tests that ask the shipped surfaces after a **real** cancellation: `GET
+/api/tasks/{id}` and `GET /api/journals/{id}/tasks` after a user's type-data edit, and MCP `get_task`
+after a sync cancellation. Only the upcoming-window listing (Phase 14) remains deferred, since it
+still does not exist.
+
+**The lesson is about parallel phases, not about this one.** Two phases were in flight against the
+same seam from opposite sides, and the one that merged first covered it in the weaker of the two
+ways available — not wrongly, but with the arrangement its own subject made natural. A note written
+into a phase that is *already being implemented elsewhere* cannot reach it. **Where two phases share
+a seam, the assertion belongs to whichever ships last, and that has to be decided when the second
+one is planned rather than recorded as a note in the first.**
+
+**Decisions taken (Phase 4):**
+
+- **A "constructed read model" turned out to include the constructed *journal*.** Phase 12 already
+  tested `DUE_JOURNAL_CANCELLED` against real rows — but the cancelled row was one the test wrote with
+  `mark_journal_as_event(..., EventState.CANCELLED)`. That proves the read half and assumes the write
+  half. What this phase adds is the only thing left: that the state a *real* cancellation leaves
+  behind is the state the read looks for. **The general form is worth keeping: an integration test
+  that seeds the post-condition of the operation it is about has tested one side of a seam and
+  asserted the other.**
+- **All three cancellation routes are tested, because none is evidence for the others.** A single
+  `journal_event.cancelled` and the `journal_event.series_cancelled` fan-out reach
+  `_mark_journal_cancelled` through different code — the fan-out decides per instance inside a
+  per-item savepoint — and **a user setting the event editor's status to "Cancelled"** reaches the
+  column through `JournalWriteService.update_type_data`, sharing nothing with either. The mutation
+  checks confirmed each split earns its keep: removing the series fallback fails **exactly one**
+  test, removing the single-instance fallback fails **seven**, and stopping the type-data update
+  from persisting `event_state` fails **exactly the two** user-path tests and none of the sync ones.
+- **The user-facing route was missed on the first pass and added after review — the correction is
+  the most valuable thing in this phase.** The phase originally recorded that *no* user-facing
+  cancellation existed and that `_mark_journal_cancelled` was the only writer. That was wrong:
+  `event_state` is an editable field of the EVENT type data, exposed by `EventTypeEditor` and
+  writable over `PUT /api/journals/{id}/types/EVENT/data`, and there was already a shipped test
+  asserting that endpoint accepts `"cancelled"`. **The error came from searching for a
+  cancel-journal *operation*** — an endpoint, tool or service method with a cancelling name — when
+  the capability is a *field on an existing update*. Two independent agent investigations repeated
+  the same search and reached the same wrong answer; the PR review, which reads the API schema and
+  the editor rather than the call graph, found it immediately. **Carry-forward, and it generalises
+  well past this phase: "no capability X exists" is a claim about every way X could be spelled, and
+  a name-shaped search cannot establish it. Before recording an absence, look at the surface a user
+  touches — the form, the request schema's enum, the editor — because a capability expressed as a
+  field will not appear in any search for a verb.** It also cost real coverage, not just accuracy:
+  the route a person actually takes was the one route the phase had no test for, and it is the one
+  the specification's cancel-rather-than-delete steer points at.
+- **A second enum contract, found in review round 2, and it protects against data loss rather than a
+  wrong read.** The first pass bound `event_state` from its enum and left the link's `sync_status`
+  as a literal, with a docstring asserting that "nothing reads it to decide anything". **That was
+  wrong**: `_should_delete_cancelled_instance` checks `link_sync_status == "cancelled"` *first*,
+  and it is the idempotency guard that makes cancellation sticky — marking a journal cancelled bumps
+  the link's `updated_at`, which erases the edit-protection signal, so without that check a
+  redelivered cancellation would **delete** a journal that was deliberately protected on the first
+  pass. Both ends now bind `ExternalEventLinkSyncStatus.CANCELLED.value`. **The lesson is about how
+  the wrong claim got written: it was reasoned from the field's *name* — "sync status sounds like
+  bookkeeping" — rather than from its readers. A literal is safe only if you have looked for every
+  comparison against it, and `grep` for the value is the cheap way to do that.** The `'synced'`
+  writes elsewhere in the processor are still literals and are genuinely unread by any cancellation
+  decision; that remains a tidy-up of its own.
+- **The one production change is five lines, and it is the seam's other end.**
+  `_mark_journal_cancelled` typed `'cancelled'` into its `UPDATE` while `find_cancelled_journal_ids`
+  binds `EventState.CANCELLED.value` — with a comment saying why, that renaming the member must not
+  leave a query silently matching nothing. The same hazard pointing the other way is worse: a *write*
+  that drifted from the enum leaves every task whose due journal was cancelled quietly un-lapsed,
+  with nothing failing. Now bound from the enum on both ends, and the unit test compares them **to
+  each other** — reading the value out of the *compiled* query — rather than each to `EventState`,
+  which would let both drift together.
+- **The phase had no conventional red phase for its integration tests, and the mutation checks are
+  the honest substitute.** All nine passed the moment they were written, because the behaviour was
+  already correct; that is the expected outcome for a seam phase and not evidence of anything. They
+  were mutation-checked **before** moving on rather than at the end, which is the only ordering that
+  makes "tests first" mean something when there is no production code to make them pass.
+- **The sync harness was extracted rather than copied.** `_processor`, `_sync_event`,
+  `_series_cancelled_event`, `_create_calendar`, `_event_state`, `_journal_exists` and
+  `_link_recurring_id` moved from `test_journal_series_sync_processor.py` into
+  `tests/integration/core/integrations/journal_sync_seeding.py`, taking `user_id`. The
+  `recorded_statements` precedent from Phase 12: a second copy of a harness whose correctness is not
+  obvious is the kind of duplication that drifts. The sync suite keeps ownership because it owns the
+  processor, and the tasks suite imports across — the direction traffic already went, since that file
+  already imported `tests.integration.tasks.task_seeding`.
+- **The mentioned-journal test seeds its journal *near* future, deliberately.** Nothing anchors a
+  mentioned journal, so the delete guard has no reason to refuse and a far-future instance would
+  simply be **deleted** — a real behaviour, but a different one. Six hours out puts it in the
+  fan-out's "cancel, don't delete" bucket, which is the arrangement the test is actually about.
+- **Every journal in the file is ten days out.** The date cause therefore demonstrably cannot be what
+  fired, which is what makes "lapsed" mean "cancelled" here without a timezone argument. The
+  day-boundary cases belong to the rule and are Phase 12's; repeating them would be testing
+  `derive_lapse_reason` a third time.
 
 **Required Test Coverage:** integration — cancel a due journal and observe the lapse with the cancellation
 reason through `get_task`, `list_journal_tasks` and the upcoming-window listing (where it must be excluded);
 done and cancelled tasks unaffected; cancelling a creating journal is inert; cancellation is never blocked.
 No unit work beyond what Phase 12 covers. No e2e (Phase 5).
+
+**Delivered: 15 integration tests and 4 unit tests.**
+
+- **Integration — the shipped read surfaces (3):** added once ITER18-001 Phase 13 merged and made
+  them exist. `GET /api/tasks/{id}` and `GET /api/journals/{id}/tasks` after a user's real
+  cancellation (in this phase's own file), and MCP `get_task` after a real *sync* cancellation (in
+  `tests/integration/mcp/test_task_tools_mcp.py`, beside Phase 13's seeded counterpart so the pair
+  reads as one story). Each asserts `lapse_reason` rather than merely `lapsed`, since a passed-date
+  journal would satisfy the weaker claim; each journal is a week out, so it cannot.
+
+- **Integration — the user's own route (2):** added after review, in the same file. A task due in a
+  confirmed event journal is not lapsed; a real `PUT /api/journals/{id}/types/EVENT/data` through the
+  authenticated client sets the status to cancelled; the task reads as lapsed with
+  `DUE_JOURNAL_CANCELLED`. And the reverse — setting the status back to *confirmed* un-lapses it,
+  which only this path can do and which is the second demonstration that the lapse is derived on
+  every read rather than recorded. Mutation-checked by stopping the type-data update from persisting
+  `event_state`, which fails **exactly these two** and none of the sync-driven ten.
+- **Integration — the sync routes (10):** `backend/tests/integration/tasks/test_journal_cancellation_lapse_integration.py`.
+  *The lapse (6):* a not-done task due in a future synced instance is not lapsed, is cancelled, and
+  then is — the transition asserted on one set of rows, because the lapse alone would pass against a
+  rule that lapsed everything and the control alone against one that lapsed nothing; the series
+  fan-out reaching the same verdict by the other route, with `deleted=0, cancelled=1` and the journal
+  still standing; the `cancelled` flag landing on the due ref and **not** on the creating or mention
+  refs, over three distinct journals; a done and a cancelled task not lapsing, parametrised, with
+  their own status asserted untouched; and **the recovery the specification names** — retargeting off
+  the cancelled journal un-lapses the task, which is the test that shows the lapse is *derived* rather
+  than sticky, since the retarget retains the cancelled journal as a mention and a rule that recorded
+  the cancellation against the task would leave it lapsed forever. *Inert cancellations (2):* the
+  creating journal and a mentioned journal, each marked on its ref and each changing no verdict. *The
+  task itself (2):* every link unchanged, read back from `tasks`, `task_intermediate_journals` and
+  `task_contacts`; and a journal anchoring all three task statuses cancelling without being blocked.
+- **Unit (4):** `backend/tests/unit/core/integrations/test_journal_outbox_event_processor.py` — the
+  event state is bound from `EventState` and not inlined in the SQL, and the value written equals the
+  one the compiled cancellation query sends. Both confirmed **red** against the literal before the
+  change. Round 2 added the same pair for the link's `sync_status`: the write binds
+  `ExternalEventLinkSyncStatus.CANCELLED.value`, and the sticky-cancellation guard is asserted to
+  compare against the enum rather than a literal. That last one reads the guard's **source**
+  deliberately — the behaviour it protects only appears on a *second* delivery of the same event,
+  which the integration suite already covers but which cannot distinguish a matching pair of
+  literals from a matching pair of enum references.
+- **Mutation checks, run rather than argued.** Neutering `derive_lapse_reason`'s cancellation branch
+  fails **3**; making `_mark_journal_cancelled` write `'confirmed'` fails **all** of them, which is
+  the check that shows the file is testing the seam rather than the rule; removing the series fallback
+  fails **exactly the fan-out test**; removing the single-instance fallback fails **7**; pointing the
+  lapse at the *creating* journal's flag fails the **2** tests that use three distinct journals — the
+  creating-journal test is the discriminator, and the tests where creating equals due cannot detect
+  it, which is why both shapes are present; and letting a cancelled *mention* count toward the lapse
+  fails the **2** mention-bearing tests, including the retarget one. Reverting the enum binding fails
+  both unit tests.
+- **One mutation result had to be thrown away and re-run, and the reason is worth recording.** A
+  mutation was applied while a wide integration run was still in flight against the same test
+  database, and the two sessions fought: the wide run came back with 3 failures and 41 errors, and the
+  mutation named the wrong tests. Both numbers were artefacts. **The integration fixture is a single
+  savepoint-bound transaction per test but the *schema* is shared, so two pytest sessions in one
+  workspace are not independent** — the same hazard as the recorded workspace-env port collision,
+  reached from inside one worktree rather than across two. Mutation checks and suite runs are
+  serialised here from now on; the results above are all from clean serial runs.
+- **E2E:** none — deferral taken as the phase states. No frontend file changed.
+- **Docs:** `docs/architecture/domain-architecture.md`'s *Task read model and lapsed derivation*
+  gained *where a cancelled journal comes from* (the single writer, its two routes, and why a due
+  journal always takes the delete-guard fallback), the write/read enum contract, and what cancellation
+  does **not** touch.
+- **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` and `core_shared`;
+  `mypy .` clean over **895** backend files and **129** in `core_shared`; the full `tests/unit/` suite
+  (**3,328** tests); and `tests/integration/tasks/`, `tests/integration/core/integrations/`,
+  `tests/integration/journal/`, `tests/integration/api/` and `tests/integration/mcp/` — **1,796**
+  tests, run in three serial chunks rather than one, for the shared-schema reason above. No frontend
+  or e2e gates: the phase changes no frontend file.
+- **Reviewed independently against this document and the specification**, with no findings. The
+  review verified for itself that the three named read surfaces do not exist, that the deferral notes
+  landed in ITER18-001 Phases 13 and 14, that re-pointing the sync suite changed no test's meaning,
+  and that no other production code compares `event_state` against a hardcoded string.
 
 #### Phase 5: Frontend — Delete Failure Explanation and E2E
 
@@ -4448,6 +4677,24 @@ No unit work beyond what Phase 12 covers. No e2e (Phase 5).
       can be actioned, with working navigation.
 - [ ] The dialog continues to steer toward cancelling the journal rather than deleting it.
 - [ ] A delete that succeeds is unchanged from today's behaviour.
+
+> **Note from Phase 4 — where the steer actually leads.** Cancelling a journal is a **type-data
+> edit**, not an operation of its own: the event editor's *Event Status* select offers "Cancelled"
+> and saves through `PUT /api/journals/{id}/types/EVENT/data`. So the steer is sound and this phase
+> inherits no gap — but the dialog should point somewhere specific, because "cancel this journal
+> instead" is only actionable if the user knows the control is the event editor's status field, and
+> it only exists for **EVENT**-typed journals. For a note journal there is no cancelled state at all,
+> and the only routes out of a blocked delete are the task actions the blocking-task links already
+> lead to. Worth handling both cases in the wording.
+>
+> **This corrects a finding Phase 4 first recorded here and got wrong** — it claimed no user-facing
+> cancellation existed anywhere. Caught by the PR review. The claim came from searching for a
+> *cancel-journal operation* — an endpoint, tool or service method — when the capability is a field
+> on an existing update, which is exactly the shape that search misses. Two separate agent
+> investigations made the same mistake before a reviewer that reads the surface, not the call graph,
+> found it in one pass. **Carry-forward: "no capability X exists" is a claim about every way X could
+> be spelled, and a search for X-shaped names cannot establish it. Check the surface a user
+> touches — the form, the schema's enum, the editor — before recording an absence.**
 - [ ] E2E: deleting a journal with a task due in it shows the explanation; following the link reaches a
       journal where the task can be actioned; after cancelling or retargeting the task, the delete succeeds;
       merging a journal that anchors a task succeeds. Deterministic per-test fixtures, built with the

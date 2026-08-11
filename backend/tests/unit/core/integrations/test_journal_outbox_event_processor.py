@@ -6,13 +6,18 @@ outbox events from integration workers, including invitee sync and
 InboundFieldMerger protected-edit logic.
 """
 
+import inspect
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from core_shared.models.journal_external_event_link import (
+    ExternalEventLinkSyncStatus,
+)
 from core_shared.models.journals import EventDateRange, Journal
+from core_shared.models.journals.event_state import EventState
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -24,6 +29,7 @@ from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessingError,
     JournalOutboxEventProcessor,
 )
+from app.core.journal.adapters.sql.calendar_info_repository import _FIND_CANCELLED
 
 CALENDAR_ID = "12345678-1234-5678-1234-567812345678"
 SERIES_ID = uuid4()
@@ -989,6 +995,106 @@ class TestJournalOutboxEventProcessorCancelled:
         assert result["reason"] == "no_existing_journal_id"
         # Should not have called execute at all
         mock_connection.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_event_state_is_bound_from_the_enum(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The state written comes from ``EventState``, not a typed-out string.
+
+        This write is one half of a contract whose other half —
+        ``find_cancelled_journal_ids`` — already compares against the enum's
+        value for the stated reason that renaming the member must not leave a
+        query silently matching nothing. A literal here is the same hazard
+        pointing the other way, and it is the hazard that matters more: a write
+        that drifts leaves every task whose due journal was cancelled quietly
+        un-lapsed, with nothing failing.
+        """
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+        )
+        mock_connection.execute.return_value = _mock_empty_result()
+
+        await processor.process_event(event)
+
+        statement, params = mock_connection.execute.call_args_list[1].args
+        assert params["event_state"] == EventState.CANCELLED.value
+        # Bound rather than inlined, which is what makes the assertion above
+        # about the code's behaviour and not about this test's own string.
+        assert "'cancelled'" not in str(statement)
+
+    @pytest.mark.asyncio
+    async def test_the_state_written_is_the_state_the_lapse_read_matches_on(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The two ends of the cancellation contract, compared to each other.
+
+        A task lapses with ``DUE_JOURNAL_CANCELLED`` only if the string the sync
+        writes is the string ``CalendarInfoRepository`` looks for. Asserting each
+        end against ``EventState`` separately would let both drift together;
+        this reads the value out of the *compiled* query, so the comparison is
+        against what that end actually sends to PostgreSQL.
+        """
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+        )
+        mock_connection.execute.return_value = _mock_empty_result()
+
+        await processor.process_event(event)
+
+        _, params = mock_connection.execute.call_args_list[1].args
+        assert params["event_state"] == _FIND_CANCELLED.compile().params["cancelled"]
+
+    @pytest.mark.asyncio
+    async def test_cancelled_sync_status_is_bound_from_the_enum(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The link's status is a decision input too, so it gets the same care.
+
+        ``_should_delete_cancelled_instance`` checks this value **first**: a
+        link already cancelled keeps its earlier keep decision, because marking
+        a journal cancelled bumps the link's ``updated_at`` and erases the
+        edit-protection signal. A literal that drifted from the enum on either
+        side would let a redelivered cancellation delete a journal that was
+        deliberately protected on the first pass — a data-loss bug with nothing
+        failing to announce it.
+        """
+        event = _make_outbox_event(
+            event_type="journal_event.cancelled",
+            sync_action="cancelled",
+            existing_journal_id=42,
+        )
+        mock_connection.execute.return_value = _mock_empty_result()
+
+        await processor.process_event(event)
+
+        statement, params = mock_connection.execute.call_args_list[0].args
+        assert params["sync_status"] == ExternalEventLinkSyncStatus.CANCELLED.value
+        assert "'cancelled'" not in str(statement)
+
+    def test_the_sticky_cancellation_guard_reads_the_same_enum(self) -> None:
+        """The guard's comparison and the write above must not drift apart.
+
+        Asserted against the guard's *source* rather than by running it, because
+        the behaviour it protects only shows up on a second delivery of the same
+        event — which the integration suite covers, but which cannot tell a
+        matching pair of literals from a matching pair of enum references.
+        """
+        source = inspect.getsource(
+            JournalOutboxEventProcessor._should_delete_cancelled_instance
+        )
+        assert "ExternalEventLinkSyncStatus.CANCELLED.value" in source
+        assert '== "cancelled"' not in source
 
 
 class TestStravaFitnessDataProcessing:

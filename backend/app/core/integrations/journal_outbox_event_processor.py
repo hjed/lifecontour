@@ -12,6 +12,9 @@ from uuid import UUID
 
 import structlog
 from core_shared.models.history import Provenance
+from core_shared.models.journal_external_event_link import (
+    ExternalEventLinkSyncStatus,
+)
 from core_shared.models.journals import (
     AttendeeStatus,
     ContactEventRole,
@@ -20,6 +23,7 @@ from core_shared.models.journals import (
     Journal,
     JournalHasAnchoredTasksError,
 )
+from core_shared.models.journals.event_state import EventState
 from core_shared.models.journals.gear_maintenance_data import GearMaintenanceData
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
@@ -879,7 +883,7 @@ class JournalOutboxEventProcessor:
         repeated upstream cancellation) could delete a journal that was
         protected the first time.
         """
-        if linked.link_sync_status == "cancelled":
+        if linked.link_sync_status == ExternalEventLinkSyncStatus.CANCELLED.value:
             return False
         if linked.event_date_range_start is None:
             return False
@@ -926,11 +930,28 @@ class JournalOutboxEventProcessor:
         The link UPDATE keys on the composite PK (journal_id, calendar_id) —
         never on external_event_id, which is nullable (NULL = NULL is false
         in SQL and would silently leave the link 'synced').
+
+        **Both states are bound from their enums**, because both are read back
+        to decide something and a literal that drifted would change behaviour
+        with nothing failing:
+
+        - ``event_state`` is what ``find_cancelled_journal_ids`` matches on, so
+          a drifted write would un-lapse every task whose due journal was
+          cancelled, silently.
+        - ``sync_status`` is what ``_should_delete_cancelled_instance`` checks
+          first — a link already ``cancelled`` keeps its earlier keep decision,
+          because this method bumps ``updated_at`` and erases the
+          edit-protection signal. A drifted write would let a redelivered
+          cancellation delete a journal that was protected on the first pass.
+
+        The ``'synced'`` writes elsewhere in this processor are still literals;
+        converting those is a tidy-up of its own and no cancellation decision
+        reads them.
         """
         await self.connection.execute(
             text("""
                 UPDATE journal_external_event_links
-                SET sync_status = 'cancelled',
+                SET sync_status = :sync_status,
                     updated_at = :now
                 WHERE journal_id = :journal_id
                   AND calendar_id = :calendar_id
@@ -938,6 +959,7 @@ class JournalOutboxEventProcessor:
             {
                 "journal_id": journal_id,
                 "calendar_id": calendar_id,
+                "sync_status": ExternalEventLinkSyncStatus.CANCELLED.value,
                 "now": datetime.now(UTC),
             },
         )
@@ -945,12 +967,13 @@ class JournalOutboxEventProcessor:
         await self.connection.execute(
             text("""
                 UPDATE journal_calendar_info
-                SET event_state = 'cancelled',
+                SET event_state = :event_state,
                     updated_at = :now
                 WHERE journal_id = :journal_id
             """),
             {
                 "journal_id": journal_id,
+                "event_state": EventState.CANCELLED.value,
                 "now": datetime.now(UTC),
             },
         )

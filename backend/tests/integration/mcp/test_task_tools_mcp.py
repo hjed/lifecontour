@@ -27,6 +27,12 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from tests.integration.core.integrations.journal_sync_seeding import (
+    MASTER_ID,
+    build_processor,
+    create_calendar,
+    sync_event,
+)
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
     initialize_mcp_session,
@@ -2848,6 +2854,60 @@ class TestGetTaskTool:
             clean_database,
             creating_journal_id=creating_id,
             due_journal_id=cancelled_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task(client, session_id, task_id=task_id)
+
+        assert payload["lapsed"] is True
+        assert payload["lapse_reason"] == "due_journal_cancelled"
+        assert payload["due_journal"]["cancelled"] is True
+
+    async def test_a_really_cancelled_due_journal_reports_it_over_mcp(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The same answer after a cancellation nothing seeded.
+
+        The test above writes ``journal_calendar_info`` itself, which proves
+        this tool *serialises* a cancelled journal correctly and assumes the
+        state arrives. Here calendar sync really cancels the instance — the
+        deletion it prefers is refused by the anchor guard, exactly as it is in
+        production for a task's due journal — so the whole chain is exercised:
+        the sync write, the batched cancellation lookup, the rule, and the tool
+        payload an agent reads. ITER18-002 Phase 4 owns this half.
+        """
+        creating_id, _ = task_anchors
+        calendar_id = await create_calendar(clean_database, user_id=USER_ID)
+        processor = build_processor(clean_database)
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_mcp_lapse",
+                user_id=USER_ID,
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        due_id = int(created["journal_id"])
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        await processor.process_event(
+            sync_event(
+                "journal_event.cancelled",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_mcp_lapse",
+                user_id=USER_ID,
+                existing_journal_id=due_id,
+                recurring_event_id=MASTER_ID,
+            )
         )
 
         async with authenticated_lifespan_client() as client:
