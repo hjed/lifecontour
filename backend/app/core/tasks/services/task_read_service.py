@@ -139,13 +139,14 @@ class TaskReadService:
         )
         contact_ids = await self.task_repo.list_contact_ids(task_id, user_id)
 
+        timezone = await self.date_resolver.timezone_for(user_id)
         models, _ = await self._assemble(
             user_id,
             [task],
             mentions={task_id: intermediate_ids},
             contacts={task_id: contact_ids},
-            now=now,
-            timezone=await self.date_resolver.timezone_for(user_id),
+            today=today_in(timezone, now),
+            timezone=timezone,
         )
         return models[0]
 
@@ -202,13 +203,14 @@ class TaskReadService:
         )
         contacts = await self.task_repo.list_contact_ids_for_tasks(task_ids, user_id)
 
+        timezone = await self.date_resolver.timezone_for(user_id)
         models, journal_refs = await self._assemble(
             user_id,
             tasks,
             mentions=mentions,
             contacts=contacts,
-            now=now,
-            timezone=await self.date_resolver.timezone_for(user_id),
+            today=today_in(timezone, now),
+            timezone=timezone,
             # The viewed journal joins the batch rather than getting a lookup of
             # its own. It is almost always in there already — it anchors or is
             # mentioned by every task returned — and including it explicitly is
@@ -276,7 +278,15 @@ class TaskReadService:
                 foreign keys make unreachable.
         """
         timezone = await self.date_resolver.timezone_for(user_id)
-        window = upcoming_window(today_in(timezone, now), days_ahead)
+        # Read once and carried, not consulted again below. With ``now=None``
+        # each call to ``today_in`` reads the wall clock afresh, so a request
+        # crossing local midnight between two of them would build the window
+        # against one day and judge the lapse against the next — and a task due
+        # on the earlier day would be dropped as "date passed" from a window
+        # that still claims to include it. Raised by the pull request's
+        # automated review.
+        today = today_in(timezone, now)
+        window = upcoming_window(today, days_ahead)
         instants = local_window(window.first_day, window.last_day, timezone)
 
         tasks = await self.task_repo.find_upcoming_tasks(
@@ -296,7 +306,7 @@ class TaskReadService:
             tasks,
             mentions=mentions,
             contacts=contacts,
-            now=now,
+            today=today,
             timezone=timezone,
         )
         return select_upcoming_tasks(models, window)
@@ -308,7 +318,7 @@ class TaskReadService:
         *,
         mentions: dict[int, list[int]],
         contacts: dict[int, list[int]],
-        now: datetime.datetime | None,
+        today: datetime.date,
         timezone: ZoneInfo,
         extra_journal_ids: Sequence[int] = (),
     ) -> tuple[list[TaskReadModel], dict[int, TaskJournalRef]]:
@@ -331,12 +341,18 @@ class TaskReadService:
             mentions: Each task's intermediate journal ids, keyed by task id.
                 A task with no links may be absent rather than empty.
             contacts: Each task's contact ids, on the same terms
-            now: The instant to judge "today" from
-            timezone: The acting user's timezone, **already resolved**. A
-                parameter rather than a lookup here because the upcoming-window
-                listing needs the same zone to build its window *before* it has
-                any tasks to assemble, and resolving it twice would be a second
-                settings read that could straddle a change to it.
+            today: Today's date in the acting user's timezone, **already
+                resolved**. A date rather than an instant, so this cannot read
+                the clock a second time: with ``now=None`` every ``today_in``
+                call samples the wall clock afresh, and a request crossing local
+                midnight between two of them would judge one half of an answer
+                against a different day from the other. The upcoming window
+                needs the date before it has any tasks, so it resolves it and
+                hands it down; taking it as a parameter is what makes the two
+                halves agreeing structural rather than a coincidence of timing.
+            timezone: The acting user's timezone, **already resolved**, on the
+                same reasoning — one settings read per request, and no window
+                for a change to it to land between two of them.
             extra_journal_ids: Journals to resolve beside the tasks' own — the
                 journal a listing is *about*, which must be resolved even when
                 nothing is linked to it
@@ -375,7 +391,6 @@ class TaskReadService:
             )
         )
 
-        today = today_in(timezone, now)
         models = [
             build_task_read_model(
                 task=task,

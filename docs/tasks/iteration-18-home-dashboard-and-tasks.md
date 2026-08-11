@@ -3542,7 +3542,7 @@ carry the same ×4.
   `upcoming` parses as an id and 400s — the footgun `main.py:345` records for `/journals/series`. A test
   asserts the literal route wins, because the failure mode is an endpoint that silently became unreachable.
 
-**Tests: 84 unit and 60 integration**, every unit one of them inside CI's marker selection.
+**Tests: 85 unit and 60 integration**, every unit one of them inside CI's marker selection.
 
 - `tests/unit/tasks/test_task_upcoming_window.py` (**25**, new) — the pure rule: the default and
   `days_ahead=0`, every edge from both sides (today/yesterday, the boundary day/the day after), the three
@@ -3640,6 +3640,29 @@ Required-Test-Coverage item against a named test, the MCP parity claim (nothing 
 and not the other), that both pre-existing `_assemble` callers were updated, and every spot-checkable
 number in this write-up.
 
+**Acted on from the PR review** (`auggie review` on #1294). One finding, medium severity, and it was
+right — a second instance of the *same* failure the local review had already found once:
+
+- **The wall clock was read twice per request, so a listing could disagree with itself at midnight.**
+  `today_in(timezone, now)` was called once to build the window and again inside `_assemble` to judge the
+  lapse, and with `now=None` — which is every production call — each samples the clock afresh. A request
+  crossing local midnight between the two would build the window against day *D* and judge the lapse
+  against *D+1*, so a task due on *D* is inside the window the response reports and simultaneously "date
+  passed" to the lapse rule: **dropped from a listing that claims to include it**. Fixed structurally
+  rather than by passing the same instant down — `_assemble` now takes `today: date` instead of
+  `now: datetime | None`, so there is exactly one clock read per request and the two halves cannot
+  disagree by construction. All three read paths resolve it once and hand it down.
+- **The first test written for it was vacuous, and a mutation caught that.** It stubbed the clock to
+  advance a day per call, but seeded the task *mid-window* — where a lapse judged a day late still
+  doesn't fire — so reinstating the second read left it green. The task has to be due on the window's
+  **first day** for the two verdicts to collide, which meant overriding the shared journal fixture. Now
+  the mutation fails it. **Twice in one phase a test was written that could not fail**, and both times a
+  mutation was the only thing that noticed; the habit is worth more than either fix.
+
+Worth recording that the local review and the PR review found the *same class* of bug in the same file —
+two clock/date reads that can disagree — in two different places. A phase whose subject is "what day is
+it" should audit for repeated reads as a matter of course rather than waiting to be told twice.
+
 **E2E:** none — the deferral the phase states. No file under `frontend/` changes and no user-visible surface
 ships; ITER18-001's e2e lands in Phase 22 and the dashboard's in ITER18-004 Phase 17.
 
@@ -3655,14 +3678,17 @@ Tasks Domain entry links to it.
 
 **Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` and `core_shared`;
 `mypy` clean over **900** backend files and **131** in `core_shared`; the full `tests/unit/` suite at
-**3,563** passing, of which **1,440** are marker-selected. All **84** of this phase's new unit tests are in
+**3,568** passing, of which **1,441** are marker-selected. All **85** of this phase's new unit tests are in
 that selection, checked per file with `pytest -m unit --collect-only` rather than assumed — Phase 13's
 21-tests-that-would-never-run finding is the reason it is checked rather than trusted. (The repo-wide gap
-it recorded is untouched and still real: 1,440 of 3,563 is the same proportion as 1,326 of 3,422, so the
+it recorded is untouched and still real: 1,441 of 3,568 is the same proportion as 1,326 of 3,422, so the
 marker still misses roughly six unit tests in ten. That remains tracked separately, not swept up here.)
-And **1,898** integration tests
-across `tests/integration/tasks/`, `api/`, `mcp/` and `journal/`, all passing. No frontend or e2e gates —
-the phase changes no frontend file.
+And **1,984** integration tests
+across `tests/integration/tasks/`, `api/`, `mcp/`, `journal/` and `core/`, all passing — re-run on the
+tree merged with main, since ITER18-002 Phase 4 (cancellation as a lapse reason) landed mid-review and
+makes a cancelled journal *really* lapse the tasks due in it, which is precisely the exclusion this
+listing rests on. Its own `test_journal_cancellation_lapse_integration.py` is in that count. No frontend
+or e2e gates — the phase changes no frontend file.
 
 #### Phase 15: Frontend — Task API Client
 

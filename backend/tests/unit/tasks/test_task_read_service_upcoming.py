@@ -274,6 +274,59 @@ class TestWindowAnchoring:
 
         assert settings_repo.get_timezone.await_count == 1
 
+    async def test_the_clock_is_read_once_so_the_window_and_the_lapse_agree(
+        self,
+        service: TaskReadService,
+        task_repo: AsyncMock,
+        journal_repo: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """**The midnight-crossing case**, raised by the pull request's review.
+
+        In production ``now`` is ``None``, and every call to ``today_in`` then
+        samples the wall clock afresh. Two calls — one to build the window, one
+        to judge the lapse — can land either side of local midnight, and the
+        answer then disagrees with itself: a task due on the earlier day is
+        inside the window the response *reports* and simultaneously "date
+        passed" to the lapse rule, so it is dropped from a listing that claims
+        to include it.
+
+        The clock is stubbed to advance a day on every call, which is that race
+        made deterministic and certain rather than one-request-in-a-million.
+
+        **The task must be due on the window's first day**, which is why this
+        overrides the shared journal fixture: a task due mid-window survives a
+        lapse judged a day late, so seeding one there would make this pass
+        against the very bug it exists to catch. It was written that way first,
+        and a mutation reinstating the second read did not fail it.
+        """
+        days = iter(
+            [
+                TODAY_UTC,
+                TODAY_UTC + datetime.timedelta(days=1),
+                datetime.date(2030, 1, 1),
+            ]
+        )
+        monkeypatch.setattr(
+            "app.core.tasks.services.task_read_service.today_in",
+            lambda _tz, _now=None: next(days),
+        )
+        due_today = make_journal(IN_WINDOW_ID, TODAY_UTC, title="This morning")
+        journal_repo.find_by_ids_for_user.side_effect = None
+        journal_repo.find_by_ids_for_user.return_value = [
+            due_today,
+            make_journal(CREATED_IN_ID, TODAY_UTC - datetime.timedelta(days=30)),
+        ]
+        task_repo.find_upcoming_tasks.return_value = [
+            make_task(1, due_journal_id=IN_WINDOW_ID)
+        ]
+
+        upcoming = await service.read_models_for_upcoming_window(USER_ID)
+
+        assert upcoming.window.first_day == TODAY_UTC
+        assert [model.task.id for model in upcoming.tasks] == [1]
+        assert upcoming.tasks[0].lapsed is False
+
     async def test_an_explicit_days_ahead_is_honoured(
         self, service: TaskReadService, task_repo: AsyncMock
     ) -> None:
