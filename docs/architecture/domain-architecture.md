@@ -613,6 +613,38 @@ answers that for a whole set in one statement, because the per-journal `find_by_
 an N+1 the moment a journal's task list is rendered. It performs no ownership check: callers reach it
 with ids an owner-scoped query has already filtered.
 
+**Where a cancelled journal comes from.** Three production paths write `EventState.CANCELLED`. The
+user's path shares nothing with the other two; the two sync routes differ in how they *decide*, then
+converge on the same write:
+
+- **A person.** The event editor's *Event Status* select offers "Cancelled", saved through
+  `PUT /api/journals/{id}/types/EVENT/data` — `event_state` is an ordinary editable field of the
+  EVENT type data, so cancelling is a type-data edit rather than an operation of its own. This is the
+  path the specification's "cancel rather than delete" steer points at, and it is reversible: setting
+  the status back to *confirmed* un-lapses the tasks, because the lapse is derived on every read.
+- **Calendar sync, one instance** — `journal_event.cancelled`.
+- **Calendar sync, a whole series** — the `journal_event.series_cancelled` fan-out.
+
+Both sync routes prefer to *delete* an untouched far-future instance and fall back to
+`JournalOutboxEventProcessor._mark_journal_cancelled` when the
+[delete guard](#the-journal-delete-guard) refuses — which for a task's due journal is the ordinary
+path rather than an edge of it: a due journal is future-dated by invariant, so it is always a
+deletion candidate and always anchored.
+
+That makes the write and the read **one contract**, and both ends bind `EventState.CANCELLED.value`
+rather than typing the string. A literal that drifted on the write side would leave every task whose
+due journal was cancelled quietly un-lapsed, with no query failing — which is why the two are
+compared against each other in a unit test rather than each against the enum.
+
+**Cancelling a journal changes nothing about a task.** Not its status, not its text, and none of its
+links — the anchors and the intermediate and contact rows are untouched, because the cancellation
+writes only to `journal_calendar_info` and the external link. The task stays on every journal it was
+on and simply reads as lapsed, which is the specification's stance: cancellation is the escape hatch
+the delete guard steers users toward, so it must never be refused for a journal that anchors a task
+whatever that task's status. Pinned end to end in
+`tests/integration/tasks/test_journal_cancellation_lapse_integration.py`, which drives both real
+cancellation routes rather than writing the calendar-info row itself.
+
 **One read per collection**, for the same reason: the read model's assembler is a *pure function over
 pieces already fetched*, so a list surface can load *N* tasks' journals in one query and call it once
 per task. The single-task path costs a fixed **seven** statements regardless of how many journals or
