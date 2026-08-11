@@ -120,6 +120,49 @@ Mutation handlers must refresh the cache through
   `invalidateQueries` calls were; `await` it only where the handler already
   awaited the refresh.
 
+### Task Query Keys
+
+`taskKeys` (`frontend/src/lib/api/tasks.ts`) hangs three namespaces off
+`['tasks']` as **siblings**, never nesting one inside another:
+
+| Factory | Key | Feeds |
+| --- | --- | --- |
+| `detail(taskId)` | `['tasks', 'detail', id]` | a single task read whole |
+| `journalList(journalId, role?)` | `['tasks', 'journal', id, role \| null]` | a journal's task section |
+| `upcomingWindow(days)` | `['tasks', 'upcoming', days]` | the home dashboard's task section — **reserved, with no hook yet**: the listing endpoint (ITER18-001 Phase 14) does not exist |
+
+- **The sibling arrangement is the contract**, not an accident of naming: a
+  journal's task list and the dashboard's task section must be invalidatable
+  independently, and nesting either under the other would silently remove that.
+  Two tests assert it in both directions. The `upcoming` namespace was reserved
+  before anything read it for exactly that reason — adding a sibling later is the
+  change most likely to end up nesting it.
+- **A mutation names only the namespaces its change can reach.** Attaching or
+  detaching an intermediate ("mentioned") journal leaves `upcoming()` alone —
+  that listing selects on the *due* journal, so a mention cannot move a task in
+  or out of a forward date window.
+- **The role is part of the journal-list key.** A filtered listing narrows
+  `link_roles` as well as the rows, so it is a different answer rather than a
+  subset of the unfiltered one.
+- Task failures throw `TaskApiError`, whose `message` is `errors[0].detail` as
+  every other client's is, **plus** the JSON:API `status`, `code` and `meta`
+  beside it. Surfaces branch on the code — `TASK_REOPEN_NOT_ACKNOWLEDGED` is a
+  confirmation to ask for, not an error to report, and `useRetargetTask` raises
+  no toast for it.
+- **Task mutations opt out of the app-wide `retry: 1`** (`lib/providers.tsx`).
+  Creating a task is not idempotent, so a retried `POST` whose first response was
+  merely lost records the commitment twice; and a refusal here is often the
+  answer rather than a failure, so retrying it delays the confirmation the caller
+  should be showing and logs a second refusal for every one the user resolves.
+  Reads keep the default retry. Any client that builds product behaviour on a
+  mutation's *error* needs the same opt-out.
+- A deleted task's detail is **removed** from the cache, not invalidated:
+  invalidating would refetch it into a 404, and leaving it would let a later
+  `useTask` render a deleted task from cache for the whole `staleTime`.
+- Invalidation is **not** delayed behind a `setTimeout`. The write commits in
+  the service layer before the response is sent, so there is no read-after-write
+  race to wait out (the same reasoning as the journal-tag client, #1204).
+
 ### TypeScript Integration
 
 - Define interfaces for all component props
