@@ -27,6 +27,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from app.core.tasks.models.events import contact_field_name
 from tests.integration.core.integrations.journal_sync_seeding import (
     MASTER_ID,
     build_processor,
@@ -1570,6 +1571,78 @@ class TestTheToolsRecordMcpProvenance:
         _, event = await task_events(clean_database, task_id=task_id)
         assert event.event_type == "TaskJournalUnlinked"
         assert event.payload["journal_id"] == mentioned
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_linking_a_contact_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """An assistant putting a person on somebody's task, recorded as theirs.
+
+        Contact membership travels as a ``TaskUpdated`` carrying
+        ``changed_fields``, the same type a reword uses, so the key is asserted
+        alongside the provenance — a tool that reached the wrong service method
+        would publish a ``TaskUpdated`` too.
+        """
+        creating_id, due_id = task_anchors
+        sarah = await create_contact(clean_database, first_name="Sarah")
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _link_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+
+        assert "error" not in payload
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {
+            contact_field_name(sarah): [None, sarah]
+        }
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_unlinking_a_contact_is_attributed_to_the_assistant(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The other tool, asserted separately rather than assumed from the first.
+
+        They are different functions making different service calls, and either
+        one dropping provenance is a silent success: the contact still moves and
+        an event is still published — only the user's history stops being able to
+        tell their own edit from an assistant's.
+        """
+        creating_id, due_id = task_anchors
+        sarah = await create_contact(clean_database, first_name="Sarah")
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            linked = await _link_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+            payload = await _unlink_contact(
+                client, session_id, task_id=task_id, contact_id=sarah
+            )
+
+        assert "error" not in linked
+        assert "error" not in payload
+        _, event = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {
+            contact_field_name(sarah): [sarah, None]
+        }
         assert event.payload["source"] == Provenance.MCP.value
         assert event.payload["changed_by"] == "mcp"
 

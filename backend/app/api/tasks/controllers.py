@@ -448,6 +448,8 @@ async def link_task_contact(
         task_id=task_id,
         contact_id=link_request.data.contact_id,
         transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
     )
 
 
@@ -484,6 +486,8 @@ async def unlink_task_contact(
         task_id=task_id,
         contact_id=contact_id,
         transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
     )
 
 

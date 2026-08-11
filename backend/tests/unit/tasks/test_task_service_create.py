@@ -1007,25 +1007,81 @@ class TestCreationPublishesAnEvent:
         assert published_events(mock_event_publisher) == []
 
     @pytest.mark.asyncio
-    async def test_the_payload_says_nothing_about_contacts(
+    async def test_a_create_with_contacts_publishes_one_event_naming_them(
         self,
         service: TaskService,
         mock_contact_repo: AsyncMock,
         mock_event_publisher: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Contact links get their own event type in a later phase.
+        """The question the create event was left silent about, now answered.
 
-        Carrying the ids here would answer that phase's question — whether a
-        create with contacts publishes one event or two — in the wrong place and
-        without the tests that decision needs.
+        **One event, and it names them.** The earlier phase deliberately left
+        ``contact_ids`` off this payload so that "does a create with contacts
+        publish one event or two" would be decided with the tests that decision
+        needs rather than by a key appearing unnoticed. It publishes one, because
+        a create is one write and no write path but a retarget may publish more
+        than one — and it names them, because contact membership is a field of
+        the task, and a create silent about it would leave a later unlink writing
+        a "removed Sarah" line into a history with no "added Sarah" line before
+        it.
+
+        The unpacking is the assertion: a create that also announced a link
+        would put two events here.
         """
         mock_contact_repo.find_names_by_ids.return_value = {5: ("Sarah", None, None)}
 
         await create(service, mock_transaction, contact_ids=[5])
 
         (event,) = published_events(mock_event_publisher)
-        assert "contact_ids" not in event.event_data
+        assert event.event_type == "TaskCreated"
+        assert event.event_data["contact_ids"] == [5]
+
+    @pytest.mark.asyncio
+    async def test_a_create_naming_nobody_says_so_explicitly(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """An empty list rather than a missing key, so the projection has one shape."""
+        await create(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["contact_ids"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_payload_names_the_contacts_a_row_was_written_for(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_contact_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """What was written, not what was asked for.
+
+        On a create the two coincide — a new task has no links to collide with —
+        so this cannot be shown by a realistic scenario and is shown by the
+        repository reporting a different set instead. It matters because it is
+        the rule every other payload in this domain follows, and because the day
+        it stops coinciding is the day a create would otherwise start announcing
+        people it did not link.
+        """
+        mock_contact_repo.find_names_by_ids.return_value = {
+            5: ("Sarah", None, None),
+            6: ("Ali", None, None),
+        }
+        # The fixture's double echoes back whatever it is asked to link, which is
+        # what makes the two indistinguishable in every other test here. Clearing
+        # the side effect is what lets this one prise them apart.
+        mock_task_repo.add_contacts.side_effect = None
+        mock_task_repo.add_contacts.return_value = [5]
+
+        await create(service, mock_transaction, contact_ids=[5, 6])
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["contact_ids"] == [5]
 
 
 @pytest.mark.unit

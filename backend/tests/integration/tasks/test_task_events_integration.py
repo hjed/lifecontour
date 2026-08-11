@@ -37,7 +37,9 @@ from core_shared.models.tasks import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.tasks.task_seeding import (
@@ -45,8 +47,10 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     TaskEventRow,
     count,
+    create_contact,
     create_journal,
     intermediate_journal_ids,
+    linked_contact_ids,
     stored_anchors,
     stored_status,
     stored_text,
@@ -84,6 +88,7 @@ async def _create(
     connection: AsyncConnection,
     anchors: tuple[int, int],
     *,
+    contact_ids: list[int] | None = None,
     source: Provenance = Provenance.SYSTEM,
     changed_by: str = "system",
 ) -> int:
@@ -95,11 +100,52 @@ async def _create(
         due_journal_id=due_id,
         text=TASK_TEXT,
         transaction=connection,
+        contact_ids=contact_ids,
         source=source,
         changed_by=changed_by,
     )
     assert created.id is not None
     return created.id
+
+
+async def _link_contact(
+    service: TaskService,
+    connection: AsyncConnection,
+    task_id: int,
+    contact_id: int,
+    *,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+) -> bool:
+    """Reference a contact from a task, through the service."""
+    return await service.link_contact(
+        user_id=USER_ID,
+        task_id=task_id,
+        contact_id=contact_id,
+        transaction=connection,
+        source=source,
+        changed_by=changed_by,
+    )
+
+
+async def _unlink_contact(
+    service: TaskService,
+    connection: AsyncConnection,
+    task_id: int,
+    contact_id: int,
+    *,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+) -> bool:
+    """Stop referencing a contact from a task, through the service."""
+    return await service.unlink_contact(
+        user_id=USER_ID,
+        task_id=task_id,
+        contact_id=contact_id,
+        transaction=connection,
+        source=source,
+        changed_by=changed_by,
+    )
 
 
 async def _retarget(
@@ -174,6 +220,24 @@ def _link_events(events: list[TaskEventRow]) -> list[TaskEventRow]:
     return [event for event in events if event.event_type == "TaskJournalLinked"]
 
 
+def _contact_events(events: list[TaskEventRow], contact_id: int) -> list[TaskEventRow]:
+    """Just the updates that moved this contact's membership.
+
+    Contact changes share ``TaskUpdated`` with rewords and status moves, so a
+    filter on the event *type* is not enough to name this subject — the key
+    inside ``changed_fields`` is what separates them, which is the property the
+    whole design rests on and the reason this helper exists rather than a type
+    comparison inline.
+    """
+    field = contact_field_name(contact_id)
+    return [
+        event
+        for event in events
+        if event.event_type == "TaskUpdated"
+        and field in event.payload["changed_fields"]
+    ]
+
+
 @pytest.mark.integration
 class TestCreationLeavesAnOutboxRow:
     """One create, one row, describing the task that was actually written."""
@@ -202,6 +266,10 @@ class TestCreationLeavesAnOutboxRow:
 
         A service that published one task's details while saving another's would
         satisfy any assertion written against the arguments the test passed in.
+
+        ``contact_ids`` is empty here and checked against the link table for the
+        same reason: this create named nobody, and a payload inventing a person
+        would be as wrong as one inventing a title.
         """
         creating_id, due_id = task_anchors
         task_id = await _create(service, async_connection, task_anchors)
@@ -214,6 +282,7 @@ class TestCreationLeavesAnOutboxRow:
             "status": TaskStatus.NOT_DONE.value,
             "creating_journal_id": creating_id,
             "due_journal_id": due_id,
+            "contact_ids": await linked_contact_ids(async_connection, task_id),
             "source": Provenance.SYSTEM.value,
             "changed_by": "system",
         }
@@ -1827,6 +1896,517 @@ class TestDetachingLeavesAnOutboxRow:
             event.event_type
             for event in await task_events(async_connection, task_id=task_id)
         ] == ["TaskCreated", "TaskJournalLinked"]
+
+
+@pytest.mark.integration
+class TestLinkingAContactLeavesAnOutboxRow:
+    """The specification's *"contact linked"*, against a real outbox.
+
+    It arrives as a ``TaskUpdated`` rather than a type of its own, because
+    contact membership is a field of the task — the specification calls the link
+    *"a plain reference"* with no relationship type, role or attendance status.
+    So the assertions here are as much about the **key inside**
+    ``changed_fields`` as about the row: that key is the only thing separating a
+    contact change from a reword in the stored form, and it is what Phase 6's
+    projection will fan out into one history row per person.
+    """
+
+    @pytest.mark.asyncio
+    async def test_exactly_one_row_is_appended(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        await _link_contact(service, async_connection, task_id, contact_id)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == ["TaskCreated", "TaskUpdated"]
+
+    @pytest.mark.asyncio
+    async def test_the_payload_describes_the_link_that_was_written(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A whole-payload comparison, checked against the link table itself.
+
+        Reading ``task_contacts`` back alongside the payload is what stops this
+        passing for a service that announced a link it did not write.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        await _link_contact(service, async_connection, task_id, contact_id)
+
+        (event,) = _contact_events(
+            await task_events(async_connection, task_id=task_id), contact_id
+        )
+        assert event.aggregate_id == task_id
+        assert event.payload == {
+            "task_id": task_id,
+            "user_id": USER_ID,
+            "changed_fields": {contact_field_name(contact_id): [None, contact_id]},
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+        assert await linked_contact_ids(async_connection, task_id) == [contact_id]
+
+    @pytest.mark.asyncio
+    async def test_the_stored_pair_is_an_indexable_two_element_list(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The form the projection reads, asserted after a real round trip.
+
+        The pair is built as a tuple and reaches ``field_history`` through JSON
+        in a ``TEXT`` column, so what matters is what comes back out.
+        ``_rows_from_changed_fields`` guards ``len(change) == 2`` and then indexes
+        — and a payload shaped any other way does not raise there, it projects
+        **no rows at all**, which is a person silently missing from a task's
+        history rather than a failure anybody would see.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        await _link_contact(service, async_connection, task_id, contact_id)
+
+        (event,) = _contact_events(
+            await task_events(async_connection, task_id=task_id), contact_id
+        )
+        change = event.payload["changed_fields"][contact_field_name(contact_id)]
+        assert isinstance(change, list)
+        assert len(change) == 2
+        assert change[0] is None
+        assert change[1] == contact_id
+
+    @pytest.mark.asyncio
+    async def test_the_row_records_when_the_change_happened(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Bracketed, because ``occurred_at`` is ``NOT NULL``.
+
+        Asserting it is merely present would be guaranteed by the column and
+        would pass for a timestamp taken at projection time. Phase 6 writes
+        history rows from this value, so what has to hold is that it is the
+        moment of the *change*.
+
+        The bounds are naive because the stored value is: the publisher strips
+        the timezone on the way in.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        before = datetime.now(UTC).replace(tzinfo=None)
+        await _link_contact(service, async_connection, task_id, contact_id)
+        after = datetime.now(UTC).replace(tzinfo=None)
+
+        (event,) = _contact_events(
+            await task_events(async_connection, task_id=task_id), contact_id
+        )
+        assert before <= event.occurred_at <= after
+
+    @pytest.mark.asyncio
+    async def test_a_create_that_named_contacts_announces_them_on_one_event(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The completeness question this phase settles, against a real outbox.
+
+        One event for the create, carrying the people it linked — not one event
+        plus a link event each. The type list is the assertion: a create that
+        also announced its links would show two or three rows here.
+        """
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        ali = await create_contact(async_connection, first_name="Ali")
+
+        task_id = await _create(
+            service, async_connection, task_anchors, contact_ids=[sarah, ali]
+        )
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == ["TaskCreated"]
+        assert events[0].payload["contact_ids"] == [sarah, ali]
+        assert await linked_contact_ids(async_connection, task_id) == sorted(
+            [sarah, ali]
+        )
+
+    @pytest.mark.asyncio
+    async def test_linking_the_same_contact_again_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The idempotent insert, seen from the outbox.
+
+        Against a real ``ON CONFLICT DO NOTHING`` rather than a mocked boolean:
+        the repository's answer is the only thing separating the two calls, and
+        this is the only place it is a real answer. Publishing anyway would tell
+        the user they added the same person twice.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        assert (
+            await _link_contact(service, async_connection, task_id, contact_id) is True
+        )
+        assert (
+            await _link_contact(service, async_connection, task_id, contact_id) is False
+        )
+
+        assert (
+            len(
+                _contact_events(
+                    await task_events(async_connection, task_id=task_id), contact_id
+                )
+            )
+            == 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_link_to_an_unknown_contact_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+
+        with pytest.raises(ContactNotFoundError):
+            await _link_contact(service, async_connection, task_id, 999_999)
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_a_link_to_an_unreachable_task_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+    ) -> None:
+        contact_id = await create_contact(async_connection)
+
+        with pytest.raises(TaskNotFoundError):
+            await _link_contact(service, async_connection, 999_999, contact_id)
+
+        assert await task_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_link_leaves_neither_the_row_nor_the_event(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The acceptance criterion, from the caller's unit of work.
+
+        ``@transactional`` is re-entrant, so the service joins the enclosing unit
+        of work; failing inside it has to take the ``task_contacts`` row and the
+        outbox row together, or a user's history would claim a person their task
+        does not have.
+        """
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await _link_contact(service, async_connection, task_id, contact_id)
+                raise RuntimeError("the caller failed after the contact was linked")
+
+        assert await linked_contact_ids(async_connection, task_id) == []
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+
+@pytest.mark.integration
+class TestUnlinkingAContactLeavesAnOutboxRow:
+    """The specification's *"contact unlinked"*, and the deletes that say nothing."""
+
+    @pytest.mark.asyncio
+    async def test_the_payload_carries_the_pair_the_other_way_round(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Direction is positional, and position is all a consumer has.
+
+        ``_rows_from_changed_fields`` reads ``change[0]`` as the old value and
+        never looks at the key, so a pair built the wrong way round would render
+        somebody being removed from a task as their addition to it.
+        """
+        contact_id = await create_contact(async_connection)
+        task_id = await _create(
+            service, async_connection, task_anchors, contact_ids=[contact_id]
+        )
+
+        await _unlink_contact(service, async_connection, task_id, contact_id)
+
+        (event,) = _contact_events(
+            await task_events(async_connection, task_id=task_id), contact_id
+        )
+        assert event.payload["changed_fields"] == {
+            contact_field_name(contact_id): [contact_id, None]
+        }
+        assert await linked_contact_ids(async_connection, task_id) == []
+
+    @pytest.mark.asyncio
+    async def test_unlinking_a_contact_that_was_not_linked_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        assert (
+            await _unlink_contact(service, async_connection, task_id, contact_id)
+            is False
+        )
+
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+    @pytest.mark.asyncio
+    async def test_an_unlink_from_an_unreachable_task_appends_nothing(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+    ) -> None:
+        contact_id = await create_contact(async_connection)
+
+        with pytest.raises(TaskNotFoundError):
+            await _unlink_contact(service, async_connection, 999_999, contact_id)
+
+        assert await task_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_unlink_leaves_both_the_row_and_no_event(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The other direction of the criterion: the link survives with the event.
+
+        A rollback that took the outbox row but left the delete applied would be
+        the worse failure — a person removed from a task with nothing in their
+        history saying so — which is why both directions are asserted rather than
+        one standing in for the other.
+        """
+        contact_id = await create_contact(async_connection)
+        task_id = await _create(
+            service, async_connection, task_anchors, contact_ids=[contact_id]
+        )
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await _unlink_contact(service, async_connection, task_id, contact_id)
+                raise RuntimeError("the caller failed after the contact was unlinked")
+
+        assert await linked_contact_ids(async_connection, task_id) == [contact_id]
+        assert [
+            event.event_type
+            for event in await task_events(async_connection, task_id=task_id)
+        ] == ["TaskCreated"]
+
+
+@pytest.mark.integration
+class TestProvenanceReachesTheContactRow:
+    """Who linked, and from where, survives into the stored payload.
+
+    Both surfaces reaching these methods passed **nothing** before this phase, so
+    the service's ``SYSTEM`` default is a silent success: an endpoint that forgot
+    would still link the contact, still publish an event, and only file a
+    person's own change under "system" in their history. The per-surface tests in
+    ``test_task_endpoints.py`` and ``test_task_tools_mcp.py`` are what pin the
+    surfaces; these pin that the value survives the write.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "changed_by"),
+        [
+            (Provenance.SYSTEM, "system"),
+            (Provenance.UI, "ui"),
+            (Provenance.MCP, "mcp"),
+        ],
+    )
+    async def test_a_link_stores_the_callers_origin(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        await _link_contact(
+            service,
+            async_connection,
+            task_id,
+            contact_id,
+            source=source,
+            changed_by=changed_by,
+        )
+
+        (event,) = _contact_events(
+            await task_events(async_connection, task_id=task_id), contact_id
+        )
+        assert event.payload["source"] == source.value
+        assert event.payload["changed_by"] == changed_by
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "changed_by"),
+        [
+            (Provenance.SYSTEM, "system"),
+            (Provenance.UI, "ui"),
+            (Provenance.MCP, "mcp"),
+        ],
+    )
+    async def test_an_unlink_stores_the_callers_origin(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        contact_id = await create_contact(async_connection)
+        task_id = await _create(
+            service, async_connection, task_anchors, contact_ids=[contact_id]
+        )
+
+        await _unlink_contact(
+            service,
+            async_connection,
+            task_id,
+            contact_id,
+            source=source,
+            changed_by=changed_by,
+        )
+
+        (event,) = _contact_events(
+            await task_events(async_connection, task_id=task_id), contact_id
+        )
+        assert event.payload["source"] == source.value
+        assert event.payload["changed_by"] == changed_by
+
+
+@pytest.mark.integration
+class TestContactChangesStayDistinctInTheTrail:
+    """Three kinds of change now share ``TaskUpdated``, and must stay separable.
+
+    This is the risk the design takes on. Before this phase a ``TaskUpdated``
+    always meant text or status; now it may mean a person joined or left, and the
+    only thing distinguishing them in the stored form is the key inside
+    ``changed_fields``. Phase 6 fans that dict out into one ``field_history`` row
+    per key, so if two kinds of change could collide there the user would read
+    one line where two things happened.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_reword_and_two_contact_changes_read_as_three_distinct_rows(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        ali = await create_contact(async_connection, first_name="Ali")
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _link_contact(service, async_connection, task_id, sarah)
+        await _update(service, async_connection, task_id, text=UPDATED_TEXT)
+        await _link_contact(service, async_connection, task_id, ali)
+
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskCreated",
+            "TaskUpdated",
+            "TaskUpdated",
+            "TaskUpdated",
+        ]
+        assert [sorted(event.payload["changed_fields"]) for event in events[1:]] == [
+            [contact_field_name(sarah)],
+            ["text"],
+            [contact_field_name(ali)],
+        ]
+
+    @pytest.mark.asyncio
+    async def test_two_people_never_share_a_field_name(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Why the key names the contact rather than being a shared ``contacts``.
+
+        Phase 6 writes history ``ON CONFLICT (event_id, entity_type, entity_id,
+        field_name) DO NOTHING``. Two people under one field name on one task
+        would collide on all four columns whenever the events also shared a
+        microsecond, and one would be dropped as a redelivery of the other.
+        """
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        ali = await create_contact(async_connection, first_name="Ali")
+        task_id = await _create(service, async_connection, task_anchors)
+
+        await _link_contact(service, async_connection, task_id, sarah)
+        await _link_contact(service, async_connection, task_id, ali)
+
+        keys = [
+            key
+            for event in await task_events(async_connection, task_id=task_id)
+            if event.event_type == "TaskUpdated"
+            for key in event.payload["changed_fields"]
+        ]
+        assert keys == [contact_field_name(sarah), contact_field_name(ali)]
+        assert len(set(keys)) == 2
+
+    @pytest.mark.asyncio
+    async def test_a_link_and_its_removal_read_as_a_trail_in_order(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The same person twice, told apart by the direction of the pair alone."""
+        task_id = await _create(service, async_connection, task_anchors)
+        contact_id = await create_contact(async_connection)
+
+        await _link_contact(service, async_connection, task_id, contact_id)
+        await _unlink_contact(service, async_connection, task_id, contact_id)
+
+        field = contact_field_name(contact_id)
+        events = _contact_events(
+            await task_events(async_connection, task_id=task_id), contact_id
+        )
+        assert [event.payload["changed_fields"][field] for event in events] == [
+            [None, contact_id],
+            [contact_id, None],
+        ]
 
 
 @pytest.mark.integration
