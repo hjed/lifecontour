@@ -14,6 +14,7 @@ first, the ``bool`` the link methods return only ever means "was there a change"
 and never "was that your task".
 """
 
+from datetime import datetime
 from typing import Any
 
 from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
@@ -287,6 +288,56 @@ class SqlTaskRepository(TaskRepository):
         )
         result = await self.conn.execute(
             query, {"journal_id": journal_id, "user_id": user_id}
+        )
+        return [_row_to_task(row) for row in result.fetchall()]
+
+    async def find_upcoming_tasks(
+        self,
+        user_id: str,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[Task]:
+        """Find the user's not-done tasks due inside a window, in one statement.
+
+        The only join to ``journals`` in this repository, and it is an inner one
+        on the due anchor: ``due_journal_id`` is ``NOT NULL`` with an
+        ``ON DELETE RESTRICT`` foreign key, so every task has exactly one row to
+        match and the join can neither drop a task nor duplicate one.
+
+        The journal is not owner-scoped, matching ``find_tasks_for_journal``'s
+        reasoning: the task already is, and a task of the caller's cannot be
+        anchored to somebody else's journal — the service refuses to write one.
+        Adding the predicate would suggest it were load-bearing.
+
+        ``BETWEEN`` is inclusive at both ends, which is what makes a task due at
+        any hour of the last day part of the window; the caller supplies that
+        day's final microsecond for exactly that reason.
+
+        The order is the due journal's start, then the task id. The second term
+        is what makes it **total**: a day's journal commonly holds several
+        tasks, all sharing one start, and without a tie-break the same request
+        could come back in a different order between runs.
+        """
+        query = text(
+            f"""
+            SELECT {", ".join(f"t.{column}" for column in _TASK_COLUMN_NAMES)}
+            FROM tasks t
+            JOIN journals j ON j.id = t.due_journal_id
+            WHERE t.user_id = :user_id
+              AND t.status = :status
+              AND j.event_date_range_start BETWEEN :window_start AND :window_end
+            ORDER BY j.event_date_range_start, t.id
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": user_id,
+                "status": TaskStatus.NOT_DONE.value,
+                "window_start": window_start,
+                "window_end": window_end,
+            },
         )
         return [_row_to_task(row) for row in result.fetchall()]
 

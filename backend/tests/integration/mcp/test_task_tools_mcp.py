@@ -3259,3 +3259,252 @@ class TestListJournalTasksTool:
             near_task,
             far_task,
         ]
+
+
+async def _list_upcoming_tasks(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "list_upcoming_tasks", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+@pytest.mark.integration
+class TestListUpcomingTasksTool:
+    """The forward window, as an agent asked "what have I got on" sees it.
+
+    The parity claim is the point of this class: an agent must be told the same
+    thing the dashboard shows a browser, including — especially — which tasks
+    are *missing* and where they went. An agent that reported "nothing due" to a
+    user holding three cancelled-meeting commitments would be confidently wrong
+    in a way the user could not check.
+    """
+
+    async def test_it_returns_the_window_the_total_and_the_tasks(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The full read shape per row, so no follow-up call is needed."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Permit Meeting", days_offset=2
+        )
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+        contact_id = await create_contact(clean_database, first_name="Sarah")
+        await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_upcoming_tasks(client, session_id)
+
+        assert payload["window"]["days_ahead"] == 7
+        assert payload["total"] == 1
+        (task,) = payload["tasks"]
+        assert task["id"] == task_id
+        assert task["text"] == "print the permit"
+        assert task["due_journal"]["title"] == "Permit Meeting"
+        assert task["due_journal"]["date"] is not None
+        assert [contact["display_name"] for contact in task["contacts"]] == ["Sarah"]
+        assert task["lapsed"] is False
+
+    async def test_an_explicit_days_ahead_narrows_the_window(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """An agent may ask about today, tomorrow or the fortnight."""
+        creating_id, _ = task_anchors
+        near_id = await create_journal(journal_repository, title="Near", days_offset=1)
+        far_id = await create_journal(journal_repository, title="Far", days_offset=5)
+        near_task = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=near_id
+        )
+        await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=far_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_upcoming_tasks(client, session_id, days_ahead=2)
+
+        assert [task["id"] for task in payload["tasks"]] == [near_task]
+        assert payload["window"]["days_ahead"] == 2
+
+    async def test_a_task_due_on_the_boundary_day_is_listed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """Both ends inclusive, for an agent as for a browser."""
+        creating_id, boundary_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=boundary_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_upcoming_tasks(client, session_id)
+
+        assert [task["id"] for task in payload["tasks"]] == [task_id]
+
+    @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
+    async def test_a_finished_task_is_not_listed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """What is outstanding, not what exists."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(journal_repository, title="Soon", days_offset=2)
+        await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_upcoming_tasks(client, session_id)
+
+        assert payload["tasks"] == []
+        assert payload["total"] == 0
+
+    async def test_a_task_whose_due_journal_was_cancelled_is_not_listed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """**The fixture that makes the lapsed exclusion non-vacuous.**
+
+        And the pair the tool's own description promises an agent: absent here,
+        present with its reason on the journal — which is the answer to "what
+        happened to that task", and the reason an agent can say something more
+        useful than "it is gone".
+        """
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Cancelled meeting", days_offset=2
+        )
+        await mark_journal_as_event(
+            clean_database, due_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            upcoming = await _list_upcoming_tasks(client, session_id)
+            on_its_journal = await _list_journal_tasks(
+                client, session_id, journal_id=due_id
+            )
+
+        assert upcoming["tasks"] == []
+        (listed,) = on_its_journal["groups"]["due"]
+        assert listed["id"] == task_id
+        assert listed["lapsed"] is True
+        assert listed["lapse_reason"] == "due_journal_cancelled"
+
+    async def test_another_users_task_is_never_listed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The acting user is the session's, and both users have one due."""
+        creating_id, _ = task_anchors
+        mine_journal = await create_journal(
+            journal_repository, title="Mine", days_offset=2
+        )
+        mine = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=mine_journal,
+        )
+        theirs_journal = await create_journal(
+            journal_repository, title="Theirs", days_offset=2, user_id=OTHER_USER_ID
+        )
+        await create_task(
+            clean_database,
+            creating_journal_id=theirs_journal,
+            due_journal_id=theirs_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_upcoming_tasks(client, session_id)
+
+        assert [task["id"] for task in payload["tasks"]] == [mine]
+
+    async def test_rows_are_ordered_soonest_first(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The same order the endpoint promises, so the two surfaces agree."""
+        creating_id, _ = task_anchors
+        far_id = await create_journal(journal_repository, title="Friday", days_offset=5)
+        near_id = await create_journal(
+            journal_repository, title="Tomorrow", days_offset=1
+        )
+        far_task = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=far_id
+        )
+        near_task = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=near_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_upcoming_tasks(client, session_id)
+
+        assert [task["id"] for task in payload["tasks"]] == [near_task, far_task]
+
+    async def test_an_empty_window_still_names_its_dates(
+        self, authenticated_lifespan_client
+    ):
+        """The answer an agent turns into "nothing due until Tuesday"."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _list_upcoming_tasks(client, session_id)
+
+        assert payload["tasks"] == []
+        assert payload["total"] == 0
+        assert payload["window"]["start_date"] is not None
+        assert payload["window"]["end_date"] is not None
+
+    @pytest.mark.parametrize("days_ahead", [-1, 91])
+    async def test_an_out_of_range_window_is_refused(
+        self, authenticated_lifespan_client, days_ahead: int
+    ):
+        """The bound that keeps this from becoming an every-task browser."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client, session_id, "list_upcoming_tasks", {"days_ahead": days_ahead}
+            )
+
+        assert '"isError":true' in response.text

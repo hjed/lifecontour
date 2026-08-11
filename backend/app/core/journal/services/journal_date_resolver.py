@@ -78,19 +78,58 @@ def is_future_dated(
     return journal_date(journal, tz) > today_in(tz, now)
 
 
+def local_window(
+    first_day: datetime.date, last_day: datetime.date, tz: ZoneInfo
+) -> EventDateRange:
+    """A span of local days as an instant range, both ends included.
+
+    Local midnight on ``first_day`` through the final microsecond of
+    ``last_day``, which is what turns an inclusive *date* window — the shape the
+    tasks upcoming rule works in — into the timestamps a query over
+    ``event_date_range_start`` can compare against.
+
+    ``ZoneInfo`` resolves each end's offset from its own local wall time, so a
+    span containing a clock change is the hours it really is, and the two ends
+    may carry different offsets. Building both from dates rather than by zeroing
+    the components of some instant inside the span keeps the result independent
+    of which instant that was.
+
+    **The end is derived from the next day's midnight, not from 23:59:59.999999
+    on the last day.** In a zone whose clocks go back *at* midnight — Santiago,
+    Beirut, Asunción — the last hour of the day happens twice, and
+    ``combine(day, time.max, tz)`` resolves that ambiguity with ``fold=0``: the
+    **earlier** pass, an hour before the day really ends. A window built that
+    way silently drops a journal starting in the repeated hour, though its
+    ``local_date`` is squarely inside the span, and the caller has no way to
+    tell it was dropped. Taking one microsecond off the following midnight has
+    no ambiguity to resolve, because the first instant of a day is unique
+    however the clocks moved.
+
+    That subtraction is done **in UTC and converted back**: taking a
+    ``timedelta`` off a ``ZoneInfo``-aware datetime is wall-clock arithmetic, so
+    doing it locally would land straight back on the ambiguous
+    ``23:59:59.999999`` this exists to avoid.
+    """
+    next_midnight = datetime.datetime.combine(
+        last_day + datetime.timedelta(days=1), datetime.time.min, tz
+    )
+    last_instant = next_midnight.astimezone(datetime.UTC) - datetime.timedelta(
+        microseconds=1
+    )
+    return EventDateRange(
+        start=datetime.datetime.combine(first_day, datetime.time.min, tz),
+        end=last_instant.astimezone(tz),
+    )
+
+
 def local_day_window(day: datetime.date, tz: ZoneInfo) -> EventDateRange:
     """``day`` as an instant range: local midnight to its final microsecond.
 
-    ``ZoneInfo`` resolves each end's offset from its own local wall time, so a
-    day whose clocks change is the 23 or 25 hours it really is. Building both
-    ends from the date — the idiom ``OutdoorDashboardService._window`` uses —
-    rather than by zeroing the components of some instant inside the day also
-    keeps the result independent of which instant that was, ``fold`` included.
+    The single-day case of :func:`local_window`, kept as its own name because
+    "the instants of this day" is what most callers are actually asking for and
+    passing the same date twice reads as a mistake.
     """
-    return EventDateRange(
-        start=datetime.datetime.combine(day, datetime.time.min, tz),
-        end=datetime.datetime.combine(day, datetime.time.max, tz),
-    )
+    return local_window(day, day, tz)
 
 
 class JournalDateResolver:

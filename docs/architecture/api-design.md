@@ -289,16 +289,19 @@ export.
 
 Tasks are commitments anchored to two journals — the one a task arose in and the
 future-dated one it is due in — so creation hangs off the journal path rather
-than a top-level collection. There is deliberately **no `/api/tasks` collection**:
-no endpoint lists *all* tasks, because no screen does. A task's own member routes
-under `/api/tasks/` exist for operations that involve no journal at all, and the
-only listing there is is a *journal's* tasks.
+than a top-level collection. There is deliberately **no unbounded `/api/tasks`
+collection**: no endpoint lists *all* tasks, because no screen does. A task's own
+member routes under `/api/tasks/` exist for operations that involve no journal at
+all. There are exactly two listings, and each is bounded by something: a
+*journal's* tasks, bounded by the journal, and the *upcoming window*, bounded by
+a capped span of days. Neither can be widened into a task browser.
 
 | Verb + path | Purpose | Status |
 |---|---|---|
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
 | `GET /api/tasks/{task_id}` | Read one task whole: its journals **by role** (each with title, date and whether it is a cancelled event), its contacts, and `lapsed` with `lapse_reason` | 200; 400 an out-of-range id; 404 task unknown/not-owned |
 | `GET /api/journals/{journal_id}/tasks` | The journal's tasks, **grouped by link role** — due here, created here, mentioned here. Optional `?role=due\|created\|mentioned` | 200 (a journal with no tasks answers three empty groups); 400 an out-of-range id or an unknown `role`; 404 journal unknown/not-owned |
+| `GET /api/tasks/upcoming` | Not-done tasks due between **today and `?days_ahead=` days ahead** (default 7, both ends inclusive), anchored on today in your timezone. Done, cancelled and lapsed tasks excluded | 200 (an empty window is a 200 with `data: []`, never a 404); 400 `days_ahead` below 0 or above 90 |
 | `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
 | `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
@@ -491,9 +494,57 @@ Conventions this surface pins down:
   already need. An unknown journal and another user's are the same answer, while
   a journal of the caller's with nothing linked to it is a 200 with three empty
   groups — the distinction that check buys.
-- **Reads open no transaction.** Both controllers await `TaskReadService`, which
-  carries no `@transactional`, takes no lock and publishes no event: a read that
-  opened a unit of work would hold a transaction for the length of a page render.
+- **Reads open no transaction.** All three read controllers await
+  `TaskReadService`, which carries no `@transactional`, takes no lock and
+  publishes no event: a read that opened a unit of work would hold a transaction
+  for the length of a page render.
+- **`/api/tasks/upcoming` is registered before `/api/tasks/{task_id}`, and the
+  order is load-bearing.** FastAPI matches in registration order, so the member
+  route would otherwise claim `upcoming` as an id and answer 400 — the same
+  footgun `main.py` records for `/journals/series`. An integration test asserts
+  the literal route wins, because the failure mode is a working endpoint that
+  silently became unreachable.
+- **The upcoming window includes today, and the future-dated invariant does
+  not.** The two rules disagree about today deliberately: a journal must be
+  strictly future-dated to *become* a deadline, while a deadline landing today
+  is exactly what a dashboard exists to surface. Both ends of the window are
+  inclusive, so a task due on the last day is in it.
+- **The window is anchored on today in the acting user's timezone**, resolved
+  once per request from their settings, and turned into instants before it
+  reaches SQL. No timezone conversion happens in the database: a journal's date
+  is defined in `JournalDateResolver`, and a second definition in a query could
+  drift from it. There is no way for a caller to move the anchor — no `now`, no
+  `date`, no `today` parameter on either surface — since one would let a client
+  ask what next month will look like as though it were now.
+- **The upcoming listing excludes done, cancelled and lapsed tasks; a journal's
+  listing excludes nothing.** That difference is the product's, not an
+  inconsistency: the dashboard shows what is outstanding, and a journal is where
+  a lapsed task is meant to be found again. Inside a *forward* window only one
+  lapse cause can occur — a **cancelled due journal** — because a passed date is
+  behind the window by construction, which is why that fixture is the only one
+  that makes the exclusion non-vacuous and is required at every test level.
+- **The lapse exclusion is applied to the assembled read model, not in SQL.**
+  The statement filters status and the date window; cancellation is known from
+  the batched lookup the assembler already makes, so the exclusion reads the
+  verdict rather than recomputing it. One definition of *lapsed*, in the read
+  model, where the endpoint, the tool and the journal listing all get it from.
+- **The whole window is returned: no cap, no pagination.** `meta.total` equals
+  `len(data)`, and it is named anyway because it is the count a capped UI's
+  *show more* displays — the dashboard applies its five-item cap client-side, so
+  revealing the rest costs no second request. `meta` is a listing-specific model
+  rather than the shared paginated one, for the reason the journal listing's is:
+  advertising page controls that do not exist is worse than having none. What
+  bounds the collection instead is `days_ahead`, capped at 90 on both surfaces
+  *and* in the domain rule, so the cap cannot be bypassed by reaching the service
+  another way.
+- **The window travels in `meta`, including when the answer is empty.** No row
+  carries it, so a client with no rows could not otherwise say *what* was empty —
+  and "nothing due between today and next Tuesday" is the empty state the
+  specification asks for, not "nothing due".
+- **The rows are the same `TaskReadResource` the single read returns**, so a
+  dashboard renders one with the renderer it already has. `link_roles` is absent
+  and deliberately so: that field answers "how is this task linked to the journal
+  being listed", and in a window the question has no meaning.
 - **A journal relationship is named for the role it holds, not for the resource
   it points at.** A task has three journal relationships — creating, due and
   intermediate — and only the last is a row in a link table, so the route is
@@ -528,7 +579,8 @@ Conventions this surface pins down:
 - The matching MCP tools are `create_task`, `set_task_status`, `retarget_task`,
   `update_task_text`, `delete_task`, `link_task_to_contact`,
   `unlink_task_from_contact`, `attach_intermediate_journal_to_task`,
-  `detach_intermediate_journal_from_task`, `get_task` and `list_journal_tasks`
+  `detach_intermediate_journal_from_task`, `get_task`, `list_journal_tasks` and
+  `list_upcoming_tasks`
   (documented in their docstrings and
   parameter schemas, per the MCP documentation convention). `update_task_text`
   offers no `status` parameter and `set_task_status` no `text`: a model gets one
@@ -541,7 +593,13 @@ Conventions this surface pins down:
   `get_task` now does, and it keeps `intermediate_journal_ids` beside the
   resolved journals for the same reason the endpoint does: an agent that learned
   the shape from `create_task` should not have to learn a second one to read the
-  same task back.
+  same task back. `list_upcoming_tasks` returns the same window, total and
+  ordering the endpoint does, in the same read shape per row; its description
+  carries what the one-integer schema cannot say, and in particular **names
+  `list_journal_tasks` as where an excluded task is still found**, because an
+  agent that reported "you have nothing due" to a user holding three
+  cancelled-meeting commitments would be confidently wrong in a way the user
+  could not check.
 
 ## Authentication Guidelines
 

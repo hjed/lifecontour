@@ -2,7 +2,7 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **63 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–13 complete** (task tables + domain entity; task repository; journal-date
+**ITER18-001 Phases 1–14 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
 MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
 one automatic link, and its only way back out of a terminal status — and then retargeting over REST and
@@ -11,8 +11,12 @@ both surfaces; intermediate journal links over both surfaces; contact links over
 read model with the lapsed derivation — which is where a task first becomes readable *whole* — and now
 the two surfaces that ask for it: `GET /api/tasks/{id}` and a journal's tasks grouped by link role, with
 `get_task` and `list_journal_tasks` beside them, over batched reads that cost one query per collection
-however many tasks a journal holds. **A task is now readable, not only writable**; what remains before
-the frontend is the upcoming-window listing the dashboard consumes.)
+however many tasks a journal holds; and the upcoming-window listing the dashboard consumes —
+`GET /api/tasks/upcoming` and `list_upcoming_tasks`, over one pure window rule and one statement, reusing
+that same batched assembly. **A task is now readable, not only writable, and the query the home dashboard
+is built on exists**; every task *surface* the frontend needs is now served, and what remains is the
+frontend itself (15–20), the journal-list indicator whose backend half is still to come (21), and the
+e2e (22).)
 **ITER18-002 Phases 1, 2 and 3 complete** (the delete guard: journal deletion is refused, explanatorily,
 for any journal anchoring a task, and that refusal now reaches REST and MCP callers as machine-readable
 blockers alongside the prose; and merge, which is never refused — it re-points task links onto the
@@ -3463,19 +3467,180 @@ gates — the phase changes no frontend file.
 
 **Acceptance Criteria:**
 
-- [ ] A listing of **not-done** tasks whose due journal falls between today and *N* days ahead inclusive,
+- [x] A listing of **not-done** tasks whose due journal falls between today and *N* days ahead inclusive,
       default seven, ordered by due-journal date soonest first, anchored on today in the user's timezone.
-- [ ] Lapsed, done and cancelled tasks are excluded. **The only fixture that makes the lapsed exclusion
+- [x] Lapsed, done and cancelled tasks are excluded. **The only fixture that makes the lapsed exclusion
       non-vacuous is a not-done task whose due journal is inside the window but `EventState.CANCELLED`** — a
       date-passed lapse cannot fall inside a forward window by construction. That fixture is required.
-- [ ] MCP `list_upcoming_tasks` with the same default and semantics, in the same PR.
-- [ ] The response carries task text, due journal id/title/date and linked contacts, in one query per
+- [x] MCP `list_upcoming_tasks` with the same default and semantics, in the same PR.
+- [x] The response carries task text, due journal id/title/date and linked contacts, in one query per
       collection. This is the query ITER18-004's tasks section consumes, so its shape is settled here.
 
 **Required Test Coverage:** unit — window arithmetic and ordering, including a task due exactly on the
 boundary day. Integration — both surfaces with tasks inside, outside, on the boundary, done, cancelled and
 cancelled-journal-lapsed; window anchoring for a non-UTC user near midnight; no N+1. E2E deferred to
 Phase 22.
+
+**Delivered.** `GET /api/tasks/upcoming?days_ahead=7` and MCP `list_upcoming_tasks`, over one pure rule,
+one statement and the batched assembly Phase 13 built. **707 production lines against a ~150 estimate**
+(4.7×), and **3,961 tracked against ~600** (6.6×), of which 2,951 are tests and 303 docs — so **5.6×
+against its own production**.
+
+**Calibration rule 15 predicted this phase by name** and the estimate was not updated: it lists Phase 14
+among the REST+MCP pairs still estimated at ×4 and says to take ×6-against-production as the default for
+any phase with more than one entry point. 5.6× is that figure. Rule 14 applies on top — the deliverable is
+a *decision* ("is this deadline coming up"), meaningful only at its boundaries, and every boundary is a
+test. **The lesson is not about this phase but about the ones after it:** a rule that names the phases it
+catches is only useful if their estimates are then changed, and these were not. Phases 15–22's estimates
+carry the same ×4.
+
+**What the shape settles, since ITER18-004 Phase 13 consumes it:**
+
+- `core_shared/models/tasks/upcoming.py` (new) holds the whole rule, pure: `upcoming_window(today,
+  days_ahead)` and `select_upcoming_tasks(models, window)`, returning an `UpcomingTasks` that carries the
+  **window beside the tasks** — the shape `group_tasks_by_link_role` uses, and for the same reason: a
+  surface renders "the next seven days" too, and an *empty* answer has no rows to derive the window from.
+- **The window is computed in the service and never in SQL.** The timezone is resolved once through
+  `JournalDateResolver` and shared by the window *and* the assembler — `_assemble` now takes it as a
+  parameter, so one request cannot pay for two settings reads or straddle a change to it. A new
+  `local_window(first, last, tz)` turns the inclusive date span into instants; `local_day_window` is now
+  its single-day case. Pushing the conversion into SQL would put a second definition of "a journal's date"
+  in the database, one no unit test could reach.
+- **No cap and no pagination**, per ITER18-004 Phase 13's settled choice: `meta.total` equals `len(data)`
+  and is named anyway because it is the count the UI's show-more displays. What bounds the collection is
+  `days_ahead`, capped at 90 in the **domain rule** as well as on both surfaces, so it cannot be sidestepped
+  by reaching the service another way. `api-design.md`'s "there is deliberately no `/api/tasks` collection"
+  became false and was rewritten rather than left: there is no *unbounded* one, and both listings are
+  bounded by something.
+- **The lapse is read, not re-derived.** The statement filters status and dates; the pure rule drops
+  anything `lapsed` using the verdict `build_task_read_model` already reached from the batched cancellation
+  lookup. So the **cancelled due journal** is the only fixture that makes the check non-vacuous — the
+  mutation below confirms it is the *only* failure when the check is deleted.
+- **Route ordering is load-bearing.** `/api/tasks/upcoming` is declared above `/api/tasks/{task_id}`, or
+  `upcoming` parses as an id and 400s — the footgun `main.py:345` records for `/journals/series`. A test
+  asserts the literal route wins, because the failure mode is an endpoint that silently became unreachable.
+
+**Tests: 84 unit and 60 integration**, every unit one of them inside CI's marker selection.
+
+- `tests/unit/tasks/test_task_upcoming_window.py` (**25**, new) — the pure rule: the default and
+  `days_ahead=0`, every edge from both sides (today/yesterday, the boundary day/the day after), the three
+  exclusions including the cancelled-due-journal one, the date-then-id total order, the bounds rejection,
+  and that the answer carries its window when empty.
+- `tests/unit/tasks/test_task_read_service_upcoming.py` (**20**, new) — everything the rule cannot see: the
+  instants the repository is handed, a Kiritimati (+14) user at an instant whose UTC date is the previous
+  day, the timezone resolved once, call counts at **2 and 6** tasks, and the per-task link reads asserted
+  *untouched* rather than merely counted.
+- `tests/unit/journal/test_journal_date_resolver.py` (**+9**) — `local_window`, the new multi-day
+  generalisation the tasks window is built on (`local_day_window` is now its single-day case, asserted
+  equal so the two cannot drift). **A seven-day window straddles a DST transition twice a year**, which a
+  one-day window never does. The property test — every journal whose local date is in the span has its
+  *instant* inside the range, at any hour and in **both folds** — is parametrised over four spans
+  including two midnight-transition zones, and is what caught the bug below.
+- `tests/unit/api/test_task_read_serialisation.py` (**+7**) and `test_task_endpoint_docs.py` (**+6**) — the
+  envelope, and what the endpoint's published description must say. The docs test exists because the
+  endpoint's whole contract is one integer with a default: everything that makes the answer meaningful is
+  prose, and a client that does not read it will see a task vanish and conclude it was deleted.
+- `tests/unit/mcp/domains/test_task_tools_schema.py` (**+17**) — the tool's contract: the default of 7 **in
+  the schema** rather than only in the sentence, both bounds, and seven refused parameters (`now`/`today`/
+  `date` — the anchor cannot be moved; `user_id` — no impersonation; `status` — the exclusions are the rule;
+  `page`/`limit` — the window is the bound).
+- `tests/integration/tasks/test_task_upcoming_listing_integration.py` (**30**, new) — against real rows,
+  with `now` injected and journals seeded from **fixed instants** wherever the assertion is about an edge, a
+  boundary case on a moving clock being a flake waiting for a late-evening run. The boundary day is seeded
+  at **23:00** on purpose: a statement using the day's *start* would still pass a morning fixture. Both
+  Kiritimati halves; the same-local-day-different-hours case that proves the rule's order wins over the
+  query's; statement counts at 2 and 6, and the floor of **two** for an empty window.
+- `tests/integration/api/test_task_endpoints.py` (**+19**) and `tests/integration/mcp/test_task_tools_mcp.py`
+  (**+11**) — both surfaces end to end, each asserting the cancelled-due-journal task **absent here and
+  present with its reason on its journal in the same test**, so "hidden, not lost" is proved rather than
+  assumed.
+
+**Mutation checks.** Nine were run, each reverted after. Removing the lapsed exclusion fails **5**, across
+all four levels, and the cancelled-due-journal cases are the only ones that fail — the non-vacuousness the
+phase demanded, demonstrated rather than asserted. Making the window's far end exclusive fails **6**;
+dropping the id tie-break from the pure sort key fails **2**; anchoring the window on UTC fails **3**;
+reintroducing an N+1 on the contact read fails **6**; dropping the SQL status filter fails exactly **1** —
+the repository-level test, which is why that class exists at all, since the pure rule would otherwise mask
+it; dropping owner scoping fails **2**; and carrying the window's first-day offset to its far end fails
+**2**, which is the DST case above.
+
+**One attempted mutation was itself a no-op and is recorded because it looked like a passing check.** The
+first attempt at the DST mutation replaced the end's `tzinfo` with `start.tzinfo` — which *is* the same
+`ZoneInfo`, so nothing changed and every test stayed green. A mutation that passes is only evidence when
+the mutation was real, and this one had to be rewritten to carry a fixed `timezone(utcoffset())` before it
+meant anything. The same trap Phase 13 recorded with its de-duplication mutation, hit again in a different
+shape.
+
+**One mutation found a real gap rather than confirming a test.** Dropping the upper bound from the
+statement's `BETWEEN` left *every* test green, because the pure rule filters the window a second time. The
+answer stays correct and the query silently becomes "every future task of this user's, resolved" — the
+unbounded listing this endpoint exists not to be. A repository-level test was added
+(`test_it_fetches_neither_side_of_the_window`), and re-running the mutation now fails exactly that one test
+and nothing else. **The lesson generalises:** defence in depth at two layers means a weakened *lower* layer
+is invisible from above, so any layer that duplicates a filter needs a test addressed to it directly.
+
+**Acted on from the local review, before the gates were re-run. It found a real bug, in the one place the
+phase had argued a bug was impossible.**
+
+- **The window's far end was an hour short in any zone whose clocks go back *at midnight*.**
+  `local_window` built it as `combine(last_day, time.max, tz)`, and `ZoneInfo` resolves that ambiguous
+  wall time with `fold=0` — the **earlier** of the two passes through 23:59:59.999999. In Santiago,
+  Beirut and Asunción the last hour of such a day happens twice, so the window closed an hour before the
+  day did. PostgreSQL then compares *instants*, so `BETWEEN` dropped rows that the pure rule's
+  `contains()` said were inside — **exactly the SQL-versus-rule disagreement this phase claimed could not
+  happen**, and the reason it claimed so (that both are built from the same dates) was true and
+  insufficient. The user-visible failure: a Santiago user's task due at 23:30 on 4 April 2026 is absent
+  from the dashboard and from `list_upcoming_tasks` for that one day a year, with nothing to say it was
+  dropped. Fixed by taking a microsecond off the **following** midnight, which has no ambiguity to
+  resolve because the first instant of a day is unique however the clocks moved — done in UTC and
+  converted back, since subtracting a `timedelta` from a `ZoneInfo`-aware datetime is wall-clock
+  arithmetic and would land straight back on the ambiguous value. **The bug predates this phase** in
+  `local_day_window` (the outdoor dashboard has carried it since iteration 16); what this phase did was
+  generalise it and put it under a user-visible listing, so it is fixed here for both.
+- **The test that was supposed to catch it could not.** The property test compared `window.start <=
+  moment <= window.end` with all three carrying the *same* `ZoneInfo` — and Python compares two aware
+  datetimes sharing one `tzinfo` by their **naive** values, ignoring the offsets. So it asserted
+  wall-clock containment while the thing it existed to protect is an instant comparison, and it was
+  parametrised only over Sydney, whose 02:00/03:00 transitions cannot produce the ambiguity anyway. It
+  now converts both sides to UTC, probes **both folds** (`combine` only ever yields `fold=0`, so the
+  repeated hour was never sampled), and runs over four spans including Santiago and Beirut. Restoring
+  the old implementation now fails it in both midnight zones plus two explicit cases — four failures
+  where there were none. **The general lesson: a datetime assertion that never converts is not asserting
+  what a database will.**
+- **"Raised before any query runs, so a rejected request costs no database work" was false.** The
+  timezone read happens first — the bound cannot be checked against a window that has not been built.
+  The test named `..._before_any_read` did not contradict the claim because it only ever asserted the
+  *listing* query. Both were corrected; the test is now `..._before_the_listing_query` and asserts the
+  batched reads are untouched too.
+
+The review also confirmed what it could not fault: all four acceptance criteria against the code, every
+Required-Test-Coverage item against a named test, the MCP parity claim (nothing reachable on one surface
+and not the other), that both pre-existing `_assemble` callers were updated, and every spot-checkable
+number in this write-up.
+
+**E2E:** none — the deferral the phase states. No file under `frontend/` changes and no user-visible surface
+ships; ITER18-001's e2e lands in Phase 22 and the dashboard's in ITER18-004 Phase 17.
+
+**Docs:** `api-design.md` gained the endpoint row, a rewritten opening (the "no `/api/tasks` collection"
+claim), and ten conventions — route ordering, today-in-the-window versus future-dated, the timezone anchor
+and the absent seams, the asymmetric exclusions between the two listings, the lapse applied to the read
+model, the uncapped window and what `meta.total` is for, the window travelling in `meta` when empty, and
+the row being the read resource without `link_roles`. `domain-architecture.md` gained *The upcoming window*
+— the pure rule, the today disagreement, the single timezone resolution, the only-one-exclusion-bites
+point, the reused batching with its floor of two, the two different orderings, the bound, and the
+midnight-ambiguity rule the review's bug turned into architecture rather than a comment — and the
+Tasks Domain entry links to it.
+
+**Gates run locally:** `ruff format --check` and `ruff check` clean for `backend` and `core_shared`;
+`mypy` clean over **900** backend files and **131** in `core_shared`; the full `tests/unit/` suite at
+**3,563** passing, of which **1,440** are marker-selected. All **84** of this phase's new unit tests are in
+that selection, checked per file with `pytest -m unit --collect-only` rather than assumed — Phase 13's
+21-tests-that-would-never-run finding is the reason it is checked rather than trusted. (The repo-wide gap
+it recorded is untouched and still real: 1,440 of 3,563 is the same proportion as 1,326 of 3,422, so the
+marker still misses roughly six unit tests in ten. That remains tracked separately, not swept up here.)
+And **1,898** integration tests
+across `tests/integration/tasks/`, `api/`, `mcp/` and `journal/`, all passing. No frontend or e2e gates —
+the phase changes no frontend file.
 
 #### Phase 15: Frontend — Task API Client
 

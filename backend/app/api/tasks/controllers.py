@@ -50,7 +50,13 @@ review.
 from typing import Annotated
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import Task, TaskLinkRole, TaskValidationError
+from core_shared.models.tasks import (
+    DEFAULT_UPCOMING_DAYS_AHEAD,
+    MAX_UPCOMING_DAYS_AHEAD,
+    Task,
+    TaskLinkRole,
+    TaskValidationError,
+)
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Query, Request, status
@@ -69,10 +75,12 @@ from app.api.tasks.schemas import (
     TaskResponse,
     TaskRetargetRequest,
     TaskUpdateRequest,
+    UpcomingTasksResponse,
     persisted_task_id,
     task_self_link,
     to_journal_tasks_response,
     to_task_read_resource,
+    to_upcoming_tasks_response,
 )
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
@@ -111,6 +119,66 @@ def _to_resource(
         ),
         links=JsonApiLinks(self=task_self_link(task_id, base_url)),
     )
+
+
+# Declared **before** ``/tasks/{task_id}``, and that ordering is load-bearing:
+# FastAPI matches routes in registration order, so the member route would
+# otherwise claim ``upcoming`` as an id and answer 400. The same footgun
+# ``main.py`` records for ``/journals/series``, and an integration test pins it.
+@router.get("/tasks/upcoming")
+@inject
+async def list_upcoming_tasks(
+    request: Request,
+    task_read_service: FromDishka[TaskReadService],
+    user: FromDishka[SessionUser],  # Require authentication
+    days_ahead: Annotated[
+        int,
+        Query(
+            ge=0,
+            le=MAX_UPCOMING_DAYS_AHEAD,
+            description="How many days beyond today to include",
+        ),
+    ] = DEFAULT_UPCOMING_DAYS_AHEAD,
+) -> UpcomingTasksResponse:
+    """What is coming up: tasks due between today and `days_ahead` days ahead.
+
+    The home dashboard's tasks section. The window defaults to **seven days**
+    and both ends are **inclusive**, so a task due today is in it and so is one
+    due on the last day.
+
+    **The window is anchored on today in your timezone**, not the server's and
+    not the browser's, and each row's due-journal date arrives already resolved
+    in that same zone — so a client can render "Today" or "Tomorrow" without
+    re-deriving a day and disagreeing with the window it was given.
+
+    Note that this rule and the *future-dated* one a due journal must satisfy
+    disagree about today on purpose: a journal must be strictly future-dated to
+    *become* a deadline, while a deadline landing today is exactly what this
+    listing exists to surface.
+
+    **Done, cancelled and lapsed tasks are absent.** A task lapses when it is
+    still not done and its due journal has passed or been **cancelled**; inside
+    a forward window only the second can happen, so a cancelled meeting is what
+    takes a task off this list. Nothing is lost when it does — the task stays on
+    every journal it is linked to, where `GET /api/journals/{journal_id}/tasks`
+    lists it with its lapse marker and the user can **retarget** it onto a new
+    future journal.
+
+    **The whole window is returned and it is not paginated.** The window bounds
+    the collection, so a caller showing the first few can name the full count
+    from `meta.total` and reveal the rest without asking again. There is
+    deliberately no unpaginated *unbounded* listing: `days_ahead` is capped, and
+    this endpoint must not become the "every task" collection no screen has.
+
+    No transaction is opened on this path.
+
+    Raises:
+        400: `days_ahead` below zero or above the maximum.
+    """
+    upcoming = await task_read_service.read_models_for_upcoming_window(
+        user.id, days_ahead=days_ahead
+    )
+    return to_upcoming_tasks_response(upcoming, get_request_base_url(request))
 
 
 @router.get("/tasks/{task_id}")

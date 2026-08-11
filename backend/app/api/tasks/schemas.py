@@ -41,6 +41,7 @@ from core_shared.models.tasks import (
     TaskLinkRole,
     TaskReadModel,
     TaskStatus,
+    UpcomingTasks,
 )
 from pydantic import (
     BaseModel,
@@ -763,6 +764,98 @@ def _journal_task_resource(
             link_roles=list(groups.roles_for(task_id)),
         ),
         links=JsonApiLinks(self=task_self_link(task_id, base_url)),
+    )
+
+
+class UpcomingWindowSchema(BaseModel):
+    """The span a listing covers, in the acting user's timezone.
+
+    Dates rather than instants, for the reason a journal ref carries one: the
+    window was decided in the user's zone, and a client that re-derived it in
+    the browser's could disagree with the rows it was sent.
+    """
+
+    start_date: date_type = Field(
+        ..., description="Today in your timezone — the window includes it"
+    )
+    end_date: date_type = Field(
+        ..., description="The last day in the window, which is also included"
+    )
+    days_ahead: int = Field(
+        ...,
+        description=(
+            "How far ahead this answer looked. Echoed rather than left to be "
+            "derived by subtracting the two dates, so a surface can label "
+            "itself without doing calendar arithmetic."
+        ),
+    )
+
+
+class UpcomingTasksMeta(BaseModel):
+    """The listing's metadata: the window it covers and how much is in it.
+
+    A model of its own rather than the shared ``JsonApiMeta``, whose fields are
+    the pagination ones — this collection is bounded by its window rather than
+    paged, so borrowing that model would advertise controls that do not exist.
+    """
+
+    window: UpcomingWindowSchema = Field(
+        ..., description="The span these tasks are due in"
+    )
+    total: int = Field(
+        ...,
+        description=(
+            "How many tasks fall in the window. Equal to the length of data, "
+            "because the whole window is returned rather than a page of it: a "
+            "surface showing the first few can name the full count without a "
+            "second request, and revealing the rest costs nothing."
+        ),
+    )
+
+
+class UpcomingTasksResponse(BaseModel):
+    """Response model for the upcoming-window listing.
+
+    ``data`` holds the same ``TaskReadResource`` the single read returns, so a
+    client renders a dashboard row with the renderer it already has. There is
+    no ``link_roles`` here and deliberately so: that field answers "how is this
+    task linked to the journal being listed", and this listing is about a
+    window, in which the question has no meaning.
+    """
+
+    data: list[TaskReadResource] = Field(
+        ..., description="The tasks due in the window, soonest first"
+    )
+    meta: UpcomingTasksMeta = Field(..., description="The window and its total")
+
+
+def to_upcoming_tasks_response(
+    upcoming: UpcomingTasks, base_url: str = ""
+) -> UpcomingTasksResponse:
+    """Render the upcoming-window answer as its listing response.
+
+    Pure, like the other two renderers, and for the same reason: no request, no
+    connection, no service, so it can be asserted directly.
+
+    Args:
+        upcoming: The selected tasks and the window they were selected for
+        base_url: Prefix for each row's ``self`` link, so it is absolute like
+            every other resource's
+
+    Returns:
+        The response: the rows in the read shape, with the window and the total
+        in ``meta``.
+    """
+    return UpcomingTasksResponse(
+        data=[to_task_read_resource(model, base_url) for model in upcoming.tasks],
+        meta=UpcomingTasksMeta(
+            window=UpcomingWindowSchema(
+                start_date=upcoming.window.first_day,
+                end_date=upcoming.window.last_day,
+                days_ahead=upcoming.window.days_ahead,
+            ),
+            total=upcoming.total,
+        ),
     )
 
 

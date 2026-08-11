@@ -173,7 +173,8 @@ the *creating* journal where it arose and the *due* journal where it matters.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below — and the
   link-role grouping a journal's task list is built on, see
-  *[A journal's tasks, by link role](#a-journals-tasks-by-link-role)*.
+  *[A journal's tasks, by link role](#a-journals-tasks-by-link-role)*; and the forward-window rule the
+  home dashboard's tasks section is built on, see *[The upcoming window](#the-upcoming-window)*.
 - **Domain Services**: `TaskService`
   (`backend/app/core/tasks/services/task_service.py`), provided at request scope by `TaskProvider`.
   It is where the specification's *core invariants* are enforced, so REST and MCP both inherit them
@@ -673,6 +674,69 @@ order.
 **Every linked task is listed, in every status** — done, cancelled and lapsed included. A journal is
 where a lapsed task is meant to be found again, so the lapse is a marker on the row rather than a
 filter; the dashboard's tasks section is the surface that excludes them.
+
+### The upcoming window
+
+`TaskReadService.read_models_for_upcoming_window` answers the other half of "where tasks appear": the
+[specification's](../product-specifications/home-dashboard-and-tasks-product-specification.md#tasks)
+dashboard section — not-done tasks whose due journal falls between **today and seven days ahead,
+inclusive**, soonest first. It is the only task listing that reaches across journals, and it is the
+query ITER18-004's tasks section consumes, which is why its shape is settled here rather than there.
+
+**The window is arithmetic, and it is pure.** `upcoming_window` and `select_upcoming_tasks`
+(`core_shared/models/tasks/upcoming.py`) take a date the caller resolved and the models the caller
+assembled, and hold the whole rule: where the window starts and ends, which tasks it drops, and what
+order the survivors come back in. `select_upcoming_tasks` returns an `UpcomingTasks` carrying the
+window beside the tasks — the same shape `group_tasks_by_link_role` returns its `journal_id` in, and
+for the same reason: a surface renders "the next seven days" as well as the rows, and an **empty**
+answer has no rows to derive the window from.
+
+**Today is in the window, and the future-dated invariant excludes it.** The two rules disagree about
+today deliberately, and conflating them is the likely mistake: `is_future_dated` asks whether a
+journal may *become* a deadline, and this asks whether a deadline is coming up. A task written
+yesterday for today is exactly what the dashboard is for.
+
+**Whose today is decided once, in the service, and never in SQL.** The timezone is resolved through
+`JournalDateResolver.timezone_for` and shared by the window *and* the assembler — `_assemble` takes it
+as a parameter rather than looking it up, so one request cannot straddle a settings change or pay for
+two reads. `local_window` then turns the inclusive date span into local midnight on the first day
+through the final microsecond of the last, and those instants are what the query compares against
+`journals.event_date_range_start`. Pushing the conversion into SQL would put a second definition of
+"a journal's date" in the database, one no unit test could reach.
+
+**A day's last instant is derived from the next day's midnight, and that is not a stylistic choice.**
+In a zone whose clocks go back *at* midnight — Santiago, Beirut, Asunción — the local wall time
+`23:59:59.999999` names two different instants, and `ZoneInfo` resolves the ambiguity to the earlier
+one. A window built from it closes an hour before the day does, and since SQL compares instants while
+the pure rule compares dates, the two disagree: a real journal inside the window is dropped by the
+query and nothing reports it. The following midnight has no such ambiguity, because the first instant
+of a day is unique however the clocks moved. Found by review after the phase had argued that
+disagreement was impossible.
+
+**Three exclusions, and only one of them can actually bite.** The statement filters *status*, so done
+and cancelled tasks never arrive. The pure rule then drops anything `lapsed`, reading the verdict
+`build_task_read_model` derived rather than recomputing it — and inside a *forward* window a
+date-passed lapse is impossible by construction, since the window starts today. So the **cancelled due
+journal** is the only fixture that makes the lapse check non-vacuous, and it is required at every test
+level: remove the check and that one case is the only failure. The excluded task is not lost — it stays
+on every journal it is linked to, marked and retargetable, which is the pair the specification promises.
+
+**The batched reads are the journal listing's, reused whole.** `find_upcoming_tasks` is one statement —
+an inner join to `journals` on the due anchor, which is `NOT NULL` and `ON DELETE RESTRICT` so it can
+neither drop nor duplicate a task — and everything after it is `_assemble`. The listing therefore costs
+the same seven statements a journal's does, invariant in the task count, with a floor of **two** for an
+empty window, where every batch below has no ids to ask about.
+
+**Ordering is total, and the pure rule owns it.** By due-journal *date* then task id, matching the
+journal listing exactly so the same tasks read the same way on both surfaces. The query orders too, by
+the raw timestamp, which is not the same key: two journals on one local day at different hours tie in
+the rule and do not in the query. The rule's order is the one that reaches a client.
+
+**Bounded, not paginated.** `days_ahead` is capped at 90 in the domain rule as well as on both
+surfaces, so the cap cannot be sidestepped by reaching the service another way, and the whole window is
+returned uncapped within it — ITER18-004 settles that the dashboard's five-item cap is the UI's, so its
+*show more* costs no second request. There is deliberately no unbounded task listing anywhere in this
+product, and this is the endpoint that would most easily become one.
 
 ### The journal delete guard
 

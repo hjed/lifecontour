@@ -21,6 +21,7 @@ from app.api.tasks.controllers import (
     delete_task,
     get_task,
     list_journal_tasks,
+    list_upcoming_tasks,
     update_task,
 )
 
@@ -145,3 +146,74 @@ class TestTheReadEndpointsDocumentWhatTheyAnswer:
         description = _description(list_journal_tasks)
 
         assert "more than one group" in description
+
+
+@pytest.mark.unit
+class TestTheUpcomingListingDocumentsItsWindow:
+    """The listing whose whole contract is a rule the schema cannot state.
+
+    Its parameter is one integer with a default, so everything that makes the
+    answer meaningful — where the window starts, which tasks are missing from it
+    and why, and whose clock decides — exists only in the description. A client
+    that does not read it will see a task vanish from the listing and conclude
+    the task was deleted.
+    """
+
+    def test_it_names_the_default_window(self) -> None:
+        """Seven days, the specification's own figure."""
+        description = _description(list_upcoming_tasks)
+
+        assert "seven days" in description
+
+    def test_it_says_the_window_includes_today(self) -> None:
+        """The near edge, which the future-dated invariant excludes.
+
+        The two rules disagree about today on purpose, and a caller who assumes
+        this one matches the create rule will think today's tasks are missing.
+        """
+        description = _description(list_upcoming_tasks)
+
+        assert "today" in description
+        assert "inclusive" in description
+
+    def test_it_says_the_window_is_anchored_in_the_users_timezone(self) -> None:
+        """So a client does not re-derive "today" in the browser's zone.
+
+        Asserted on "timezone" together with the anchoring word rather than on
+        "timezone" alone, which the date fields' own descriptions would satisfy.
+        """
+        description = _description(list_upcoming_tasks)
+
+        assert "your timezone" in description
+        assert "anchored" in description
+
+    def test_it_names_all_three_exclusions(self) -> None:
+        """Done, cancelled and lapsed, because an absence is otherwise a puzzle."""
+        description = _description(list_upcoming_tasks)
+
+        assert "done" in description
+        assert "cancelled" in description
+        assert "lapsed" in description
+
+    def test_it_says_where_an_excluded_task_can_still_be_found(self) -> None:
+        """A lapsed task is hidden here and visible on its journals.
+
+        The half that makes the exclusion safe to document: without it, "lapsed
+        tasks do not appear" reads as data loss rather than as a deliberate
+        split between two surfaces.
+        """
+        description = _description(list_upcoming_tasks)
+
+        assert "journal" in description
+        assert "retarget" in description
+
+    def test_it_says_the_window_is_uncapped(self) -> None:
+        """The choice ITER18-004's show-more depends on.
+
+        The whole window travels in one response, so revealing the rest of it
+        costs no second request. A client told nothing would reasonably
+        implement pagination against an endpoint that has none.
+        """
+        description = _description(list_upcoming_tasks)
+
+        assert "not paginated" in description
