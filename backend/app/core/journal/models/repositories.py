@@ -73,13 +73,39 @@ class JournalRepository(ABC):
     @abstractmethod
     async def find_by_id(self, journal_id: int) -> Journal | None:
         """
-        Find a journal by ID.
+        Find a journal by ID, **without** scoping it to an owner.
+
+        This is for callers that have no acting user: integration workers and
+        stream consumers, which process journals on nobody's behalf. Anything
+        serving a request *does* have one and must use
+        :meth:`find_by_id_for_user`, or it is deciding on ownership after the
+        fact — which is how issue #1267 happened.
 
         Args:
             journal_id: The journal ID to look up
 
         Returns:
             The Journal if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_id_for_user(
+        self, journal_id: int, user_id: str
+    ) -> Journal | None:
+        """
+        Find a journal by ID, scoped to the user who owns it.
+
+        Implementations must apply the owner predicate in the query itself, so
+        a journal belonging to somebody else is indistinguishable from one that
+        does not exist — the caller never holds it and so cannot leak it.
+
+        Args:
+            journal_id: The journal ID to look up
+            user_id: The acting user; a journal owned by anybody else is absent
+
+        Returns:
+            The Journal if it exists and belongs to ``user_id``, None otherwise
         """
         pass
 

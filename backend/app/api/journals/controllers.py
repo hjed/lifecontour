@@ -191,9 +191,7 @@ async def get_journal_history(
     # Verify the journal exists and belongs to the authenticated user; a journal
     # owned by someone else is reported as not-found so history cannot leak across
     # users (mirrors the route sub-resource endpoints).
-    journal = await journal_service.get_journal(journal_id)
-    if not journal or journal.user_id != user.id:
-        raise JournalNotFoundError(journal_id)
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     offset = (page - 1) * limit
 
@@ -1760,15 +1758,31 @@ async def get_outdoor_dashboard(
     )
 
 
+async def _require_owned_journal(
+    journal_service: JournalService, user_id: str, journal_id: int
+) -> Journal:
+    """Return the journal, or raise ``JournalNotFoundError`` if it is not yours.
+
+    Every handler taking a ``{journal_id}`` needs the journal anyway, so going
+    through here costs nothing: the read is the one the handler was already
+    doing, only scoped to the owner in SQL. That is the whole of issue #1267 —
+    eleven handlers fetched the journal by id alone and never compared its
+    ``user_id``, so a stranger could read, rewrite and strip any journal.
+
+    A journal belonging to somebody else raises exactly as a missing one does,
+    so the refusal cannot be used to discover that the id is real.
+    """
+    journal = await journal_service.get_journal_for_user(journal_id, user_id)
+    if journal is None:
+        raise JournalNotFoundError(journal_id)
+    return journal
+
+
 async def _ensure_journal_owned(
     journal_service: JournalService, user_id: str, journal_id: int
 ) -> None:
     """Raise ``JournalNotFoundError`` unless the journal exists and is the user's."""
-    journals = await journal_service.find_journals_by_ids_for_user(
-        user_id=user_id, journal_ids=[journal_id]
-    )
-    if not journals:
-        raise JournalNotFoundError(journal_id)
+    await _require_owned_journal(journal_service, user_id, journal_id)
 
 
 def _build_incomplete_outdoor_activity_resource(
@@ -1897,9 +1911,7 @@ async def get_journal_external_links(
     Returns links to external systems (Strava, Google Calendar, Immich) that
     are associated with this journal, derived from existing sync data.
     """
-    journal = await journal_service.get_journal(journal_id)
-    if not journal or journal.user_id != user.id:
-        raise JournalNotFoundError(journal_id)
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Fetch every Strava activity linked to the journal (an additively merged
     # journal carries more than one)
@@ -1984,9 +1996,7 @@ async def get_journal(
     """
     base_url = get_request_base_url(request)
 
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    journal = await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
@@ -2292,9 +2302,9 @@ async def update_journal(
     """
     base_url = get_request_base_url(request)
 
-    existing_journal = await journal_service.get_journal(journal_id)
-    if not existing_journal:
-        raise JournalNotFoundError(journal_id)
+    existing_journal = await _require_owned_journal(
+        journal_service, user.id, journal_id
+    )
 
     updated_journal = JournalRequestConverter.from_update_request(
         journal_request.data, existing_journal
@@ -2444,9 +2454,9 @@ async def partial_update_journal(
     """
     base_url = get_request_base_url(request)
 
-    existing_journal = await journal_service.get_journal(journal_id)
-    if not existing_journal:
-        raise JournalNotFoundError(journal_id)
+    existing_journal = await _require_owned_journal(
+        journal_service, user.id, journal_id
+    )
 
     # For partial update, merge with existing values
     # Only update fields that are provided in the request
@@ -2636,9 +2646,7 @@ async def delete_journal(
     refusal cannot be used to discover that it exists — the stance the MCP read
     already takes, and the one the task domain's ports document.
     """
-    existing_journal = await journal_service.get_journal(journal_id)
-    if not existing_journal or str(existing_journal.user_id) != str(user.id):
-        raise JournalNotFoundError(journal_id)
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     await journal_write_service.delete_journal(
         journal_id, connection, changed_by="ui", source=Provenance.UI
@@ -2699,27 +2707,14 @@ async def merge_journal(
 
         raise JournalMergeConflictError("Cannot merge a journal into itself")
 
-    # Ownership and existence checks for both target and source journals
-    target_journal_for_user = await journal_service.get_journal(journal_id)
-    if not target_journal_for_user:
-        raise JournalNotFoundError(journal_id)
-
-    source_journal_for_user = await journal_service.get_journal(source_id)
-    if not source_journal_for_user:
-        raise JournalNotFoundError(source_id)
-
-    # Ensure both journals belong to the authenticated user to prevent cross-tenant merges
-    target_user_id = str(getattr(target_journal_for_user, "user_id", ""))
-    source_user_id = str(getattr(source_journal_for_user, "user_id", ""))
-    auth_user_id = str(getattr(user, "id", ""))
-
-    if target_user_id != auth_user_id or source_user_id != auth_user_id:
-        from fastapi import HTTPException, status
-
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to merge these journals.",
-        )
+    # Both journals are read owner-scoped: a merge reads two journals by id and
+    # writes one of them, so either being somebody else's is a refusal.
+    #
+    # This used to answer 403, which told the caller their id was real — the one
+    # surface that distinguished "not yours" from "does not exist". It now
+    # answers 404 like every other journal-by-id route (#1267).
+    await _require_owned_journal(journal_service, user.id, journal_id)
+    await _require_owned_journal(journal_service, user.id, source_id)
 
     overrides_dict = None
     if merge_request.data.attributes.overrides:
@@ -2841,10 +2836,9 @@ async def add_type_to_journal(
     """
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse journal type
     try:
@@ -2985,10 +2979,9 @@ async def remove_type_from_journal(
     """
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse journal type
     try:
@@ -3111,10 +3104,9 @@ async def update_type_data(
     """
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse journal type
     try:
@@ -3231,10 +3223,9 @@ async def add_contact_to_journal(
     """
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse contact_id and relationship type
     try:
@@ -3391,10 +3382,9 @@ async def update_journal_contact_relationship(
 
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse relationship type
     try:
@@ -3554,10 +3544,9 @@ async def remove_contact_from_journal(
 
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse contact_id and relationship type
     try:
@@ -3676,10 +3665,9 @@ async def add_tag_to_journal(
 
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse tag_id
     try:
@@ -3793,10 +3781,9 @@ async def remove_tag_from_journal(
 
     base_url = get_request_base_url(request)
 
-    # Verify journal exists
-    journal = await journal_service.get_journal(journal_id)
-    if not journal:
-        raise JournalNotFoundError(journal_id)
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     # Parse tag_id
     try:
