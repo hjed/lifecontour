@@ -431,6 +431,10 @@ PORT_READ_METHODS = frozenset(
         "list_intermediate_journal_ids_for_tasks",
         "list_contact_ids_for_tasks",
         "find_tasks_anchored_to_journal",
+        # The upcoming-window listing (ITER18-001 Phase 14), which arrived
+        # without being classified here — exactly the hole this test exists to
+        # catch. It reads: a windowed select, no writes on its path.
+        "find_upcoming_tasks",
     }
 )
 
