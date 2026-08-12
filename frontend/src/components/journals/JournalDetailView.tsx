@@ -54,6 +54,7 @@ import { JournalContactBadge } from './JournalContactBadge';
 import { JournalSeriesBadge } from './JournalSeriesBadge';
 import { JournalTagsEditor } from './JournalTagsEditor';
 import { JournalChildrenList } from './JournalChildrenList';
+import { JournalTasksSection } from './JournalTasksSection';
 import { JournalParentSelector } from './JournalParentSelector';
 import { JournalTypeSection } from './JournalTypeSection';
 import { countAbseils } from './type-editors/pitchUtils';
@@ -705,6 +706,11 @@ export function JournalDetailView({
           )}
         </CardContent>
       </Card>
+
+      {/* Tasks linked to this journal, grouped by link role. Renders nothing
+          when the journal has no tasks, which is most journals. Read-only
+          until ITER18-001 Phase 17. */}
+      <JournalTasksSection journalId={journal.id} />
 
       {/* Children List - Always shown for add-child functionality */}
       <JournalChildrenList

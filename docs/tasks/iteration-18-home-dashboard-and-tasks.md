@@ -3871,23 +3871,139 @@ The full Jest suite rather than the new file alone, because `lib/constants.ts` i
 trusting the pass that preceded them. No backend gates and no e2e — no Python file and no rendered
 surface changed.
 
-#### Phase 16: Frontend — Journal Task Display
+#### Phase 16: Frontend — Journal Task Display ✅ COMPLETE
 
 **Prerequisites:** Phase 15.
-**Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Actual:** ~347 production →
+**~1,030 tracked** (across 9 files: 347 production, 579 tests, ~104 docs — the docs figure counting
+this entry).
 
-**Acceptance Criteria:**
+**The estimate missed production by ~2.5×, and the multiplier came in at 3.0× rather than 4×** — the
+same shape Phase 15 recorded, and for the same reason: a frontend phase has one layer to test, not
+the service/REST/MCP three a backend phase multiplies over. What the 140 missed is that "a section
+component" is **three** production files, not one. The row is a component in its own right (Phases
+17–19 all hang off it), and the lapse wording had to leave the component entirely to be assertable
+without rendering — see decision 2.
 
-- [ ] A `JournalTasksSection` component renders the three groups — due, created, mentioned — on the journal
-      detail view, showing each task's text, status and linked contacts.
-- [ ] Rows reuse the dashboard row idiom (**W22**, **W23**, **W27**) so the two surfaces read alike.
-- [ ] Lapsed tasks are clearly marked and the marker **states which reason applies**, in wording distinct
-      between date-passed and due-journal-cancelled (the data comes from Phase 12).
-- [ ] A journal with no tasks renders nothing rather than an empty container; an empty group is omitted.
-- [ ] Read-only in this phase: no action buttons yet, which breaks nothing that previously worked.
+**Acceptance criteria, ticked:**
+
+- [x] A `JournalTasksSection` component renders the three groups — due, created, mentioned — on the journal
+      detail view, showing each task's text, status and linked contacts. —
+      `frontend/src/components/journals/JournalTasksSection.tsx`, mounted in `JournalDetailView`
+      between the main card and the children list. The grouping is read from **`meta.groups`**, whose
+      values are ordered id lists, not re-derived from `link_roles`: a task holding two roles in the
+      journal comes back **once** in `data` (JSON:API forbids the same resource twice) and is named
+      in each of its groups, so it is rendered under both headings. Pinned by a test, as is the fact
+      that the rows follow `meta.groups`' order rather than `data`'s.
+- [x] Rows reuse the dashboard row idiom (**W22**, **W23**, **W27**) so the two surfaces read alike. —
+      `JournalTaskRow.tsx`: bordered rounded row with a left accent bar and hover shadow (W22), the
+      task text as a prominent non-link `font-medium` line (W23), and each linked contact as an
+      avatar beside their name in muted text with zero contacts rendering nothing at all (W27). One
+      recorded divergence and one deliberate addition — decisions 4 and 5.
+- [x] Lapsed tasks are clearly marked and the marker **states which reason applies**, in wording distinct
+      between date-passed and due-journal-cancelled (the data comes from Phase 12). —
+      `Lapsed · date passed` and `Lapsed · journal cancelled`, from `lib/task-display.ts`. The
+      distinctness is asserted directly (`not.toBe`) at both levels rather than each wording being
+      checked in isolation, because two tests that each assert "contains *lapsed*" would both pass
+      after the two were collapsed into one string. Confirmed by mutation check.
+- [x] A journal with no tasks renders nothing rather than an empty container; an empty group is omitted. —
+      Both, plus the loading pass, which renders nothing for the same reason (decision 1). Each is a
+      separate test; the empty-group filter is one of the four mutation checks.
+- [x] Read-only in this phase: no action buttons yet, which breaks nothing that previously worked. —
+      Asserted rather than assumed: a test renders the busiest row the phase can produce (lapsed,
+      with contacts) and requires `queryAllByRole('button')` and `queryAllByRole('checkbox')` to be
+      empty, so Phase 17 adds actions to a row that is provably inert today. Nothing previously
+      working changed: the existing `JournalDetailView` suite (32 tests) passes untouched, and the
+      three heaviest journal e2e specs were re-run on both projects as a regression pass.
+
+**Decisions taken (Phase 16):**
+
+1. **Loading renders nothing; a *failure* does not.** The two look like the same "no data yet" case
+   and are not. Most journals hold no tasks, so a loading skeleton would flash on nearly every
+   journal detail view for a section about to render nothing — hence nothing while loading. But
+   hiding the section when the listing *fails* is indistinguishable from "this journal has no
+   tasks", so a journal whose lapsed tasks failed to load would read as clean, which is precisely
+   the outcome the lapsed design exists to prevent. A failure therefore renders one quiet line.
+   Both branches are tested, and the silent-failure version is one of the four mutation checks.
+2. **The lapse wording lives in `lib/task-display.ts`, not in the row.** Phase 12 deliberately
+   shipped `LapseReason` as structured data "so surfaces can word it differently", which makes the
+   wording a product rule rather than a presentation detail — the specification's cancellation
+   section requires the journal to make the cancellation cause *obvious*. A pure function is what
+   lets a test assert the two stay distinguishable without rendering a component, and it is where
+   Phase 17's action labels and the dashboard's own wording will go.
+3. **A status badge on every row**, including `Not done`. The dashboard's rows (W22–W27) carry no
+   status badge because everything on the dashboard is not-done; a journal shows all three statuses
+   side by side, so the badge is doing work here that it would not do there. Done and cancelled rows
+   are additionally muted and struck through — shown, not hidden, and never as if still live, which
+   is the stance W18 takes on cancelled journals.
+4. **The W22 accent bar is keyed to status and lapse, not to the due journal's colour.** W22 keys it
+   to the due journal's type/calendar colour (via W17), and `TaskJournalRef` carries only `id`,
+   `title`, `date` and `cancelled`. Widening the read model for a colour is a backend change this
+   phase does not own, so the bar is keyed to what the row actually knows — whether the commitment
+   is still live. Recorded here rather than left as an unexplained difference from the wireframe.
+5. **A "due in ⟨journal⟩" line (W26) on rows whose due journal is not the journal being viewed.**
+   Not named among this phase's criteria, and added deliberately: on a *created* or *mentioned* row a
+   lapse marker without the journal that lapsed is a statement the user cannot act on. Suppressed on
+   the due group, where it would only read "due in this journal".
+6. **Contacts are avatar + muted name, not links.** W27 specifies muted text; the linked contact
+   name is W31's upcoming-dates idiom, a different row. Left as W27 draws it rather than quietly
+   upgraded, since the criterion names W27 as the thing to match.
 
 **Required Test Coverage:** unit (RTL) — the three groups, both lapsed reasons, the no-tasks case, contact
 rendering, and accessible grouping labels. E2E deferred to Phase 22.
+
+**Delivered:** **39** unit tests across three suites — `frontend/src/lib/__tests__/task-display.test.ts`
+(9), `components/journals/__tests__/JournalTaskRow.test.tsx` (19) and
+`components/journals/__tests__/JournalTasksSection.test.tsx` (11) — following the
+`JournalContactBadge.test.tsx` idiom, with the task fixtures (`createMockJournalTask`,
+`createMockTaskJournalRef`) added to the existing `components/journals/test-helpers.tsx` rather than
+duplicated per file. Beyond the required list: the `meta.groups`-ordering assertion (whose fixture
+deliberately orders `data` differently, so a pass-through implementation cannot satisfy it
+vacuously), a task holding two roles appearing under both headings, an unresolvable id being skipped
+rather than throwing, the loading and failure branches, and the read-only guarantee.
+
+**Accessible grouping** is asserted through the accessibility tree rather than through test ids:
+each group is a `<section aria-labelledby>` queried as `getByRole('region', { name })` with its list
+and items queried inside it, and the heading levels are pinned (`h3` for the card, `h4` per group)
+so a later restyle cannot flatten the structure while keeping the tests green.
+
+**Mutation checks.** Four deliberate breakages, each reverted after confirming it was caught:
+reading the grouping from `data`'s order instead of `meta.groups` failed 2 tests; dropping the
+empty-group filter failed 2; collapsing the two lapse wordings into one failed 5 across both suites;
+and returning `null` on a failed listing failed 1. These are the assertions the acceptance criteria
+rest on, so a green suite that could not fail on them would be worth less than it looks.
+
+**Integration:** none, and not a deferral of convenience — the phase adds no Python. The endpoint the
+section calls carries its own integration coverage from Phase 13 and the lapse derivation from Phase
+12. **E2E:** none *new*; Phase 22 owns ITER18-001's e2e along with the `TestDataManager` task helpers
+and the lapsed-fixture recipe, and building those here would fork that work. What this phase did run
+is a **regression** pass over the journal detail surface, since mounting a new section can disturb
+layout, scroll and click targets in specs that already pass.
+
+**One e2e failure, investigated rather than waved through.** The regression pass came back 78 passed
+/ 1 failed: `journal-history.spec.ts` *"records tag assignment and removal"* on Mobile Chrome, where
+a tag badge never appeared in `JournalTagsEditor`. Four pieces of evidence say it is a pre-existing
+flake and not this phase's doing — it passed on firefox in the same run; the element is in the
+metadata block, not the new section; the journals those specs build hold no tasks, so
+`JournalTasksSection` renders **nothing** on them; and re-running the spec on Mobile Chrome with
+`--repeat-each 3` passed every time. Recorded here rather than left in a log, since the next person
+to see it should not have to redo this. Mobile Chrome runs with `retries: 0` and surfaces flakes the
+other project masks.
+
+**Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
+clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in
+`tests/e2e/`). The **full** Jest suite rather than the three new files alone, because
+`JournalDetailView` is imported widely: **169** suites and **1,849** tests, all passing (1,810
+before this phase). Plus the e2e regression pass above on both projects. No backend gates: no Python
+file changed.
+
+**Docs:** `frontend-design.md` gained *The Journal Task Surface* — the `meta.groups` grouping rule
+and why it is a contract rather than a convenience, the render-nothing-vs-quiet-failure distinction,
+that every status including lapsed is shown, where the lapse wording lives and why, the W22 accent
+divergence, and the group accessibility structure. Its *Task Query Keys* table also had a stale
+claim corrected: it said the upcoming-window endpoint "does not exist", which stopped being true
+when Phase 14 landed — the hook is still absent, but for a different reason. `api-design.md` is
+unchanged: no backend file was touched.
 
 #### Phase 17: Frontend — Inline Status Actions
 

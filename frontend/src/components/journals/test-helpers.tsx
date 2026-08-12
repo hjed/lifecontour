@@ -9,6 +9,13 @@ import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JournalType, type JournalResource } from '@/types/journals';
 import {
+  TaskLinkRole,
+  TaskStatus,
+  type JournalTaskAttributes,
+  type JournalTaskResource,
+  type TaskJournalRef,
+} from '@/types/tasks';
+import {
   DisplayJournal,
   transformJournalForDisplay,
 } from '@/utils/journalTransformers';
@@ -143,6 +150,57 @@ export function createMockUseInlineEdit(
     setValue: jest.fn(),
     handleKeyDown: jest.fn(),
     ...overrides,
+  };
+}
+
+/**
+ * Create a mock journal reference as a task's read model carries one.
+ *
+ * `date` is an ISO date already resolved in the user's timezone, never an
+ * instant — the same shape `TaskJournalRef` documents.
+ */
+export function createMockTaskJournalRef(
+  partial?: Partial<TaskJournalRef>
+): TaskJournalRef {
+  return {
+    id: 1,
+    title: 'Test Journal',
+    date: '2025-01-15',
+    cancelled: false,
+    ...partial,
+  };
+}
+
+/**
+ * Create a mock task resource as a journal's listing returns one.
+ *
+ * Defaults to the simplest task a journal can hold: not done, not lapsed, no
+ * contacts, due in the journal that created it. Every test states only the
+ * attributes it is about.
+ */
+export function createMockJournalTask(
+  partial?: Partial<JournalTaskAttributes> & { id?: string }
+): JournalTaskResource {
+  const { id = '1', ...attributes } = partial ?? {};
+
+  return {
+    type: 'tasks',
+    id,
+    attributes: {
+      text: 'Print the permit',
+      status: TaskStatus.NOT_DONE,
+      creating_journal_id: 1,
+      due_journal_id: 1,
+      intermediate_journal_ids: [],
+      creating_journal: createMockTaskJournalRef(),
+      due_journal: createMockTaskJournalRef(),
+      intermediate_journals: [],
+      contacts: [],
+      lapsed: false,
+      lapse_reason: null,
+      link_roles: [TaskLinkRole.DUE],
+      ...attributes,
+    },
   };
 }
 
