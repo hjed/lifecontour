@@ -745,7 +745,7 @@ describe('Task API client', () => {
           taskKeys.upcoming(),
         ]);
       });
-      expect(toast.success).toHaveBeenCalledWith('Task updated successfully');
+      expect(toast.success).toHaveBeenCalledWith('Task marked done');
     });
 
     it('surfaces the refusal to move a cancelled task back with a PATCH', async () => {
@@ -768,6 +768,245 @@ describe('Task API client', () => {
       expect(toast.error).toHaveBeenCalledWith(
         'Retarget it onto a new future journal to reopen it'
       );
+    });
+  });
+
+  /**
+   * The optimistic half of the inline status actions (ITER18-001 Phase 17).
+   *
+   * A row must read as done the instant it is ticked, and read as it did
+   * before if the write fails — so the cache is patched in `onMutate` and
+   * every snapshot restored in `onError`. These tests hold the request open
+   * rather than resolving it, because a patch that only appears once the
+   * response lands is not an optimistic one and would pass a naive assertion.
+   */
+  describe('useUpdateTask optimistic status change', () => {
+    const listKey = taskKeys.journalList('7');
+
+    /** A held-open `fetch`, plus the trigger that finally answers it. */
+    function heldRequest(answer: () => Response): () => void {
+      let release: () => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise<Response>(resolve => {
+            release = () => {
+              resolve(answer());
+            };
+          })
+      );
+      return () => {
+        release();
+      };
+    }
+
+    /** The status a cached journal listing is showing for one task. */
+    function cachedListStatus(taskId: string): TaskStatus | undefined {
+      return queryClient
+        .getQueryData<JournalTasksResponse>(listKey)
+        ?.data.find(task => task.id === taskId)?.attributes.status;
+    }
+
+    /** The status the cached single-task read is showing. */
+    function cachedDetailStatus(): TaskStatus | undefined {
+      return queryClient.getQueryData<TaskReadResponse>(taskKeys.detail('1'))
+        ?.data.attributes.status;
+    }
+
+    function seedCache(listing = journalTasksResponse()): void {
+      queryClient.setQueryData(listKey, listing);
+      queryClient.setQueryData(taskKeys.detail('1'), taskReadResponse());
+    }
+
+    it('shows the new status in a cached journal listing before the response lands', async () => {
+      seedCache();
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      await waitFor(() => {
+        expect(cachedListStatus('1')).toBe(TaskStatus.DONE);
+      });
+
+      release();
+      await settled;
+    });
+
+    it('shows the new status in the cached single-task read before the response lands', async () => {
+      seedCache();
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.CANCELLED }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.CANCELLED,
+      });
+
+      await waitFor(() => {
+        expect(cachedDetailStatus()).toBe(TaskStatus.CANCELLED);
+      });
+
+      release();
+      await settled;
+    });
+
+    it('leaves the listing’s other tasks alone', async () => {
+      seedCache();
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      expect(cachedListStatus('2')).toBe(TaskStatus.NOT_DONE);
+    });
+
+    /**
+     * Lapse is *derived* from "still not done and the due journal is no longer
+     * ahead of it", so a task that has just been marked done or cancelled
+     * cannot be lapsed and its marker must go at once — otherwise ticking a
+     * lapsed task off leaves it reading `Done · Lapsed` until the refetch.
+     */
+    it('clears the lapse marker when the task leaves not done', async () => {
+      const lapsedListing = journalTasksResponse();
+      lapsedListing.data[0].attributes.lapsed = true;
+      lapsedListing.data[0].attributes.lapse_reason = LapseReason.DATE_PASSED;
+      seedCache(lapsedListing);
+
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      await waitFor(() => {
+        const task = queryClient
+          .getQueryData<JournalTasksResponse>(listKey)
+          ?.data.find(entry => entry.id === '1');
+        expect(task?.attributes.lapsed).toBe(false);
+        expect(task?.attributes.lapse_reason).toBeNull();
+      });
+
+      release();
+      await settled;
+    });
+
+    it('restores every cached namespace when the write fails', async () => {
+      seedCache();
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await expect(
+        result.current.mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+      ).rejects.toThrow();
+
+      await waitFor(() => {
+        expect(cachedListStatus('1')).toBe(TaskStatus.NOT_DONE);
+      });
+      expect(cachedDetailStatus()).toBe(TaskStatus.NOT_DONE);
+      expect(toast.error).toHaveBeenCalledWith('Something went wrong');
+    });
+
+    it('restores the lapse marker a failed completion had cleared', async () => {
+      const lapsedListing = journalTasksResponse();
+      lapsedListing.data[0].attributes.lapsed = true;
+      lapsedListing.data[0].attributes.lapse_reason =
+        LapseReason.DUE_JOURNAL_CANCELLED;
+      seedCache(lapsedListing);
+
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await expect(
+        result.current.mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+      ).rejects.toThrow();
+
+      await waitFor(() => {
+        const task = queryClient
+          .getQueryData<JournalTasksResponse>(listKey)
+          ?.data.find(entry => entry.id === '1');
+        expect(task?.attributes.lapsed).toBe(true);
+        expect(task?.attributes.lapse_reason).toBe(
+          LapseReason.DUE_JOURNAL_CANCELLED
+        );
+      });
+    });
+
+    it.each([
+      [TaskStatus.DONE, 'Task marked done'],
+      [TaskStatus.NOT_DONE, 'Task returned to not done'],
+      [TaskStatus.CANCELLED, 'Task cancelled'],
+    ])('announces %s as "%s"', async (status, expected) => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await result.current.mutateAsync({ taskId: '1', status });
+
+      expect(toast.success).toHaveBeenCalledWith(expected);
+    });
+
+    it('keeps the generic message for a text-only update', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await result.current.mutateAsync({
+        taskId: '1',
+        text: 'Return the book',
+      });
+
+      expect(toast.success).toHaveBeenCalledWith('Task updated successfully');
+    });
+
+    it('leaves a cached status alone when only the text changed', async () => {
+      seedCache();
+      mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await result.current.mutateAsync({
+        taskId: '1',
+        text: 'Return the book',
+      });
+
+      expect(cachedListStatus('1')).toBe(TaskStatus.NOT_DONE);
     });
   });
 
@@ -1132,6 +1371,18 @@ describe('Task API client', () => {
       name: string;
       run: () => Promise<unknown>;
       response: () => Response;
+      /**
+       * Cancels an optimistic handler makes on its own, before the refresh
+       * helper's.
+       *
+       * The count guard below is what stops this test passing vacuously — a
+       * hook using bare `invalidateQueries` would leave `cancelSpy` with no
+       * calls at all, `Math.max()` of nothing is `-Infinity`, and the ordering
+       * assertion would hold for the wrong reason. Loosening it to `>=` for
+       * the optimistic hooks would give that vacuity straight back, so the
+       * expected surplus is *stated per hook* instead.
+       */
+      optimisticCancels?: number;
     }> = [
       {
         name: 'useCreateTask',
@@ -1150,6 +1401,7 @@ describe('Task API client', () => {
       {
         name: 'useUpdateTask',
         response: () => jsonResponse(taskWriteResponse()),
+        optimisticCancels: 1,
         run: async () => {
           const { result } = renderHook(() => useUpdateTask(), {
             wrapper: createWrapper,
@@ -1233,7 +1485,7 @@ describe('Task API client', () => {
 
     it.each(mutations)(
       '$name cancels every in-flight fetch before invalidating any of them',
-      async ({ run, response }) => {
+      async ({ run, response, optimisticCancels = 0 }) => {
         mockFetch.mockResolvedValueOnce(response());
         const cancelSpy = jest.spyOn(queryClient, 'cancelQueries');
         const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
@@ -1244,7 +1496,7 @@ describe('Task API client', () => {
           expect(invalidateSpy).toHaveBeenCalled();
         });
         expect(cancelSpy).toHaveBeenCalledTimes(
-          invalidateSpy.mock.calls.length
+          invalidateSpy.mock.calls.length + optimisticCancels
         );
         expect(lastCallOrder(cancelSpy)).toBeLessThan(
           firstCallOrder(invalidateSpy)

@@ -65,3 +65,84 @@ const STATUS_WORDS: Record<TaskStatus, string> = {
 export function statusWording(status: TaskStatus): string {
   return STATUS_WORDS[status] ?? status;
 }
+
+/** One inline status action a row can offer (**W24**). */
+export interface TaskStatusAction {
+  /** Stable identity for React keys, test ids and the offer table itself. */
+  readonly key: 'done' | 'not-done' | 'cancel';
+  /** The status the action moves the task to. */
+  readonly target: TaskStatus;
+  /** The visible button text. Short, as W24 draws it. */
+  readonly label: string;
+  /**
+   * The button's accessible name.
+   *
+   * Longer than the label because "Done" and "Cancel" say what a control *is*
+   * rather than what pressing it does, and it **contains** the visible label so
+   * a user speaking what they can see still addresses it (WCAG 2.5.3).
+   */
+  readonly accessibleName: string;
+}
+
+const MARK_DONE: TaskStatusAction = {
+  key: 'done',
+  target: TaskStatus.DONE,
+  label: 'Done',
+  accessibleName: 'Mark done',
+};
+
+const RETURN_TO_NOT_DONE: TaskStatusAction = {
+  key: 'not-done',
+  target: TaskStatus.NOT_DONE,
+  label: 'Not done',
+  accessibleName: 'Return to not done',
+};
+
+const CANCEL: TaskStatusAction = {
+  key: 'cancel',
+  target: TaskStatus.CANCELLED,
+  label: 'Cancel',
+  accessibleName: 'Cancel task',
+};
+
+/**
+ * What a row offers for a task in this status.
+ *
+ * **A cancelled task offers nothing here**, and that is the rule this table
+ * exists to state. The service gives cancelled exactly one exit — retargeting
+ * onto a new future journal, which revalidates the future-dated rule and always
+ * lands on *not done* — and refuses `cancelled → done` and `cancelled → not
+ * done` alike. A button for either could do nothing but draw a 409, so the
+ * resurrect affordance belongs to the retarget dialog rather than here.
+ *
+ * A **lapsed** task is still not done, so it keeps the full not-done offer:
+ * lapsing is a marker on a live commitment, never a disabled state.
+ */
+const STATUS_ACTIONS: Record<TaskStatus, readonly TaskStatusAction[]> = {
+  [TaskStatus.NOT_DONE]: [MARK_DONE, CANCEL],
+  [TaskStatus.DONE]: [RETURN_TO_NOT_DONE, CANCEL],
+  [TaskStatus.CANCELLED]: [],
+};
+
+/** The inline status actions a task in this status offers, in display order. */
+export function statusActions(status: TaskStatus): readonly TaskStatusAction[] {
+  return STATUS_ACTIONS[status] ?? [];
+}
+
+/**
+ * What a completed status change is reported to have done.
+ *
+ * The generic "Task updated successfully" does not say *what* changed, and the
+ * toast is where the result is announced — Sonner's `Toaster` is a polite live
+ * region, so this string is what a screen reader hears after the click.
+ */
+const STATUS_CHANGE_WORDS: Record<TaskStatus, string> = {
+  [TaskStatus.NOT_DONE]: 'Task returned to not done',
+  [TaskStatus.DONE]: 'Task marked done',
+  [TaskStatus.CANCELLED]: 'Task cancelled',
+};
+
+/** Word the outcome of a status change, naming which outcome it was. */
+export function statusChangeWording(status: TaskStatus): string {
+  return STATUS_CHANGE_WORDS[status] ?? 'Task updated';
+}

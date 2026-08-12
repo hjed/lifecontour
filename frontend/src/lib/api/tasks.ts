@@ -33,6 +33,7 @@ import {
 import { toast } from 'sonner';
 import {
   JournalTasksResponse,
+  LapseReason,
   TaskContactLinkInput,
   TaskCreateInput,
   TaskIntermediateJournalLinkInput,
@@ -40,6 +41,7 @@ import {
   TaskReadResponse,
   TaskResponse,
   TaskRetargetInput,
+  TaskStatus,
   TaskUpdateInput,
 } from '@/types/tasks';
 import type { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
@@ -48,6 +50,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { statusChangeWording } from '@/lib/task-display';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 /**
@@ -418,6 +421,107 @@ function reportFailure(error: Error): void {
   toast.error(error.message);
 }
 
+// Optimistic status changes
+//
+// The journal's inline actions (**W24**) must read as done the instant they are
+// pressed and read as they did before if the write fails, so `useUpdateTask`
+// patches every cached copy of the task in `onMutate` and puts each snapshot
+// back in `onError`. The idiom is `useDismissIncompleteOutdoorActivity`'s:
+// cancel, snapshot, patch, restore, and invalidate through the helper once the
+// write settles either way.
+
+/** The attributes an optimistic patch may set on a cached task. */
+interface OptimisticTaskPatch {
+  status?: TaskStatus;
+  text?: string;
+  lapsed?: boolean;
+  lapse_reason?: LapseReason | null;
+}
+
+/** A task resource as it sits in any cached payload, whatever else it carries. */
+interface CachedTaskResource {
+  readonly id: string;
+  readonly attributes: object;
+}
+
+/**
+ * A cached payload embedding task resources.
+ *
+ * Two shapes, because a task's attributes are *embedded* rather than pointed
+ * at: the single-resource detail read, and the array-shaped journal listing and
+ * upcoming window. Patching one and not the other would leave a namespace
+ * showing the status the user just changed.
+ */
+interface CachedTaskPayload {
+  readonly data: CachedTaskResource | readonly CachedTaskResource[];
+}
+
+/** What a status write changes about a task, beyond the status itself. */
+function optimisticPatch({
+  status,
+  text,
+}: {
+  status?: TaskStatus;
+  text?: string;
+}): OptimisticTaskPatch {
+  const patch: OptimisticTaskPatch = {};
+
+  if (text !== undefined) patch.text = text;
+  if (status !== undefined) {
+    patch.status = status;
+    // Lapse is derived from "still not done and the due journal is no longer
+    // ahead of it", so a task that has just left *not done* cannot be lapsed
+    // and its marker goes at once. The reverse is not knowable here — it needs
+    // the day boundary in the user's timezone — so returning a task to not done
+    // leaves the marker to the refetch that follows.
+    if (status !== TaskStatus.NOT_DONE) {
+      patch.lapsed = false;
+      patch.lapse_reason = null;
+    }
+  }
+
+  return patch;
+}
+
+function patchResource(
+  resource: CachedTaskResource,
+  taskId: string,
+  patch: OptimisticTaskPatch
+): CachedTaskResource {
+  return resource.id === taskId
+    ? { ...resource, attributes: { ...resource.attributes, ...patch } }
+    : resource;
+}
+
+/** Applies a patch to whichever of the two cached shapes was handed over. */
+function patchCachedTask(
+  cached: CachedTaskPayload | undefined,
+  taskId: string,
+  patch: OptimisticTaskPatch
+): CachedTaskPayload | undefined {
+  if (!cached) return cached;
+
+  const { data } = cached;
+
+  if (Array.isArray(data)) {
+    return {
+      ...cached,
+      data: data.map(resource => patchResource(resource, taskId, patch)),
+    };
+  }
+
+  return {
+    ...cached,
+    data: patchResource(data as CachedTaskResource, taskId, patch),
+  };
+}
+
+/** A cache entry as it was before the optimistic patch touched it. */
+type TaskCacheSnapshot = readonly [
+  readonly unknown[],
+  CachedTaskPayload | undefined,
+];
+
 /**
  * Task mutations do not retry.
  *
@@ -496,6 +600,13 @@ export function useCreateTask() {
  * Leaving *cancelled* is refused here — a cancelled task is reopened by
  * retargeting it onto a new future journal — and the refusal arrives as a 409
  * whose message says so.
+ *
+ * **The change is applied optimistically.** The journal's inline actions are a
+ * tick-and-move-on affordance, so the row shows the new status before the
+ * request has been answered, and every cached copy is put back if it fails.
+ * The success toast is worded from what changed rather than from the generic
+ * update message: Sonner's `Toaster` is a polite live region, so this string is
+ * how the action announces its result.
  */
 export function useUpdateTask() {
   const queryClient = useQueryClient();
@@ -503,11 +614,40 @@ export function useUpdateTask() {
   return useMutation({
     ...NO_RETRY,
     mutationFn: updateTask,
-    onSuccess: (_, { taskId }) => {
-      void refreshTask(queryClient, taskId);
-      toast.success(SUCCESS_MESSAGES.TASK_UPDATED);
+    onMutate: async ({ taskId, status, text }) => {
+      // Every namespace under `all`: the same attributes are embedded in the
+      // detail read, the journal listings and the upcoming window alike.
+      await queryClient.cancelQueries({ queryKey: taskKeys.all });
+
+      const snapshots = queryClient.getQueriesData<CachedTaskPayload>({
+        queryKey: taskKeys.all,
+      }) as readonly TaskCacheSnapshot[];
+
+      const patch = optimisticPatch({ status, text });
+      queryClient.setQueriesData<CachedTaskPayload>(
+        { queryKey: taskKeys.all },
+        cached => patchCachedTask(cached, taskId, patch)
+      );
+
+      return { snapshots };
     },
-    onError: reportFailure,
+    onError: (error: Error, _input, context) => {
+      context?.snapshots.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data);
+      });
+      reportFailure(error);
+    },
+    onSuccess: (_, { status }) => {
+      toast.success(
+        status ? statusChangeWording(status) : SUCCESS_MESSAGES.TASK_UPDATED
+      );
+    },
+    // Settled rather than success: a failed write has just had its rollback
+    // applied from a snapshot that may itself be stale, so the refetch is worth
+    // as much on that path as on the happy one.
+    onSettled: (_data, _error, { taskId }) => {
+      void refreshTask(queryClient, taskId);
+    },
   });
 }
 

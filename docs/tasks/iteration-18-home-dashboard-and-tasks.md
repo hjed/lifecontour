@@ -4064,17 +4064,162 @@ unchanged: no backend file was touched.
 
 **Prerequisites:** Phases 6 and 16.
 **Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Estimate revised before work started:** **~270 production → ~950–1,100 tracked.** Delivery rule 3 caps a
+PR at ~500 changed lines *unless splitting would break rule 9, in which case the overrun is recorded in the
+phase before work starts* — Phase 6 was marked as breaching that rule by recording its overrun late, so
+this one is recorded first. Three things the ~130 missed, all of them the shapes Phases 15 and 16 already
+measured (est. 360 → 2,406, and est. 560 → ~1,030). **The actions are a component of their own**, not a
+few buttons appended to the row: an offer table per status, a pending state, and a confirmed delete behind
+an `AlertDialog`. **The optimistic update is a second production site** — `useUpdateTask` gains
+`onMutate`/`onError`/`onSettled` with a shape-aware cache patch, because the criterion pairs the optimism
+with `invalidateAfterMutation`, which is the hook's responsibility rather than the component's. And the
+test share on a frontend phase runs ~2.5–3× production, which on ~270 is ~700–800 alone.
+**Actual:** **412 production → 1,528 tracked** (1,528 insertions, 44 deletions across 12 files: 412
+production — the actions component 151, the optimistic block in `tasks.ts` 143, the offer table and
+result wording 81, the row 37 — 913 tests and 203 docs, the docs figure counting this entry).
 
-**Acceptance Criteria:**
+**The revised estimate was closer than the original and still low by ~1.5×, and the reason is worth
+keeping.** Production came in at 412 against ~270: the three sites were identified correctly and each
+was bigger than guessed, chiefly because the offer table (81 lines for what reads as "three buttons")
+carries the cancelled-row rule, the accessible names and the result wording, and each of those is a
+product decision with a docstring rather than a constant. The multiplier landed at **3.7×**, with tests
+at 2.2× production — under the ×4 calibration rule and consistent with Phases 15 and 16, so it is the
+*production* estimate that keeps missing on frontend phases, not the multiplier. **Calibration
+refinement:** for a frontend phase, count the production sites and multiply by ~140 lines each; "a
+component" and "a hook change" are each a file's worth of decisions, not a diff hunk.
 
-- [ ] Inline done / return-to-not-done / cancel actions on each row (**W24** idiom), with optimistic update
-      and rollback on failure, routed through `invalidateAfterMutation`.
-- [ ] Cancel is presented as the ordinary action; delete, where offered, is visually secondary and
-      confirmed.
-- [ ] Actions are keyboard reachable and announce their result.
+**Splitting is rejected rather than overlooked.** The natural cut — done inline first, cancel and delete
+after — would ship a task row whose only exit is completion, on the surface the specification designates
+for meeting a lapsed or unwanted commitment again. That breaks rule 9 more plainly than the overrun breaks
+rule 3.
+
+**Acceptance criteria, ticked:**
+
+- [x] Inline done / return-to-not-done / cancel actions on each row (**W24** idiom), with optimistic update
+      and rollback on failure, routed through `invalidateAfterMutation`. —
+      `frontend/src/components/journals/JournalTaskActions.tsx`, mounted by `JournalTaskRow` in the
+      right-hand cluster of the text row so it wraps under the text on a narrow column, as W24 draws it.
+      The optimism is `useUpdateTask`'s (decision 1): `onMutate` cancels `taskKeys.all`, snapshots it and
+      patches it; `onError` restores every snapshot; `onSettled` invalidates through the helper. The
+      source-level test that the client never calls `invalidateQueries` directly is untouched and still
+      green.
+- [x] Cancel is presented as the ordinary action; delete, where offered, is visually secondary and
+      confirmed. — cancel is an `outline` button beside the others; delete is last, icon-only, `ghost`
+      and `text-muted-foreground`, behind an `AlertDialog` whose body says what cancelling would keep.
+      Asserted as *ordering*, as *not the destructive variant*, and as *no request on the click* — three
+      assertions rather than one, because "secondary" is a claim about all three.
+- [x] Actions are keyboard reachable and announce their result. — real buttons, so reach is structural;
+      tab order, `Enter` and `Space` each have a test. The result is announced by the toast, worded from
+      what changed (decision 4), not by a second live region (decision 5).
+
+**Decisions taken (Phase 17):**
+
+1. **The optimistic update lives in `useUpdateTask`, not in the component.** The criterion pairs the
+   optimism with `invalidateAfterMutation`, which is the hook's responsibility; and Phase 18, Phase 20
+   and ITER18-004's dashboard all press the same hook, so putting it in the row would have it written
+   three more times or lifted later. The idiom is `useDismissIncompleteOutdoorActivity`'s exactly —
+   cancel, snapshot with `getQueriesData`, patch with `setQueriesData`, restore in `onError`, invalidate
+   in `onSettled` — which `frontend-design.md` already sanctioned before this phase needed it.
+2. **The patch is shape-aware, because a task's attributes are embedded in two shapes.** The detail read
+   answers a single resource and the journal listing and upcoming window answer arrays, and the same
+   `status`, `lapsed` and `text` sit inside all three. One updater handles both shapes and patches by id;
+   patching only the listing would leave `useTask` showing the status the user had just changed.
+3. **Leaving *not done* clears the lapse marker; returning to it does not set one.** Lapse is *derived* —
+   still not done, and the due journal no longer ahead of it — so a task that has just been ticked off
+   cannot be lapsed, and without the clear, completing a lapsed task leaves it reading `Done · Lapsed`
+   until the refetch lands. The reverse needs the day boundary in the user's timezone and is not knowable
+   in the browser, so it is left to the invalidation a beat later. Recorded rather than left as an
+   unexplained asymmetry; both halves have a test.
+4. **The success toast is worded from what changed.** `SUCCESS_MESSAGES.TASK_UPDATED` — "Task updated
+   successfully" — does not say *what* happened, and the third criterion is about announcing the result.
+   A status change now says "Task marked done" / "Task returned to not done" / "Task cancelled"; a
+   text-only update keeps the generic message, which has its own test so the exception cannot widen. The
+   wording went to `lib/task-display.ts` because Phase 16 nominated that module for exactly this.
+5. **The toast *is* the announcement; no second live region was added.** Sonner's `Toaster`
+   (`lib/providers.tsx`) is already a polite live region, so a `role="status"` node on the row would make
+   a screen reader say the same thing twice. Recorded because adding one is the reflexive answer to
+   "announce their result" and the reason not to is not visible from the criterion.
+6. **A cancelled row offers no status action at all.** The criterion names three actions and this row
+   offers none of them, which is not a gap: Phase 6 refuses `cancelled → done` and `cancelled → not done`
+   alike, so either button could do nothing but draw a 409, and the specification gives cancelled exactly
+   one exit — a new future due journal. Resurrection is therefore Phase 18's, and this row shows only its
+   secondary delete until then. The offer table in `lib/task-display.ts` is where the rule lives, guarded
+   by a test that fails if any offered transition is one the service refuses.
+7. **Delete *is* offered, and the criterion's "where offered" is the reason to argue it either way.** It
+   is offered because the contrast between an ordinary cancel and an exceptional delete is what the
+   criterion is about, and because there is no other surface from which a mistaken task can be removed —
+   `delete_task` shipped in Phase 9 with no UI behind it. It is not offered on the dashboard, where a row
+   is a reminder rather than a place a task is worked with; recorded in the wireframe document as gap 8.
+8. **One write at a time from a row.** Every action is disabled while any of them is in flight, with
+   `aria-busy` on the acting one. Two overlapping status calls both decide against the same stale
+   reading and the later write wins whatever the first was for — the lost-*decision* problem Phase 6 took
+   a row lock for on the server. The lock makes the server's answer correct; this keeps a user from
+   queueing the losing call in the first place.
+9. **Phase 16's read-only guarantee was inverted, not deleted.** That test required the busiest row to
+   render zero buttons and zero checkboxes, and existed precisely so this phase would have to come back
+   to it. It now asserts the group is present and described by the task text, with a second test that a
+   *lapsed* row's actions are enabled rather than presented as settled.
+10. **`JournalTasksSection`'s narrow module mock gained two stubs rather than a provider.** The section
+    suite mocks `@/lib/api/tasks` down to `useJournalTasks`, and the rows now call two mutation hooks
+    through it. Stubbing those two keeps that suite about the grouping contract it exists to assert,
+    rather than making every grouping test carry a `QueryClientProvider` it has no use for.
 
 **Required Test Coverage:** unit (RTL) — each action's happy path and failure rollback, keyboard operation,
 and cancel-before-invalidate ordering. E2E deferred to Phase 22.
+
+**Delivered:** **52** unit tests across four suites.
+
+- **`components/journals/__tests__/JournalTaskActions.test.tsx` (28, new):** what each status offers
+  including the cancelled row's silence and the lapsed row's full offer; the three happy paths asserted
+  on the request body, not just the call; the three failure rollbacks asserted on a **seeded cache**, so
+  the rollback has something real to move; the optimistic patch landing before the response, driven
+  through the button rather than the hook; disabled-and-`aria-busy` in flight and enabled-and-unbusy at
+  rest; tab order, `Enter` and `Space`; the accessible names and the group's description; delete last,
+  not destructive, dialog-gated, confirmed, declined, and failing; and the dialog's focus move and
+  `Escape` restore.
+- **`lib/api/__tests__/tasks.test.ts` (13 new, 63 total):** the patch on both cached shapes before the
+  response, the lapse clear, the full snapshot restore on failure including the lapse marker, the
+  per-status toast wording against the generic text-only one, and a cached status left alone by a
+  text-only update.
+- **`lib/__tests__/task-display.test.ts` (12 new, 22 total):** the offer table per status, the guard that
+  no offered transition is one the service refuses, that no action targets the status the task already
+  has, label-in-name (WCAG 2.5.3) across the whole table, and the three result wordings asserted pairwise
+  with `not.toBe`.
+- **`components/journals/__tests__/JournalTaskRow.test.tsx` (2 new, 21 total):** the inverted read-only
+  assertion and the lapsed row staying actionable.
+
+**The cancel-before-invalidate table needed splitting rather than loosening.** It asserted
+`cancelCount === invalidateCount` for all eight mutations, and `useUpdateTask`'s new `onMutate` cancel
+makes that four against three. The equal-count guard is the only thing stopping the test passing
+vacuously — a hook using bare `invalidateQueries` leaves `cancelSpy` with no calls at all, `Math.max()`
+of nothing is `-Infinity`, and the ordering assertion holds for the wrong reason. Relaxing it to `>=`
+would hand that vacuity straight back, so the expected surplus is stated **per hook** as an
+`optimisticCancels` field instead, and the assertion stays exact.
+
+**Mutation checks.** Five deliberate breakages, each reverted after confirming it was caught: dropping the
+`onError` rollback failed **5** tests across both suites; offering `Mark done` on a cancelled row failed
+**3**; making delete a `destructive` sibling rather than a muted dialog trigger failed **1**; collapsing
+the three status wordings into one failed **8**; and removing the `setQueriesData` patch entirely — the
+check that matters most, since a passing suite could otherwise have described a non-optimistic
+implementation — failed **4**.
+
+**Integration:** none, and not a deferral of convenience — the phase adds no Python. `PATCH /api/tasks/{id}`
+and `DELETE /api/tasks/{id}` carry their own integration coverage from Phases 6 and 9 (34 endpoint tests
+and 22 MCP tests between them). **MCP parity** (delivery rule 5) needed nothing: `set_task_status` and
+`delete_task` shipped alongside their REST twins, so no capability lands in the UI here that an agent
+cannot already reach.
+
+**E2E:** none *new* — Phase 22 owns ITER18-001's e2e along with the `TestDataManager` task helpers and the
+lapsed-fixture recipe, and building them here would fork that work. What ran instead is a **regression**
+pass over the journal detail surface, because mounting interactive controls inside a row can disturb
+layout, scroll and click targets in specs that already pass.
+
+**Docs:** `frontend-design.md`'s *The Journal Task Surface* gained *Inline status actions* — the offer
+table and why the cancelled row is empty, cancel-over-delete, where the optimism lives and why, the
+two-shape patch, the lapse asymmetry, the toast-as-announcement, and the accessibility structure.
+`home-dashboard-wireframe.md` gained gap 8, recording that the journal row *extends* W24 rather than
+diverging from it, and that delete and the empty cancelled row are journal-only. `api-design.md` is
+unchanged: no backend file was touched.
 
 #### Phase 18: Frontend — Retarget and Resurrect Dialog
 
