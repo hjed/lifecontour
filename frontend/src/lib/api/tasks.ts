@@ -516,11 +516,60 @@ function patchCachedTask(
   };
 }
 
-/** A cache entry as it was before the optimistic patch touched it. */
-type TaskCacheSnapshot = readonly [
-  readonly unknown[],
-  CachedTaskPayload | undefined,
-];
+/** Finds one task inside a cached payload, whichever shape it is in. */
+function findCachedTask(
+  cached: CachedTaskPayload | undefined,
+  taskId: string
+): CachedTaskResource | undefined {
+  if (!cached) return undefined;
+
+  const { data } = cached;
+
+  if (Array.isArray(data)) {
+    return data.find(resource => resource.id === taskId);
+  }
+
+  const single = data as CachedTaskResource | undefined;
+  return single?.id === taskId ? single : undefined;
+}
+
+/** The attributes an optimistic patch can overwrite, and so must restore. */
+const PATCHABLE_FIELDS = ['status', 'text', 'lapsed', 'lapse_reason'] as const;
+
+/**
+ * What a task read as before the patch, taken from the cache itself.
+ *
+ * **A rollback restores one task's attributes, not whole cache entries**, and
+ * that distinction is the whole point. Two rows ticked one after the other
+ * share a cache entry, so putting back a snapshot taken before the first write
+ * would undo the second — a row the user had just ticked reverting because an
+ * unrelated one failed, with nothing on screen connecting the two. Restoring by
+ * id cannot reach a task the failed write never touched.
+ *
+ * Only the fields a patch can set are carried, and only where the cached shape
+ * actually has them: writing `lapsed: undefined` over a real value would be a
+ * different kind of corruption from the one being undone.
+ */
+function previousTaskAttributes(
+  queryClient: QueryClient,
+  taskId: string
+): OptimisticTaskPatch | undefined {
+  for (const [, cached] of queryClient.getQueriesData<CachedTaskPayload>({
+    queryKey: taskKeys.all,
+  })) {
+    const resource = findCachedTask(cached, taskId);
+    if (!resource) continue;
+
+    const attributes = resource.attributes as Record<string, unknown>;
+    const previous: Record<string, unknown> = {};
+    for (const field of PATCHABLE_FIELDS) {
+      if (field in attributes) previous[field] = attributes[field];
+    }
+    return previous as OptimisticTaskPatch;
+  }
+
+  return undefined;
+}
 
 /**
  * Task mutations do not retry.
@@ -619,9 +668,7 @@ export function useUpdateTask() {
       // detail read, the journal listings and the upcoming window alike.
       await queryClient.cancelQueries({ queryKey: taskKeys.all });
 
-      const snapshots = queryClient.getQueriesData<CachedTaskPayload>({
-        queryKey: taskKeys.all,
-      }) as readonly TaskCacheSnapshot[];
+      const previous = previousTaskAttributes(queryClient, taskId);
 
       const patch = optimisticPatch({ status, text });
       queryClient.setQueriesData<CachedTaskPayload>(
@@ -629,12 +676,16 @@ export function useUpdateTask() {
         cached => patchCachedTask(cached, taskId, patch)
       );
 
-      return { snapshots };
+      return { previous };
     },
-    onError: (error: Error, _input, context) => {
-      context?.snapshots.forEach(([queryKey, data]) => {
-        queryClient.setQueryData(queryKey, data);
-      });
+    onError: (error: Error, { taskId }, context) => {
+      const previous = context?.previous;
+      if (previous) {
+        queryClient.setQueriesData<CachedTaskPayload>(
+          { queryKey: taskKeys.all },
+          cached => patchCachedTask(cached, taskId, previous)
+        );
+      }
       reportFailure(error);
     },
     onSuccess: (_, { status }) => {

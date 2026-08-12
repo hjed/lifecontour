@@ -994,6 +994,56 @@ describe('Task API client', () => {
       expect(toast.success).toHaveBeenCalledWith('Task updated successfully');
     });
 
+    /**
+     * Two rows in the same listing, ticked one after the other, and the first
+     * fails.
+     *
+     * A rollback that restored whole cache *entries* would put back a snapshot
+     * taken before the second task was patched, so a failure on one row would
+     * silently undo another row the user had just ticked — and the user would
+     * have no reason to connect the two. Restoring only the failed task's own
+     * attributes is what keeps the two independent.
+     */
+    it('rolls back only the task that failed, not one patched beside it', async () => {
+      seedCache();
+
+      const releaseFirst = heldRequest(() =>
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+      const releaseSecond = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+
+      const first = result.current
+        .mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+        .catch(() => undefined);
+      await waitFor(() => {
+        expect(cachedListStatus('1')).toBe(TaskStatus.DONE);
+      });
+
+      const second = result.current
+        .mutateAsync({ taskId: '2', status: TaskStatus.CANCELLED })
+        .catch(() => undefined);
+      await waitFor(() => {
+        expect(cachedListStatus('2')).toBe(TaskStatus.CANCELLED);
+      });
+
+      releaseFirst();
+      await first;
+
+      await waitFor(() => {
+        expect(cachedListStatus('1')).toBe(TaskStatus.NOT_DONE);
+      });
+      expect(cachedListStatus('2')).toBe(TaskStatus.CANCELLED);
+
+      releaseSecond();
+      await second;
+    });
+
     it('leaves a cached status alone when only the text changed', async () => {
       seedCache();
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));

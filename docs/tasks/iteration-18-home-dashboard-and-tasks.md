@@ -4124,6 +4124,24 @@ rule 3.
    answers a single resource and the journal listing and upcoming window answer arrays, and the same
    `status`, `lapsed` and `text` sit inside all three. One updater handles both shapes and patches by id;
    patching only the listing would leave `useTask` showing the status the user had just changed.
+2b. **The rollback restores one task's attributes, not whole cache entries — and the first version did
+   the latter, which was a bug.** React Query's canonical optimistic recipe snapshots the matching cache
+   entries with `getQueriesData` and puts them back on failure, and that is what shipped in the first
+   draft. It is wrong wherever two rows share an entry, which on this surface is *every* pair of rows in
+   the same journal: tick row 1, tick row 2 while the first is still in flight, and row 1's failure
+   restores a snapshot taken before **either** patch, silently reverting row 2 — a commitment the user
+   had just marked done going quietly back to not-done because an unrelated row failed, with nothing on
+   screen connecting the two. The per-row "one write at a time" guard (decision 8) does not help, since
+   the two clicks are on different rows. `onMutate` now reads the task's own `status`, `text`, `lapsed`
+   and `lapse_reason` out of the cache before patching, and `onError` patches exactly those back by id,
+   which cannot reach a task the failed write never touched. Only fields the cached shape actually
+   carries are restored: writing `lapsed: undefined` over a real value would be a different corruption
+   from the one being undone. **Found by writing the test rather than by reading the code** — the
+   scenario was on the list of things to have an independent reviewer check, and the review came back
+   saying the snapshot approach was safe *for this exact case*, having reasoned that a later mutation's
+   patch would be inside the earlier one's snapshot. It is the other way round, and the two-row test is
+   what settled it. Kept as a caution: "the standard recipe" is an argument about the common case, and
+   a surface where several rows share one cache entry is not it.
 3. **Leaving *not done* clears the lapse marker; returning to it does not set one.** Lapse is *derived* —
    still not done, and the due journal no longer ahead of it — so a task that has just been ticked off
    cannot be lapsed, and without the clear, completing a lapsed task leaves it reading `Done · Lapsed`
@@ -4167,7 +4185,7 @@ rule 3.
 **Required Test Coverage:** unit (RTL) — each action's happy path and failure rollback, keyboard operation,
 and cancel-before-invalidate ordering. E2E deferred to Phase 22.
 
-**Delivered:** **52** unit tests across four suites.
+**Delivered:** **53** unit tests across four suites.
 
 - **`components/journals/__tests__/JournalTaskActions.test.tsx` (28, new):** what each status offers
   including the cancelled row's silence and the lapsed row's full offer; the three happy paths asserted
@@ -4177,10 +4195,11 @@ and cancel-before-invalidate ordering. E2E deferred to Phase 22.
   rest; tab order, `Enter` and `Space`; the accessible names and the group's description; delete last,
   not destructive, dialog-gated, confirmed, declined, and failing; and the dialog's focus move and
   `Escape` restore.
-- **`lib/api/__tests__/tasks.test.ts` (13 new, 63 total):** the patch on both cached shapes before the
-  response, the lapse clear, the full snapshot restore on failure including the lapse marker, the
-  per-status toast wording against the generic text-only one, and a cached status left alone by a
-  text-only update.
+- **`lib/api/__tests__/tasks.test.ts` (14 new, 64 total):** the patch on both cached shapes before the
+  response, the lapse clear, the restore on failure including the lapse marker, the **two-row test that
+  found decision 2b's bug** — two tasks in one listing, both patched, the first failing, and the second
+  required to keep its patch — the per-status toast wording against the generic text-only one, and a
+  cached status left alone by a text-only update.
 - **`lib/__tests__/task-display.test.ts` (12 new, 22 total):** the offer table per status, the guard that
   no offered transition is one the service refuses, that no action targets the status the task already
   has, label-in-name (WCAG 2.5.3) across the whole table, and the three result wordings asserted pairwise
@@ -4196,7 +4215,8 @@ of nothing is `-Infinity`, and the ordering assertion holds for the wrong reason
 would hand that vacuity straight back, so the expected surplus is stated **per hook** as an
 `optimisticCancels` field instead, and the assertion stays exact.
 
-**Mutation checks.** Five deliberate breakages, each reverted after confirming it was caught: dropping the
+**Mutation checks.** Five deliberate breakages (the first re-run against the rewritten rollback, where it
+now fails **6**), each reverted after confirming it was caught: dropping the
 `onError` rollback failed **5** tests across both suites; offering `Mark done` on a cancelled row failed
 **3**; making delete a `destructive` sibling rather than a muted dialog trigger failed **1**; collapsing
 the three status wordings into one failed **8**; and removing the `setQueriesData` patch entirely — the
@@ -4231,8 +4251,9 @@ cleanup could not delete either journal, both answering **409**, because each an
 **Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
 clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in `tests/e2e/`).
 The **full** Jest suite rather than the changed files alone, because `lib/api/tasks.ts` and
-`JournalTaskRow` are both imported beyond this surface: **171** suites and **1,910** tests, all passing
-(170 and 1,858 before this phase). No backend gates — `ruff`, `mypy` and pytest all had nothing to run,
+`JournalTaskRow` are both imported beyond this surface: **171** suites and **1,911** tests, all passing
+(170 and 1,858 before this phase). Re-run in full after decision 2b's fix rather than trusting the pass
+that preceded it. No backend gates — `ruff`, `mypy` and pytest all had nothing to run,
 since no Python file changed.
 
 **Docs:** `frontend-design.md`'s *The Journal Task Surface* gained *Inline status actions* — the offer
