@@ -4060,7 +4060,7 @@ claim corrected: it said the upcoming-window endpoint "does not exist", which st
 when Phase 14 landed — the hook is still absent, but for a different reason. `api-design.md` is
 unchanged: no backend file was touched.
 
-#### Phase 17: Frontend — Inline Status Actions
+#### Phase 17: Frontend — Inline Status Actions ✅ COMPLETE
 
 **Prerequisites:** Phases 6 and 16.
 **Estimated diff:** ~130 production → **~520 tracked** (×4)
@@ -4212,7 +4212,28 @@ cannot already reach.
 **E2E:** none *new* — Phase 22 owns ITER18-001's e2e along with the `TestDataManager` task helpers and the
 lapsed-fixture recipe, and building them here would fork that work. What ran instead is a **regression**
 pass over the journal detail surface, because mounting interactive controls inside a row can disturb
-layout, scroll and click targets in specs that already pass.
+layout, scroll and click targets in specs that already pass: `journal-detail`, `journal-history`,
+`journal-contact-status` and `journals-merge` on **both** projects, **79 passed / 0 failed**, run against
+the committed code rather than a working tree the dev server would hot-reload mid-run. The specs build no
+tasks, so `JournalTasksSection` renders nothing on their journals — which is exactly why this is a layout
+and click-target regression check and not coverage of the actions themselves.
+
+**The one criterion no test could check was checked by eye.** W24's *"top-right of the text row, wrapping
+under the text when the column is narrow"* is a claim about layout, and jsdom has none — a green RTL suite
+says nothing about it. A throwaway spec (written, run, and deleted) built a journal holding one task in
+each status and screenshotted the section at 1280px and 380px. Both hold: wide, the buttons sit right of
+the text on its own line with the status badge to their left; narrow, they wrap beneath the text,
+right-aligned, and the cancelled row shows its badge and the muted delete alone. Recorded because the next
+person to change this row will want to know the claim was verified rather than assumed. That spec also
+turned up ITER18-002's delete guard working as intended from an angle nothing was testing from: its
+cleanup could not delete either journal, both answering **409**, because each anchored a task.
+
+**Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
+clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in `tests/e2e/`).
+The **full** Jest suite rather than the changed files alone, because `lib/api/tasks.ts` and
+`JournalTaskRow` are both imported beyond this surface: **171** suites and **1,910** tests, all passing
+(170 and 1,858 before this phase). No backend gates — `ruff`, `mypy` and pytest all had nothing to run,
+since no Python file changed.
 
 **Docs:** `frontend-design.md`'s *The Journal Task Surface* gained *Inline status actions* — the offer
 table and why the cancelled row is empty, cancel-over-delete, where the optimism lives and why, the
