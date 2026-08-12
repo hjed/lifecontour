@@ -1072,6 +1072,348 @@ class TestAffectsHistoryFlag:
         assert [_row_tuple(r) for r in service.project_event(absent)] == [expected]
 
 
+# --------------------------------------------------------------------------- #
+# Task event projection (ITER18-003 Phase 6) — the lifecycle types.
+#
+# A task is a top-level aggregate keyed by its own integer id, so its rows go
+# under ("task", task_id) and use the *journal* marker convention (__created__ /
+# __deleted__) rather than the contact one (field_name="status"). The contact
+# shape exists because contact history spreads across a family of sub-entity
+# rows; a task has none.
+#
+# Only three types are projected here. TaskDueJournalRetargeted,
+# TaskJournalLinked and TaskJournalUnlinked are Phase 7.
+# --------------------------------------------------------------------------- #
+
+TASK_ID = 42
+TASK_TEXT = "Book the venue"
+CONTACT_ID = 7
+OTHER_CONTACT_ID = 9
+
+
+def _task_event(
+    event_type: str, event_data: dict[str, Any], *, event_id: str = "evt-1"
+) -> OutboxEvent:
+    """A task event as the outbox stores it — aggregate id is the task."""
+    return OutboxEvent(
+        id=0,
+        event_id=event_id,
+        event_type=event_type,
+        aggregate_id=event_data.get("task_id", 0),
+        event_data=event_data,
+        occurred_at=OCCURRED_AT,
+        retry_count=0,
+        created_at=OCCURRED_AT,
+    )
+
+
+def _task_created_payload(**overrides: Any) -> dict[str, Any]:
+    """A ``TaskCreated`` payload as ``TaskService.create_task`` publishes it."""
+    payload: dict[str, Any] = {
+        "task_id": TASK_ID,
+        "user_id": "u1",
+        "text": TASK_TEXT,
+        "status": "not_done",
+        "creating_journal_id": 100,
+        "due_journal_id": 200,
+        "contact_ids": [],
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestTaskCreated:
+    def test_projects_a_created_marker_carrying_the_text(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event("TaskCreated", _task_created_payload())
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "__created__", None, TASK_TEXT)
+        ]
+        assert rows[0].source == Provenance.UI
+        assert rows[0].changed_by == "ui"
+        assert rows[0].event_id == "evt-1"
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_names_every_contact_the_task_was_created_with(
+        self, service: HistoryService
+    ) -> None:
+        """A create with people has to announce each of them as an addition.
+
+        ``contact_ids`` is a *list*, not an ``(old, new)`` pair, so the generic
+        changed-fields helper cannot fan it out — this handler does. Without it a
+        task created with Sarah shows nothing, and a later unlink puts a removal
+        in the user's history with no matching addition before it: the exact
+        asymmetry Phase 5's payload decision exists to prevent.
+        """
+        rows = service.project_event(
+            _task_event(
+                "TaskCreated",
+                _task_created_payload(contact_ids=[CONTACT_ID, OTHER_CONTACT_ID]),
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "__created__", None, TASK_TEXT),
+            ("task", TASK_ID, f"contact:{CONTACT_ID}", None, str(CONTACT_ID)),
+            (
+                "task",
+                TASK_ID,
+                f"contact:{OTHER_CONTACT_ID}",
+                None,
+                str(OTHER_CONTACT_ID),
+            ),
+        ]
+
+    def test_every_row_of_a_create_shares_the_event_under_a_distinct_field_name(
+        self, service: HistoryService
+    ) -> None:
+        """One event, several rows — and the dedup index is what makes that safe.
+
+        Rows are written ``ON CONFLICT (event_id, entity_type, entity_id,
+        field_name) DO NOTHING``. Three rows of one event therefore only all
+        survive because their field names differ, which is why contact keys name
+        the contact instead of sharing a ``contacts`` field.
+        """
+        rows = service.project_event(
+            _task_event(
+                "TaskCreated",
+                _task_created_payload(contact_ids=[CONTACT_ID, OTHER_CONTACT_ID]),
+            )
+        )
+
+        assert {r.event_id for r in rows} == {"evt-1"}
+        assert len({r.field_name for r in rows}) == len(rows)
+
+    def test_a_create_with_nobody_projects_only_the_marker(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event("TaskCreated", _task_created_payload(contact_ids=[]))
+        )
+
+        assert [r.field_name for r in rows] == ["__created__"]
+
+    def test_a_payload_without_contact_ids_projects_only_the_marker(
+        self, service: HistoryService
+    ) -> None:
+        """A replay of a task event published before contacts joined the payload.
+
+        The ``history-projection`` group reads the stream from id ``0``, so it can
+        be handed a ``TaskCreated`` from before Phase 5 added ``contact_ids``.
+        Skipping the key beats raising: a raising handler dead-letters the batch
+        and stalls history for every event queued behind it.
+        """
+        payload = _task_created_payload()
+        del payload["contact_ids"]
+
+        rows = service.project_event(_task_event("TaskCreated", payload))
+
+        assert [r.field_name for r in rows] == ["__created__"]
+
+    def test_status_and_the_two_anchors_are_not_projected(
+        self, service: HistoryService
+    ) -> None:
+        """The create marker opens the history; it does not itemise the task.
+
+        A later status move and a later retarget each publish a self-describing
+        ``(old, new)`` pair, so neither needs an opening value to read correctly.
+        A contact *unlink* does — it publishes ``(id, None)`` — which is why
+        contacts are the one part of the payload this handler fans out.
+        """
+        rows = service.project_event(
+            _task_event("TaskCreated", _task_created_payload(contact_ids=[CONTACT_ID]))
+        )
+
+        assert "status" not in {r.field_name for r in rows}
+        assert not [r for r in rows if "journal" in r.field_name]
+
+
+class TestTaskUpdated:
+    def test_text_and_status_each_land_one_row(self, service: HistoryService) -> None:
+        """One ``PATCH`` may do both, which is one event and two rows."""
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                # Lists, mirroring the JSON round-trip through Redis.
+                "changed_fields": {
+                    "text": [TASK_TEXT, "Book the other venue"],
+                    "status": ["not_done", "done"],
+                },
+                "source": Provenance.MCP.value,
+                "changed_by": "mcp",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "text", TASK_TEXT, "Book the other venue"),
+            ("task", TASK_ID, "status", "not_done", "done"),
+        ]
+        for row in rows:
+            assert row.source == Provenance.MCP
+            assert row.changed_by == "mcp"
+            assert row.created_at == OCCURRED_AT
+
+    def test_a_contact_link_lands_one_row_naming_the_contact(
+        self, service: HistoryService
+    ) -> None:
+        """Phase 5 made contact membership a field, so it arrives here.
+
+        The handler needs no branch for it: ``_rows_from_changed_fields`` reads
+        ``change[0]`` as the old value and never looks at the key, so a
+        ``contact:{id}`` key projects like any other field.
+        """
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "changed_fields": {f"contact:{CONTACT_ID}": [None, CONTACT_ID]},
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        assert [_row_tuple(r) for r in service.project_event(event)] == [
+            ("task", TASK_ID, f"contact:{CONTACT_ID}", None, str(CONTACT_ID))
+        ]
+
+    def test_a_contact_unlink_lands_the_pair_the_other_way_round(
+        self, service: HistoryService
+    ) -> None:
+        """Direction is positional and nothing else carries it.
+
+        An unlink projected as ``(None, id)`` would read in the feed as the
+        person being added, and no other key in the payload would contradict it.
+        """
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "changed_fields": {f"contact:{CONTACT_ID}": [CONTACT_ID, None]},
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        assert [_row_tuple(r) for r in service.project_event(event)] == [
+            ("task", TASK_ID, f"contact:{CONTACT_ID}", str(CONTACT_ID), None)
+        ]
+
+    def test_two_people_land_under_distinct_field_names(
+        self, service: HistoryService
+    ) -> None:
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "changed_fields": {
+                    f"contact:{CONTACT_ID}": [None, CONTACT_ID],
+                    f"contact:{OTHER_CONTACT_ID}": [None, OTHER_CONTACT_ID],
+                },
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert len({r.field_name for r in rows}) == 2
+
+    def test_no_changed_fields_produces_no_rows(self, service: HistoryService) -> None:
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "changed_fields": {},
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        assert service.project_event(event) == []
+
+
+class TestTaskDeleted:
+    def test_projects_a_deleted_marker(self, service: HistoryService) -> None:
+        """The event is a marker, so the row is one too.
+
+        ``TaskDeleted`` carries no text and no anchors — ``delete_task`` reads
+        nothing before deleting — so there is no value to record either side.
+        """
+        event = _task_event(
+            "TaskDeleted",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "source": Provenance.MCP.value,
+                "changed_by": "mcp",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "__deleted__", None, None)
+        ]
+        assert rows[0].source == Provenance.MCP
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_the_row_is_keyed_off_the_payload_rather_than_the_task_row(
+        self, service: HistoryService
+    ) -> None:
+        """Tasks are hard-deleted, so the row this projects can never be joined
+        back to a ``tasks`` row. Everything the projection needs is in the event."""
+        event = _task_event(
+            "TaskDeleted",
+            {"task_id": 999, "user_id": "u1", "source": Provenance.UI.value},
+        )
+
+        assert [r.entity_id for r in service.project_event(event)] == [999]
+
+
+class TestTaskEventsThisPhaseDoesNotProject:
+    def test_retarget_and_journal_links_project_nothing_yet(
+        self, service: HistoryService
+    ) -> None:
+        """Phase 7 adds these three handlers, and should delete this test.
+
+        Asserted positively rather than left unstated: the consumer subscribes
+        only to the three lifecycle types, so these events are filtered out
+        rather than consumed and silently dropped, and the two facts have to stay
+        in step. A handler added without the subscription — or the reverse — is
+        history that is written and never read, or read and never written.
+        """
+        payloads: dict[str, dict[str, Any]] = {
+            "TaskDueJournalRetargeted": {
+                "task_id": TASK_ID,
+                "previous_due_journal_id": 200,
+                "due_journal_id": 300,
+            },
+            "TaskJournalLinked": {
+                "task_id": TASK_ID,
+                "journal_id": 200,
+                "origin": "manual",
+            },
+            "TaskJournalUnlinked": {"task_id": TASK_ID, "journal_id": 200},
+        }
+
+        for event_type, payload in payloads.items():
+            assert service.project_event(_task_event(event_type, payload)) == []
+
+
 class TestUnknownAndProvenanceDefaults:
     def test_unknown_event_type_returns_empty(self, service: HistoryService) -> None:
         event = _event("SomethingElse", {"journal_id": 10})

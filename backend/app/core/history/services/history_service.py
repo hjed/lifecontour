@@ -1,10 +1,18 @@
-"""Projection of journal and contact domain events into field history rows.
+"""Projection of journal, contact and task domain events into field history rows.
 
 ``HistoryService.project_event`` is a *pure* mapping from a single journal/route/
-gear or contact domain event (delivered as an :class:`OutboxEvent`) to the list of
-:class:`FieldHistoryEntry` rows that should be written for it. It performs no I/O,
-so it is trivially unit-testable; the :class:`HistoryProjectionConsumer` owns the
-repository and the idempotent writes.
+gear, contact or task domain event (delivered as an :class:`OutboxEvent`) to the
+list of :class:`FieldHistoryEntry` rows that should be written for it. It performs
+no I/O, so it is trivially unit-testable; the :class:`HistoryProjectionConsumer`
+owns the repository and the idempotent writes.
+
+Tasks (ITER18-003 Phase 6): a task is a top-level aggregate keyed by its own
+integer id, so its rows go under ``("task", task_id)`` and use the *journal*
+marker convention (``__created__``/``__deleted__``) rather than the contact one
+(``field_name="status"``). The contact shape exists because contact history
+spreads across a family of sub-entity rows; a task has none. Only the three
+lifecycle types are mapped here — the retarget and journal-link types are
+Phase 7.
 
 Contacts (ITER12-003 Phase 1): each contact handler reproduces the EXACT rows the
 synchronous dual-write (``ContactHistoryService.record_*``) writes today, keyed to
@@ -41,9 +49,15 @@ from typing import Any
 from core_shared.models.history import Provenance
 
 from app.core.history.models import FieldHistoryEntry
+from app.core.tasks.models.events import contact_field_name
 from app.infrastructure.events.outbox_repository import OutboxEvent
 
 _JOURNAL_ENTITY_TYPE = "journal"
+
+# The task aggregate. ``tasks.id`` is an ``Integer``, so task rows sit in the
+# shared ``field_history.entity_id`` column with no migration — unlike routes and
+# gear, whose UUID ids are why those events are filed under their journal.
+_TASK_ENTITY_TYPE = "task"
 
 # Contact entity types — must match the contact aggregation strategy in
 # ``app/core/history/models.py`` and the dual-write's ``record_*`` entity types.
@@ -577,6 +591,108 @@ class HistoryService:
             changed_fields=data.get("changed_fields"),
         )
 
+    # -- task handlers (ITER18-003 Phase 6) ----------------------------------
+
+    def _project_task_created(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """The marker that opens a task's history, plus the people it named.
+
+        The marker carries the task's text, as the journal's carries its title,
+        so the first line of a task's history says what the task is.
+
+        **It does not itemise the rest of the payload.** A later status move and
+        a later retarget each publish a self-describing ``(old, new)`` pair, so
+        neither needs an opening value to read correctly. A contact *unlink*
+        does — it publishes ``(id, None)`` — so a create that named people has to
+        announce them, or a task created with Sarah and later unlinked from her
+        shows a removal with no addition before it. That asymmetry is what
+        Phase 5's decision to carry ``contact_ids`` on this event exists to
+        prevent, and fanning the list out here is the half that finishes it:
+        ``contact_ids`` is a list rather than an ``(old, new)`` pair, so
+        ``_rows_from_changed_fields`` cannot do it.
+
+        The keys come from ``contact_field_name`` — the same function
+        ``TaskService`` builds them with — because a format that lives in two
+        places is one that can drift, and these rows have to sort alongside the
+        ones a later link publishes.
+        """
+        task_id = data["task_id"]
+        rows = [
+            self._row(
+                event,
+                data,
+                entity_type=_TASK_ENTITY_TYPE,
+                entity_id=task_id,
+                field_name="__created__",
+                old_value=None,
+                new_value=data.get("text"),
+            )
+        ]
+        # ``or []`` rather than a required key: the history-projection group
+        # reads the stream from id 0, so it can be handed a TaskCreated from
+        # before Phase 5 added contact_ids. Raising would dead-letter the batch
+        # and stall history for every event queued behind it, to record a task
+        # that had no contacts anyway.
+        for contact_id in data.get("contact_ids") or []:
+            rows.append(
+                self._row(
+                    event,
+                    data,
+                    entity_type=_TASK_ENTITY_TYPE,
+                    entity_id=task_id,
+                    field_name=contact_field_name(contact_id),
+                    old_value=None,
+                    new_value=contact_id,
+                )
+            )
+        return rows
+
+    def _project_task_updated(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """One row per changed field: the text, the status, and each contact.
+
+        Three kinds of change reach this one event type, and none needs a branch
+        here. ``_rows_from_changed_fields`` reads ``change[0]`` as the old value
+        and never looks at the key, so a ``contact:{id}`` key linking somebody
+        (``(None, id)``) or unlinking them (``(id, None)``) projects like any
+        other field — one row, naming the person, the right way round.
+        """
+        return self._rows_from_changed_fields(
+            event,
+            data,
+            entity_type=_TASK_ENTITY_TYPE,
+            entity_id=data["task_id"],
+            changed_fields=data.get("changed_fields"),
+        )
+
+    def _project_task_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """A marker, because the event is one.
+
+        ``TaskService.delete_task`` reads nothing before deleting, so the event
+        carries no text and no anchors and there is no value to record on either
+        side — the same reason ``JournalDeleted`` projects a bare marker.
+
+        Everything the row needs comes off the payload. Tasks are hard-deleted,
+        so this row can never be joined back to a ``tasks`` row, which is why the
+        event carries ``user_id`` and why the task-scoped read Phase 8 adds can
+        still find it.
+        """
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_TASK_ENTITY_TYPE,
+                entity_id=data["task_id"],
+                field_name="__deleted__",
+                old_value=None,
+                new_value=None,
+            )
+        ]
+
     # -- helpers -------------------------------------------------------------
 
     def _rows_from_changed_fields(
@@ -700,4 +816,13 @@ _HANDLERS = {
     "ContactRelationshipUpdated": HistoryService._project_contact_relationship_updated,
     "ContactRelationshipDeleted": HistoryService._project_contact_relationship_deleted,
     "ContactSummaryUpdated": HistoryService._project_contact_summary_updated,
+    # Task lifecycle events (ITER18-003 Phase 6). TaskDueJournalRetargeted,
+    # TaskJournalLinked and TaskJournalUnlinked are deliberately absent until
+    # Phase 7: the consumer subscribes to exactly the types listed here, so an
+    # entry added without the subscription writes history nobody reads, and a
+    # subscription added without an entry consumes an event and drops it
+    # silently. Both halves move together.
+    "TaskCreated": HistoryService._project_task_created,
+    "TaskUpdated": HistoryService._project_task_updated,
+    "TaskDeleted": HistoryService._project_task_deleted,
 }
