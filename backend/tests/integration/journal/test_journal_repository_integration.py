@@ -151,6 +151,44 @@ class TestJournalRepositoryFindById:
 
 
 @pytest.mark.integration
+class TestJournalRepositoryFindByIdForUser:
+    """The owner-scoped read, which is where ownership is enforced (#1267)."""
+
+    OWNER = "owner"
+    STRANGER = "somebody-else"
+
+    async def test_returns_the_journal_to_its_owner(
+        self, journal_repository: SqlJournalRepository
+    ):
+        saved = await journal_repository.save(create_test_journal(user_id=self.OWNER))
+
+        found = await journal_repository.find_by_id_for_user(saved.id, self.OWNER)  # type: ignore[arg-type]
+
+        assert found is not None
+        assert found.id == saved.id
+
+    async def test_another_users_journal_is_absent_not_forbidden(
+        self, journal_repository: SqlJournalRepository
+    ):
+        """Absent, not refused: the caller never holds the row to leak it.
+
+        Returning ``None`` rather than raising is what lets every caller answer
+        404 without having to decide between "missing" and "not yours" — the
+        two are the same answer by design.
+        """
+        saved = await journal_repository.save(create_test_journal(user_id=self.OWNER))
+
+        found = await journal_repository.find_by_id_for_user(saved.id, self.STRANGER)  # type: ignore[arg-type]
+
+        assert found is None
+
+    async def test_missing_journal_is_none(
+        self, journal_repository: SqlJournalRepository
+    ):
+        assert await journal_repository.find_by_id_for_user(99999, self.OWNER) is None
+
+
+@pytest.mark.integration
 class TestJournalRepositoryDelete:
     """Test journal delete operations."""
 

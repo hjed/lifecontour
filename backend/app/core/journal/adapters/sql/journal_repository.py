@@ -321,7 +321,12 @@ class SqlJournalRepository(JournalRepository):
             params["end_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
     async def find_by_id(self, journal_id: int) -> Journal | None:
-        """Find a journal by ID."""
+        """Find a journal by ID, **without** scoping it to an owner.
+
+        For callers that have no acting user — integration workers and stream
+        consumers. Anything serving a request on a user's behalf wants
+        :meth:`find_by_id_for_user` instead; see the port for why.
+        """
         query = text(
             """
             SELECT id, user_id, title, content,
@@ -332,6 +337,35 @@ class SqlJournalRepository(JournalRepository):
             """
         )
         result = await self.conn.execute(query, {"journal_id": journal_id})
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return self._row_to_journal(row)
+
+    async def find_by_id_for_user(
+        self, journal_id: int, user_id: str
+    ) -> Journal | None:
+        """Find a journal by ID, scoped to its owner.
+
+        The ``user_id`` predicate lives in the statement rather than in a
+        comparison above it, so a caller cannot hold the journal before deciding
+        whether it was allowed to — the ``TaskRepository`` stance, and what
+        issue #1267 was: eleven endpoints that read first and never compared.
+        """
+        query = text(
+            """
+            SELECT id, user_id, title, content,
+                   event_date_range_start, event_date_range_end,
+                   parent_id, "order", created_at, updated_at
+            FROM journals
+            WHERE id = :journal_id AND user_id = :user_id
+            """
+        )
+        result = await self.conn.execute(
+            query, {"journal_id": journal_id, "user_id": user_id}
+        )
         row = result.fetchone()
 
         if not row:

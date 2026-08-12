@@ -364,7 +364,12 @@ class JournalService:
 
     async def get_journal(self, journal_id: int) -> Journal | None:
         """
-        Get a journal by ID.
+        Get a journal by ID, **without** scoping it to an owner.
+
+        For callers with no acting user — integration workers and stream
+        consumers. Anything serving a user's request wants
+        :meth:`get_journal_for_user`; reading here and comparing ``user_id``
+        afterwards is exactly the shape issue #1267 was.
 
         Args:
             journal_id: The ID of the journal to retrieve
@@ -373,6 +378,26 @@ class JournalService:
             The journal if found, None otherwise
         """
         return await self.journal_repo.find_by_id(journal_id)
+
+    async def get_journal_for_user(
+        self, journal_id: int, user_id: str
+    ) -> Journal | None:
+        """
+        Get a journal by ID, scoped to the user who owns it.
+
+        The scoping happens in the repository's SQL, so a journal belonging to
+        somebody else arrives as ``None`` — the same answer as one that does not
+        exist, which is what lets callers refuse both with a plain 404 and
+        disclose nothing by the difference.
+
+        Args:
+            journal_id: The ID of the journal to retrieve
+            user_id: The acting user
+
+        Returns:
+            The journal if it exists and belongs to ``user_id``, None otherwise
+        """
+        return await self.journal_repo.find_by_id_for_user(journal_id, user_id)
 
     async def find_journals_by_ids_for_user(
         self, user_id: str, journal_ids: list[int]

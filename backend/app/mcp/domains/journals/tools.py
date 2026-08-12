@@ -2582,8 +2582,14 @@ async def update_journal_entry(
     # data for the response.
     repos = _create_journal_tool_repositories(db_connection)
 
-    # Get existing journal
-    existing_journal = await repos.journal_repo.find_by_id(journal_id)
+    # Get the existing journal, owner-scoped. Somebody else's is reported as
+    # missing, exactly as the read and delete tools report it (#1267) — without
+    # this the tool rewrote another user's journal and read it back in its own
+    # success response.
+    user_id = await get_current_user_id()
+    existing_journal = await repos.journal_repo.find_by_id_for_user(
+        journal_id, str(user_id)
+    )
     if not existing_journal:
         raise JournalNotFoundError(journal_id)
 
@@ -3642,8 +3648,11 @@ async def link_journal_to_contact(
     # Create repositories
     repos = _create_journal_tool_repositories(db_connection)
 
-    # Check that contact and journal exist
-    journal = await repos.journal_repo.find_by_id(journal_id)
+    # Check that contact and journal exist. The journal is read owner-scoped:
+    # linking writes a row to it, so somebody else's must be as unreachable
+    # here as it is through the read tool (#1267).
+    user_id = await get_current_user_id()
+    journal = await repos.journal_repo.find_by_id_for_user(journal_id, str(user_id))
     if not journal:
         raise ValueError(f"Could not find journal with ID {journal_id}")
 
@@ -4022,7 +4031,12 @@ async def get_merge_candidates(
     """
     repos = _create_journal_tool_repositories(db_connection)
 
-    target = await repos.journal_repo.find_by_id(journal_id)
+    # Owner-scoped, and it matters more here than anywhere else: the candidate
+    # query below used to scope itself to ``target.user_id`` — the *owner's* id,
+    # not the caller's — so one foreign journal id returned a list of that
+    # user's overlapping journals, titles and content included (#1267).
+    user_id = str(await get_current_user_id())
+    target = await repos.journal_repo.find_by_id_for_user(journal_id, user_id)
     if not target:
         raise JournalNotFoundError(journal_id)
 
@@ -4042,7 +4056,10 @@ async def get_merge_candidates(
     result = await db_connection.execute(
         query,
         {
-            "user_id": target.user_id,
+            # The caller's id, not the target's. They are the same id now that
+            # the read above is owner-scoped, and saying so keeps them the same
+            # if that guard is ever moved.
+            "user_id": user_id,
             "journal_id": journal_id,
             "start_date": target.event_date_range.start,
             "end_date": target.event_date_range.end,

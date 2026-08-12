@@ -61,6 +61,7 @@ from tests.integration.mcp.http_helpers import (
 )
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
+    USER_ID,
     count,
     create_journal,
     create_task,
@@ -143,7 +144,13 @@ class TestJournalToolsIntegration:
 
     @pytest_asyncio.fixture
     async def sample_journal_id(self, clean_database: AsyncConnection) -> int:
-        """Create a sample journal for testing and return its ID."""
+        """Create a sample journal for testing and return its ID.
+
+        Owned by ``USER_ID`` — the id the authenticated MCP client actually
+        acts as. It used to be seeded as ``current_user``, which belongs to
+        nobody, so a tool that reads owner-scoped saw it as another user's
+        journal and refused before reaching what the test meant to assert.
+        """
         from sqlalchemy import text
 
         now = datetime.now(UTC)
@@ -156,7 +163,7 @@ class TestJournalToolsIntegration:
         result = await clean_database.execute(
             query,
             {
-                "user_id": "current_user",
+                "user_id": USER_ID,
                 "title": "Test Journal",
                 "content": "Test content for integration testing",
                 "start": now,
@@ -441,6 +448,131 @@ class TestJournalToolsIntegration:
             {"id": other_journal_id},
         )
         assert surviving.scalar_one() == 1
+
+    @pytest.mark.asyncio
+    async def test_update_journal_entry_will_not_touch_another_users_journal(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """The write tool reads owner-scoped, as the read and delete tools do.
+
+        Issue #1267: the tool loaded the journal by id alone, so an agent
+        holding somebody else's id could rewrite their title and content — and
+        read the result back in the tool's own response.
+        """
+        other_journal_id = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "update_journal_entry",
+                        "arguments": {
+                            "journal_id": other_journal_id,
+                            "request": {"title": "Rewritten By A Stranger"},
+                        },
+                    },
+                },
+                headers=mcp_headers(await initialize_mcp_session(authenticated_client)),
+            )
+
+        assert response.status_code == 200
+        assert "Somebody Else's Trip" not in response.text
+        stored = await async_connection.execute(
+            text("SELECT title FROM journals WHERE id = :id"),
+            {"id": other_journal_id},
+        )
+        assert stored.scalar_one() == "Somebody Else's Trip"
+
+    @pytest.mark.asyncio
+    async def test_link_journal_to_contact_will_not_touch_another_users_journal(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """Linking is a write to their journal, so it is refused the same way."""
+        other_journal_id = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+        contact_id = (
+            await async_connection.execute(
+                text("INSERT INTO contacts (first_name) VALUES ('Mine') RETURNING id")
+            )
+        ).scalar_one()
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "link_journal_to_contact",
+                        "arguments": {
+                            "journal_id": other_journal_id,
+                            "contact_id": int(contact_id),
+                            "relationship_type": "PARTICIPANT",
+                        },
+                    },
+                },
+                headers=mcp_headers(await initialize_mcp_session(authenticated_client)),
+            )
+
+        assert response.status_code == 200
+        assert "Somebody Else's Trip" not in response.text
+        linked = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM journal_contact_relationships "
+                "WHERE journal_id = :id"
+            ),
+            {"id": other_journal_id},
+        )
+        assert linked.scalar_one() == 0
+
+    @pytest.mark.asyncio
+    async def test_merge_candidates_will_not_list_another_users_journals(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        """This one discloses in bulk, not one journal at a time.
+
+        The candidate query scoped itself to ``target.user_id`` — the *owner's*
+        id, not the caller's — so an id belonging to somebody else returned
+        their overlapping journals, titles and content included.
+        """
+        journal_repo = SqlJournalRepository(async_connection)
+        other_journal_id = await create_journal(
+            journal_repo, title="Somebody Else's Trip", user_id=OTHER_USER_ID
+        )
+        await create_journal(
+            journal_repo, title="Their Overlapping Weekend", user_id=OTHER_USER_ID
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_merge_candidates",
+                        "arguments": {"journal_id": other_journal_id},
+                    },
+                },
+                headers=mcp_headers(await initialize_mcp_session(authenticated_client)),
+            )
+
+        assert response.status_code == 200
+        assert "Their Overlapping Weekend" not in response.text
+        assert "Somebody Else's Trip" not in response.text
 
     @pytest.mark.asyncio
     async def test_the_refusal_tells_an_agent_which_tasks_block_and_where_to_go(
