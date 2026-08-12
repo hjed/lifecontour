@@ -58,14 +58,29 @@ from tests.integration.tasks.task_seeding import (
 OTHER_TITLE = "Somebody Else's Expedition"
 OTHER_CONTENT = "The hut is booked under my name."
 
-# Association tables that must be identical before and after every refused
-# request. Listed once because a write to any of them is a write to somebody
-# else's journal, whichever endpoint made it.
-ASSOCIATION_TABLES = (
-    "journal_mood_data",
-    "journal_plan_data",
-    "journal_contact_relationships",
-    "journal_tag_assignments",
+# Everything a refused request must leave identical: the journal row, and every
+# association a write could have reached. Written out as whole statements rather
+# than interpolating a table name, so nothing here builds SQL by string
+# formatting — even in a test, and even from a constant.
+UNCHANGED_ROWS = {
+    "journals": text("SELECT to_jsonb(t) FROM journals t WHERE id = :id"),
+    "mood": text("SELECT to_jsonb(t) FROM journal_mood_data t WHERE journal_id = :id"),
+    "plan": text("SELECT to_jsonb(t) FROM journal_plan_data t WHERE journal_id = :id"),
+    "contacts": text(
+        "SELECT to_jsonb(t) FROM journal_contact_relationships t WHERE journal_id = :id"
+    ),
+    "tags": text(
+        "SELECT to_jsonb(t) FROM journal_tag_assignments t WHERE journal_id = :id"
+    ),
+}
+
+# Values shared by several table entries, named so the table reads as one shape
+# rather than repeating the same string in unrelated-looking places.
+MOOD_TYPE = "MOOD_RATING"
+PARTICIPANT = "PARTICIPANT"
+CONTACT_RELATIONSHIP_RESOURCE = "journal-contact-relationships"
+CONTACT_RELATIONSHIP_ROUTE = (
+    "/api/journals/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}"
 )
 
 _JOURNAL_BODY = {
@@ -160,12 +175,12 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     CrossUserRequest(
         "DELETE",
         "/api/journals/{journal_id}/types/{journal_type}",
-        params={"journal_type": "MOOD_RATING"},
+        params={"journal_type": MOOD_TYPE},
     ),
     CrossUserRequest(
         "PUT",
         "/api/journals/{journal_id}/types/{journal_type}/data",
-        params={"journal_type": "MOOD_RATING"},
+        params={"journal_type": MOOD_TYPE},
         body={
             "data": {
                 "type": "journal-type-data",
@@ -178,7 +193,7 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
         "/api/journals/{journal_id}/relationships/contacts",
         body={
             "data": {
-                "type": "journal-contact-relationships",
+                "type": CONTACT_RELATIONSHIP_RESOURCE,
                 "attributes": {
                     "contact_id": "{contact_id}",
                     "relationship_type": "MENTION",
@@ -188,19 +203,19 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     ),
     CrossUserRequest(
         "PATCH",
-        "/api/journals/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}",
-        params={"relationship_type": "PARTICIPANT"},
+        CONTACT_RELATIONSHIP_ROUTE,
+        params={"relationship_type": PARTICIPANT},
         body={
             "data": {
-                "type": "journal-contact-relationships",
+                "type": CONTACT_RELATIONSHIP_RESOURCE,
                 "attributes": {"status": "ATTENDING"},
             }
         },
     ),
     CrossUserRequest(
         "DELETE",
-        "/api/journals/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}",
-        params={"relationship_type": "PARTICIPANT"},
+        CONTACT_RELATIONSHIP_ROUTE,
+        params={"relationship_type": PARTICIPANT},
     ),
     CrossUserRequest(
         "POST",
@@ -237,33 +252,52 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     ),
 )
 
-# Routes deliberately not in the table above, each with the reason. These are
-# claims that can be checked by reading what they name — which is the point of
+# Operations deliberately not in the table above, each with the reason. These
+# are claims that can be checked by reading what they name — the point of
 # writing them down rather than silently omitting the route.
-COVERED_ELSEWHERE: dict[str, str] = {
-    "/api/journals/{journal_id}/routes": (
+#
+# Keyed on ``(method, path)`` rather than path alone: a path-keyed exemption
+# would cover every verb the path ever grows, so adding an unguarded write to an
+# already-exempted path would slip past this guard — the exact class of omission
+# the guard exists to catch.
+COVERED_ELSEWHERE: dict[tuple[str, str], str] = {
+    ("GET", "/api/journals/{journal_id}/routes"): (
         "asserted by test_route_endpoints.py; those handlers already refuse a "
         "journal that is not the caller's"
     ),
-    "/api/journals/{journal_id}/routes/{route_id}": (
+    ("POST", "/api/journals/{journal_id}/routes"): (
         "asserted by test_route_endpoints.py, as above"
     ),
-    "/api/journals/{journal_id}/tasks": (
+    ("GET", "/api/journals/{journal_id}/routes/{route_id}"): (
+        "asserted by test_route_endpoints.py, as above"
+    ),
+    ("PUT", "/api/journals/{journal_id}/routes/{route_id}"): (
+        "asserted by test_route_endpoints.py, as above"
+    ),
+    ("DELETE", "/api/journals/{journal_id}/routes/{route_id}"): (
+        "asserted by test_route_endpoints.py, as above"
+    ),
+    ("GET", "/api/journals/{journal_id}/tasks"): (
         "asserted by test_task_endpoints.py — the task domain's reads are "
         "owner-scoped in SQL"
     ),
-    "/api/tasks/{task_id}/relationships/intermediate-journals/{journal_id}": (
-        "keyed on the task, not the journal; asserted by test_task_endpoints.py"
+    ("POST", "/api/journals/{journal_id}/tasks"): (
+        "asserted by test_task_endpoints.py — creating against another user's "
+        "journal is refused as an absent anchor"
     ),
-    "/api/journals/{journal_id}/relationships/series": (
+    (
+        "DELETE",
+        "/api/tasks/{task_id}/relationships/intermediate-journals/{journal_id}",
+    ): ("keyed on the task, not the journal; asserted by test_task_endpoints.py"),
+    ("POST", "/api/journals/{journal_id}/relationships/series"): (
         "needs a series of the caller's before the journal is even reached, so "
         "it is asserted in test_journal_series_endpoints.py instead"
     ),
-    "/api/journals/{journal_id}/relationships/series/{series_id}": (
+    ("DELETE", "/api/journals/{journal_id}/relationships/series/{series_id}"): (
         "scoped by the series, whose own ownership is checked first; asserted "
         "in test_journal_series_endpoints.py"
     ),
-    "/api/integrations/strava/journals/{journal_id}/unmatched-athletes": (
+    ("GET", "/api/integrations/strava/journals/{journal_id}/unmatched-athletes"): (
         "the query is owner-scoped (get_by_journal_id(user.id, …)), so another "
         "user's journal yields an empty list rather than a 404 — nothing to leak"
     ),
@@ -292,17 +326,10 @@ async def _snapshot(connection: AsyncConnection, journal_id: int) -> dict[str, A
     rewritten title, a flipped RSVP status and a changed mood value, none of
     which move a count.
     """
-    journal = await connection.execute(
-        text("SELECT to_jsonb(j) FROM journals j WHERE id = :id"),
-        {"id": journal_id},
-    )
-    state: dict[str, Any] = {"journals": sorted(str(r[0]) for r in journal.fetchall())}
-    for table in ASSOCIATION_TABLES:
-        rows = await connection.execute(
-            text(f"SELECT to_jsonb(t) FROM {table} t WHERE journal_id = :id"),  # noqa: S608
-            {"id": journal_id},
-        )
-        state[table] = sorted(str(r[0]) for r in rows.fetchall())
+    state: dict[str, Any] = {}
+    for name, query in UNCHANGED_ROWS.items():
+        rows = await connection.execute(query, {"id": journal_id})
+        state[name] = sorted(str(row[0]) for row in rows.fetchall())
     return state
 
 
@@ -436,14 +463,10 @@ class TestOwnershipCoverageIsComplete:
         """
         mounted = _mounted_journal_id_routes(create_app(settings=test_settings))
         tested = {(spec.method, spec.route) for spec in CROSS_USER_REQUESTS}
-        uncovered = {
-            (method, path)
-            for method, path in mounted
-            if (method, path) not in tested and path not in COVERED_ELSEWHERE
-        }
+        uncovered = mounted - tested - set(COVERED_ELSEWHERE)
 
         assert not uncovered, (
-            "these journal-by-id routes have no ownership test: "
+            "these journal-by-id operations have no ownership test: "
             f"{sorted(uncovered)}. Add each to CROSS_USER_REQUESTS, or to "
             "COVERED_ELSEWHERE with the reason it does not belong there."
         )
@@ -457,14 +480,13 @@ class TestOwnershipCoverageIsComplete:
         the coverage test above would go on passing while nothing was checked.
         """
         mounted = _mounted_journal_id_routes(create_app(settings=test_settings))
-        mounted_paths = {path for _, path in mounted}
 
         stale_requests = {
             (spec.method, spec.route)
             for spec in CROSS_USER_REQUESTS
             if (spec.method, spec.route) not in mounted
         }
-        stale_exemptions = set(COVERED_ELSEWHERE) - mounted_paths
+        stale_exemptions = set(COVERED_ELSEWHERE) - mounted
 
         assert not stale_requests, f"no longer served: {sorted(stale_requests)}"
         assert not stale_exemptions, f"no longer served: {sorted(stale_exemptions)}"

@@ -1632,7 +1632,7 @@ async def dismiss_incomplete_outdoor_activity(
     Idempotent: re-dismissing refreshes the recorded provenance. The dismissed
     journal no longer appears in the review regardless of matched rules.
     """
-    await _ensure_journal_owned(journal_service, user.id, journal_id)
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     dismissal = await dismissal_service.dismiss(
         journal_id, user.id, Provenance.UI, connection
@@ -1668,7 +1668,7 @@ async def undismiss_incomplete_outdoor_activity(
     Idempotent: un-dismissing a journal that was never dismissed is a no-op
     (``was_dismissed`` is false).
     """
-    await _ensure_journal_owned(journal_service, user.id, journal_id)
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
     was_dismissed = await dismissal_service.undismiss(journal_id, user.id, connection)
 
@@ -1776,13 +1776,6 @@ async def _require_owned_journal(
     if journal is None:
         raise JournalNotFoundError(journal_id)
     return journal
-
-
-async def _ensure_journal_owned(
-    journal_service: JournalService, user_id: str, journal_id: int
-) -> None:
-    """Raise ``JournalNotFoundError`` unless the journal exists and is the user's."""
-    await _require_owned_journal(journal_service, user_id, journal_id)
 
 
 def _build_incomplete_outdoor_activity_resource(
