@@ -4035,10 +4035,17 @@ back **79 passed / 0 failed**.
 
 **Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
 clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in
-`tests/e2e/`). The **full** Jest suite rather than the three new files alone, because
-`JournalDetailView` is imported widely: **169** suites and **1,849** tests, all passing (1,810
-before this phase). Plus the e2e regression pass above on both projects. No backend gates: no Python
-file changed.
+`tests/e2e/`). The **full** Jest suite rather than the new files alone, because `JournalDetailView`
+is imported widely and the review fixes reach the journal and contact clients: **170** suites and
+**1,858** tests, all passing (1,810 before this phase). No backend gates: no Python file changed.
+
+**A final e2e pass after the review fixes: 129 passed, 0 failed** on both projects, widened from the
+original three specs to `journals-merge`, `contacts`, `contacts-merge` and `contact-inline-editing`
+as well — every surface the new invalidations touch. Widened because the fixes mean a journal or
+contact write now refetches a task listing wherever one is mounted, which is a behaviour change on
+pages this phase otherwise never altered. An earlier attempt at this run was **discarded rather than
+reported**: it overlapped the edits it was meant to be testing, and the dev server hot-reloads
+mid-run, so its green count would have been evidence of nothing.
 
 **Docs:** `frontend-design.md` gained *The Journal Task Surface* — the `meta.groups` grouping rule
 and why it is a contract rather than a convenience, the render-nothing-vs-quiet-failure distinction,
