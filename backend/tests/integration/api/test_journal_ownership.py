@@ -78,6 +78,7 @@ UNCHANGED_ROWS = {
 # rather than repeating the same string in unrelated-looking places.
 MOOD_TYPE = "MOOD_RATING"
 PARTICIPANT = "PARTICIPANT"
+JOURNAL_ROUTE = "/api/journals/{journal_id}"
 CONTACT_RELATIONSHIP_RESOURCE = "journal-contact-relationships"
 CONTACT_RELATIONSHIP_ROUTE = (
     "/api/journals/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}"
@@ -158,10 +159,10 @@ def _fill(template: str, values: dict[str, str]) -> str:
 
 
 CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
-    CrossUserRequest("GET", "/api/journals/{journal_id}"),
-    CrossUserRequest("PUT", "/api/journals/{journal_id}", body=_JOURNAL_BODY),
-    CrossUserRequest("PATCH", "/api/journals/{journal_id}", body=_JOURNAL_BODY),
-    CrossUserRequest("DELETE", "/api/journals/{journal_id}"),
+    CrossUserRequest("GET", JOURNAL_ROUTE),
+    CrossUserRequest("PUT", JOURNAL_ROUTE, body=_JOURNAL_BODY),
+    CrossUserRequest("PATCH", JOURNAL_ROUTE, body=_JOURNAL_BODY),
+    CrossUserRequest("DELETE", JOURNAL_ROUTE),
     CrossUserRequest(
         "POST",
         "/api/journals/{journal_id}/types",
@@ -260,28 +261,30 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
 # would cover every verb the path ever grows, so adding an unguarded write to an
 # already-exempted path would slip past this guard — the exact class of omission
 # the guard exists to catch.
+ROUTES_COLLECTION = "/api/journals/{journal_id}/routes"
+ROUTES_MEMBER = "/api/journals/{journal_id}/routes/{route_id}"
+JOURNAL_TASKS = "/api/journals/{journal_id}/tasks"
+
+BY_ROUTE_SUITE = (
+    "asserted by test_route_endpoints.py; those handlers already refuse a "
+    "journal that is not the caller's"
+)
+BY_SERIES_SUITE = (
+    "the series is resolved and owner-checked before the journal is reached; "
+    "asserted in test_journal_series_endpoints.py"
+)
+
 COVERED_ELSEWHERE: dict[tuple[str, str], str] = {
-    ("GET", "/api/journals/{journal_id}/routes"): (
-        "asserted by test_route_endpoints.py; those handlers already refuse a "
-        "journal that is not the caller's"
-    ),
-    ("POST", "/api/journals/{journal_id}/routes"): (
-        "asserted by test_route_endpoints.py, as above"
-    ),
-    ("GET", "/api/journals/{journal_id}/routes/{route_id}"): (
-        "asserted by test_route_endpoints.py, as above"
-    ),
-    ("PUT", "/api/journals/{journal_id}/routes/{route_id}"): (
-        "asserted by test_route_endpoints.py, as above"
-    ),
-    ("DELETE", "/api/journals/{journal_id}/routes/{route_id}"): (
-        "asserted by test_route_endpoints.py, as above"
-    ),
-    ("GET", "/api/journals/{journal_id}/tasks"): (
+    ("GET", ROUTES_COLLECTION): BY_ROUTE_SUITE,
+    ("POST", ROUTES_COLLECTION): BY_ROUTE_SUITE,
+    ("GET", ROUTES_MEMBER): BY_ROUTE_SUITE,
+    ("PUT", ROUTES_MEMBER): BY_ROUTE_SUITE,
+    ("DELETE", ROUTES_MEMBER): BY_ROUTE_SUITE,
+    ("GET", JOURNAL_TASKS): (
         "asserted by test_task_endpoints.py — the task domain's reads are "
         "owner-scoped in SQL"
     ),
-    ("POST", "/api/journals/{journal_id}/tasks"): (
+    ("POST", JOURNAL_TASKS): (
         "asserted by test_task_endpoints.py — creating against another user's "
         "journal is refused as an absent anchor"
     ),
@@ -289,13 +292,9 @@ COVERED_ELSEWHERE: dict[tuple[str, str], str] = {
         "DELETE",
         "/api/tasks/{task_id}/relationships/intermediate-journals/{journal_id}",
     ): ("keyed on the task, not the journal; asserted by test_task_endpoints.py"),
-    ("POST", "/api/journals/{journal_id}/relationships/series"): (
-        "needs a series of the caller's before the journal is even reached, so "
-        "it is asserted in test_journal_series_endpoints.py instead"
-    ),
+    ("POST", "/api/journals/{journal_id}/relationships/series"): BY_SERIES_SUITE,
     ("DELETE", "/api/journals/{journal_id}/relationships/series/{series_id}"): (
-        "scoped by the series, whose own ownership is checked first; asserted "
-        "in test_journal_series_endpoints.py"
+        BY_SERIES_SUITE
     ),
     ("GET", "/api/integrations/strava/journals/{journal_id}/unmatched-athletes"): (
         "the query is owner-scoped (get_by_journal_id(user.id, …)), so another "
@@ -362,7 +361,8 @@ async def foreign_journal(async_connection: AsyncConnection) -> ForeignJournal:
     tag_repo = SqlJournalTagRepository(async_connection)
     assigned = await tag_repo.save(JournalTag(name="their-assigned-tag"))
     unassigned = await tag_repo.save(JournalTag(name="their-other-tag"))
-    assert assigned.id is not None and unassigned.id is not None
+    assert assigned.id is not None
+    assert unassigned.id is not None
     await tag_repo.assign_tag(journal_id, assigned.id)
 
     return ForeignJournal(
