@@ -1341,9 +1341,13 @@ export function useDeleteJournal() {
     mutationFn: deleteJournal,
     onSuccess: () => {
       setTimeout(() => {
-        void invalidateAfterMutation(queryClient, {
-          queryKey: journalKeys.lists(),
-        });
+        void invalidateAfterMutation(
+          queryClient,
+          { queryKey: journalKeys.lists() },
+          // Deleting a journal that is only an *intermediate* link is
+          // permitted, and it removes that link from every task that held it.
+          { queryKey: taskKeys.all }
+        );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_DELETED);
     },
@@ -1374,7 +1378,10 @@ export function useMergeJournal() {
         { queryKey: journalKeys.detail(targetId) },
         { queryKey: journalKeys.detail(sourceId) },
         { queryKey: journalKeys.lists() },
-        { queryKey: reviewItemKeys.all }
+        { queryKey: reviewItemKeys.all },
+        // A merge re-points the absorbed journal's task links at the survivor,
+        // so a listing cached before it would omit the tasks that moved.
+        { queryKey: taskKeys.all }
       );
       toast.success('Journals merged successfully');
     },

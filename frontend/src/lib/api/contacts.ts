@@ -618,7 +618,10 @@ export function useMergeContact() {
         // The merge writes an audit row to field_history; refresh the activity
         // feed (backed by historyKeys) so it surfaces without waiting for a
         // natural refetch.
-        { queryKey: historyKeys.all }
+        { queryKey: historyKeys.all },
+        // The source contact is deleted, so any task row still holding its
+        // embedded copy would go on showing a contact that no longer exists.
+        { queryKey: taskKeys.all }
       );
       toast.success('Contacts merged successfully');
     },

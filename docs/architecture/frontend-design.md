@@ -210,8 +210,18 @@ A task's read shapes **embed** the entities they reference rather than pointing
 at them: `due_journal.title`, `due_journal.date`, `due_journal.cancelled`, the
 derived `lapsed` / `lapse_reason`, and each contact's `display_name` and
 `photo_url` all arrive inside the task payload. So `useUpdateJournal`,
-`useUpdateJournalField`, `useUpdateContact`, `useUpdateContactField` and
-`useDeleteContact` name `taskKeys.all` alongside their own key sets.
+`useUpdateJournalField`, `useDeleteJournal`, `useMergeJournal`,
+`useUpdateContact`, `useUpdateContactField`, `useDeleteContact` and
+`useMergeContact` name `taskKeys.all` alongside their own key sets.
+
+The **lifecycle** hooks are in that list for a reason of their own, not merely by
+symmetry: a merge re-points the absorbed journal's task links at the survivor
+and deletes the source contact outright, and deleting a journal that is only an
+*intermediate* link is permitted and removes that link. Each changes the
+membership of a task listing rather than just the values inside it. The `create`
+hooks are deliberately absent — a new journal or contact cannot be attached to an
+existing task yet — as is `useToggleContactFavourite`, since a task's contact ref
+carries only id, display name and photo.
 
 - **This is the "names only the namespaces its change can reach" rule pointing
   the other way.** The rule constrains a *task* mutation from over-invalidating;

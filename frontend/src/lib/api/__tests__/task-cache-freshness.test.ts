@@ -27,9 +27,15 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
 import { taskKeys } from '../tasks';
-import { useUpdateJournal, useUpdateJournalField } from '../journals';
+import {
+  useDeleteJournal,
+  useMergeJournal,
+  useUpdateJournal,
+  useUpdateJournalField,
+} from '../journals';
 import {
   useDeleteContact,
+  useMergeContact,
   useUpdateContact,
   useUpdateContactField,
 } from '../contacts';
@@ -113,6 +119,32 @@ describe('journal mutations refresh the task caches', () => {
 
     await expectTasksRefreshed(spy);
   });
+
+  it('useMergeJournal names the task namespace', async () => {
+    // A merge re-points the absorbed journal's task links at the survivor, so
+    // a listing cached before it would omit the tasks that moved.
+    const spy = jest.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useMergeJournal(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ targetId: '1', sourceId: '2' });
+
+    await expectTasksRefreshed(spy);
+  });
+
+  it('useDeleteJournal names the task namespace', async () => {
+    // Deleting a journal that is only an intermediate link is permitted, and
+    // it removes that link from every task that held it.
+    const spy = jest.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useDeleteJournal(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate('1');
+
+    await expectTasksRefreshed(spy);
+  });
 });
 
 describe('contact mutations refresh the task caches', () => {
@@ -149,6 +181,19 @@ describe('contact mutations refresh the task caches', () => {
     });
 
     result.current.mutate('1');
+
+    await expectTasksRefreshed(spy);
+  });
+
+  it('useMergeContact names the task namespace', async () => {
+    // The merge deletes the source contact, so any task row still holding its
+    // embedded copy would keep showing a contact that no longer exists.
+    const spy = jest.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useMergeContact(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ survivorId: '1', sourceId: '2' });
 
     await expectTasksRefreshed(spy);
   });

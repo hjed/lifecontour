@@ -3952,8 +3952,9 @@ without rendering — see decision 2.
 **Required Test Coverage:** unit (RTL) — the three groups, both lapsed reasons, the no-tasks case, contact
 rendering, and accessible grouping labels. E2E deferred to Phase 22.
 
-**Delivered:** **45** unit tests across four suites — the three below plus the six cache-freshness
-tests the review produced (`frontend/src/lib/api/__tests__/task-cache-freshness.test.ts`).
+**Delivered:** **48** unit tests across four suites — the three below plus the nine cache-freshness
+tests the two review rounds produced
+(`frontend/src/lib/api/__tests__/task-cache-freshness.test.ts`).
 `frontend/src/lib/__tests__/task-display.test.ts`
 (9), `components/journals/__tests__/JournalTaskRow.test.tsx` (19) and
 `components/journals/__tests__/JournalTasksSection.test.tsx` (11) — following the
@@ -3997,7 +3998,16 @@ the journal's own detail view is the surface displaying those tasks. Edit the da
 below would go on showing `Not done` with no lapse marker, for five minutes, on the same screen.
 That is the phase's headline criterion silently wrong.
 
-Fixed by naming `taskKeys.all` in those five mutations, with **six** tests in
+**A second review round found the hole the first fix left**, and it was a fair catch: the fix covered
+the mutations that change a task's embedded *values* and missed the ones that change a listing's
+*membership*. `useMergeJournal` re-points the absorbed journal's task links at the survivor and
+`useMergeContact` deletes the source contact outright — so a cached listing would omit the tasks that
+moved, or go on showing a contact that no longer exists. Reviewing the same class rather than only
+the two hooks named turned up a third: `useDeleteJournal`, since deleting a journal that is only an
+*intermediate* link is permitted and removes that link from every task holding it. All three added,
+with a test each.
+
+Fixed by naming `taskKeys.all` in those eight mutations, with **nine** tests in
 `frontend/src/lib/api/__tests__/task-cache-freshness.test.ts`. `all` rather than `journalLists()`
 because all three sibling namespaces carry the same embedded refs, so that is the reachable set
 exactly — asserted by a test that fails if the invalidation is narrowed to either sibling. This is
