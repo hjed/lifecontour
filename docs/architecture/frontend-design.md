@@ -129,7 +129,7 @@ Mutation handlers must refresh the cache through
 | --- | --- | --- |
 | `detail(taskId)` | `['tasks', 'detail', id]` | a single task read whole |
 | `journalList(journalId, role?)` | `['tasks', 'journal', id, role \| null]` | a journal's task section |
-| `upcomingWindow(days)` | `['tasks', 'upcoming', days]` | the home dashboard's task section — **reserved, with no hook yet**: the listing endpoint (ITER18-001 Phase 14) does not exist |
+| `upcomingWindow(days)` | `['tasks', 'upcoming', days]` | the home dashboard's task section — **reserved, with no hook yet**: the listing endpoint landed in ITER18-001 Phase 14, but nothing reads it until the dashboard is built (ITER18-004) |
 
 - **The sibling arrangement is the contract**, not an accident of naming: a
   journal's task list and the dashboard's task section must be invalidatable
@@ -162,6 +162,79 @@ Mutation handlers must refresh the cache through
 - Invalidation is **not** delayed behind a `setTimeout`. The write commits in
   the service layer before the response is sent, so there is no read-after-write
   race to wait out (the same reasoning as the journal-tag client, #1204).
+
+### The Journal Task Surface
+
+`JournalTasksSection` (`components/journals/JournalTasksSection.tsx`) renders a
+journal's tasks in the three groups the specification names — due, created and
+mentioned — with `JournalTaskRow` for each entry. It is one of only two surfaces
+where tasks are worked with; there is no `/tasks` route.
+
+- **The grouping comes from `meta.groups`, never from `link_roles`.** A task
+  holding two roles in the same journal (both anchors, or a due journal it
+  already mentioned) appears **once** in `data` — JSON:API forbids the same
+  resource twice — and is named in each of its groups. The section indexes
+  `data` by id and walks each group's **ordered** id list, so it renders such a
+  task under both headings and never re-sorts an order the listing already
+  decided server-side.
+- **Every status is shown, lapsed included.** A lapsed task leaves the dashboard
+  silently, and its journals are where the user is meant to meet it again, so
+  this listing must never filter one out. Done and cancelled rows are
+  de-emphasised (muted, struck through) but never hidden — the stance the
+  wireframe takes on cancelled journals.
+- **Nothing renders when there is nothing to show**, and that includes the
+  loading pass: most journals hold no tasks, so a skeleton would flash on nearly
+  every journal detail view for a section about to render nothing. An empty
+  group is omitted rather than shown as a heading with nothing under it.
+- **A failed listing is the one case that does render.** One quiet line, because
+  hiding the section on error is indistinguishable from "this journal has no
+  tasks" — a journal whose lapsed tasks failed to load would read as clean,
+  which is the outcome the lapsed design exists to prevent.
+- **Lapse wording lives in `lib/task-display.ts`, not in the components.** The
+  backend ships `LapseReason` as structured data so surfaces can word it
+  differently, and the specification requires a journal to make clear that a
+  task lapsed because its due journal was *cancelled* rather than because the
+  date went by. `lapseWording` keeps the two distinguishable, and pure so a test
+  can assert it without rendering.
+- **The row's left accent bar diverges from wireframe W22**, which keys it to
+  the due journal's type/calendar colour: a task's journal references carry only
+  id, title, date and cancelled, so the bar is keyed to whether the commitment
+  is still live. Revisit if the read model ever carries a colour.
+- Accessibility: each group is a `<section aria-labelledby>` with an `h4` and a
+  list, under the card's own `h3`, so a group is announced by name with its item
+  count rather than as a flat run of text.
+
+#### Journal and contact writes invalidate `taskKeys.all`
+
+A task's read shapes **embed** the entities they reference rather than pointing
+at them: `due_journal.title`, `due_journal.date`, `due_journal.cancelled`, the
+derived `lapsed` / `lapse_reason`, and each contact's `display_name` and
+`photo_url` all arrive inside the task payload. So `useUpdateJournal`,
+`useUpdateJournalField`, `useDeleteJournal`, `useMergeJournal`,
+`useUpdateContact`, `useUpdateContactField`, `useDeleteContact` and
+`useMergeContact` name `taskKeys.all` alongside their own key sets.
+
+The **lifecycle** hooks are in that list for a reason of their own, not merely by
+symmetry: a merge re-points the absorbed journal's task links at the survivor
+and deletes the source contact outright, and deleting a journal that is only an
+*intermediate* link is permitted and removes that link. Each changes the
+membership of a task listing rather than just the values inside it. The `create`
+hooks are deliberately absent — a new journal or contact cannot be attached to an
+existing task yet — as is `useToggleContactFavourite`, since a task's contact ref
+carries only id, display name and photo.
+
+- **This is the "names only the namespaces its change can reach" rule pointing
+  the other way.** The rule constrains a *task* mutation from over-invalidating;
+  it equally obliges a journal or contact mutation to name the task namespace,
+  because that is a namespace its change genuinely reaches.
+- **`all` rather than `journalLists()`**, because all three sibling namespaces —
+  `detail`, `journalList` and `upcoming` — carry the same embedded refs. That is
+  the reachable set exactly, not an over-broad sweep.
+- **The lapse marker is why this is not cosmetic.** Moving a journal's date into
+  the past, or cancelling it, is what *lapses* the tasks due in it — and the
+  journal's own detail view is displaying those tasks. Without the refresh the
+  user edits the date and the task section below goes on claiming the task is
+  fine for the whole five-minute `staleTime`.
 
 ### TypeScript Integration
 
