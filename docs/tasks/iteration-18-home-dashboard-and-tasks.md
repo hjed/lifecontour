@@ -6093,9 +6093,11 @@ section without the inline done action — the specification names that as an in
 
 **Open decisions:**
 
-1. **Endpoint placement and name** — settled in **Phase 1**. `GET /api/dashboard` (a new top-level
-   singleton) versus `GET /api/home-dashboard`; the outdoor precedent lives under `/api/journals/` because
-   it is journal-scoped, which this is not.
+1. ~~**Endpoint placement and name**~~ — ✅ **settled in Phase 1: `GET /api/home-dashboard`, a new
+   top-level singleton** with resource type `home-dashboards`. Not `/api/dashboard`: the path, the type and
+   `HomeDashboardService` should name the same thing, and this system has two dashboards. The outdoor
+   precedent stays under `/api/journals/` because it is journal-scoped, which this is not. See *Decisions
+   taken (Phase 1)*.
 2. **How the SQL side obtains the importance signals** — settled in **Phase 8**. Reuse the computation that
    feeds the search index (`search_indexer._fetch_complete_contact_data`) by extracting it into a shared
    read, or query the index itself. Extraction keeps the dashboard independent of MeiliSearch availability
@@ -6115,21 +6117,88 @@ section without the inline done action — the specification names that as an in
 
 **Acceptance Criteria:**
 
-- [ ] A read-only `HomeDashboardService` (no unit of work) and a **singleton JSON:API resource whose id is
-      the user id**, following `OutdoorDashboardService` / `OutdoorDashboardResource` exactly.
-- [ ] The endpoint (name per open decision 1) takes **no date parameters** and anchors "today" in the
-      user's configured timezone via `UserSettingsRepository.get_timezone`, never UTC-today.
-- [ ] The payload declares all four sections from the outset, present but empty, so later phases fill a
-      stable contract rather than changing it.
-- [ ] **Per-section resilience is in the contract**: every section can independently report unavailable and
+- [x] A read-only `HomeDashboardService` (no unit of work) and a **singleton JSON:API resource whose id is
+      the user id**, following `OutdoorDashboardService` / `OutdoorDashboardResource` exactly. —
+      `app/core/dashboard/services/home_dashboard_service.py` and `HomeDashboardResource`
+      (type `home-dashboards`) in `app/api/home_dashboard/schemas.py`. A new `app/core/dashboard/` domain
+      rather than the journal domain, which is where the outdoor dashboard belongs: that projection is
+      journal-scoped, this one reads across journals, tasks, contacts and the summary.
+- [x] The endpoint (name per open decision 1) takes **no date parameters** and anchors "today" in the
+      user's configured timezone via `UserSettingsRepository.get_timezone`, never UTC-today. —
+      `GET /api/home-dashboard`, anchored through `JournalDateResolver.timezone_for` plus the pure
+      `today_in(tz, now)` (Phase 3's module), which is `resolve_timezone(await get_timezone(user_id))`
+      underneath — **one** settings read for all four sections, the batch discipline that module asks for.
+      A supplied `?date=` changes nothing, asserted. The anchor and its resolved zone travel in
+      `meta.anchor`, so a surface labels the page with the server's day rather than the browser's.
+- [x] The payload declares all four sections from the outset, present but empty, so later phases fill a
+      stable contract rather than changing it. — `HomeDashboardAttributes` carries `summary`, `agenda`,
+      `tasks` and `upcoming_dates`, each a `DashboardSectionSchema[…]` over a named payload model whose
+      docstring points at the phase that fills it (2, 5–6, 13, 11). Later phases add fields inside a
+      payload; none of them adds, renames or reshapes a section.
+- [x] **Per-section resilience is in the contract**: every section can independently report unavailable and
       distinguishes *unavailable* from *empty*; a failure in one never fails the request. Asserted now,
-      before three sections depend on it.
-- [ ] DI wiring registered. No composite MCP dashboard tool is added; the deliberate omission and its
-      accepted tradeoff are recorded in the service docstring.
+      before three sections depend on it. — `DashboardSection.ready(data)` / `.unavailable()`:
+      *empty* is `status: "ready"` with a payload, *unavailable* is `status: "unavailable"` with
+      `data: null`, and the renderer derives the pair from the payload so the two can never drift apart on
+      the wire. Each section is read behind its own `savepoint(connection)` with `Exception` caught and
+      logged, which is what makes the promise true once the sections have queries — see the decisions below.
+- [x] DI wiring registered. No composite MCP dashboard tool is added; the deliberate omission and its
+      accepted tradeoff are recorded in the service docstring. — `DashboardProvider`
+      (`app/infrastructure/di/dashboard.py`), registered in the application container and **both**
+      integration-test containers, since Dishka validates the whole graph at construction. The MCP omission
+      is recorded in the service docstring and repeated in the endpoint's, which is the surface an agent's
+      operator actually reads.
 
 **Required Test Coverage:** unit — assembly, per-section error isolation, empty-vs-unavailable, timezone
 anchoring. Integration — the four-section envelope in one call; an injected section failure still yields 200
-with the others. No e2e.
+with the others. No e2e. — **Delivered:** 18 unit tests over the envelope and the service
+(`tests/unit/dashboard/`), 11 over the document shape (`tests/unit/api/test_home_dashboard_serialisation.py`)
+and 11 integration tests (`tests/integration/api/test_home_dashboard_api.py`).
+
+**Decisions taken (Phase 1):**
+
+- **Open decision 1 settled: `GET /api/home-dashboard`, a new top-level singleton.** Not under
+  `/api/journals/`, where the outdoor precedent belongs because it is journal-scoped. Named
+  `home-dashboard` rather than the shorter `dashboard` so the path, the resource type (`home-dashboards`)
+  and the service (`HomeDashboardService`) all say the same word: this system now has two dashboards, and a
+  bare `/api/dashboard` would make a reader guess which. The open-decision entry above is struck through.
+- **A degraded section is part of `data`, and that is the specification's ruling rather than a preference.**
+  JSON:API requires a document's top level to hold "at least one of `data`, `errors`, `meta`" and forbids
+  `data` and `errors` from coexisting, so "three sections and a failure in the fourth" has *no*
+  representation as an error document. The status therefore lives in the section envelope, the response
+  stays 200, and Phase 16's per-section unavailable state has something to render. Nested objects inside
+  `attributes` are explicitly permitted ("attributes can hold any valid JSON value, including complex
+  objects"), which is what lets the envelope be one field rather than four flattened ones.
+- **The anchor rides in `meta`, not `attributes`.** `attributes` is information about the resource; which
+  day was read and in whose zone is information about how the answer was computed. ITER18-001 Phase 14 made
+  the same call for the upcoming-tasks window (`meta.window`, present even when the answer is empty), so
+  this follows it, with a purpose-built `HomeDashboardMeta` rather than the shared `JsonApiMeta`, whose
+  fields are the pagination ones a singleton does not have. **Phase 3 must read `meta.anchor.date`** for the
+  W2 header date — and this is also the client-side configured timezone that Phase 3's recorded follow-up
+  from ITER18-001 Phase 3 asks for.
+- **Compound documents (`relationships` + `included`) considered and declined.** The specification prefers
+  relationships over embedded `author_id`-style keys, and `included` exists precisely to serve one round
+  trip, so this was the live alternative for the sections. It cannot express the phase's whole point: a
+  relationship's `data` is resource identifiers only, with nowhere to put a section's `status`. It also has
+  nowhere for the per-context material the sections carry (all-day ordering, the relative due chip, a
+  resolved occurrence date and its days-away), which belongs to no referenced resource. Later phases
+  therefore embed denormalised refs in section attributes, as `TaskReadAttributes` already does.
+  Member names stay snake_case; camelCase is a non-normative *recommendation*, and one camelCase endpoint
+  would be worse than none.
+- **Sections are read sequentially, each inside a SAVEPOINT.** A request holds one `AsyncConnection`, so
+  gathering the four reads concurrently is not available. Sequential reads alone would not deliver the
+  isolation criterion either: a failed query leaves the transaction aborted, so every section after it
+  would fail too. `savepoint(connection)` — the helper written for batch loops that skip and continue —
+  makes the failure local, and the service holds the connection **only** for that, not to query with.
+  Asserted now, with a spec'd mock proving each section is wrapped and a failing one rolls back, because
+  Phases 2–13 add the queries that would otherwise discover this the hard way.
+- **A failure resolving the anchor is a 500, not a fifth unavailable section.** Every window depends on the
+  anchor, so there is no coherent dashboard to return without it; pinned by a test so a later phase does not
+  "improve" it into a silently dateless payload.
+- **The four payload models are deliberately empty.** An empty model serialises as `{}`, which is exactly
+  "this section is ready and has nothing in it" — the state the wireframe's W29 empty lines render. The
+  alternative, declaring fields now for entries whose shape Phases 5–13 settle, would have invented a
+  contract this phase cannot honour.
 
 #### Phase 2: Summary Section in the Payload
 

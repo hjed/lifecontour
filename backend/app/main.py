@@ -270,6 +270,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.contacts.relationship_controllers import router as relationships_router
     from app.api.error_handlers import register_error_handlers
     from app.api.health import router as health_router
+    from app.api.home_dashboard.controllers import router as home_dashboard_router
     from app.api.integrations.controllers import router as integrations_router
     from app.api.integrations.immich_auth_controller import (
         router as immich_auth_router,
@@ -349,6 +350,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Tasks hang off a journal path (/journals/{journal_id}/tasks) but are their
     # own domain, so they get their own router rather than the journals one.
     app.include_router(tasks_router, prefix="/api", tags=["tasks"])
+    # The home dashboard is a top-level singleton, not journal-scoped like the
+    # outdoor one: it reads across journals, tasks, contacts and the summary.
+    app.include_router(home_dashboard_router, prefix="/api", tags=["dashboard"])
     app.include_router(activity_template_router, prefix="/api")
     app.include_router(gear_item_router, prefix="/api")
     app.include_router(daily_summary_router, prefix="/api", tags=["journals"])

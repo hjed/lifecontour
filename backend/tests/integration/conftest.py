@@ -417,6 +417,7 @@ async def _authenticated_client_context(
     from app.infrastructure.config import Settings
     from app.infrastructure.di.auth import AdminAccess
     from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.dashboard import DashboardProvider
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
@@ -484,6 +485,7 @@ async def _authenticated_client_context(
         ContactProvider(),
         JournalProvider(),
         TaskProvider(),
+        DashboardProvider(),
         IntegrationProvider(),
         SettingsProvider(),
         FastapiProvider(),
@@ -838,6 +840,7 @@ def authenticated_search_client(
     from dishka.integrations.fastapi import FastapiProvider
 
     from app.infrastructure.di.contacts import ContactProvider
+    from app.infrastructure.di.dashboard import DashboardProvider
     from app.infrastructure.di.infrastructure import InfrastructureProvider
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
@@ -856,6 +859,7 @@ def authenticated_search_client(
         InfrastructureProvider(),
         ContactProvider(),
         JournalProvider(),
+        DashboardProvider(),
         IntegrationProvider(),
         SettingsProvider(),
         TestAuthSearchProvider(),  # Must be after ContactProvider to override SearchService

@@ -10,6 +10,7 @@ from dishka.integrations.fastapi import FastapiProvider
 from app.infrastructure.config import Settings
 from app.infrastructure.di.auth import AuthProvider
 from app.infrastructure.di.contacts import ContactProvider
+from app.infrastructure.di.dashboard import DashboardProvider
 from app.infrastructure.di.database import DatabaseProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
 from app.infrastructure.di.integrations import IntegrationProvider
@@ -35,6 +36,7 @@ def create_container(settings: Settings | None = None) -> AsyncContainer:
         ContactProvider(),
         JournalProvider(),
         TaskProvider(),
+        DashboardProvider(),
         IntegrationProvider(),
         SettingsProvider(),
         FastapiProvider(),  # Provides FastAPI Request/WebSocket objects
