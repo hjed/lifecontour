@@ -5946,7 +5946,12 @@ No e2e.
 #### Phase 8: Task History Read Surface — REST and MCP
 
 **Prerequisites:** Phase 7.
-**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple.
+**Revised by Phase 6's review (delivery rule 3): ~230 production → ~800 tracked.** The read surface
+itself is unchanged; what is added is the ownership carrier and the one backfill that populates it and
+re-projects the historic events at the same time — a migration on a shared table, a query over
+`outbox_events`, and a test that runs against a consumer group which has *already* acknowledged the
+events it is being asked to project.
 
 **Acceptance Criteria:**
 
@@ -5955,6 +5960,26 @@ No e2e.
 - [ ] **The delete case is the decision's discriminator:** tasks are hard-deleted, so a task-scoped read
       must resolve history by id **without requiring the task row to exist**, with ownership carried on the
       history rows — otherwise the `TaskDeleted` projection is written to a surface that can never read it.
+      **Two consequences of Phase 6, raised in its review and recorded here because this is the phase that
+      has to act on them:**
+      **(a) `field_history` has no ownership column**, so the rows Phase 6 writes carry none. Every other
+      history read authorises by loading the aggregate and comparing `user_id` (see
+      `get_journal_history`), which is exactly what a hard-deleted task has nothing to load. Whatever
+      carries ownership — a column on `field_history`, or a task-scoped mapping table — has to be
+      **backfilled**, and it cannot be backfilled from `tasks`: the deleted ones are not there. It must
+      come from **`outbox_events`**, which retains every event forever (the relay only stamps
+      `relayed_at`; nothing prunes the table) and whose `TaskDeleted` payload carries `user_id` for
+      precisely this reason. That is why Phase 6 could leave it alone: the information is not lost, it is
+      merely not on the row yet.
+      **(b) Historic task events were skip-acknowledged, not replayed.** A deployed `history-projection`
+      group has been consuming task events since Phase 1 and acknowledging them as non-matching, so
+      widening its patterns only projects events published *after* the deploy — tasks that already exist
+      get no lifecycle history, and Phase 6's tests cannot catch this because a fresh stream and a fresh
+      group have nothing already acknowledged. The fix is the same mechanism as (a): re-project the
+      retained `Task%` rows from `outbox_events` through `HistoryService`, which is idempotent on
+      `(event_id, entity_type, entity_id, field_name)` and therefore safe to run repeatedly and safe to
+      overlap with live projection. **Do both in one backfill**, and assert it against a group that has
+      already acknowledged the events rather than against a fresh one.
 - [ ] `GET /api/tasks/{id}/history` (paginated, most recent first) using the shared
       `History{Attributes,Resource,ListResponse}` schemas, scoped to the authenticated user so history
       cannot leak across users (the ITER12-002 lesson).
