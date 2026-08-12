@@ -3952,7 +3952,9 @@ without rendering — see decision 2.
 **Required Test Coverage:** unit (RTL) — the three groups, both lapsed reasons, the no-tasks case, contact
 rendering, and accessible grouping labels. E2E deferred to Phase 22.
 
-**Delivered:** **39** unit tests across three suites — `frontend/src/lib/__tests__/task-display.test.ts`
+**Delivered:** **45** unit tests across four suites — the three below plus the six cache-freshness
+tests the review produced (`frontend/src/lib/api/__tests__/task-cache-freshness.test.ts`).
+`frontend/src/lib/__tests__/task-display.test.ts`
 (9), `components/journals/__tests__/JournalTaskRow.test.tsx` (19) and
 `components/journals/__tests__/JournalTasksSection.test.tsx` (11) — following the
 `JournalContactBadge.test.tsx` idiom, with the task fixtures (`createMockJournalTask`,
@@ -3980,6 +3982,36 @@ and the lapsed-fixture recipe, and building those here would fork that work. Wha
 is a **regression** pass over the journal detail surface, since mounting a new section can disturb
 layout, scroll and click targets in specs that already pass.
 
+**Acted on from the PR review, before the gates were re-run.** Two findings, both the same defect
+seen from two sides, and both real: **mounting this query exposed a cross-entity staleness that
+nothing could observe before.** A task's read shapes *embed* the entities they reference rather than
+pointing at them — `due_journal.title`, `due_journal.date`, `due_journal.cancelled`, the derived
+`lapsed`/`lapse_reason`, and each contact's `display_name` and `photo_url` all arrive inside the task
+payload — while `useUpdateJournal`, `useUpdateJournalField`, `useUpdateContact`,
+`useUpdateContactField` and `useDeleteContact` named only their own key sets, leaving the task caches
+fresh for the app-wide five-minute `staleTime`.
+
+The journal half is the serious one, and worse than "until an unrelated refresh": **moving a
+journal's date into the past, or cancelling it, is exactly what lapses the tasks due in it** — and
+the journal's own detail view is the surface displaying those tasks. Edit the date and the section
+below would go on showing `Not done` with no lapse marker, for five minutes, on the same screen.
+That is the phase's headline criterion silently wrong.
+
+Fixed by naming `taskKeys.all` in those five mutations, with **six** tests in
+`frontend/src/lib/api/__tests__/task-cache-freshness.test.ts`. `all` rather than `journalLists()`
+because all three sibling namespaces carry the same embedded refs, so that is the reachable set
+exactly — asserted by a test that fails if the invalidation is narrowed to either sibling. This is
+the *"a mutation names only the namespaces its change can reach"* rule pointing the other way: it
+constrains a task mutation from over-invalidating, and equally obliges a journal or contact mutation
+to name the task namespace. `frontend-design.md` records it.
+
+**A red run that was red for the wrong reason.** The six tests failed first time because
+`jest.setup.ts` mocks `@/lib/constants` down to the handful of endpoints the auth tests need, leaving
+`API_ENDPOINTS.JOURNALS` undefined and every mutation throwing before it reached `fetch` — so the
+failure proved nothing about the invalidation. Caught by reading the failure rather than accepting
+it, and the suite now uses `jest.requireActual`. The real proof is a mutation check: removing
+`taskKeys.all` from `useUpdateJournal` fails 2 of the 6.
+
 **One e2e failure, investigated rather than waved through.** The regression pass came back 78 passed
 / 1 failed: `journal-history.spec.ts` *"records tag assignment and removal"* on Mobile Chrome, where
 a tag badge never appeared in `JournalTagsEditor`. Four pieces of evidence say it is a pre-existing
@@ -3988,7 +4020,8 @@ metadata block, not the new section; the journals those specs build hold no task
 `JournalTasksSection` renders **nothing** on them; and re-running the spec on Mobile Chrome with
 `--repeat-each 3` passed every time. Recorded here rather than left in a log, since the next person
 to see it should not have to redo this. Mobile Chrome runs with `retries: 0` and surfaces flakes the
-other project masks.
+other project masks. A second full pass over the same three specs, against the committed code, came
+back **79 passed / 0 failed**.
 
 **Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
 clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in

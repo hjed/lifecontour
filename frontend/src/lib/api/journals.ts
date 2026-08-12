@@ -39,6 +39,7 @@ import {
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
+import { taskKeys } from './tasks';
 
 // Query Keys
 export const journalKeys = {
@@ -1316,7 +1317,13 @@ export function useUpdateJournal() {
         void invalidateAfterMutation(
           queryClient,
           { queryKey: journalKeys.detail(id) },
-          { queryKey: journalKeys.lists() }
+          { queryKey: journalKeys.lists() },
+          // A task's read shapes embed their journals — title, date, cancelled,
+          // and the lapse derived from them — so a journal write changes what a
+          // task query would answer. Moving a date into the past or cancelling
+          // the journal is what *lapses* its due tasks, and the journal detail
+          // view is showing those very tasks.
+          { queryKey: taskKeys.all }
         );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_UPDATED);
@@ -1395,7 +1402,10 @@ export function useUpdateJournalField() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        // See useUpdateJournal: a task embeds its journals, so an inline field
+        // save — the date range above all — can change a task's lapse state.
+        { queryKey: taskKeys.all }
       );
     },
     onError: (error: Error) => {

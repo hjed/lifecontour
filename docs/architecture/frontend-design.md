@@ -204,6 +204,28 @@ where tasks are worked with; there is no `/tasks` route.
   list, under the card's own `h3`, so a group is announced by name with its item
   count rather than as a flat run of text.
 
+#### Journal and contact writes invalidate `taskKeys.all`
+
+A task's read shapes **embed** the entities they reference rather than pointing
+at them: `due_journal.title`, `due_journal.date`, `due_journal.cancelled`, the
+derived `lapsed` / `lapse_reason`, and each contact's `display_name` and
+`photo_url` all arrive inside the task payload. So `useUpdateJournal`,
+`useUpdateJournalField`, `useUpdateContact`, `useUpdateContactField` and
+`useDeleteContact` name `taskKeys.all` alongside their own key sets.
+
+- **This is the "names only the namespaces its change can reach" rule pointing
+  the other way.** The rule constrains a *task* mutation from over-invalidating;
+  it equally obliges a journal or contact mutation to name the task namespace,
+  because that is a namespace its change genuinely reaches.
+- **`all` rather than `journalLists()`**, because all three sibling namespaces —
+  `detail`, `journalList` and `upcoming` — carry the same embedded refs. That is
+  the reachable set exactly, not an over-broad sweep.
+- **The lapse marker is why this is not cosmetic.** Moving a journal's date into
+  the past, or cancelling it, is what *lapses* the tasks due in it — and the
+  journal's own detail view is displaying those tasks. Without the refresh the
+  user edits the date and the task section below goes on claiming the task is
+  fine for the whole five-minute `staleTime`.
+
 ### TypeScript Integration
 
 - Define interfaces for all component props

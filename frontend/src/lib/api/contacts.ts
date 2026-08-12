@@ -38,6 +38,7 @@ import {
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
+import { taskKeys } from './tasks';
 
 // Query Keys
 export const contactKeys = {
@@ -485,9 +486,14 @@ export function useUpdateContact() {
       updateContact(id, data),
     onSuccess: (data, { id }) => {
       queryClient.setQueryData(contactKeys.detail(id), data);
-      void invalidateAfterMutation(queryClient, {
-        queryKey: contactKeys.lists(),
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.lists() },
+        // A task embeds its linked contacts by display name and photo rather
+        // than by reference, so a rename leaves the old name on every task row
+        // showing that contact until the task caches are refreshed.
+        { queryKey: taskKeys.all }
+      );
       toast.success(SUCCESS_MESSAGES.CONTACT_UPDATED);
     },
     onError: (error: Error) => {
@@ -502,7 +508,13 @@ export function useDeleteContact() {
   return useMutation({
     mutationFn: deleteContact,
     onSuccess: () => {
-      void invalidateAfterMutation(queryClient, { queryKey: contactKeys.all });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.all },
+        // See useUpdateContact: a deleted contact stays on its task rows until
+        // the task caches drop the embedded copy.
+        { queryKey: taskKeys.all }
+      );
       toast.success(SUCCESS_MESSAGES.CONTACT_DELETED);
     },
     onError: (error: Error) => {
@@ -689,9 +701,13 @@ export function useUpdateContactField() {
       );
 
       // We still need to invalidate lists so search tables and sidebars reflect the updated field
-      void invalidateAfterMutation(queryClient, {
-        queryKey: contactKeys.lists(),
-      });
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.lists() },
+        // See useUpdateContact: a task carries an embedded copy of its
+        // contacts' names, so an inline rename must reach the task caches too.
+        { queryKey: taskKeys.all }
+      );
     },
     onError: (error: Error) => {
       // Don't show toast here - let the component handle it
