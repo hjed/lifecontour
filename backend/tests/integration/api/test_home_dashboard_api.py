@@ -64,12 +64,22 @@ class TestTheSectionEnvelope:
     async def test_takes_no_date_parameters(
         self, authenticated_client: AsyncClient
     ) -> None:
-        """The day is the server's to decide, so a supplied one changes nothing."""
-        plain = await authenticated_client.get(URL)
-        with_date = await authenticated_client.get(f"{URL}?date=2020-01-01")
+        """The day is the server's to decide, so a supplied one is ignored.
 
-        assert with_date.status_code == 200
-        assert with_date.json()["meta"] == plain.json()["meta"]
+        Asserted against *this* response rather than by comparing it with an
+        unparameterised one: two requests can straddle midnight, and the
+        comparison would then fail over a day boundary the endpoint handled
+        correctly. This user has no stored timezone, so the anchor is UTC's day
+        — bracketed either side of the call for the same reason.
+        """
+        before = local_date("UTC")
+        response = await authenticated_client.get(f"{URL}?date=2020-01-01")
+        after = local_date("UTC")
+
+        assert response.status_code == 200
+        anchor = response.json()["meta"]["anchor"]
+        assert anchor["date"] != "2020-01-01"
+        assert anchor["date"] in {before.isoformat(), after.isoformat()}
 
 
 @pytest.mark.asyncio
