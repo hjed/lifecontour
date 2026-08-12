@@ -202,6 +202,70 @@ Conventions this surface pins down:
 - The matching MCP tool is `get_outdoor_dashboard` (documented in its
   docstring, per the MCP documentation convention).
 
+## Home Dashboard Endpoint
+
+The home page is a read-only aggregate over the user's day — the daily summary,
+today's agenda, tasks due this week and upcoming contact dates — exposed as a
+**singleton JSON:API resource**:
+
+| Verb + path | Purpose | Status |
+|---|---|---|
+| `GET /api/home-dashboard` | The four dashboard sections in one call: `summary`, `agenda`, `tasks` and `upcoming_dates`, each in a status envelope. No date parameters; every window is anchored on today in the user's timezone, reported in `meta.anchor` | 200 (always, including when a section could not be read); 401 unauthenticated |
+
+Conventions this surface pins down, several of them the specification's rulings
+rather than this API's taste:
+
+- **Singleton resource:** type `home-dashboards`, id set to the user's id.
+  JSON:API has no singleton concept and requires an `id` on every resource
+  object, so a projection keyed by user has exactly one honest id. Same
+  reasoning as `outdoor-dashboards` and the daily summary.
+- **A top-level `/api/home-dashboard`, not `/api/journals/…`.** The outdoor
+  dashboard is journal-scoped; this one reads across journals, tasks, contacts
+  and the summary. Named `home-dashboard` rather than `dashboard` so the path,
+  the resource type and `HomeDashboardService` name the same thing.
+- **Per-section status is *in* `data`, because it cannot be anywhere else.** The
+  specification requires a document's top level to hold "at least one of `data`,
+  `errors`, `meta`" and forbids `data` and `errors` from coexisting, so "three
+  sections and a failure in the fourth" has no representation as an error
+  document. Each section is therefore
+  `{ "status": "ready" | "unavailable", "data": … }`:
+  - `ready` — the section was read. An **empty** payload is a real answer
+    ("nothing scheduled today") and renders as one line, not an error.
+  - `unavailable` — it could not be read, and `data` is `null` so an empty day
+    and a failed read can never be confused.
+
+  The response stays **200**: the request succeeded, and the client renders the
+  sections it has. Nested objects inside `attributes` are explicitly allowed
+  ("attributes can hold any valid JSON value, including complex objects").
+- **The anchor travels in `meta`, not `attributes`:**
+  `meta.anchor = { "date": "…", "timezone": "…" }`. `attributes` is information
+  about the resource; which day was read, and in whose zone, is information about
+  how the answer was computed — the same call `GET /api/tasks/upcoming` makes
+  with `meta.window`, and present even when every section is empty. A
+  purpose-built meta model is used rather than the shared `JsonApiMeta`, whose
+  fields are the pagination ones a singleton does not have. Clients should label
+  the page from `meta.anchor.date` rather than re-deriving "today" in the
+  browser's zone, which can differ from the configured one.
+- **Sections embed denormalised refs; there is no compound document.**
+  `relationships` + `included` is the specification's way to serve related
+  resources in one round trip, and it was the live alternative here. It cannot
+  carry a section's `status` (a relationship's `data` is resource identifiers
+  only), and it has nowhere for the per-context material sections hold — all-day
+  ordering, a relative due chip, a resolved occurrence date and its days-away —
+  which belongs to no referenced resource. So sections embed journal, task and
+  contact refs in their attributes, as `TaskReadAttributes` already does.
+- **Read-only:** no transaction is opened on this path. Each section is read
+  inside its own `savepoint(connection)` so a failed query rolls back to the
+  savepoint instead of aborting the transaction and taking the remaining
+  sections down with it; the sections are read sequentially because a request
+  holds a single `AsyncConnection`.
+- **No MCP tool, deliberately.** An agent composes the same view from the
+  daily-summary tool, journal browsing, the task listing tools and the contacts
+  tools, so nothing on this surface is UI-only. Recorded in the service and
+  endpoint docstrings.
+- Member names are snake_case, as everywhere else in this API; JSON:API's
+  camelCase preference is on its non-normative Recommendations page.
+
 ## Outdoor Logbook Basemap Tiles (Outbound)
 
 The outdoor-logbook PDF renders each activity's GPX track over a basemap. Basemap
