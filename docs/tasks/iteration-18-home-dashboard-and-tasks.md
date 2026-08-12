@@ -4234,7 +4234,8 @@ lapsed-fixture recipe, and building them here would fork that work. What ran ins
 pass over the journal detail surface, because mounting interactive controls inside a row can disturb
 layout, scroll and click targets in specs that already pass: `journal-detail`, `journal-history`,
 `journal-contact-status` and `journals-merge` on **both** projects, **79 passed / 0 failed**, run against
-the committed code rather than a working tree the dev server would hot-reload mid-run. The specs build no
+the committed code rather than a working tree the dev server would hot-reload mid-run, and **run twice** —
+once before decision 2b's fix and once after, rather than carrying the earlier pass forward. The specs build no
 tasks, so `JournalTasksSection` renders nothing on their journals — which is exactly why this is a layout
 and click-target regression check and not coverage of the actions themselves.
 
@@ -4255,6 +4256,15 @@ The **full** Jest suite rather than the changed files alone, because `lib/api/ta
 (170 and 1,858 before this phase). Re-run in full after decision 2b's fix rather than trusting the pass
 that preceded it. No backend gates — `ruff`, `mypy` and pytest all had nothing to run,
 since no Python file changed.
+
+**Follow-up found in the e2e log, not caused by this phase.** Both regression passes logged four
+`Hydration failed` errors from the **sidebar**, not from anything this phase touched: the diff is
+`aria-expanded={true}` against `aria-expanded="false"` on `SidebarContentInner`'s journals section
+header, i.e. the persisted expanded-sections state disagreeing with what the server rendered. Nothing
+here reaches that component, the specs' journals hold no tasks so `JournalTasksSection` renders nothing
+on them, and the count is identical before and after this phase's changes. Recorded rather than fixed —
+a client-only initial value or a `suppressHydrationWarning` on that toggle is the shape of the fix, and
+it belongs to whoever owns the sidebar.
 
 **Docs:** `frontend-design.md`'s *The Journal Task Surface* gained *Inline status actions* — the offer
 table and why the cancelled row is empty, cancel-over-delete, where the optimism lives and why, the
