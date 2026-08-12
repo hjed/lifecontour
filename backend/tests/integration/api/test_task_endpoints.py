@@ -36,6 +36,8 @@ are 25 hours apart, so their local dates differ at every instant — no clock, n
 race, and a UTC reading fails both.
 """
 
+from datetime import date, timedelta
+
 import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.journals import JournalNotFoundError
@@ -3921,4 +3923,441 @@ class TestListJournalTasksEndpoint:
         assert [resource["id"] for resource in response.json()["data"]] == [
             str(near_task),
             str(far_task),
+        ]
+
+
+@pytest.mark.integration
+class TestListUpcomingTasksEndpoint:
+    """``GET /api/tasks/upcoming`` — the window the home dashboard consumes.
+
+    The one listing on this surface that reaches across journals. Its window is
+    what keeps it from becoming the "every task" collection the specification
+    says no screen has, so the tests below are as interested in what it leaves
+    out as in what it returns.
+
+    Dates here are relative to the real clock rather than fixed, because ``now``
+    is deliberately unreachable from a request. That is sound for a *window*
+    assertion in a way it would not be for a day-boundary one: a journal seeded
+    at ``now + 2 days`` is two days out at whatever instant the suite runs, and
+    ``now + 7 days`` lands on the boundary day whatever the hour, since adding
+    whole days preserves the wall clock.
+    """
+
+    async def test_a_task_due_inside_the_window_is_listed_whole(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The row the dashboard renders, in one response and with no follow-up.
+
+        Text, the resolved due journal — title and date — and the linked
+        contacts, which is the fourth acceptance criterion read from the
+        client's side.
+        """
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Permit Meeting", days_offset=2
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="print the permit",
+        )
+        contact_id = await create_contact(async_connection, first_name="Sarah")
+        await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert response.status_code == 200
+        (resource,) = response.json()["data"]
+        assert resource["id"] == str(task_id)
+        assert resource["attributes"]["text"] == "print the permit"
+        assert resource["attributes"]["due_journal"]["id"] == due_id
+        assert resource["attributes"]["due_journal"]["title"] == "Permit Meeting"
+        assert resource["attributes"]["due_journal"]["date"] is not None
+        assert [
+            contact["display_name"] for contact in resource["attributes"]["contacts"]
+        ] == ["Sarah"]
+
+    async def test_the_path_resolves_to_the_listing_not_to_a_task_id(
+        self, authenticated_client: AsyncClient
+    ):
+        """The route-ordering guard.
+
+        ``/api/tasks/{task_id}`` would match ``upcoming`` as an id and answer
+        400, so the literal route has to be declared first — the same footgun
+        ``main.py`` records for ``/journals/series``. A 200 here is the whole
+        assertion: it proves which route won.
+        """
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert response.status_code == 200
+        assert "meta" in response.json()
+
+    async def test_the_meta_names_the_window_and_the_total(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """What the dashboard's heading and show-more are rendered from."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(journal_repository, title="Soon", days_offset=1)
+        await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        meta = (await authenticated_client.get("/api/tasks/upcoming")).json()["meta"]
+
+        assert meta["total"] == 1
+        assert meta["window"]["days_ahead"] == 7
+        start = date.fromisoformat(meta["window"]["start_date"])
+        end = date.fromisoformat(meta["window"]["end_date"])
+        assert end - start == timedelta(days=7)
+
+    async def test_an_explicit_days_ahead_narrows_the_window(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A caller may look a shorter distance ahead, and the rows follow."""
+        creating_id, _ = task_anchors
+        near_id = await create_journal(journal_repository, title="Near", days_offset=1)
+        far_id = await create_journal(journal_repository, title="Far", days_offset=5)
+        near_task = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=near_id
+        )
+        await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=far_id
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming?days_ahead=2")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(near_task)
+        ]
+        assert response.json()["meta"]["window"]["days_ahead"] == 2
+
+    async def test_a_task_due_on_the_boundary_day_is_listed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """ "Inclusive" reaches the wire, which is where the off-by-one shows."""
+        creating_id, boundary_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=boundary_id,
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(task_id)
+        ]
+
+    async def test_a_task_beyond_the_window_is_not_listed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """One day past the boundary is somebody else's week."""
+        creating_id, _ = task_anchors
+        beyond_id = await create_journal(
+            journal_repository, title="Next fortnight", days_offset=8
+        )
+        await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=beyond_id
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert response.json()["data"] == []
+        assert response.json()["meta"]["total"] == 0
+
+    @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
+    async def test_a_finished_task_is_not_listed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+        status: TaskStatus,
+    ):
+        """The section shows what is outstanding, in either terminal status."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(journal_repository, title="Soon", days_offset=2)
+        await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            status=status,
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert response.json()["data"] == []
+
+    async def test_a_task_whose_due_journal_was_cancelled_is_not_listed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """**The fixture that makes the lapsed exclusion non-vacuous.**
+
+        Not done, dated inside the window, and absent only because the meeting
+        was called off. A date-passed lapse cannot fall inside a forward window,
+        so without this case the exclusion could be deleted and every other test
+        here would still pass.
+
+        The same task is asserted still present on its journal in the same test:
+        it is hidden from the dashboard, not lost, and "hidden here, visible
+        there" is the pair the specification actually promises.
+        """
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Cancelled meeting", days_offset=2
+        )
+        await mark_journal_as_event(
+            async_connection, due_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        upcoming = await authenticated_client.get("/api/tasks/upcoming")
+        on_its_journal = await authenticated_client.get(f"/api/journals/{due_id}/tasks")
+
+        assert upcoming.json()["data"] == []
+        listed = on_its_journal.json()
+        assert [resource["id"] for resource in listed["data"]] == [str(task_id)]
+        assert listed["data"][0]["attributes"]["lapsed"] is True
+        assert (
+            listed["data"][0]["attributes"]["lapse_reason"] == "due_journal_cancelled"
+        )
+
+    async def test_a_confirmed_event_journal_lapses_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Only *cancelled* counts, so the exclusion is not "is an event"."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Meeting", days_offset=2
+        )
+        await mark_journal_as_event(
+            async_connection, due_id, event_state=EventState.CONFIRMED
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(task_id)
+        ]
+
+    async def test_a_task_whose_due_journal_has_passed_is_not_listed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The other lapse cause, which is also simply behind the window.
+
+        Both reasons are asserted rather than one, because they exclude the same
+        task and a rule that lost either would still pass a test that only
+        checked the row was gone.
+        """
+        creating_id, _ = task_anchors
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=past_id
+        )
+
+        upcoming = await authenticated_client.get("/api/tasks/upcoming")
+        read_back = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert upcoming.json()["data"] == []
+        assert read_back.json()["data"]["attributes"]["lapse_reason"] == "date_passed"
+
+    async def test_another_users_task_is_never_listed(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """Owner scoping is the statement's, and both users have one due."""
+        creating_id, _ = task_anchors
+        mine_journal = await create_journal(
+            journal_repository, title="Mine", days_offset=2
+        )
+        mine = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=mine_journal,
+        )
+        theirs_journal = await create_journal(
+            journal_repository, title="Theirs", days_offset=2, user_id=OTHER_USER_ID
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=theirs_journal,
+            due_journal_id=theirs_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [str(mine)]
+
+    async def test_rows_are_ordered_soonest_first(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The specification's order, all the way to the wire."""
+        creating_id, _ = task_anchors
+        far_id = await create_journal(journal_repository, title="Friday", days_offset=5)
+        near_id = await create_journal(
+            journal_repository, title="Tomorrow", days_offset=1
+        )
+        far_task = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=far_id
+        )
+        near_task = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=near_id
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(near_task),
+            str(far_task),
+        ]
+
+    async def test_same_day_rows_are_ordered_by_task_id(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The tie-break, which is the common case for a dashboard week.
+
+        Two tasks due in the same journal share a date exactly, so the id is the
+        only thing separating them and the order would otherwise be whatever
+        PostgreSQL happened to find.
+        """
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Tuesday", days_offset=2
+        )
+        first = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        second = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(first),
+            str(second),
+        ]
+
+    async def test_each_row_carries_an_absolute_self_link(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """One ``links.self`` shape across every task route."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(journal_repository, title="Soon", days_offset=2)
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        self_link = response.json()["data"][0]["links"]["self"]
+        assert self_link.startswith("http")
+        assert self_link.endswith(f"/api/tasks/{task_id}")
+
+    async def test_an_empty_window_is_a_200_not_a_404(
+        self, authenticated_client: AsyncClient
+    ):
+        """Nothing due this week is a good outcome, and still names the window."""
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+        assert response.json()["meta"]["total"] == 0
+        assert response.json()["meta"]["window"]["days_ahead"] == 7
+
+    @pytest.mark.parametrize("days_ahead", [-1, 91])
+    async def test_an_out_of_range_days_ahead_is_rejected(
+        self, authenticated_client: AsyncClient, days_ahead: int
+    ):
+        """The bound that keeps this from becoming an unbounded task list."""
+        response = await authenticated_client.get(
+            f"/api/tasks/upcoming?days_ahead={days_ahead}"
+        )
+
+        assert response.status_code == 400
+
+    async def test_days_ahead_of_zero_is_today_only(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A single-day window is a legitimate ask, not an empty one."""
+        creating_id, _ = task_anchors
+        today_id = await create_journal(
+            journal_repository, title="Today", days_offset=0
+        )
+        tomorrow_id = await create_journal(
+            journal_repository, title="Tomorrow", days_offset=1
+        )
+        today_task = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=today_id
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=tomorrow_id,
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming?days_ahead=0")
+
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(today_task)
         ]

@@ -24,12 +24,15 @@ from typing import Annotated, Any
 
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
+    DEFAULT_UPCOMING_DAYS_AHEAD,
+    MAX_UPCOMING_DAYS_AHEAD,
     JournalTaskGroups,
     Task,
     TaskJournalRef,
     TaskLinkRole,
     TaskReadModel,
     TaskStatus,
+    UpcomingTasks,
 )
 from fastmcp import FastMCP
 from pydantic import Field, StrictBool
@@ -794,6 +797,86 @@ async def list_journal_tasks(
     return json.dumps(_groups_to_dict(groups), indent=2)
 
 
+def _upcoming_to_dict(upcoming: UpcomingTasks) -> dict[str, Any]:
+    """The upcoming window as the tool hands it over.
+
+    The window travels beside the tasks rather than being left for the agent to
+    infer from the rows, because an **empty** answer has no rows to infer it
+    from — and "nothing due between today and next Tuesday" is a different, more
+    useful sentence than "nothing due".
+    """
+    return {
+        "window": {
+            "start_date": upcoming.window.first_day.isoformat(),
+            "end_date": upcoming.window.last_day.isoformat(),
+            "days_ahead": upcoming.window.days_ahead,
+        },
+        "total": upcoming.total,
+        "tasks": [_read_model_to_dict(model) for model in upcoming.tasks],
+    }
+
+
+@mcp_unified_error_handler("list_upcoming_tasks", "task")
+async def list_upcoming_tasks(
+    days_ahead: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=MAX_UPCOMING_DAYS_AHEAD,
+            description=(
+                "How many days beyond today to include. Zero is today alone. "
+                "Leave it out for the usual week."
+            ),
+        ),
+    ] = DEFAULT_UPCOMING_DAYS_AHEAD,
+    task_read_service: TaskReadService = mcp_depends(get_task_read_service),
+) -> str:
+    """
+    List what the user has coming up: tasks due in the next few days.
+
+    The window runs from **today** to ``days_ahead`` days ahead, **inclusive at
+    both ends**, and defaults to **seven days** — the same window the user's own
+    home dashboard shows, so your answer and their screen agree. It is anchored
+    on today in **their timezone**, and each task's due journal comes back with
+    its date already resolved in that zone: do not compute the window, the day
+    boundaries or "how many days away" from a timestamp yourself.
+
+    Take care not to confuse this with the rule for *setting* a due journal,
+    which requires a strictly future date. A task due today is not settable but
+    is very much upcoming, and it is the one the user most needs telling about.
+
+    **Done, cancelled and lapsed tasks are all absent**, so this is what is
+    genuinely outstanding rather than everything that exists. A task lapses when
+    it is still not done and its due journal has passed or been **cancelled** —
+    inside a forward window it is the cancellation that does it, when a meeting
+    a commitment was pinned to was called off.
+
+    **An absent task has not been deleted.** If the user asks after something
+    they expected to see, use ``list_journal_tasks`` on the journal it is linked
+    to: that lists every status, marks the lapse and names the reason. The way
+    back is to ``retarget_task`` onto a new future journal, which returns it to
+    *not done* and puts it back in a window.
+
+    The whole window comes back in one answer and is **not paginated**: there is
+    no second page to ask for, and this is deliberately not a way to list every
+    task the user has.
+
+    Returns:
+        JSON string with a window object naming start_date, end_date and
+        days_ahead; a total count; and tasks, each in the same shape get_task
+        returns — id, text, status, both journal anchors resolved with title and
+        date, the intermediate journals, the linked contacts, and the lapse
+        fields, which for every task listed here say it has not lapsed. An empty
+        window is an ordinary answer, and a good one.
+    """
+    user_id = await get_current_user_id()
+
+    upcoming = await task_read_service.read_models_for_upcoming_window(
+        user_id, days_ahead=days_ahead
+    )
+    return json.dumps(_upcoming_to_dict(upcoming), indent=2)
+
+
 def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
@@ -807,3 +890,4 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(detach_intermediate_journal_from_task)
     mcp.add_tool(get_task)
     mcp.add_tool(list_journal_tasks)
+    mcp.add_tool(list_upcoming_tasks)

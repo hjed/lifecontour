@@ -956,3 +956,154 @@ class TestListJournalTasksDocumentsItself:
 
         assert "lapsed" in description
         assert "every status" in description
+
+
+@pytest.fixture
+async def list_upcoming_tasks_schema() -> dict[str, Any]:
+    """The ``list_upcoming_tasks`` tool as a client sees it."""
+    return await _tool_schema("list_upcoming_tasks")
+
+
+@pytest.mark.unit
+class TestListUpcomingTasksToolParameters:
+    """The forward window, which is the only listing that crosses journals.
+
+    Its whole contract is one optional integer, so everything that makes the
+    answer meaningful lives in the description rather than the schema — which
+    is what the next class exists for. What the schema itself must do is refuse
+    the things that would turn a bounded window into an unbounded task browser,
+    or let an agent ask the question on somebody else's behalf.
+    """
+
+    def test_every_parameter_is_optional(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """ "What is coming up" is answerable with no arguments at all.
+
+        The default is the specification's seven days, so an agent asked "what
+        have I got on this week" sends an empty object.
+        """
+        input_schema = list_upcoming_tasks_schema["input_schema"]
+
+        assert input_schema.get("required", []) == []
+        assert list(input_schema["properties"]) == ["days_ahead"]
+
+    def test_the_window_defaults_to_seven_days(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The default is in the schema, not only in the prose.
+
+        A model that reads the schema rather than the sentence must still send
+        the same window the dashboard shows, or an agent and the UI will
+        disagree about what "this week" holds.
+        """
+        days_ahead = list_upcoming_tasks_schema["input_schema"]["properties"][
+            "days_ahead"
+        ]
+
+        assert days_ahead["default"] == 7
+
+    def test_the_window_is_bounded_at_both_ends(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """Zero is today alone; the ceiling is what stops "every task ever".
+
+        There is deliberately no unbounded task listing in this product, and an
+        agent asking for a ten-year window would be one.
+        """
+        days_ahead = list_upcoming_tasks_schema["input_schema"]["properties"][
+            "days_ahead"
+        ]
+
+        assert days_ahead["minimum"] == 0
+        assert days_ahead["maximum"] == 90
+
+    @pytest.mark.parametrize(
+        "unwanted", ["now", "today", "date", "user_id", "status", "page", "limit"]
+    )
+    def test_it_offers_no_seam_no_impersonation_and_no_paging(
+        self, list_upcoming_tasks_schema: dict[str, Any], unwanted: str
+    ) -> None:
+        """Three refusals in one list, for three different reasons.
+
+        ``now``/``today``/``date``: the window is anchored on the acting user's
+        today, and a tool able to move it could ask what next month will look
+        like as though it were now. ``user_id``: the acting user is the session's.
+        ``status``: the exclusions are the rule, not a default a caller may turn
+        off. ``page``/``limit``: the window bounds the answer, and paging
+        controls would advertise a collection this is not.
+        """
+        assert unwanted not in list_upcoming_tasks_schema["input_schema"]["properties"]
+
+    def test_injected_collaborators_are_not_part_of_the_contract(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The connection and the service are wiring, not arguments."""
+        properties = list_upcoming_tasks_schema["input_schema"]["properties"]
+
+        assert "db_connection" not in properties
+        assert "task_read_service" not in properties
+
+
+@pytest.mark.unit
+class TestListUpcomingTasksDocumentsItself:
+    """Everything the one-integer schema cannot say.
+
+    An agent that reads this listing without being told what is missing from it
+    will report "you have nothing due" to a user with three lapsed commitments,
+    which is worse than saying nothing at all.
+    """
+
+    def test_it_names_the_default_window(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """Seven days, so a model describing the answer names the right span."""
+        assert "seven days" in list_upcoming_tasks_schema["description"].lower()
+
+    def test_it_says_the_window_includes_today(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The edge the future-dated rule excludes, so the two are easy to mix up."""
+        description = list_upcoming_tasks_schema["description"].lower()
+
+        assert "today" in description
+        assert "inclusive" in description
+
+    def test_it_says_whose_today_the_window_starts_on(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """The user's timezone, so an agent does not compute a window itself."""
+        description = list_upcoming_tasks_schema["description"].lower()
+
+        assert "timezone" in description
+        assert "do not" in description
+
+    def test_it_names_all_three_exclusions(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """Done, cancelled and lapsed — the ones an agent will otherwise miss."""
+        description = list_upcoming_tasks_schema["description"].lower()
+
+        assert "done" in description
+        assert "cancelled" in description
+        assert "lapsed" in description
+
+    def test_it_says_where_the_excluded_tasks_can_still_be_found(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """An absent task is not a deleted one, and the tool says which is which.
+
+        ``list_journal_tasks`` lists every status, so it is the answer to "where
+        did that commitment go" — named here because that is where the question
+        is asked.
+        """
+        description = list_upcoming_tasks_schema["description"].lower()
+
+        assert "list_journal_tasks" in description
+        assert "retarget" in description
+
+    def test_it_says_the_answer_is_the_whole_window(
+        self, list_upcoming_tasks_schema: dict[str, Any]
+    ) -> None:
+        """No paging, so an agent does not go looking for a second page."""
+        assert "not paginated" in list_upcoming_tasks_schema["description"].lower()

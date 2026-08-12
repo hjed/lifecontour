@@ -24,6 +24,7 @@ both inherit them.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from core_shared.models.journals import BlockingTask
 from core_shared.models.tasks import Task
@@ -265,6 +266,49 @@ class TaskRepository(ABC):
             The linked tasks, ordered by id. The read surfaces re-order by due
             date before showing them, so this order exists only to be
             deterministic.
+        """
+
+    @abstractmethod
+    async def find_upcoming_tasks(
+        self,
+        user_id: str,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[Task]:
+        """The user's not-done tasks whose due journal starts inside a window.
+
+        The query behind the dashboard's tasks section. It is the **only**
+        listing that reaches across journals, and it is bounded by the window
+        rather than paginated: the product has no "every task" screen, and this
+        must not become one by accident.
+
+        **The window arrives as instants, not dates.** A journal's date is the
+        local date of ``event_date_range_start`` in the acting user's timezone,
+        and that conversion belongs to the caller who resolved the timezone —
+        pushing it into SQL would put a second definition of "a journal's date"
+        in the database, and one that could not be unit-tested. So the caller
+        sends local midnight on the first day and the last microsecond of the
+        last, and this compares timestamps to timestamps.
+
+        **Cancellation is not filtered here.** A not-done task whose due journal
+        was cancelled is *lapsed* and must not reach the dashboard, but that
+        verdict is the read model's and depends on a batched lookup the caller
+        already makes. Filtering it here would be a second definition of lapsed
+        sitting in SQL, so the status and the window are all this statement
+        knows about.
+
+        Args:
+            user_id: The acting user; the statement filters on it, so another
+                user's task is unreachable even with its id
+            window_start: The first instant in the window
+            window_end: The last instant in the window, inclusive
+
+        Returns:
+            The matching tasks, ordered by due-journal start then task id. The
+            caller re-orders by the resolved date before showing them, so this
+            order exists to make the query deterministic rather than to be the
+            display order.
         """
 
     @abstractmethod

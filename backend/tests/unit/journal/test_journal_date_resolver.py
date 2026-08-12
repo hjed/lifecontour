@@ -28,6 +28,7 @@ from app.core.journal.services.journal_date_resolver import (
     journal_date,
     local_date,
     local_day_window,
+    local_window,
     today_in,
 )
 
@@ -36,6 +37,12 @@ USER_ID = "test-user-123"
 SYDNEY = ZoneInfo("Australia/Sydney")
 NEW_YORK = ZoneInfo("America/New_York")
 UTC_ZONE = ZoneInfo("UTC")
+# Two zones whose clocks change **at midnight**, which is the case Sydney's
+# 02:00/03:00 transitions cannot exercise: the last hour of the day repeats, so
+# a window built from the local wall time ``23:59:59.999999`` closes an hour
+# early and drops real journals.
+SANTIAGO = ZoneInfo("America/Santiago")
+BEIRUT = ZoneInfo("Asia/Beirut")
 
 
 def utc(
@@ -240,6 +247,150 @@ class TestLocalDayWindow:
         assert end_utc - start_utc == datetime.timedelta(hours=23) - datetime.timedelta(
             microseconds=1
         )
+
+
+@pytest.mark.unit
+class TestLocalWindow:
+    """A span of local days as an instant range — the multi-day generalisation.
+
+    ``local_day_window`` is now its single-day case, so the cases above still
+    cover that. What is only reachable here is a span that *contains* a clock
+    change, which is the shape the tasks upcoming window has: seven days is long
+    enough to straddle a transition twice a year, and both ends then carry
+    different offsets.
+    """
+
+    def test_it_spans_the_first_midnight_to_the_last_microsecond(self) -> None:
+        """Both ends inclusive, which is what the upcoming window promises."""
+        window = local_window(
+            datetime.date(2026, 7, 30), datetime.date(2026, 8, 2), SYDNEY
+        )
+
+        assert window.start.astimezone(datetime.UTC) == utc(2026, 7, 29, 14, 0)
+        assert window.end.astimezone(datetime.UTC) == datetime.datetime(
+            2026, 8, 2, 13, 59, 59, 999999, tzinfo=datetime.UTC
+        )
+
+    def test_a_span_containing_a_clock_change_is_an_hour_short(self) -> None:
+        """The two ends carry different offsets, and the span is what it really is.
+
+        4 October 2026 is Sydney's spring forward, so a window opening on the 1st
+        at +10 closes on the 7th at +11. Building both ends from *dates* is what
+        makes this right: zeroing the components of some instant inside the span
+        would carry that instant's offset to both ends and lose the hour.
+        """
+        window = local_window(
+            datetime.date(2026, 10, 1), datetime.date(2026, 10, 7), SYDNEY
+        )
+        start_utc = window.start.astimezone(datetime.UTC)
+        end_utc = window.end.astimezone(datetime.UTC)
+
+        assert window.start.utcoffset() == datetime.timedelta(hours=10)
+        assert window.end.utcoffset() == datetime.timedelta(hours=11)
+        assert end_utc - start_utc == datetime.timedelta(days=7) - datetime.timedelta(
+            hours=1, microseconds=1
+        )
+
+    @pytest.mark.parametrize(
+        ("zone", "first", "last"),
+        [
+            # Sydney's spring forward, at 02:00 — the ordinary shape.
+            (SYDNEY, datetime.date(2026, 10, 1), datetime.date(2026, 10, 7)),
+            # Sydney's fall back, at 03:00.
+            (SYDNEY, datetime.date(2026, 4, 1), datetime.date(2026, 4, 7)),
+            # **Santiago's fall back happens at midnight**, so 23:00–23:59 on
+            # 4 April occurs twice. That is the case a window built from
+            # ``time.max`` gets wrong: ``fold=0`` picks the earlier pass and the
+            # window closes an hour before the day does.
+            (SANTIAGO, datetime.date(2026, 3, 29), datetime.date(2026, 4, 4)),
+            # Beirut's, in the other hemisphere and the other half of the year.
+            (BEIRUT, datetime.date(2026, 10, 18), datetime.date(2026, 10, 24)),
+        ],
+    )
+    def test_every_local_day_in_the_span_falls_inside_the_instants(
+        self, zone: ZoneInfo, first: datetime.date, last: datetime.date
+    ) -> None:
+        """The property that actually matters, over the zones that break it.
+
+        The window exists to be compared against ``event_date_range_start`` in
+        **SQL**, where the comparison is between *instants*. So what has to hold
+        is that a journal whose ``journal_date`` is in the span has its instant
+        in the range, at any hour of any day in it.
+
+        Both sides are converted to UTC before comparing, and that is not
+        incidental: Python compares two aware datetimes sharing one ``tzinfo``
+        by their *naive* values, so a version of this test that compared them
+        as-is would assert wall-clock containment — passing happily against a
+        window whose instants were an hour short. Found by review, having been
+        written the wrong way first.
+
+        The failure this pins is a task vanishing from a dashboard for one day a
+        year in Santiago, with nothing to tell the user it was ever there.
+
+        Each hour is probed in **both folds**. ``combine`` always produces
+        ``fold=0``, so a repeated hour would otherwise only ever be sampled on
+        its first pass — and the second pass is precisely the instant the broken
+        window excluded.
+        """
+        window = local_window(first, last, zone)
+        start_utc = window.start.astimezone(datetime.UTC)
+        end_utc = window.end.astimezone(datetime.UTC)
+
+        outside = [
+            (day, hour, fold)
+            for offset in range((last - first).days + 1)
+            for day in [first + datetime.timedelta(days=offset)]
+            for hour in (0, 12, 23)
+            for fold in (0, 1)
+            for moment in [
+                datetime.datetime.combine(day, datetime.time(hour), zone).replace(
+                    fold=fold
+                )
+            ]
+            if journal_date(make_journal(moment), zone) == day
+            and not (start_utc <= moment.astimezone(datetime.UTC) <= end_utc)
+        ]
+
+        assert outside == []
+
+    def test_the_window_ends_where_the_next_day_begins(self) -> None:
+        """One microsecond before the following midnight, in an ambiguous zone.
+
+        Santiago's clocks go back **at midnight** on 5 April 2026, so 4 April
+        has two 23:00 hours and its final microsecond is the later one. Asserted
+        as an absolute instant, because the local wall time ``23:59:59.999999``
+        names both of them and is exactly the ambiguity that made this wrong.
+        """
+        day = datetime.date(2026, 4, 4)
+        window = local_window(day, day, SANTIAGO)
+        next_midnight = datetime.datetime.combine(
+            day + datetime.timedelta(days=1), datetime.time.min, SANTIAGO
+        )
+
+        assert window.end.astimezone(datetime.UTC) == next_midnight.astimezone(
+            datetime.UTC
+        ) - datetime.timedelta(microseconds=1)
+
+    def test_a_day_whose_clocks_go_back_at_midnight_is_twenty_five_hours_long(
+        self,
+    ) -> None:
+        """The regression case, stated as the thing a user would notice.
+
+        A window an hour short here is not an approximation: it is a journal at
+        23:30 local, on a date the window says it covers, that no query returns.
+        """
+        window = local_day_window(datetime.date(2026, 4, 4), SANTIAGO)
+        span = window.end.astimezone(datetime.UTC) - window.start.astimezone(
+            datetime.UTC
+        )
+
+        assert span == datetime.timedelta(hours=25) - datetime.timedelta(microseconds=1)
+
+    def test_a_single_day_span_matches_the_day_window(self) -> None:
+        """``local_day_window`` is defined as this, so the two cannot drift."""
+        day = datetime.date(2026, 10, 4)
+
+        assert local_window(day, day, SYDNEY) == local_day_window(day, SYDNEY)
 
 
 @pytest.mark.unit

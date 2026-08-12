@@ -41,11 +41,14 @@ from core_shared.models.tasks import (
     TaskLinkRole,
     TaskReadModel,
     TaskStatus,
+    UpcomingTasks,
+    upcoming_window,
 )
 
 from app.api.tasks.schemas import (
     to_journal_tasks_response,
     to_task_read_resource,
+    to_upcoming_tasks_response,
 )
 
 USER_ID = "test-user-123"
@@ -476,3 +479,114 @@ class TestTheJournalListingEnvelope:
         assert attributes.due_journal.id == JOURNAL_ID
         assert attributes.lapsed is False
         assert attributes.contacts == []
+
+
+@pytest.mark.unit
+class TestTheUpcomingWindowEnvelope:
+    """The dashboard's listing: the read shape, plus the window it covers.
+
+    A different envelope from a journal's listing, and deliberately so. That one
+    is *about a journal* and reports a grouping; this one is about a **window**,
+    which no row carries, so the window rides in ``meta`` — and must be there
+    even when there are no rows to infer it from.
+    """
+
+    def upcoming(self, *models: TaskReadModel, days_ahead: int = 7) -> UpcomingTasks:
+        """An assembled answer, as a controller receives one."""
+        window = upcoming_window(datetime.date(2026, 8, 11), days_ahead)
+        return UpcomingTasks(window=window, tasks=models)
+
+    def test_the_rows_carry_the_full_read_attributes(self) -> None:
+        """The same shape ``GET /api/tasks/{id}`` returns, not a thinner one.
+
+        The specification asks each dashboard entry for "the task text, the due
+        journal's title and date, and any linked contacts" — all of which the
+        read resource already carries, so the row *is* the read resource rather
+        than a projection that could drift from it.
+        """
+        response = to_upcoming_tasks_response(
+            self.upcoming(read_model(contacts=(TaskContactRef(1, "Sarah Chen", None),)))
+        )
+
+        attributes = response.data[0].attributes
+        assert attributes.text == "return Sarah's book"
+        assert attributes.due_journal.title == "Permit Meeting"
+        assert attributes.due_journal.date == DUE_DATE
+        assert [contact.display_name for contact in attributes.contacts] == [
+            "Sarah Chen"
+        ]
+
+    def test_each_row_carries_an_absolute_self_link(self) -> None:
+        """The same link shape every other task response emits."""
+        response = to_upcoming_tasks_response(
+            self.upcoming(read_model()), "https://pms.test"
+        )
+
+        assert response.data[0].links is not None
+        assert response.data[0].links.self == f"https://pms.test/api/tasks/{TASK_ID}"
+
+    def test_the_meta_names_the_window(self) -> None:
+        """A surface renders "the next seven days", so it is told which days."""
+        response = to_upcoming_tasks_response(self.upcoming(read_model()))
+
+        assert response.meta.window.start_date == datetime.date(2026, 8, 11)
+        assert response.meta.window.end_date == datetime.date(2026, 8, 18)
+        assert response.meta.window.days_ahead == 7
+
+    def test_the_meta_names_the_total(self) -> None:
+        """What the dashboard's show-more counts.
+
+        Equal to ``len(data)`` because the window is uncapped — the whole window
+        travels and the five-item cap is the UI's — so this is the full count
+        rather than a page's.
+        """
+        response = to_upcoming_tasks_response(
+            self.upcoming(read_model(1), read_model(2))
+        )
+
+        assert response.meta.total == 2 == len(response.data)
+
+    def test_an_empty_window_still_names_its_dates(self) -> None:
+        """The case the rows could not have told a client about.
+
+        "Nothing due between today and next Tuesday" is the empty state, and a
+        response that dropped the window when it dropped the rows could not say
+        it.
+        """
+        response = to_upcoming_tasks_response(self.upcoming(days_ahead=3))
+
+        assert response.data == []
+        assert response.meta.total == 0
+        assert response.meta.window.end_date == datetime.date(2026, 8, 14)
+
+    def test_the_row_order_is_preserved(self) -> None:
+        """The rule ordered them; the renderer must not reshuffle."""
+        response = to_upcoming_tasks_response(
+            self.upcoming(read_model(3), read_model(1), read_model(2))
+        )
+
+        assert [resource.id for resource in response.data] == ["3", "1", "2"]
+
+    def test_an_unpersisted_task_is_refused(self) -> None:
+        """The same guard the other two surfaces carry.
+
+        A row silently dropped from a dashboard is worse than an error: the
+        caller cannot tell it was dropped.
+        """
+        unpersisted = TaskReadModel(
+            task=Task(
+                user_id=USER_ID,
+                text="unsaved",
+                creating_journal_id=JOURNAL_ID,
+                due_journal_id=DUE_JOURNAL_ID,
+                status=TaskStatus.NOT_DONE,
+            ),
+            creating_journal=journal_ref(JOURNAL_ID),
+            due_journal=journal_ref(DUE_JOURNAL_ID),
+            intermediate_journals=(),
+            contacts=(),
+            lapse_reason=None,
+        )
+
+        with pytest.raises(ValueError, match="persisted"):
+            to_upcoming_tasks_response(self.upcoming(unpersisted))

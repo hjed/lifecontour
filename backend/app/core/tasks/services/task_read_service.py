@@ -27,16 +27,24 @@ from typing import TYPE_CHECKING
 
 from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.tasks import (
+    DEFAULT_UPCOMING_DAYS_AHEAD,
     JournalTaskGroups,
     TaskContactRef,
     TaskJournalRef,
     TaskNotFoundError,
     TaskReadModel,
+    UpcomingTasks,
     build_task_read_model,
     group_tasks_by_link_role,
+    select_upcoming_tasks,
+    upcoming_window,
 )
 
-from app.core.journal.services.journal_date_resolver import journal_date, today_in
+from app.core.journal.services.journal_date_resolver import (
+    journal_date,
+    local_window,
+    today_in,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -131,12 +139,14 @@ class TaskReadService:
         )
         contact_ids = await self.task_repo.list_contact_ids(task_id, user_id)
 
+        timezone = await self.date_resolver.timezone_for(user_id)
         models, _ = await self._assemble(
             user_id,
             [task],
             mentions={task_id: intermediate_ids},
             contacts={task_id: contact_ids},
-            now=now,
+            today=today_in(timezone, now),
+            timezone=timezone,
         )
         return models[0]
 
@@ -193,12 +203,14 @@ class TaskReadService:
         )
         contacts = await self.task_repo.list_contact_ids_for_tasks(task_ids, user_id)
 
+        timezone = await self.date_resolver.timezone_for(user_id)
         models, journal_refs = await self._assemble(
             user_id,
             tasks,
             mentions=mentions,
             contacts=contacts,
-            now=now,
+            today=today_in(timezone, now),
+            timezone=timezone,
             # The viewed journal joins the batch rather than getting a lookup of
             # its own. It is almost always in there already — it anchors or is
             # mentioned by every task returned — and including it explicitly is
@@ -211,6 +223,94 @@ class TaskReadService:
 
         return group_tasks_by_link_role(journal_id, models, role=role)
 
+    async def read_models_for_upcoming_window(
+        self,
+        user_id: str,
+        *,
+        days_ahead: int = DEFAULT_UPCOMING_DAYS_AHEAD,
+        now: datetime.datetime | None = None,
+    ) -> UpcomingTasks:
+        """The not-done tasks due between today and ``days_ahead`` days ahead.
+
+        The dashboard's tasks section: "not-done tasks whose due journal falls
+        between today and seven days ahead, inclusive", soonest first, with
+        done, cancelled and lapsed tasks absent.
+
+        **Today is the user's, not UTC's.** The timezone is resolved once and
+        the window is built from it, so a user in Kiritimati is shown their
+        Wednesday rather than the world's Tuesday. The window then reaches the
+        query as instants, because that is what the stored column holds.
+
+        **Today is in the window**, unlike the future-dated invariant on a due
+        journal, which excludes it. The two rules answer different questions —
+        "may this become a deadline" versus "is this deadline coming up" — and a
+        task written yesterday for today is exactly what a dashboard is for.
+
+        **The lapse is applied here rather than in SQL.** The query filters
+        status and dates; the cancelled due journal that lapses a task inside a
+        forward window is known only from the batched cancellation lookup
+        ``_assemble`` already makes, so the exclusion belongs to the pure rule
+        that reads the assembled verdict. Nothing re-derives it.
+
+        Unpaginated and uncapped by design. The window bounds it, the dashboard
+        applies its own five-item cap to what comes back, and a server-side cap
+        would turn that cap's *show more* into a second request.
+
+        Args:
+            user_id: The acting user; every read below is scoped to them
+            days_ahead: How far ahead to look, defaulting to the
+                specification's seven
+            now: The instant to judge "today" from, for tests that need a
+                specific side of a day boundary. Production omits it.
+
+        Returns:
+            The window and its tasks, ordered by due-journal date then task id.
+
+        Raises:
+            TaskValidationError: ``days_ahead`` is negative or beyond the
+                maximum. Raised before the listing query, though **after** the
+                settings read the window's anchor needs — the bound cannot be
+                checked against a window that has not been built. Both surfaces
+                reject an out-of-range value at their own schema, so in practice
+                this is the backstop for a caller reaching the service directly
+                rather than the path a bad request takes.
+            JournalNotFoundError: An anchor journal is missing, which the
+                foreign keys make unreachable.
+        """
+        timezone = await self.date_resolver.timezone_for(user_id)
+        # Read once and carried, not consulted again below. With ``now=None``
+        # each call to ``today_in`` reads the wall clock afresh, so a request
+        # crossing local midnight between two of them would build the window
+        # against one day and judge the lapse against the next — and a task due
+        # on the earlier day would be dropped as "date passed" from a window
+        # that still claims to include it. Raised by the pull request's
+        # automated review.
+        today = today_in(timezone, now)
+        window = upcoming_window(today, days_ahead)
+        instants = local_window(window.first_day, window.last_day, timezone)
+
+        tasks = await self.task_repo.find_upcoming_tasks(
+            user_id,
+            window_start=instants.start,
+            window_end=instants.end,
+        )
+        task_ids = [task.id for task in tasks if task.id is not None]
+
+        mentions = await self.task_repo.list_intermediate_journal_ids_for_tasks(
+            task_ids, user_id
+        )
+        contacts = await self.task_repo.list_contact_ids_for_tasks(task_ids, user_id)
+
+        models, _ = await self._assemble(
+            user_id,
+            tasks,
+            mentions=mentions,
+            contacts=contacts,
+            today=today,
+            timezone=timezone,
+        )
+        return select_upcoming_tasks(models, window)
+
     async def _assemble(
         self,
         user_id: str,
@@ -218,7 +318,8 @@ class TaskReadService:
         *,
         mentions: dict[int, list[int]],
         contacts: dict[int, list[int]],
-        now: datetime.datetime | None,
+        today: datetime.date,
+        timezone: ZoneInfo,
         extra_journal_ids: Sequence[int] = (),
     ) -> tuple[list[TaskReadModel], dict[int, TaskJournalRef]]:
         """Turn already-fetched tasks and their link ids into read models.
@@ -240,7 +341,18 @@ class TaskReadService:
             mentions: Each task's intermediate journal ids, keyed by task id.
                 A task with no links may be absent rather than empty.
             contacts: Each task's contact ids, on the same terms
-            now: The instant to judge "today" from
+            today: Today's date in the acting user's timezone, **already
+                resolved**. A date rather than an instant, so this cannot read
+                the clock a second time: with ``now=None`` every ``today_in``
+                call samples the wall clock afresh, and a request crossing local
+                midnight between two of them would judge one half of an answer
+                against a different day from the other. The upcoming window
+                needs the date before it has any tasks, so it resolves it and
+                hands it down; taking it as a parameter is what makes the two
+                halves agreeing structural rather than a coincidence of timing.
+            timezone: The acting user's timezone, **already resolved**, on the
+                same reasoning — one settings read per request, and no window
+                for a change to it to land between two of them.
             extra_journal_ids: Journals to resolve beside the tasks' own — the
                 journal a listing is *about*, which must be resolved even when
                 nothing is linked to it
@@ -253,8 +365,6 @@ class TaskReadService:
         Raises:
             JournalNotFoundError: An anchor journal is missing.
         """
-        timezone = await self.date_resolver.timezone_for(user_id)
-
         journal_refs = await self._journal_refs(
             user_id,
             _ordered_unique(
@@ -281,7 +391,6 @@ class TaskReadService:
             )
         )
 
-        today = today_in(timezone, now)
         models = [
             build_task_read_model(
                 task=task,
