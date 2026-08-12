@@ -431,6 +431,7 @@ PORT_READ_METHODS = frozenset(
         "list_intermediate_journal_ids_for_tasks",
         "list_contact_ids_for_tasks",
         "find_tasks_anchored_to_journal",
+        "find_upcoming_tasks",
     }
 )
 
