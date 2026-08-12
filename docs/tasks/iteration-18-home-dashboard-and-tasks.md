@@ -29,14 +29,19 @@ not-done tasks due in it with the cancellation reason, while touching none of th
 being refused). Delivery rule 9 is satisfied for all three shipped journal operations; **the rest of
 ITER18-001 is next**, per the Sequencing Strategy. ITER18-002's remaining phases are 5 (the
 delete-failure UI and its e2e) and 6 (the retarget/merge lock order).
-**ITER18-003 Phases 1–4 complete** (task created and deleted; text updated and status changed as
-one `TaskUpdated`; the due-journal retarget, carrying any reopen; and journal linked/unlinked, which
-took the automatic link out of the retarget's payload and gave it its own event — so a retarget now
-publishes **two** events, the link it retains and then the anchor move).
-Every task event so far is published inside its write's unit of work and
-carries provenance from the caller. Nothing is user-visible yet — the projection lands in Phases 6–7 and
-the first surface that reads it in Phase 9. Phase 3's review added **Phase 10**: a journal merge
-re-points task anchors and publishes no task event.
+**ITER18-003 Phases 1–5 complete, and the specification's full event set is now published** (task
+created and deleted; text updated and status changed as one `TaskUpdated`; the due-journal retarget,
+carrying any reopen; journal linked/unlinked, which took the automatic link out of the retarget's
+payload and gave it its own event — so a retarget now publishes **two** events, the link it retains
+and then the anchor move; and contact linked/unlinked, which Phase 5 delivered as **more
+`changed_fields` on `TaskUpdated` rather than two new types**, because a contact link is a plain
+reference and membership is a field of the task).
+Every task event is published inside its write's unit of work and
+carries provenance from the caller, and Phase 5 pinned the **completeness rule** with a test anchored
+to the repository ports rather than to `TaskService`'s method list. Nothing is user-visible yet — the
+projection lands in Phases 6–7 and the first surface that reads it in Phase 9. Phase 3's review added
+**Phase 10**: a journal merge re-points task anchors and publishes no task event, which is now the
+completeness test's one **named exclusion** and asserted positively rather than merely absent.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -5566,29 +5571,98 @@ events a retarget publishes and how `origin` and `source` split the question bet
   it matches on the `Task%` prefix rather than an enumerated list. Recorded because Phase 3 predicted
   this phase would meet it.
 
-#### Phase 5: Events — Contact Linked and Unlinked
+#### Phase 5: Events — Contact Linked and Unlinked ✅ COMPLETE
 
 **Prerequisites:** Phase 1, ITER18-001 Phase 11.
 **Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Revised before work started (delivery rule 3):** **~80–110 production → ~700–1,000 tracked**.
+Production is revised **down**, which no earlier phase in this group did, and the reason is the shape
+chosen below: contact membership joins `TaskCreated` and `TaskUpdated` rather than getting two event
+classes of its own, so this phase adds **no new type**. Calibration rule 6's ~600 test lines per type
+— the figure that drove the overruns in Phases 1–4, every one of which shipped new classes — does not
+apply. What is left is two publish sites, one payload key, one widened docstring and four provenance
+arguments. Tests are revised **up** against the ×4, because what remains is the behaviour count Phase 2
+recommended estimating from: link and unlink, each against a row that moved, one that did not and a
+refusal, times three provenance origins, times four surfaces that pass none today — plus the
+completeness test, which is new machinery rather than a variant of an existing assertion.
+
+**Shape chosen for criterion 1 (recorded before work started):** **no new event types. Contact
+membership is a field of the task, so it travels in the field vocabulary** — `contact_ids` on
+`TaskCreated`, and `changed_fields={"contact:{id}": (None, id)}` / `{(id, None)}` on `TaskUpdated`
+for a later link or unlink.
+
+The criterion says *"Event **classes** … for contact linked and unlinked"*, so this is a divergence,
+and it is the same one Phase 2 made from *"Event classes … for text updated and status changed"*. The
+first draft of this phase's plan did add two classes, and review caught what that produced: a create
+with contacts announcing them as a **field** of the task and a link a minute later announcing the same
+fact as an **aggregate-level event of its own**. It is one or the other. Reading it as a field costs no
+information — `HistoryService._rows_from_changed_fields` fans a `changed_fields` dict into one
+`field_history` row per key, so the user still reads a distinct line per person — and it means **Phase 7
+needs no contact-link handler at all**, because Phase 6's `TaskUpdated` handler already covers it. That
+entry should be amended when this lands, the way Phase 4 amended this one's completeness rule.
+
+**Why this is not what Phase 4 did for journal links**, which *did* get their own types: a journal link
+has structure to carry. It has an `origin`, because two different writes cause it, and it is half of the
+ordered pair a retarget publishes. A contact link has neither. The specification calls it *"a plain
+reference"* with no relationship type, role or attendance status, and it has exactly one cause — a user
+asking for it — because a create announces its own contacts and a contact delete cascades without
+anybody acting on the task. There is nothing a dedicated type would carry that `changed_fields` does
+not. The keys are `contact:{id}` rather than a shared `"contacts"`, following the collection prefixes
+`journal_write_service.py` already uses (`plan:doc`, `abseil:pitch`), because Phase 6 writes history
+`ON CONFLICT (event_id, entity_type, entity_id, field_name) DO NOTHING` and a shared field name would
+collapse two people into one row.
+
+**This also settles the hole Phase 1 left.** `TaskCreated` gains `contact_ids` — the ids for which a
+link row was actually written, in order. Phase 4's amended rule forces a create to publish exactly one
+event; with contacts as a field, that event should name them, or a task created with Alice and later
+unlinked from her puts an "unlinked" line in the user's history with no "linked" line before it.
+
+**Actual:** **226 production insertions (201 net) → 2,082 test lines** (events module 116, service 102,
+controller 4, MCP 4 — figures include the docstrings each carries; 1,363 lines added to five existing
+test files and a 719-line new one, plus ~150 docs of which most is this entry). **Both halves of the
+revised estimate overran — production by ~2×, tests by ~2×** — and the two misses have different
+causes, neither of which is the one the earlier phases recorded.
+
+Production is not the publishing. The behaviour is two `if` statements and a shared six-line helper;
+what ran to 226 lines is **prose**, because this phase's whole content is a *decision* rather than a
+mechanism, and this repo documents why rather than what. The module docstring had to explain why
+contact membership is a field, `TaskUpdated`'s had to be widened from two kinds of change to three,
+`contact_field_name` carries the dedup argument for its own existence, and `TaskCreated`'s explains
+why its new argument has no default. *Calibration addition:* a phase whose deliverable is a
+**convention** rather than a component should budget its production line count from the number of
+places that convention has to be explained, not from the number of statements that implement it.
+Rule 7's "expensive shape" is about editing many domains; this is its cousin — editing one domain's
+vocabulary.
+
+The test miss is one file. The completeness test came to **719 lines against a budget of "new
+machinery"** with no number attached, which is the estimating error rather than the writing: an
+inventory of eleven write paths needs eleven arrangements and eleven actions, and the port-coverage
+guard needs its own tests because it is itself a mechanism that can be wrong. It is ~35% of the
+phase's test lines and covers a rule the previous four phases each *stated* and none *checked*.
 
 **Acceptance Criteria:**
 
-- [ ] Event classes and publishing for contact linked and unlinked.
-- [ ] Same-unit-of-work publishing and provenance threading.
-- [ ] With this phase the specification's full event set is published: created, text updated, status
-      changed, due journal retargeted, journal linked/unlinked, contact linked/unlinked, deleted.
-      **"Full" means the set the specification names, not every write that reaches a task row.** Two
-      things sit outside it and are not this phase's to close: a retarget publishes **two** events since
-      Phase 4 landed, and a **journal merge** re-points task anchors and links while publishing nothing
-      task-scoped, which is **Phase 10**.
-- [ ] **The completeness rule, as Phase 4 restated it:** *every task write path publishes **at least
-      one** event, and a retarget publishes **exactly two** — the journal it retains, then the anchor
-      move, in that order.* The original wording, "exactly one event per write path", stopped being true
-      the moment the derived link got its own type; Phase 3 deferred the exception and Phase 4 delivered
-      it, so this phase's test is written to the rule above rather than to the one it inherited. The
-      "at least one" is not a licence for two elsewhere: **no other write path may publish more than
-      one**, and that is the half of the rule worth asserting, since it is what stops the exception
-      spreading.
+- [x] Event classes and publishing for contact linked and unlinked. — **no new classes, and that is
+      this phase's recorded divergence.** Contact membership is a field of the task, so it travels
+      in `TaskUpdated`'s `changed_fields` as `{"contact:{id}": (None, id)}` for a link and
+      `{(id, None)}` for an unlink, published from `TaskService.link_contact` and `unlink_contact`
+      **only when the repository reports a row moved**. See the shape recorded above and *Decisions
+      taken* below. Whole-key payload assertions on both directions, plus a JSON round trip, plus
+      the stored form read back out of `outbox_events`.
+- [x] Same-unit-of-work publishing and provenance threading. — rollback asserted against a real
+      database in **both directions** by failing inside a **caller's** unit of work: a rolled-back
+      link leaves neither the `task_contacts` row nor the event, and a rolled-back unlink leaves the
+      row *and* no event. Provenance is threaded through both REST endpoints and both MCP tools,
+      which had none before this phase, and asserted per surface against the stored row.
+- [x] With this phase the specification's full event set is published. — every fact the
+      specification names is now announced, and the completeness inventory names them all. The two
+      things outside it are unchanged: a retarget publishes two, and the journal merge re-point
+      publishes nothing, which is **Phase 10** and is now asserted **positively** rather than merely
+      absent.
+- [x] The completeness rule, as Phase 4 restated it. — `TestEveryWritePathPublishes` runs each of
+      **eleven** write paths against a real outbox and compares the facts it published; a companion
+      class checks that no path but the retarget published more than one, per path and against what
+      was **actually** published rather than against a declared list.
 
 **Required Test Coverage:** unit — payloads. Integration — outbox rows per operation; a completeness test
 asserting every task write path publishes at least one event, with the retarget's two named as the one
@@ -5597,6 +5671,105 @@ method list** — the merge re-point (Phase 10) is a task write performed from t
 test enumerating service methods would pass while that gap is open, which is how it went unnoticed until
 ITER18-003 Phase 3's review. It is legitimate for this phase's test to record the merge as a **known,
 named exclusion**; it is not legitimate for it to be invisible. No e2e.
+
+**Delivered: 34 unit tests and 69 integration tests.** 14 unit tests in
+`tests/unit/tasks/test_task_events.py` (7 in a new `TestTaskUpdatedCarriesContactMembership`, 4 on
+`TaskCreated`'s new `contact_ids`, 3 round-trip cases), 17 in
+`test_task_service_contact_links.py` across three new classes — announcement, silence and provenance
+— and 3 in `test_task_service_create.py`, one of which replaces the test that pinned the absence
+Phase 1 left. 23 integration tests added to `tests/integration/tasks/test_task_events_integration.py`
+(63 → 86), **42 in the new
+`tests/integration/tasks/test_task_event_completeness_integration.py`**, and 4 surface tests split
+between `tests/integration/api/test_task_endpoints.py` and
+`tests/integration/mcp/test_task_tools_mcp.py`.
+
+**No e2e**, and the absence is a checked fact rather than an assumption, as Phase 4 established:
+`grep -rn "relationships/contacts" frontend/src` returns nothing and no task API client exists, so
+no UI reaches these endpoints and nothing on screen changes. Phase 9 builds the surface.
+
+**Documentation.** `docs/architecture/domain-architecture.md` — the `TaskUpdated` paragraph now
+covers three kinds of change rather than two, with the `contact:{id}` key and the reason it names the
+contact; a new paragraph records why contact links get no type of their own while journal links do;
+and the completeness rule and its single named exclusion are described where a reader meets the event
+list rather than only in a test file.
+
+**Decisions taken (Phase 5):**
+
+- **No new event types, which diverges from criterion 1's "event classes" — the second time this
+  iteration has made that divergence, and the first time review caught the alternative first.** The
+  original plan for this phase *did* add `TaskContactLinked` and `TaskContactUnlinked`, alongside
+  putting `contact_ids` on `TaskCreated`. Review rejected it on a point neither the plan nor the
+  criterion had noticed: that combination makes contact membership a **field** of the task when the
+  task is created and an **aggregate-level event of its own** a minute later. It is one or the
+  other. Reading it as a field loses nothing — `_rows_from_changed_fields` fans a `changed_fields`
+  dict out into one `field_history` row per key, so the user still reads a line per person — and it
+  removes two classes, two handlers and a vocabulary. *The lesson is about where the inconsistency
+  was visible:* both halves were individually defensible and the plan argued each on its own merits;
+  only reading them side by side showed they disagreed. A plan that settles a modelling question in
+  one section and applies a different answer in another will not fail any test.
+- **Why journal links keep their own types and contact links do not.** Not inconsistency by
+  another name: a journal link has structure to carry — an `origin`, because two writes cause the
+  same fact, and a place in the ordered pair a retarget publishes. A contact link has neither. The
+  specification calls it *"a plain reference"* with no relationship type, role or attendance status,
+  and it has one cause, because a create announces its own contacts and a contact delete cascades
+  without anyone acting on the task. The test that states this directly is
+  `test_the_payload_says_nothing_about_a_role_or_a_relationship`, so the next person to consider
+  adding a role key meets the sentence rather than a diff.
+- **The key names the contact — `contact:{id}` — rather than a shared `"contacts"` field**, and it
+  is built by `contact_field_name()` rather than an f-string at the call sites. Phase 6 writes
+  history `ON CONFLICT (event_id, entity_type, entity_id, field_name) DO NOTHING`, so two people
+  under one field name would collide on all four columns and one would be discarded as a redelivery
+  of the other — a person silently missing from a task's history. The function exists because the
+  projection will have to *recognise* the format that the service *builds*, and a format living in
+  two places is one that can drift. Mutation-checked: collapsing it to `"contacts"` fails three
+  tests.
+- **`TaskCreated` gains `contact_ids`, and it has no default.** This settles the hole Phase 1 left
+  deliberately. Phase 4's amended rule forces a create to publish exactly one event, and with
+  contacts as a field that event should name them — otherwise a task created with Sarah and later
+  unlinked from her puts a "removed Sarah" line in the history with no "added Sarah" line before it.
+  The argument is **required** for the reason `TaskJournalLinked.origin` is: there is no safe
+  default, because `[]` is right for the ordinary create and a lie for the one that named people,
+  and the failure would be silent. The value is `_link_contacts`' return — the ids a row was written
+  for — not the request's list; the two coincide on a create, which is exactly why taking the
+  written set costs nothing.
+- **Phase 7 loses a handler and Phase 6 gains work, and both entries are amended below** — the way
+  Phase 4 amended this one's completeness rule. Phase 7's criterion asks for handlers for
+  *"retarget, journal linked/unlinked and contact linked/unlinked"*; contact links now need **none**,
+  because Phase 6's `TaskUpdated` handler covers them over the existing `_rows_from_changed_fields`.
+  What moved rather than vanished is on Phase 6: its `TaskUpdated` handler inherits the
+  `contact:{id}` keys for free but owes them a test, and its **`TaskCreated` handler owes real
+  work** — `contact_ids` is a list rather than an `(old, new)` pair, so the generic helper cannot
+  fan it out and the handler must emit a row per contact itself. Missing that would recreate exactly
+  the asymmetry this phase's payload decision exists to prevent: a task created with somebody
+  showing no addition, and a later unlink showing a removal with nothing before it. *Recorded here
+  as well as there because the risk is that a later phase reads only its own entry.*
+- **The completeness test is anchored to the repository ports, not to `TaskService`.** Every
+  mutating method on `TaskRepository` and `TaskAnchorRepository` must be classified — reached by a
+  covered path, listed as a read, or named as an exclusion — so a new port method fails the suite
+  until somebody says which it is. Reads are **listed** rather than inferred from the name, so a
+  method called `find_and_touch` cannot classify itself as harmless, and a second test checks the
+  reverse direction so a rename leaves a stale entry rather than a silent hole. The merge re-point is
+  the one exclusion, and it is asserted **positively**: the test performs a real re-point, checks the
+  task's due anchor actually moved, and checks its history does not know. That will fail when Phase
+  10 fixes it, which a comment would not have.
+- **The mutation check found a test that could not fail, and the fix reshaped the file.** Eleven
+  mutations were run. Ten behaved: removing the link publish fails 20 tests and the unlink publish
+  12; publishing unconditionally fails **exactly the two silence tests** each; reversing the pair
+  fails 4; dropping `contact_ids` fails 3; collapsing the field name fails 3; and dropping
+  `source`/`changed_by` at each of the four surfaces fails **exactly the one surface test for it** —
+  the useful result, because it says those tests exercise the surface rather than the service behind
+  it. The eleventh finding was in the harness's subject: `test_no_path_is_silent` compared *every*
+  event a task had ever published, and almost every scenario has to create a task before it can act
+  on one — so "this path published something" was true of ten paths the moment `create_task` worked.
+  Removing a publish call left it green. `WritePath` was split into `seed` and `act` with the facts
+  recorded between them, so `expects` is now the **operation's own** output; after the change the
+  same mutation fails it. *This is the third phase running in which a test written after its code
+  proved to be worth less than it looked, and the first in which the weak test was in the new
+  machinery rather than in what it tested.*
+- **A separate file for the completeness test**, rather than a class in
+  `test_task_events_integration.py` as the plan said. That file asks "what did *this* operation
+  publish?" one operation at a time and is 2,000 lines; this one asks "is anything unaccounted for?"
+  across all of them, and the inventory is its subject. Burying it is how it would stop being read.
 
 #### Phase 6: History Projection — Lifecycle Events
 
@@ -5611,6 +5784,19 @@ named exclusion**; it is not legitimate for it to be invisible. No e2e.
       text and status as one `TaskUpdated` carrying `changed_fields`, so both are covered by a single
       handler over the existing `_rows_from_changed_fields`, which already produces one row per changed
       field. See *Decisions taken (Phase 2)*.
+- [ ] **Both of those handlers inherited work from Phase 5, which this criterion predates.** That
+      phase made contact membership a *field* of the task rather than an event type, so:
+      **(a)** the `TaskUpdated` handler now also receives `contact:{id}` keys, and
+      `_rows_from_changed_fields` projects them with no change — an id in `old_value`/`new_value` and
+      the absent side `None`, the shape `JournalTagAssigned` already produces. What is owed is a
+      **test** that a link and an unlink each land one row, under distinct field names, the right way
+      round; and **(b)** `TaskCreated` now carries `contact_ids`, which is a *list*, not a
+      `(old, new)` pair, so the generic helper cannot fan it out — the create handler has to emit one
+      marker row per contact itself, under the same `contact_field_name()` the service builds, or a
+      task created with people will show none of them in its history while a later unlink shows a
+      removal with no matching addition. That is the exact asymmetry Phase 5's payload decision
+      existed to prevent, and it is this phase that has to finish it.
+      **Add ~1 handler-branch of production and ~150 test lines to this phase's estimate for the two.**
 - [ ] `HistoryProjectionConsumer` subscribes to the task event patterns; writes stay idempotent
       (`ON CONFLICT DO NOTHING` on `(event_id, entity_type, entity_id, field_name)`), so stream redelivery
       is safe.
@@ -5630,8 +5816,15 @@ Integration — publish → relay → projection per type, asserting idempotency
 
 **Acceptance Criteria:**
 
-- [ ] Handlers for retarget, journal linked/unlinked and contact linked/unlinked, producing rows that read
-      as a trail (which journal, in which role, when).
+- [ ] Handlers for retarget and journal linked/unlinked, producing rows that read as a trail (which
+      journal, in which role, when). **That is two handlers, not four, and the contact half is gone
+      entirely — amended by Phase 5, which delivered it.** This criterion originally read "…and
+      contact linked/unlinked". Phase 5 made contact membership a **field** of the task rather than
+      an event type of its own: a link publishes `TaskUpdated` carrying
+      `changed_fields = {"contact:{id}": (None, id)}`, so Phase 6's `TaskUpdated` handler already
+      covers it over the existing `_rows_from_changed_fields`. What this phase still owes the contact
+      case is a **test**, not a handler — that a link and an unlink project one `field_history` row
+      each, under distinct field names, in the right direction. See *Decisions taken (Phase 5)*.
 - [ ] The **search indexer ignores task events**: no tasks index, no task document, no task event
       dead-lettering in the `search-indexer` group, and global search never returns a task. This holds by
       construction because the consumer only sees subscribed patterns — this phase **pins it with a test**

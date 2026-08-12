@@ -51,6 +51,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from app.core.tasks.models.events import contact_field_name
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS,
     COUNT_CONTACT_LINKS_FOR_TASK,
@@ -2764,6 +2765,79 @@ class TestTheEndpointRecordsUiProvenance:
         _, event = await task_events(async_connection, task_id=task_id)
         assert event.event_type == "TaskJournalUnlinked"
         assert event.payload["journal_id"] == mentioned_id
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_linking_a_contact_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """A person added to a task, recorded as the *user's* doing.
+
+        Contact membership travels as a ``TaskUpdated`` carrying
+        ``changed_fields`` rather than a type of its own, so the key is asserted
+        alongside the provenance: an endpoint reaching the wrong service method
+        would publish a ``TaskUpdated`` too, and a test checking only the type
+        and the source would wave that through.
+        """
+        creating_id, due_id = task_anchors
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(sarah)
+        )
+        assert response.status_code == 204
+
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {
+            contact_field_name(sarah): [None, sarah]
+        }
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_unlinking_a_contact_is_attributed_to_the_ui(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The ``DELETE`` threads provenance too, which the ``POST`` cannot show.
+
+        Asserted separately rather than assumed from the link above: the two are
+        different endpoint functions calling different service methods, and each
+        would keep working — silently filing a person's own change under
+        "system" — if it forgot.
+        """
+        creating_id, due_id = task_anchors
+        sarah = await create_contact(async_connection, first_name="Sarah")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+        linked = await authenticated_client.post(
+            f"/api/tasks/{task_id}/relationships/contacts", json=_link_body(sarah)
+        )
+        assert linked.status_code == 204
+
+        response = await authenticated_client.delete(
+            f"/api/tasks/{task_id}/relationships/contacts/{sarah}"
+        )
+        assert response.status_code == 204
+
+        _, event = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {
+            contact_field_name(sarah): [sarah, None]
+        }
         assert event.payload["source"] == Provenance.UI.value
         assert event.payload["changed_by"] == "ui"
 

@@ -5,20 +5,33 @@ events through the same transactional outbox and stream that contacts and
 journals use, and those events project into field history exactly as contact and
 journal events do", each carrying provenance and the actor.
 
-This module holds creation, change, due-journal retargeting, intermediate
-journal links and hard deletion. Contact linked/unlinked lands in a later phase,
-and the history projection that reads these payloads lands after it.
+This module holds creation, every change to the task's own fields — text, status
+and contact membership — due-journal retargeting, intermediate journal links and
+hard deletion. That is the full event set the specification names. The history
+projection that reads these payloads lands in a later phase.
 
-**A task's text and status changes share one event**, ``TaskUpdated``, carrying
-``changed_fields`` — not one event type per field. The phase that added it was
-worded as though there would be two, and this is the deliberate divergence: a
-single ``PATCH`` may reword a task *and* complete it, which is one write in one
-unit of work, and two events would announce two things where one happened.
-``JournalUpdated``, ``ContactUpdated``, ``RouteUpdated`` and ``GearItemUpdated``
-all take this shape, and ``HistoryService._rows_from_changed_fields`` fans a
-``changed_fields`` dict out into one ``field_history`` row per field — so the
-user still reads a distinct "text" line and a distinct "status" line in their
+**A task's text, status and contact changes share one event**, ``TaskUpdated``,
+carrying ``changed_fields`` — not one event type per field. The phases that added
+them were each worded as though there would be two classes, and this is the
+deliberate divergence: a single ``PATCH`` may reword a task *and* complete it,
+which is one write in one unit of work, and two events would announce two things
+where one happened. ``JournalUpdated``, ``ContactUpdated``, ``RouteUpdated`` and
+``GearItemUpdated`` all take this shape, and
+``HistoryService._rows_from_changed_fields`` fans a ``changed_fields`` dict out
+into one ``field_history`` row per field — so the user still reads a distinct
+"text" line, a distinct "status" line and a distinct line per person in their
 history, which is the whole of what per-field event types would have bought.
+
+**Contact membership is a field, and journal links are not** — an asymmetry
+worth stating, because the two look alike from a distance. A journal link has
+structure to carry: :class:`TaskJournalLinked` has an ``origin``, because two
+different writes cause the same fact, and it is half of the ordered pair a
+retarget publishes. A contact link has neither. The specification calls it *"a
+plain reference"* carrying no relationship type, role or attendance status, and
+it has exactly one cause — somebody asking for it — since a create announces its
+own contacts here and a contact delete cascades without anyone acting on the
+task. There is nothing a dedicated type would carry that a ``changed_fields``
+entry does not.
 
 **Payloads are plain dictionaries, deliberately.** There are typed payload
 models in :mod:`core_shared.models.outbox_events`, but that dispatch map exists
@@ -38,6 +51,7 @@ of diff this iteration's calibration rules single out as the expensive kind — 
 it is recorded here as known duplication rather than repeated silently.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -46,6 +60,24 @@ from typing import Any
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+def contact_field_name(contact_id: int) -> str:
+    """The ``changed_fields`` key a contact's membership is recorded under.
+
+    One key **per contact** rather than a shared ``"contacts"`` field, following
+    the collection prefixes ``journal_write_service`` already uses for nested
+    rows (``plan:doc``, ``abseil:pitch``). The reason is the projection's dedup:
+    history rows are written ``ON CONFLICT (event_id, entity_type, entity_id,
+    field_name) DO NOTHING``, so two people sharing a field name would collide on
+    all four columns and the second would be discarded as a redelivery of the
+    first — one of them silently missing from the user's own history.
+
+    A function rather than an f-string at the two call sites, because the
+    service builds these keys and the projection will later have to recognise
+    them, and a format that lives in two places is one that can drift.
+    """
+    return f"contact:{contact_id}"
 
 
 @dataclass(frozen=True)
@@ -77,12 +109,29 @@ class TaskCreated(DomainEvent):
     ``Integer`` column, so aggregating under anything else — the due journal,
     say — would file a task's history against another entity.
 
-    The payload carries the task as it was persisted: its text, its status and
-    both anchors. It does **not** carry contact ids. A task may be created with
-    contacts, but whether that also publishes a contact-linked event is the
-    completeness question the contact-link phase settles, and answering it here
-    by smuggling the ids into this payload would decide it early and in the
-    wrong place.
+    The payload carries the task as it was persisted: its text, its status, both
+    anchors and **the people it was created with**.
+
+    ``contact_ids`` answers the question the phase that wrote this class left
+    open — whether a create naming contacts publishes one event or two. It
+    publishes **one**, because a create is one write and because contact
+    membership is a field of the task rather than an aggregate of its own (see
+    the module docstring). Leaving it out was the alternative, and it would put a
+    later unlink's "removed Sarah" line in a history with no "added Sarah" line
+    anywhere before it.
+
+    The value is the ids a link row was actually **written** for, in the order
+    the caller named them — ``TaskService._link_contacts``' return, not the
+    request's list. On a create the two coincide, since a new task has no links
+    to collide with; taking the written set anyway keeps this event saying what
+    happened rather than what was asked for, which is what every other payload
+    here does.
+
+    **It has no default**, unlike every other optional argument on these events.
+    There is no safe one: ``[]`` is correct for the ordinary create and a lie for
+    the one that named people, and the failure would be silent — a task with
+    three people on it whose own creation event says nobody was involved.
+    :class:`TaskJournalLinked`'s ``origin`` has no default for the same reason.
     """
 
     def __init__(
@@ -93,6 +142,7 @@ class TaskCreated(DomainEvent):
         status: TaskStatus,
         creating_journal_id: int,
         due_journal_id: int,
+        contact_ids: Sequence[int],
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
@@ -110,6 +160,11 @@ class TaskCreated(DomainEvent):
                 "status": status.value,
                 "creating_journal_id": creating_journal_id,
                 "due_journal_id": due_journal_id,
+                # Copied into a ``list`` rather than stored as handed over: the
+                # payload is a wire format, and a caller's tuple would serialise
+                # to the same JSON while handing an in-process subscriber a type
+                # a reader coming back through Redis never sees.
+                "contact_ids": list(contact_ids),
                 "source": source.value,
                 "changed_by": changed_by,
             },
@@ -119,15 +174,32 @@ class TaskCreated(DomainEvent):
 
 @dataclass(frozen=True)
 class TaskUpdated(DomainEvent):
-    """Event raised when a task's text, status, or both change.
+    """Event raised when a field of the task changes.
+
+    Three kinds of change reach this one type: a reword, a status move, and a
+    contact being linked or unlinked. They arrive from different write paths —
+    :meth:`TaskService.update_task` owns text and status, and
+    :meth:`TaskService.link_contact` / :meth:`~TaskService.unlink_contact` own
+    membership — but each is one write announcing one event.
 
     **One event for one write**, carrying ``changed_fields`` in the
     ``{field: (old, new)}`` shape every other updated-event in this codebase
-    uses. ``TaskService.update_task`` owns both fields precisely because a
+    uses. ``TaskService.update_task`` owns text and status precisely because a
     ``PATCH`` may carry both and JSON:API says a request is one change; the
     event follows that, rather than splitting a single unit of work into two
     announcements. See the module docstring for why this diverges from the
-    phase's "event classes" wording.
+    phases' "event classes" wording, twice.
+
+    **Contact membership is written as** ``{contact_field_name(id): (None, id)}``
+    for a link and ``{...: (id, None)}`` for an unlink — the shape
+    ``JournalTagAssigned`` already projects, where the absent side is the state
+    the link did not have. The direction is carried by *position* alone, since
+    ``_rows_from_changed_fields`` never reads the key, so a pair built the wrong
+    way round renders a link as a removal in somebody's own history with nothing
+    downstream able to notice. No contact name travels: the service holds an id,
+    and reading a name would add a query to a method that performs none — and
+    would fail on exactly the contact a user had just deleted, which is the one
+    :meth:`~TaskService.unlink_contact` is most likely to be called about.
 
     **Only what actually moved is named.** Setting a task's text to the text it
     already has puts no ``text`` key here, so a subscriber never has to tell a

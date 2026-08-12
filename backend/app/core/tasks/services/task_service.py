@@ -61,6 +61,7 @@ from app.core.tasks.models.events import (
     TaskJournalLinkOrigin,
     TaskJournalUnlinked,
     TaskUpdated,
+    contact_field_name,
 )
 from app.infrastructure.unit_of_work import savepoint, transactional
 
@@ -255,12 +256,19 @@ class TaskService:
 
         created = await self._save(task, creating_journal_id, due_journal_id)
         assert created.id is not None, "Task ID must be set after save"
-        await self._link_contacts(created.id, contacts, user_id, transaction)
+        linked = await self._link_contacts(created.id, contacts, user_id, transaction)
 
         # Last, and deliberately: the event announces a create that finished,
         # links included, following the journal tag service's ordering. It reads
         # the *persisted* task because the id it carries exists only after the
         # save, and that id is what the history projection files rows under.
+        #
+        # ``linked`` rather than ``contacts``: the payload names the ids a row
+        # was actually written for, as every other event here names what
+        # happened rather than what was asked for. The two coincide on a create —
+        # a new task has no links to collide with — which is exactly why taking
+        # the written set costs nothing and stops mattering only if that ever
+        # changes.
         await self.event_publisher.publish(
             TaskCreated(
                 task_id=created.id,
@@ -269,6 +277,7 @@ class TaskService:
                 status=created.status,
                 creating_journal_id=created.creating_journal_id,
                 due_journal_id=created.due_journal_id,
+                contact_ids=linked,
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -405,6 +414,8 @@ class TaskService:
         task_id: int,
         contact_id: int,
         transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> bool:
         """Link a contact to one of the user's tasks.
 
@@ -422,11 +433,27 @@ class TaskService:
         writes nothing; the return value is the only way to tell the two apart,
         and a surface is free to ignore it.
 
+        **Publishes a** :class:`~app.core.tasks.models.events.TaskUpdated`
+        **when a row was written**, carrying the membership change in
+        ``changed_fields`` — not an event type of its own. Contact membership is
+        a field of the task, and a plain reference has nothing a dedicated type
+        would carry; see the events module for why journal links went the other
+        way. The idempotent repeat above publishes **nothing**, because no row
+        moved and announcing it would put a second "added Sarah" line in the
+        user's history for a link that did not change.
+
         Args:
             user_id: The acting user; the task must be theirs
             task_id: The task to link
             contact_id: The contact to reference
             transaction: The request connection; the unit of work commits here
+            source: Where the link was asked for, recorded on the event.
+                Defaults to ``SYSTEM`` rather than to a surface, so a caller
+                that forgets to say is never mistaken for a person acting in the
+                browser.
+            changed_by: The actor, as the other domains write it — the literal
+                ``"ui"`` or ``"mcp"`` rather than a user id, which the payload
+                already carries.
 
         Returns:
             ``True`` when a link row was created, ``False`` when it was already
@@ -442,7 +469,18 @@ class TaskService:
         """
         contacts = await self._resolve_contacts([contact_id])
         created = await self._link_contacts(task_id, contacts, user_id, transaction)
-        return contact_id in created
+        linked = contact_id in created
+        if linked:
+            await self._publish_contact_change(
+                task_id=task_id,
+                user_id=user_id,
+                change=(None, contact_id),
+                contact_id=contact_id,
+                transaction=transaction,
+                source=source,
+                changed_by=changed_by,
+            )
+        return linked
 
     @transactional
     async def unlink_contact(
@@ -452,6 +490,8 @@ class TaskService:
         task_id: int,
         contact_id: int,
         transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> bool:
         """Remove a contact link from one of the user's tasks.
 
@@ -464,11 +504,26 @@ class TaskService:
         Idempotent for the same reason ``DELETE`` is: unlinking a contact that
         is not linked changes nothing and says so.
 
+        **Publishes a** :class:`~app.core.tasks.models.events.TaskUpdated`
+        **when a row was removed**, carrying the same ``changed_fields`` key the
+        link does with the pair the other way round — ``(contact_id, None)``.
+        The direction is positional, because
+        ``HistoryService._rows_from_changed_fields`` reads ``change[0]`` as the
+        old value and never looks at the key. Nothing is published when there was
+        no row to remove.
+
+        No contact name is read to decorate the event, which is what keeps the
+        asymmetry above intact: a display name would need the very lookup this
+        method declines to perform, and would fail on exactly the contact
+        somebody had just deleted.
+
         Args:
             user_id: The acting user; the task must be theirs
             task_id: The task to unlink
             contact_id: The contact to stop referencing
             transaction: The request connection; the unit of work commits here
+            source: Where the removal was asked for; defaults to ``SYSTEM``
+            changed_by: The actor recorded on the event
 
         Returns:
             ``True`` when a link row was removed, ``False`` when there was none.
@@ -477,7 +532,48 @@ class TaskService:
             TaskNotFoundError: When the task does not exist or is not the acting
                 user's.
         """
-        return await self.task_repo.remove_contact(task_id, contact_id, user_id)
+        removed = await self.task_repo.remove_contact(task_id, contact_id, user_id)
+        if removed:
+            await self._publish_contact_change(
+                task_id=task_id,
+                user_id=user_id,
+                change=(contact_id, None),
+                contact_id=contact_id,
+                transaction=transaction,
+                source=source,
+                changed_by=changed_by,
+            )
+        return removed
+
+    async def _publish_contact_change(
+        self,
+        *,
+        task_id: int,
+        user_id: str,
+        contact_id: int,
+        change: tuple[int | None, int | None],
+        transaction: AsyncConnection,
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        """Announce a contact joining or leaving a task, in the field vocabulary.
+
+        Shared by the two callers because the only thing that differs between
+        them is which way round the pair goes, and a second copy of the key
+        construction is a second place for the two to disagree about what a
+        contact's field is called. The pair is the caller's, because *it* is the
+        one that knows whether a row appeared or vanished.
+        """
+        await self.event_publisher.publish(
+            TaskUpdated(
+                task_id=task_id,
+                user_id=user_id,
+                changed_fields={contact_field_name(contact_id): change},
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
 
     @transactional
     async def attach_intermediate_journal(

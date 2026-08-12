@@ -220,11 +220,29 @@ the *creating* journal where it arose and the *due* journal where it matters.
   left to scope its history by. The payloads are plain dictionaries rather than models in
   `core_shared/models/outbox_events.py`: that dispatch map is for **inbound integration-sync**
   payloads, and no core domain event appears in it.
-  **A task's text and status changes share one event** — `TaskUpdated`, carrying `changed_fields` in
-  the `{field: (old, new)}` shape `JournalUpdated` and `ContactUpdated` use — rather than one type
-  per field, because a single `PATCH` may move both and that is one write in one unit of work;
-  `HistoryService._rows_from_changed_fields` fans the dict out into one `field_history` row per
-  field, so a reader still gets a distinct line each.
+  **A task's text, status and contact changes share one event** — `TaskUpdated`, carrying
+  `changed_fields` in the `{field: (old, new)}` shape `JournalUpdated` and `ContactUpdated` use —
+  rather than one type per field, because a single `PATCH` may move both text and status and that is
+  one write in one unit of work; `HistoryService._rows_from_changed_fields` fans the dict out into
+  one `field_history` row per field, so a reader still gets a distinct line each.
+  **Contact membership is a field of the task, so it uses that same vocabulary.** Linking a contact
+  publishes `changed_fields = {"contact:{id}": (None, id)}` and unlinking publishes the pair the
+  other way round; a create announces the people it linked as `contact_ids` on `TaskCreated`. The
+  direction is positional and nothing else carries it, because `_rows_from_changed_fields` reads
+  `change[0]` as the old value and never looks at the key. The key names the **contact**, following
+  the collection prefixes `journal_write_service` uses for nested rows (`plan:doc`,
+  `abseil:pitch`), because history rows are written `ON CONFLICT (event_id, entity_type, entity_id,
+  field_name) DO NOTHING` and a shared `contacts` field would let one person be discarded as a
+  redelivery of another. `contact_field_name()` in the events module owns that format so the
+  service and the projection cannot disagree about it.
+  **Contact links get no event type of their own, and journal links do** — an asymmetry that is
+  deliberate rather than an oversight. A journal link has structure to carry: `TaskJournalLinked`
+  has an `origin`, because two different writes cause the same fact, and it is half of the ordered
+  pair a retarget publishes. A contact link has neither. The specification calls it *"a plain
+  reference"* carrying no relationship type, role or attendance status, and it has exactly one
+  cause — somebody asking for it — since a create announces its own contacts and a contact delete
+  cascades without anyone acting on the task. There is nothing a dedicated type would carry that a
+  `changed_fields` entry does not.
   **A retarget publishes two events, and is the only task write that publishes more than one.**
   `TaskDueJournalRetargeted` carries the due-journal pair and the reopen (only when the retarget
   actually moved the status, since retargeting always lands a task *not done*); the **automatic
@@ -244,8 +262,15 @@ the *creating* journal where it arose and the *due* journal where it matters.
   browser is `ui` — the same actor as the retarget event beside it — rather than `system`, which is
   reserved for writes no person triggered. `TaskJournalUnlinked` carries no `origin`: it has one
   cause today, and a key with a single possible value would advertise a case that does not exist.
-  The remaining event types the specification names — contact linked/unlinked — and the
-  history projection that consumes all of them arrive in later phases of
+  **Every write path publishes at least one event, and only a retarget publishes two.** That rule is
+  pinned by `tests/integration/tasks/test_task_event_completeness_integration.py`, which runs each
+  path against a real outbox and compares the facts it published. The inventory is anchored to the
+  **repository ports** rather than to `TaskService`'s method list, so a write performed on a task
+  from another domain cannot escape it — there is exactly one such write today, and it is a **named
+  exclusion**: `TaskAnchorRepository.repoint_journal_links`, which a journal merge uses to re-point
+  a task's anchors and links while publishing nothing task-scoped. That gap is asserted positively
+  rather than left implicit, and closing it is its own phase.
+  The history projection that consumes these events arrives in a later phase of
   [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md). Until then **no consumer group
   subscribes to a task event**: `SearchIndexerConsumer` and `HistoryProjectionConsumer` match event
   types exactly and list none, `InboundEventConsumer`'s patterns are all prefixes of other domains,

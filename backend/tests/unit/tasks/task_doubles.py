@@ -46,6 +46,13 @@ NEW_DUE_JOURNAL_ID = 33
 # refuses to write.
 INTERMEDIATE_JOURNAL_ID = 44
 
+# The people a task can reference. Two of them, because contact membership is
+# carried as one ``changed_fields`` key *per contact* — ``contact:{id}`` — and a
+# single id cannot show that two people produce two keys rather than overwriting
+# each other under one shared field name.
+CONTACT_ID = 3
+OTHER_CONTACT_ID = 4
+
 ORIGINAL_TEXT = "return Sarah's book"
 # What a reword moves it to. Shared rather than redeclared per file because the
 # event tests assert the ``(old, new)`` pair the service tests produce, and two

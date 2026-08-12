@@ -286,6 +286,8 @@ async def link_task_to_contact(
         task_id=task_id,
         contact_id=contact_id,
         transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(
         _link_to_dict(task_id, contact_id, linked=True, changed=changed), indent=2
@@ -329,6 +331,8 @@ async def unlink_task_from_contact(
         task_id=task_id,
         contact_id=contact_id,
         transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
     return json.dumps(
         _link_to_dict(task_id, contact_id, linked=False, changed=changed), indent=2

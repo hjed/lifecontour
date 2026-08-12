@@ -28,12 +28,15 @@ the owner-scoped guard, the cascade — is proved against a real database in
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
 from sqlalchemy.exc import IntegrityError
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.services.task_service import TaskService
+from tests.unit.tasks.task_doubles import published_events
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
@@ -117,9 +120,9 @@ def service(
 ) -> TaskService:
     """The service under test.
 
-    ``mock_event_publisher`` comes from ``conftest.py``: contact links get their
-    own event type in a later phase, and until then the service needs a
-    publisher it never reaches.
+    ``mock_event_publisher`` comes from ``conftest.py``. Both methods here now
+    reach it: a link and an unlink each publish a ``TaskUpdated`` naming the
+    contact, because membership is a field of the task like its text.
     """
     return TaskService(
         task_repo=mock_task_repo,
@@ -137,13 +140,21 @@ async def link(
     user_id: str = USER_ID,
     task_id: int = TASK_ID,
     contact_id: int = CONTACT_ID,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
 ) -> bool:
-    """Call ``link_contact`` with the ordinary arguments, overriding as needed."""
+    """Call ``link_contact`` with the ordinary arguments, overriding as needed.
+
+    Provenance defaults to what the *service* defaults to, so a test that says
+    nothing about it exercises the same path a caller who says nothing does.
+    """
     return await service.link_contact(
         user_id=user_id,
         task_id=task_id,
         contact_id=contact_id,
         transaction=transaction,
+        source=source,
+        changed_by=changed_by,
     )
 
 
@@ -154,6 +165,8 @@ async def unlink(
     user_id: str = USER_ID,
     task_id: int = TASK_ID,
     contact_id: int = CONTACT_ID,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
 ) -> bool:
     """Call ``unlink_contact`` with the ordinary arguments, overriding as needed."""
     return await service.unlink_contact(
@@ -161,6 +174,8 @@ async def unlink(
         task_id=task_id,
         contact_id=contact_id,
         transaction=transaction,
+        source=source,
+        changed_by=changed_by,
     )
 
 
@@ -455,3 +470,313 @@ class TestAVanishedContact:
         # The recovery read ran and found the contact still there, which is what
         # makes re-raising the honest answer rather than a guess at an id.
         assert mock_contact_repo.find_names_by_ids.await_count == 2
+
+
+@pytest.mark.unit
+class TestAContactChangeIsAnnounced:
+    """What a link and an unlink publish, and in what shape.
+
+    **A ``TaskUpdated``, not a type of their own.** Contact membership is a field
+    of the task — the specification calls the link *"a plain reference"* carrying
+    no relationship type, role or attendance status — so it travels in
+    ``changed_fields`` beside text and status rather than as an aggregate-level
+    event. The phase's criterion is worded as though there would be two new
+    classes; the divergence is recorded in the iteration document and in the
+    events module, and it is the same one the text/status phase made.
+
+    ``field_history`` still gets a distinct row per person, because
+    ``HistoryService._rows_from_changed_fields`` fans the dict out one row per
+    key — which is the whole of what dedicated types would have bought.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_link_publishes_one_event_naming_that_contact(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await link(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskUpdated"
+        assert event.aggregate_id == TASK_ID
+        assert event.event_data["changed_fields"] == {
+            contact_field_name(CONTACT_ID): (None, CONTACT_ID)
+        }
+
+    @pytest.mark.asyncio
+    async def test_an_unlink_publishes_the_pair_the_other_way_round(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The direction is carried by position, and nothing else carries it.
+
+        ``_rows_from_changed_fields`` reads ``change[0]`` as the old value and
+        ``change[1]`` as the new one and never looks at the key. A pair built the
+        wrong way round would render somebody being added to a task as their
+        removal from it, in the user's own history, with nothing downstream able
+        to tell.
+        """
+        await unlink(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_type == "TaskUpdated"
+        assert event.event_data["changed_fields"] == {
+            contact_field_name(CONTACT_ID): (CONTACT_ID, None)
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_payload_names_the_task_and_its_owner(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """``user_id`` travels for the reason it does on every task event.
+
+        A task-scoped history read has to answer "is this yours?" for a task that
+        may since have been hard-deleted, and the event is where that answer has
+        to come from.
+        """
+        await link(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["task_id"] == TASK_ID
+        assert event.event_data["user_id"] == USER_ID
+
+    @pytest.mark.asyncio
+    async def test_no_contact_name_is_read_to_decorate_the_event(
+        self,
+        service: TaskService,
+        mock_contact_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The unlink path performs no contact read at all, event included.
+
+        Linking proves the contact exists and so reads it anyway; unlinking
+        deliberately does not, and an event wanting a display name would undo
+        that — failing on exactly the contact somebody had just deleted, which is
+        the case ``unlink_contact`` exists to keep working.
+        """
+        await unlink(service, mock_transaction)
+
+        assert mock_contact_repo.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_the_event_carries_the_callers_transaction(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Protocol conformance, and only that.
+
+        ``OutboxEventPublisher`` inserts on the connection *it* holds and never
+        reads this field. What actually makes the link row and the outbox row
+        commit together is DI handing both the same request connection, and that
+        is asserted where it can be observed — against a real database in
+        ``test_task_events_integration.py``.
+        """
+        await link(service, mock_transaction)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.transaction is mock_transaction
+
+
+@pytest.mark.unit
+class TestAContactChangeThatDidNotHappenIsSilent:
+    """No row moved, so there was no write, so there is nothing to announce."""
+
+    @pytest.mark.asyncio
+    async def test_linking_a_contact_already_linked_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The idempotent repeat, which must not write a second history line.
+
+        ``add_contacts`` is ``ON CONFLICT DO NOTHING`` and reports the ids it
+        actually created, so the repeat returns an empty list. Publishing anyway
+        would tell the user they added the same person twice.
+        """
+        mock_task_repo.add_contacts.return_value = []
+
+        assert await link(service, mock_transaction) is False
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_unlinking_a_contact_that_was_not_linked_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.remove_contact.return_value = False
+
+        assert await unlink(service, mock_transaction) is False
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_a_link_refused_for_an_unknown_contact_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_contact_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_contact_repo.find_names_by_ids.return_value = {}
+
+        with pytest.raises(ContactNotFoundError):
+            await link(service, mock_transaction, contact_id=404)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_a_link_to_an_unreachable_task_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.add_contacts.side_effect = TaskNotFoundError(TASK_ID)
+
+        with pytest.raises(TaskNotFoundError):
+            await link(service, mock_transaction, user_id=OTHER_USER_ID)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_an_unlink_from_an_unreachable_task_publishes_nothing(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.remove_contact.side_effect = TaskNotFoundError(TASK_ID)
+
+        with pytest.raises(TaskNotFoundError):
+            await unlink(service, mock_transaction, user_id=OTHER_USER_ID)
+
+        assert published_events(mock_event_publisher) == []
+
+    @pytest.mark.asyncio
+    async def test_publishing_follows_the_write_rather_than_preceding_it(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Shown by breaking the write, which is a claim a comment cannot make.
+
+        If the publish came first, the event would already have been handed over
+        by the time the failure surfaced — and the event announces a change that
+        finished, not one that was attempted.
+        """
+        mock_task_repo.add_contacts.side_effect = RuntimeError("link write failed")
+
+        with pytest.raises(RuntimeError):
+            await link(service, mock_transaction)
+
+        assert published_events(mock_event_publisher) == []
+
+
+@pytest.mark.unit
+class TestContactChangeProvenance:
+    """Who linked, and from where, travels with the change.
+
+    Both surfaces reaching these methods passed **nothing** before this phase, so
+    every contact change a person made would have been filed under "system" in
+    their own history. The default below is what makes that a silent success
+    rather than a crash, which is why it is asserted per origin here and again
+    per surface in the integration tests.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_link_defaults_to_system_when_the_caller_says_nothing(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Defaults to ``SYSTEM``, never to a surface.
+
+        A caller that forgets to say where it is calling from must not be
+        mistaken for a person acting in the browser.
+        """
+        await service.link_contact(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            contact_id=CONTACT_ID,
+            transaction=mock_transaction,
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_an_unlink_defaults_to_system_when_the_caller_says_nothing(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await service.unlink_contact(
+            user_id=USER_ID,
+            task_id=TASK_ID,
+            contact_id=CONTACT_ID,
+            transaction=mock_transaction,
+        )
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "changed_by"),
+        [(Provenance.UI, "ui"), (Provenance.MCP, "mcp")],
+    )
+    async def test_a_link_records_the_origin_the_caller_named(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        await link(service, mock_transaction, source=source, changed_by=changed_by)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == source.value
+        assert event.event_data["changed_by"] == changed_by
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "changed_by"),
+        [(Provenance.UI, "ui"), (Provenance.MCP, "mcp")],
+    )
+    async def test_an_unlink_records_the_origin_the_caller_named(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        await unlink(service, mock_transaction, source=source, changed_by=changed_by)
+
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["source"] == source.value
+        assert event.event_data["changed_by"] == changed_by

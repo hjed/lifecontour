@@ -42,11 +42,13 @@ from app.core.tasks.models.events import (
     TaskUpdated,
 )
 from tests.unit.tasks.task_doubles import (
+    CONTACT_ID,
     CREATING_JOURNAL_ID,
     DUE_JOURNAL_ID,
     INTERMEDIATE_JOURNAL_ID,
     NEW_DUE_JOURNAL_ID,
     ORIGINAL_TEXT,
+    OTHER_CONTACT_ID,
     TASK_ID,
     UPDATED_TEXT,
     USER_ID,
@@ -56,6 +58,13 @@ TEXT_CHANGE: dict[str, Any] = {"text": (ORIGINAL_TEXT, UPDATED_TEXT)}
 STATUS_CHANGE: dict[str, Any] = {
     "status": (TaskStatus.NOT_DONE.value, TaskStatus.DONE.value)
 }
+# Contact membership travels as a ``changed_fields`` key like any other field of
+# the task, keyed *per contact* so two people never share a history row. A link
+# is ``(None, id)`` and an unlink ``(id, None)`` — the shape
+# ``JournalTagAssigned`` already projects, where the absent side is the state the
+# link did not have.
+CONTACT_LINKED: dict[str, Any] = {f"contact:{CONTACT_ID}": (None, CONTACT_ID)}
+CONTACT_UNLINKED: dict[str, Any] = {f"contact:{CONTACT_ID}": (CONTACT_ID, None)}
 
 
 def make_created(
@@ -63,9 +72,16 @@ def make_created(
     source: Provenance = Provenance.SYSTEM,
     changed_by: str = "system",
     status: TaskStatus = TaskStatus.NOT_DONE,
+    contact_ids: list[int] | None = None,
     transaction: AsyncMock | None = None,
 ) -> TaskCreated:
-    """A ``TaskCreated`` over the shared task constants."""
+    """A ``TaskCreated`` over the shared task constants.
+
+    ``contact_ids`` defaults to *none linked*, which is the ordinary create. The
+    argument is defaulted **here** rather than on the event, which requires it
+    for the reason ``TaskJournalLinked.origin`` does: a create that named people
+    and forgot to pass them would silently report a task with nobody on it.
+    """
     return TaskCreated(
         task_id=TASK_ID,
         user_id=USER_ID,
@@ -73,6 +89,7 @@ def make_created(
         status=status,
         creating_journal_id=CREATING_JOURNAL_ID,
         due_journal_id=DUE_JOURNAL_ID,
+        contact_ids=[] if contact_ids is None else contact_ids,
         source=source,
         changed_by=changed_by,
         transaction=transaction,
@@ -206,9 +223,14 @@ class TestTaskCreated:
     def test_payload_carries_exactly_the_documented_keys(self) -> None:
         """A whole-key comparison, so a new key is a deliberate change.
 
-        Later phases add event *types* rather than fields to this one; if one of
-        them does need a field here, this test is where that decision is made
-        visible instead of arriving unnoticed in the projection.
+        ``contact_ids`` is the one key this test has ever gained, and it was
+        gained deliberately. Phase 1 left it out and pinned the absence so that
+        *"whether a create with contacts publishes one event or two"* would be
+        decided where it belonged; this phase decides it — **one event, and it
+        names them** — because contact membership is a field of the task rather
+        than an aggregate of its own, and a create silent about it would leave a
+        later unlink writing an "unlinked Sarah" line into a history with no
+        matching "linked" line before it.
         """
         event = make_created()
 
@@ -219,6 +241,7 @@ class TestTaskCreated:
             "status": TaskStatus.NOT_DONE.value,
             "creating_journal_id": CREATING_JOURNAL_ID,
             "due_journal_id": DUE_JOURNAL_ID,
+            "contact_ids": [],
             "source": Provenance.SYSTEM.value,
             "changed_by": "system",
         }
@@ -229,6 +252,51 @@ class TestTaskCreated:
 
         assert event.event_data["status"] == "not_done"
 
+    def test_carries_the_contacts_the_create_actually_linked(self) -> None:
+        event = make_created(contact_ids=[CONTACT_ID, OTHER_CONTACT_ID])
+
+        assert event.event_data["contact_ids"] == [CONTACT_ID, OTHER_CONTACT_ID]
+
+    def test_a_create_naming_nobody_carries_an_empty_list(self) -> None:
+        """An empty list rather than a missing key or ``None``.
+
+        The projection reads this by name, and three ways of saying "nobody"
+        would be three branches there. A create with no contacts is by far the
+        common case, so the shape it produces is the one worth pinning.
+        """
+        assert make_created().event_data["contact_ids"] == []
+
+    def test_the_contact_order_is_the_order_they_were_linked(self) -> None:
+        """Not sorted here.
+
+        ``TaskService._resolve_contacts`` de-duplicates while preserving the
+        caller's order and ``_link_contacts`` returns the ids a row was written
+        for, so the list already means something by the time it arrives.
+        Re-ordering it would discard that for no gain.
+        """
+        event = make_created(contact_ids=[OTHER_CONTACT_ID, CONTACT_ID])
+
+        assert event.event_data["contact_ids"] == [OTHER_CONTACT_ID, CONTACT_ID]
+
+    def test_the_contacts_must_be_stated_rather_than_defaulted(self) -> None:
+        """No default, for the reason ``TaskJournalLinked.origin`` has none.
+
+        Every other optional argument on these events defaults to the safest
+        reading. There is none here: ``[]`` is right for the common create and a
+        **lie** for the one that named people, and the failure would be silent —
+        a task with three people on it whose own creation event says nobody was
+        involved. Requiring it makes the one production caller say so.
+        """
+        with pytest.raises(TypeError):
+            TaskCreated(  # type: ignore[call-arg]
+                task_id=TASK_ID,
+                user_id=USER_ID,
+                text=ORIGINAL_TEXT,
+                status=TaskStatus.NOT_DONE,
+                creating_journal_id=CREATING_JOURNAL_ID,
+                due_journal_id=DUE_JOURNAL_ID,
+            )
+
     def test_defaults_to_system_provenance(self) -> None:
         event = TaskCreated(
             task_id=TASK_ID,
@@ -237,6 +305,7 @@ class TestTaskCreated:
             status=TaskStatus.NOT_DONE,
             creating_journal_id=CREATING_JOURNAL_ID,
             due_journal_id=DUE_JOURNAL_ID,
+            contact_ids=[],
         )
 
         assert event.event_data["source"] == Provenance.SYSTEM.value
@@ -413,6 +482,127 @@ class TestTaskUpdated:
         event = make_updated(transaction=transaction)
 
         assert event.transaction is transaction
+
+
+class TestTaskUpdatedCarriesContactMembership:
+    """Linking and unlinking a contact are changes to a field of the task.
+
+    **No event type of their own**, which is a divergence from this phase's
+    criterion wording — *"event classes for contact linked and unlinked"* — and
+    the same one Phase 2 made from *"event classes for text updated and status
+    changed"*. The specification calls a task-contact link *"a plain reference"*
+    with no relationship type, role or attendance status, and it has exactly one
+    cause: somebody asking for it. There is nothing a dedicated type would carry
+    that a ``changed_fields`` entry does not, and
+    ``_rows_from_changed_fields`` already fans the dict out into one
+    ``field_history`` row per key — so a reader still gets a line per person.
+
+    **Not what Phase 4 did for journal links**, deliberately. Those *do* have
+    their own types, because a journal link has structure to carry: an ``origin``
+    (two writes cause it) and a place in the ordered pair a retarget publishes. A
+    contact link has neither.
+    """
+
+    def test_a_link_is_a_none_to_id_pair_under_the_contacts_own_key(self) -> None:
+        event = make_updated(changed_fields=CONTACT_LINKED)
+
+        assert event.event_data["changed_fields"] == {
+            f"contact:{CONTACT_ID}": (None, CONTACT_ID)
+        }
+
+    def test_an_unlink_is_the_same_pair_the_other_way_round(self) -> None:
+        event = make_updated(changed_fields=CONTACT_UNLINKED)
+
+        assert event.event_data["changed_fields"] == {
+            f"contact:{CONTACT_ID}": (CONTACT_ID, None)
+        }
+
+    def test_the_direction_is_positional_like_every_other_pair(self) -> None:
+        """The link and the unlink differ only by which side is ``None``.
+
+        ``_rows_from_changed_fields`` reads ``change[0]`` as the old value and
+        ``change[1]`` as the new one and never looks at the key, so the two
+        directions are told apart by position alone. A pair built the wrong way
+        round would render a link as a removal in the user's own history, and
+        nothing downstream could notice.
+        """
+        linked = make_updated(changed_fields=CONTACT_LINKED)
+        unlinked = make_updated(changed_fields=CONTACT_UNLINKED)
+
+        assert linked.event_data["changed_fields"][f"contact:{CONTACT_ID}"][0] is None
+        assert (
+            linked.event_data["changed_fields"][f"contact:{CONTACT_ID}"][1]
+            == CONTACT_ID
+        )
+        assert (
+            unlinked.event_data["changed_fields"][f"contact:{CONTACT_ID}"][0]
+            == CONTACT_ID
+        )
+        assert unlinked.event_data["changed_fields"][f"contact:{CONTACT_ID}"][1] is None
+
+    def test_two_contacts_produce_two_keys_rather_than_one(self) -> None:
+        """Why the key names the contact instead of being a shared ``contacts``.
+
+        Phase 6 writes history rows ``ON CONFLICT (event_id, entity_type,
+        entity_id, field_name) DO NOTHING``. Two people under one field name
+        would collide on all four columns, and the second would be dropped as a
+        redelivery of the first — one of them silently missing from the user's
+        history. Keying by contact id costs nothing and removes the question,
+        following the collection prefixes ``journal_write_service`` already uses
+        (``plan:doc``, ``abseil:pitch``).
+        """
+        event = make_updated(
+            changed_fields={
+                f"contact:{CONTACT_ID}": (None, CONTACT_ID),
+                f"contact:{OTHER_CONTACT_ID}": (None, OTHER_CONTACT_ID),
+            }
+        )
+
+        assert set(event.event_data["changed_fields"]) == {
+            f"contact:{CONTACT_ID}",
+            f"contact:{OTHER_CONTACT_ID}",
+        }
+
+    def test_a_contact_change_sits_beside_a_text_change_without_merging(self) -> None:
+        """One type now carries three kinds of change, and they stay separable.
+
+        Nothing publishes a text change and a contact change together today —
+        they are different write paths — but the projection Phase 6 builds reads
+        one dict either way, and it has to produce a distinct row per key rather
+        than one row per event.
+        """
+        event = make_updated(changed_fields={**TEXT_CHANGE, **CONTACT_LINKED})
+
+        assert set(event.event_data["changed_fields"]) == {
+            "text",
+            f"contact:{CONTACT_ID}",
+        }
+
+    def test_the_payload_says_nothing_about_a_role_or_a_relationship(self) -> None:
+        """The specification's *"plain reference"*, asserted rather than assumed.
+
+        *"Task-contact links do not carry a relationship type, a role, or an
+        attendance status."* The whole-key comparisons elsewhere in this class
+        would fail on such a key; this states the rule directly so the next
+        person to consider adding one meets the sentence rather than a diff.
+        """
+        event = make_updated(changed_fields=CONTACT_LINKED)
+
+        assert set(event.event_data) == {
+            "task_id",
+            "user_id",
+            "changed_fields",
+            "source",
+            "changed_by",
+        }
+
+    def test_records_the_provenance_of_whoever_linked(self) -> None:
+        event = make_updated(
+            changed_fields=CONTACT_LINKED, source=Provenance.MCP, changed_by="mcp"
+        )
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
 
 
 class TestTaskDueJournalRetargeted:
@@ -1054,6 +1244,49 @@ class TestPayloadSurvivesTheStream:
         assert len(change) == 2
         assert change[0] == TaskStatus.NOT_DONE.value
         assert change[1] == TaskStatus.DONE.value
+
+    def test_a_contact_pair_reaches_the_projection_as_an_indexable_two_list(
+        self,
+    ) -> None:
+        """The same guard the status pair has to satisfy, for the same reason.
+
+        ``_rows_from_changed_fields`` applies ``len(change) == 2`` and then
+        indexes; a payload shaped any other way does not raise there, it projects
+        **no rows at all** — a contact silently missing from a task's history
+        rather than a failure anybody would see. The ``None`` half is the part
+        worth checking survives: JSON writes it as ``null`` and reads it back as
+        ``None``, which is what makes the "there was nobody here before"
+        direction legible downstream.
+        """
+        event = make_updated(changed_fields=CONTACT_LINKED)
+
+        change = json.loads(json.dumps(event.event_data))["changed_fields"][
+            f"contact:{CONTACT_ID}"
+        ]
+
+        assert isinstance(change, list)
+        assert len(change) == 2
+        assert change[0] is None
+        assert change[1] == CONTACT_ID
+
+    def test_an_unlink_pair_arrives_with_the_none_on_the_new_side(self) -> None:
+        event = make_updated(changed_fields=CONTACT_UNLINKED)
+
+        change = json.loads(json.dumps(event.event_data))["changed_fields"][
+            f"contact:{CONTACT_ID}"
+        ]
+
+        assert change[0] == CONTACT_ID
+        assert change[1] is None
+
+    def test_created_contacts_arrive_as_a_list_of_plain_integers(self) -> None:
+        """What Phase 6 will read off a create to know who was on the task."""
+        event = make_created(contact_ids=[CONTACT_ID, OTHER_CONTACT_ID])
+
+        arrived = json.loads(json.dumps(event.event_data))["contact_ids"]
+
+        assert arrived == [CONTACT_ID, OTHER_CONTACT_ID]
+        assert all(type(contact_id) is int for contact_id in arrived)
 
     def test_a_retarget_reaches_the_stream_with_both_pairs_intact(self) -> None:
         """The reopen case, in the form the projection will actually receive.
