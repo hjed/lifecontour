@@ -33,7 +33,10 @@ _CREDS = ("https://immich.example.com", "test-api-key")
 
 
 async def _create_album_journal(
-    connection: AsyncConnection, *, thumbnail_asset_id: str | None
+    connection: AsyncConnection,
+    *,
+    thumbnail_asset_id: str | None,
+    user_id: str = USER_ID,
 ) -> int:
     """Seed a PHOTO_ALBUM journal via the processor and return its id."""
     service = JournalService(
@@ -59,7 +62,7 @@ async def _create_album_journal(
             "version_hash": "v1",
             "sync_action": "created",
             "journal_data": {
-                "user_id": USER_ID,
+                "user_id": user_id,
                 "title": "Trip",
                 "content": "",
                 "event_date_range_start": "2026-01-15T00:00:00+00:00",
@@ -148,3 +151,46 @@ async def test_album_cover_404_when_album_has_no_cover_asset(
         )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_album_cover_of_another_users_album_is_never_fetched(
+    authenticated_client,
+    clean_database: AsyncConnection,
+) -> None:
+    """Another user's album cover is refused before Immich is ever asked.
+
+    This route is the one journal-by-id surface where a missing ownership check
+    could not be caught by watching the database: it writes nothing. The album
+    lookup used to take the journal id alone, and the *thumbnail* was then
+    fetched with the **caller's** credentials — so on an Immich server two users
+    share, one could stream the other's album cover by id (#1267).
+
+    The credentials and the fetch are both stubbed so that an unscoped lookup
+    would visibly succeed; the assertion that ``_fetch_thumbnail`` was never
+    awaited is what proves the refusal happened at the album lookup rather than
+    incidentally, at a missing key or an unreachable server.
+    """
+    their_journal_id = await _create_album_journal(
+        clean_database, thumbnail_asset_id="their-asset-uuid", user_id="other-user-456"
+    )
+
+    with (
+        patch(
+            "app.infrastructure.auth.immich_token_service.ImmichTokenService.get_credentials",
+            new_callable=AsyncMock,
+            return_value=_CREDS,
+        ),
+        patch(
+            "app.core.integrations.immich.album_cover_proxy_service.AlbumCoverProxyService._fetch_thumbnail",
+            new_callable=AsyncMock,
+            return_value=(b"\xff\xd8\xff\xe0their-photo", "image/jpeg"),
+        ) as fetch_thumbnail,
+    ):
+        response = await authenticated_client.get(
+            f"/api/journals/{their_journal_id}/album-cover"
+        )
+
+    assert response.status_code == 404
+    assert b"their-photo" not in response.content
+    fetch_thumbnail.assert_not_awaited()

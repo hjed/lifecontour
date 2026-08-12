@@ -47,17 +47,19 @@ class AlbumCoverProxyService:
 
         Args:
             journal_id: Internal journal ID.
-            user_id: Internal user ID (for credential lookup).
+            user_id: The acting user. Scopes the album lookup *and* selects the
+                credentials — the two must be the same user, or the proxy would
+                fetch somebody else's album with this caller's key.
 
         Returns:
             Tuple of (raw image bytes, content-type string).
 
         Raises:
             AlbumCoverNotFoundError: If the journal has no linked album, the
-                album has no cover asset, the user has no Immich credentials, or
-                the thumbnail fetch fails.
+                journal is not this user's, the album has no cover asset, the
+                user has no Immich credentials, or the thumbnail fetch fails.
         """
-        cover = await self._album_repo.find_cover_asset(journal_id)
+        cover = await self._album_repo.find_cover_asset(journal_id, user_id)
         if cover is None:
             raise AlbumCoverNotFoundError(
                 f"Journal {journal_id} is not linked to an Immich album"

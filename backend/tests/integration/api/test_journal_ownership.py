@@ -244,6 +244,12 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     ),
     CrossUserRequest("GET", "/api/journals/{journal_id}/history"),
     CrossUserRequest("GET", "/api/journals/{journal_id}/external-links"),
+    # This one cannot carry its own weight here, and saying so is the point: the
+    # seeded journal has no Immich album, so the 404 would arrive even with no
+    # ownership check at all. The refusal is proved in test_album_cover_route.py
+    # (`test_album_cover_of_another_users_album_is_never_fetched`), which seeds a
+    # real album and stubs the credentials so an unscoped lookup would visibly
+    # succeed. The entry stays because the endpoint must still answer 404.
     CrossUserRequest("GET", "/api/journals/{journal_id}/album-cover"),
     CrossUserRequest(
         "POST", "/api/journals/incomplete-outdoor-activities/{journal_id}/dismiss"

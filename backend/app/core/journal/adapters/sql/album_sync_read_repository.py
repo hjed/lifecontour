@@ -221,23 +221,37 @@ class AlbumSyncReadRepository:
             )
         return links
 
-    async def find_cover_asset(self, journal_id: int) -> tuple[str, str | None] | None:
+    async def find_cover_asset(
+        self, journal_id: int, user_id: str
+    ) -> tuple[str, str | None] | None:
         """Return ``(album_id, thumbnail_asset_id)`` for a PHOTO_ALBUM journal.
 
         Used by the album-cover proxy. Returns ``None`` when the journal is not
         an Immich album; ``thumbnail_asset_id`` is ``None`` when the album has no
         cover photo recorded.
+
+        **Scoped to the journal's owner.** ``sync_metadata`` carries no owner of
+        its own, so the join onto ``journals`` is what supplies one. Without it
+        the proxy resolved *any* journal's album and then fetched the thumbnail
+        with the **caller's** Immich credentials — so on a server both users
+        share, one could stream another's album cover by id (#1267).
         """
         result = await self.conn.execute(
             text("""
                 SELECT sm.external_id AS album_id,
                        sm.reference_data AS reference_data
                 FROM sync_metadata sm
+                JOIN journals j ON j.id = sm.internal_id
                 WHERE sm.integration_source = :source
                   AND sm.internal_id = :journal_id
+                  AND j.user_id = :user_id
                 LIMIT 1
             """),
-            {"source": INTEGRATION_SOURCE, "journal_id": journal_id},
+            {
+                "source": INTEGRATION_SOURCE,
+                "journal_id": journal_id,
+                "user_id": user_id,
+            },
         )
         row = result.fetchone()
         if row is None:
