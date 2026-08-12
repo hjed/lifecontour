@@ -1,7 +1,7 @@
 """History projection consumer for Redis Streams.
 
-Projects journal domain events from the ``pms:domain-events`` stream into
-``field_history`` rows via :class:`HistoryService`. Runs as the
+Projects journal, contact and task domain events from the ``pms:domain-events``
+stream into ``field_history`` rows via :class:`HistoryService`. Runs as the
 ``history-projection`` consumer group.
 
 This is the event-driven replacement for a synchronous dual-write: a journal
@@ -66,15 +66,28 @@ _CONTACT_HISTORY_EVENT_TYPES: list[str] = [
     "ContactSummaryUpdated",
 ]
 
+# Task-domain event types the projection maps (ITER18-003 Phase 6) — the
+# lifecycle set only. ``TaskDueJournalRetargeted``, ``TaskJournalLinked`` and
+# ``TaskJournalUnlinked`` are published today and deliberately absent until
+# Phase 7 adds their handlers: an unsubscribed type is filtered out here, while a
+# subscribed one with no handler would be consumed, acknowledged and dropped with
+# nothing in the logs. The two halves move together.
+_TASK_HISTORY_EVENT_TYPES: list[str] = [
+    "TaskCreated",
+    "TaskUpdated",
+    "TaskDeleted",
+]
+
 
 class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
-    """Stream consumer that projects journal and contact events into field history.
+    """Stream consumer projecting journal, contact and task events into history.
 
-    Listens to journal/route/gear and contact domain events on the
+    Listens to journal/route/gear, contact and task domain events on the
     ``pms:domain-events`` stream using the ``history-projection`` consumer group
     and delegates the event-to-rows mapping to :class:`HistoryService`. Since
     ITER12-003 Phase 2 it is the sole writer of contact history (the synchronous
-    dual-write was removed).
+    dual-write was removed), and since ITER18-003 Phase 6 it is the only writer
+    of task history, which has never had a dual-write.
     """
 
     def __init__(
@@ -100,7 +113,9 @@ class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
             group_name="history-projection",
             consumer_name=consumer_name,
             event_type_patterns=(
-                _JOURNAL_HISTORY_EVENT_TYPES + _CONTACT_HISTORY_EVENT_TYPES
+                _JOURNAL_HISTORY_EVENT_TYPES
+                + _CONTACT_HISTORY_EVENT_TYPES
+                + _TASK_HISTORY_EVENT_TYPES
             ),
             batch_size=batch_size,
             block_ms=block_ms,

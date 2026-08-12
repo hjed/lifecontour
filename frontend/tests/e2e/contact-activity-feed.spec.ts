@@ -270,10 +270,48 @@ test.describe('Contact Activity Feed', () => {
       page.getByText('New summary text that is very long')
     ).toBeHidden();
 
-    // Expand
-    const expandButton = page.getByRole('button', { name: /expand/i });
-    await expandButton.scrollIntoViewIfNeeded();
-    await expandButton.click({ force: true });
+    // Expand.
+    //
+    // The locator matches the half of the label that does not change: the
+    // button is "Expand summary text" collapsed and "Collapse summary text"
+    // expanded, so naming either state gives a locator that stops matching the
+    // moment it is used. Scoped to the row so it cannot drift onto another.
+    const disclosure = page
+      .getByTestId('activity-item-1000')
+      .getByRole('button', { name: /summary text$/i });
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+
+    // Why a retry loop around a *forced* click, rather than the usual advice of
+    // dropping `force`:
+    //
+    // Playwright's own log shows this element reported "visible, enabled and
+    // stable" and scrolled into view, and the hit test *still* landed on the
+    // card header or on the row above — the page shifts between "done
+    // scrolling" and the hit test. So an unforced click never becomes
+    // actionable here: removing `force` fails Mobile Chrome 8 runs out of 9,
+    // where this row sits ~1000px below the fold. `force` is load-bearing and
+    // is kept.
+    //
+    // What `force` costs is the guarantee that the click *landed*: it is
+    // dispatched at coordinates computed a moment earlier, so when the layout
+    // moves in that window the event goes to whatever now occupies the point
+    // and the toggle silently does not happen. That is the flake — CI failed 15
+    // seconds later on the summary text, blaming the wrong thing, and passed on
+    // retry.
+    //
+    // So: click only while the disclosure is still collapsed, and retry until
+    // it is open. The guard is what makes this safe to retry — an unguarded
+    // retry of a *toggle* would close it again on the next pass. Inner timeouts
+    // are short so the outer budget allows several attempts.
+    await expect(async () => {
+      if ((await disclosure.getAttribute('aria-expanded')) === 'false') {
+        await disclosure.scrollIntoViewIfNeeded();
+        await disclosure.click({ force: true });
+      }
+      await expect(disclosure).toHaveAttribute('aria-expanded', 'true', {
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 20000 });
 
     // Text becomes visible
     await expect(

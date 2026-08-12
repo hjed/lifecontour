@@ -1,6 +1,6 @@
 """SQL implementation of the entity-agnostic FieldHistoryRepository."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core_shared.models.history import Provenance
 from sqlalchemy import text
@@ -26,7 +26,7 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
 
     @staticmethod
     def _coerce_created_at(created_at: str | datetime | None) -> datetime | None:
-        """Normalise an entry's created_at to a datetime for binding.
+        """Normalise an entry's created_at to a UTC-aware datetime for binding.
 
         ``record_change`` writes back the persisted ``created_at`` as an ISO
         string, so a re-recorded (reused) instance arrives here as a string;
@@ -37,12 +37,26 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         A malformed string falls back to ``None`` (DB default ``now()``) rather
         than raising, so a single bad timestamp can never fail the projection and
         dead-letter the event.
+
+        **A naive value is read as UTC rather than passed through.**
+        ``created_at`` is a ``timestamptz``, so PostgreSQL resolves a naive bind
+        against the *session's* timezone and silently moves the change by the
+        server's UTC offset — a history line landing on the wrong day, or hours
+        out of order against rows written by a session configured differently.
+        The projection is handed naive timestamps in the ordinary case:
+        ``outbox_events.occurred_at`` is a ``timestamp`` *without* time zone, so
+        the offset is gone before the relay ever serialises the row. Everything
+        here stamps ``datetime.now(tz=UTC)``, so a naive one is UTC, and saying
+        so is the difference between recording that fact and re-deriving it from
+        whatever the database happens to be set to.
         """
         if isinstance(created_at, str):
             try:
-                return datetime.fromisoformat(created_at)
+                created_at = datetime.fromisoformat(created_at)
             except ValueError:
                 return None
+        if created_at is not None and created_at.tzinfo is None:
+            return created_at.replace(tzinfo=UTC)
         return created_at
 
     @staticmethod

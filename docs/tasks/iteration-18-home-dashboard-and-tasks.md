@@ -29,7 +29,8 @@ not-done tasks due in it with the cancellation reason, while touching none of th
 being refused). Delivery rule 9 is satisfied for all three shipped journal operations; **the rest of
 ITER18-001 is next**, per the Sequencing Strategy. ITER18-002's remaining phases are 5 (the
 delete-failure UI and its e2e) and 6 (the retarget/merge lock order).
-**ITER18-003 Phases 1–5 complete, and the specification's full event set is now published** (task
+**ITER18-003 Phases 1–6 complete: the specification's full event set is published, and the
+lifecycle half of it is now read.** The events (task
 created and deleted; text updated and status changed as one `TaskUpdated`; the due-journal retarget,
 carrying any reopen; journal linked/unlinked, which took the automatic link out of the retarget's
 payload and gave it its own event — so a retarget now publishes **two** events, the link it retains
@@ -38,8 +39,12 @@ and then the anchor move; and contact linked/unlinked, which Phase 5 delivered a
 reference and membership is a field of the task).
 Every task event is published inside its write's unit of work and
 carries provenance from the caller, and Phase 5 pinned the **completeness rule** with a test anchored
-to the repository ports rather than to `TaskService`'s method list. Nothing is user-visible yet — the
-projection lands in Phases 6–7 and the first surface that reads it in Phase 9. Phase 3's review added
+to the repository ports rather than to `TaskService`'s method list. **Phase 6 projects the three
+lifecycle types into `field_history` under a `task` entity type** — a create marker carrying the
+text, one row per changed field, one per person, and a delete marker that outlives the hard-deleted
+row — leaving the retarget and journal-link types to Phase 7, where they are asserted absent rather
+than assumed. Nothing is user-visible yet — the read surface is Phase 8 and the first screen that
+shows it is Phase 9. Phase 3's review added
 **Phase 10**: a journal merge re-points task anchors and publishes no task event, which is now the
 completeness test's one **named exclusion** and asserted positively rather than merely absent.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
@@ -3871,23 +3876,189 @@ The full Jest suite rather than the new file alone, because `lib/constants.ts` i
 trusting the pass that preceded them. No backend gates and no e2e — no Python file and no rendered
 surface changed.
 
-#### Phase 16: Frontend — Journal Task Display
+#### Phase 16: Frontend — Journal Task Display ✅ COMPLETE
 
 **Prerequisites:** Phase 15.
-**Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Actual:** ~347 production →
+**~1,030 tracked** (across 9 files: 347 production, 579 tests, ~104 docs — the docs figure counting
+this entry).
 
-**Acceptance Criteria:**
+**The estimate missed production by ~2.5×, and the multiplier came in at 3.0× rather than 4×** — the
+same shape Phase 15 recorded, and for the same reason: a frontend phase has one layer to test, not
+the service/REST/MCP three a backend phase multiplies over. What the 140 missed is that "a section
+component" is **three** production files, not one. The row is a component in its own right (Phases
+17–19 all hang off it), and the lapse wording had to leave the component entirely to be assertable
+without rendering — see decision 2.
 
-- [ ] A `JournalTasksSection` component renders the three groups — due, created, mentioned — on the journal
-      detail view, showing each task's text, status and linked contacts.
-- [ ] Rows reuse the dashboard row idiom (**W22**, **W23**, **W27**) so the two surfaces read alike.
-- [ ] Lapsed tasks are clearly marked and the marker **states which reason applies**, in wording distinct
-      between date-passed and due-journal-cancelled (the data comes from Phase 12).
-- [ ] A journal with no tasks renders nothing rather than an empty container; an empty group is omitted.
-- [ ] Read-only in this phase: no action buttons yet, which breaks nothing that previously worked.
+**Acceptance criteria, ticked:**
+
+- [x] A `JournalTasksSection` component renders the three groups — due, created, mentioned — on the journal
+      detail view, showing each task's text, status and linked contacts. —
+      `frontend/src/components/journals/JournalTasksSection.tsx`, mounted in `JournalDetailView`
+      between the main card and the children list. The grouping is read from **`meta.groups`**, whose
+      values are ordered id lists, not re-derived from `link_roles`: a task holding two roles in the
+      journal comes back **once** in `data` (JSON:API forbids the same resource twice) and is named
+      in each of its groups, so it is rendered under both headings. Pinned by a test, as is the fact
+      that the rows follow `meta.groups`' order rather than `data`'s.
+- [x] Rows reuse the dashboard row idiom (**W22**, **W23**, **W27**) so the two surfaces read alike. —
+      `JournalTaskRow.tsx`: bordered rounded row with a left accent bar and hover shadow (W22), the
+      task text as a prominent non-link `font-medium` line (W23), and each linked contact as an
+      avatar beside their name in muted text with zero contacts rendering nothing at all (W27). One
+      recorded divergence and one deliberate addition — decisions 4 and 5.
+- [x] Lapsed tasks are clearly marked and the marker **states which reason applies**, in wording distinct
+      between date-passed and due-journal-cancelled (the data comes from Phase 12). —
+      `Lapsed · date passed` and `Lapsed · journal cancelled`, from `lib/task-display.ts`. The
+      distinctness is asserted directly (`not.toBe`) at both levels rather than each wording being
+      checked in isolation, because two tests that each assert "contains *lapsed*" would both pass
+      after the two were collapsed into one string. Confirmed by mutation check.
+- [x] A journal with no tasks renders nothing rather than an empty container; an empty group is omitted. —
+      Both, plus the loading pass, which renders nothing for the same reason (decision 1). Each is a
+      separate test; the empty-group filter is one of the four mutation checks.
+- [x] Read-only in this phase: no action buttons yet, which breaks nothing that previously worked. —
+      Asserted rather than assumed: a test renders the busiest row the phase can produce (lapsed,
+      with contacts) and requires `queryAllByRole('button')` and `queryAllByRole('checkbox')` to be
+      empty, so Phase 17 adds actions to a row that is provably inert today. Nothing previously
+      working changed: the existing `JournalDetailView` suite (32 tests) passes untouched, and the
+      three heaviest journal e2e specs were re-run on both projects as a regression pass.
+
+**Decisions taken (Phase 16):**
+
+1. **Loading renders nothing; a *failure* does not.** The two look like the same "no data yet" case
+   and are not. Most journals hold no tasks, so a loading skeleton would flash on nearly every
+   journal detail view for a section about to render nothing — hence nothing while loading. But
+   hiding the section when the listing *fails* is indistinguishable from "this journal has no
+   tasks", so a journal whose lapsed tasks failed to load would read as clean, which is precisely
+   the outcome the lapsed design exists to prevent. A failure therefore renders one quiet line.
+   Both branches are tested, and the silent-failure version is one of the four mutation checks.
+2. **The lapse wording lives in `lib/task-display.ts`, not in the row.** Phase 12 deliberately
+   shipped `LapseReason` as structured data "so surfaces can word it differently", which makes the
+   wording a product rule rather than a presentation detail — the specification's cancellation
+   section requires the journal to make the cancellation cause *obvious*. A pure function is what
+   lets a test assert the two stay distinguishable without rendering a component, and it is where
+   Phase 17's action labels and the dashboard's own wording will go.
+3. **A status badge on every row**, including `Not done`. The dashboard's rows (W22–W27) carry no
+   status badge because everything on the dashboard is not-done; a journal shows all three statuses
+   side by side, so the badge is doing work here that it would not do there. Done and cancelled rows
+   are additionally muted and struck through — shown, not hidden, and never as if still live, which
+   is the stance W18 takes on cancelled journals.
+4. **The W22 accent bar is keyed to status and lapse, not to the due journal's colour.** W22 keys it
+   to the due journal's type/calendar colour (via W17), and `TaskJournalRef` carries only `id`,
+   `title`, `date` and `cancelled`. Widening the read model for a colour is a backend change this
+   phase does not own, so the bar is keyed to what the row actually knows — whether the commitment
+   is still live. Recorded here rather than left as an unexplained difference from the wireframe.
+5. **A "due in ⟨journal⟩" line (W26) on rows whose due journal is not the journal being viewed.**
+   Not named among this phase's criteria, and added deliberately: on a *created* or *mentioned* row a
+   lapse marker without the journal that lapsed is a statement the user cannot act on. Suppressed on
+   the due group, where it would only read "due in this journal".
+6. **Contacts are avatar + muted name, not links.** W27 specifies muted text; the linked contact
+   name is W31's upcoming-dates idiom, a different row. Left as W27 draws it rather than quietly
+   upgraded, since the criterion names W27 as the thing to match.
 
 **Required Test Coverage:** unit (RTL) — the three groups, both lapsed reasons, the no-tasks case, contact
 rendering, and accessible grouping labels. E2E deferred to Phase 22.
+
+**Delivered:** **48** unit tests across four suites — the three below plus the nine cache-freshness
+tests the two review rounds produced
+(`frontend/src/lib/api/__tests__/task-cache-freshness.test.ts`).
+`frontend/src/lib/__tests__/task-display.test.ts`
+(9), `components/journals/__tests__/JournalTaskRow.test.tsx` (19) and
+`components/journals/__tests__/JournalTasksSection.test.tsx` (11) — following the
+`JournalContactBadge.test.tsx` idiom, with the task fixtures (`createMockJournalTask`,
+`createMockTaskJournalRef`) added to the existing `components/journals/test-helpers.tsx` rather than
+duplicated per file. Beyond the required list: the `meta.groups`-ordering assertion (whose fixture
+deliberately orders `data` differently, so a pass-through implementation cannot satisfy it
+vacuously), a task holding two roles appearing under both headings, an unresolvable id being skipped
+rather than throwing, the loading and failure branches, and the read-only guarantee.
+
+**Accessible grouping** is asserted through the accessibility tree rather than through test ids:
+each group is a `<section aria-labelledby>` queried as `getByRole('region', { name })` with its list
+and items queried inside it, and the heading levels are pinned (`h3` for the card, `h4` per group)
+so a later restyle cannot flatten the structure while keeping the tests green.
+
+**Mutation checks.** Four deliberate breakages, each reverted after confirming it was caught:
+reading the grouping from `data`'s order instead of `meta.groups` failed 2 tests; dropping the
+empty-group filter failed 2; collapsing the two lapse wordings into one failed 5 across both suites;
+and returning `null` on a failed listing failed 1. These are the assertions the acceptance criteria
+rest on, so a green suite that could not fail on them would be worth less than it looks.
+
+**Integration:** none, and not a deferral of convenience — the phase adds no Python. The endpoint the
+section calls carries its own integration coverage from Phase 13 and the lapse derivation from Phase
+12. **E2E:** none *new*; Phase 22 owns ITER18-001's e2e along with the `TestDataManager` task helpers
+and the lapsed-fixture recipe, and building those here would fork that work. What this phase did run
+is a **regression** pass over the journal detail surface, since mounting a new section can disturb
+layout, scroll and click targets in specs that already pass.
+
+**Acted on from the PR review, before the gates were re-run.** Two findings, both the same defect
+seen from two sides, and both real: **mounting this query exposed a cross-entity staleness that
+nothing could observe before.** A task's read shapes *embed* the entities they reference rather than
+pointing at them — `due_journal.title`, `due_journal.date`, `due_journal.cancelled`, the derived
+`lapsed`/`lapse_reason`, and each contact's `display_name` and `photo_url` all arrive inside the task
+payload — while `useUpdateJournal`, `useUpdateJournalField`, `useUpdateContact`,
+`useUpdateContactField` and `useDeleteContact` named only their own key sets, leaving the task caches
+fresh for the app-wide five-minute `staleTime`.
+
+The journal half is the serious one, and worse than "until an unrelated refresh": **moving a
+journal's date into the past, or cancelling it, is exactly what lapses the tasks due in it** — and
+the journal's own detail view is the surface displaying those tasks. Edit the date and the section
+below would go on showing `Not done` with no lapse marker, for five minutes, on the same screen.
+That is the phase's headline criterion silently wrong.
+
+**A second review round found the hole the first fix left**, and it was a fair catch: the fix covered
+the mutations that change a task's embedded *values* and missed the ones that change a listing's
+*membership*. `useMergeJournal` re-points the absorbed journal's task links at the survivor and
+`useMergeContact` deletes the source contact outright — so a cached listing would omit the tasks that
+moved, or go on showing a contact that no longer exists. Reviewing the same class rather than only
+the two hooks named turned up a third: `useDeleteJournal`, since deleting a journal that is only an
+*intermediate* link is permitted and removes that link from every task holding it. All three added,
+with a test each.
+
+Fixed by naming `taskKeys.all` in those eight mutations, with **nine** tests in
+`frontend/src/lib/api/__tests__/task-cache-freshness.test.ts`. `all` rather than `journalLists()`
+because all three sibling namespaces carry the same embedded refs, so that is the reachable set
+exactly — asserted by a test that fails if the invalidation is narrowed to either sibling. This is
+the *"a mutation names only the namespaces its change can reach"* rule pointing the other way: it
+constrains a task mutation from over-invalidating, and equally obliges a journal or contact mutation
+to name the task namespace. `frontend-design.md` records it.
+
+**A red run that was red for the wrong reason.** The six tests failed first time because
+`jest.setup.ts` mocks `@/lib/constants` down to the handful of endpoints the auth tests need, leaving
+`API_ENDPOINTS.JOURNALS` undefined and every mutation throwing before it reached `fetch` — so the
+failure proved nothing about the invalidation. Caught by reading the failure rather than accepting
+it, and the suite now uses `jest.requireActual`. The real proof is a mutation check: removing
+`taskKeys.all` from `useUpdateJournal` fails 2 of the 6.
+
+**One e2e failure, investigated rather than waved through.** The regression pass came back 78 passed
+/ 1 failed: `journal-history.spec.ts` *"records tag assignment and removal"* on Mobile Chrome, where
+a tag badge never appeared in `JournalTagsEditor`. Four pieces of evidence say it is a pre-existing
+flake and not this phase's doing — it passed on firefox in the same run; the element is in the
+metadata block, not the new section; the journals those specs build hold no tasks, so
+`JournalTasksSection` renders **nothing** on them; and re-running the spec on Mobile Chrome with
+`--repeat-each 3` passed every time. Recorded here rather than left in a log, since the next person
+to see it should not have to redo this. Mobile Chrome runs with `retries: 0` and surfaces flakes the
+other project masks. A second full pass over the same three specs, against the committed code, came
+back **79 passed / 0 failed**.
+
+**Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
+clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in
+`tests/e2e/`). The **full** Jest suite rather than the new files alone, because `JournalDetailView`
+is imported widely and the review fixes reach the journal and contact clients: **170** suites and
+**1,858** tests, all passing (1,810 before this phase). No backend gates: no Python file changed.
+
+**A final e2e pass after the review fixes: 129 passed, 0 failed** on both projects, widened from the
+original three specs to `journals-merge`, `contacts`, `contacts-merge` and `contact-inline-editing`
+as well — every surface the new invalidations touch. Widened because the fixes mean a journal or
+contact write now refetches a task listing wherever one is mounted, which is a behaviour change on
+pages this phase otherwise never altered. An earlier attempt at this run was **discarded rather than
+reported**: it overlapped the edits it was meant to be testing, and the dev server hot-reloads
+mid-run, so its green count would have been evidence of nothing.
+
+**Docs:** `frontend-design.md` gained *The Journal Task Surface* — the `meta.groups` grouping rule
+and why it is a contract rather than a convenience, the render-nothing-vs-quiet-failure distinction,
+that every status including lapsed is shown, where the lapse wording lives and why, the W22 accent
+divergence, and the group accessibility structure. Its *Task Query Keys* table also had a stale
+claim corrected: it said the upcoming-window endpoint "does not exist", which stopped being true
+when Phase 14 landed — the hook is still absent, but for a different reason. `api-design.md` is
+unchanged: no backend file was touched.
 
 #### Phase 17: Frontend — Inline Status Actions
 
@@ -5771,20 +5942,38 @@ list rather than only in a test file.
   publish?" one operation at a time and is 2,000 lines; this one asks "is anything unaccounted for?"
   across all of them, and the inventory is its subject. Burying it is how it would stop being read.
 
-#### Phase 6: History Projection — Lifecycle Events
+#### Phase 6: History Projection — Lifecycle Events ✅ COMPLETE
 
 **Prerequisites:** Phases 1–2.
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4), plus the amendment below — **~150
+production → ~750 tracked**.
+
+**Actual:** **168 production insertions (154 net) → ~1,025 test lines** (342 in
+`test_history_service.py`, 68 in the consumer's unit test, 21 in the repository's, 5 in the
+completeness inventory, and two new files of 462 and 106). **Production landed on the revised
+estimate; tests overran it by ~37%.** The production figure is the useful result: three handlers
+came to ~100 lines of which the behaviour is about fifteen, and the rest is why — which is Phase 5's
+calibration addition holding for a second phase running (*a phase whose deliverable is a convention
+budgets its line count from the number of places that convention has to be explained*). The test
+overrun has two named causes rather than an estimating error: the end-to-end file bought a
+**seventh** test the criteria did not ask for — a retarget being filtered out rather than
+dead-lettered, which is the only positive statement anywhere that Phase 7's gap is a decision — and
+two unrelated defects each arrived with tests of their own (see *Decisions taken*). Subtracting both,
+the phase came in at ~800.
 
 **Acceptance Criteria:**
 
-- [ ] `HistoryService._HANDLERS` gains handlers for created, deleted, text updated and status changed,
+- [x] `HistoryService._HANDLERS` gains handlers for created, deleted, text updated and status changed,
       mapping each to `field_history` rows under a task entity type, with marker field names consistent
       with the journal and contact conventions. **That is three handlers, not four:** Phase 2 shipped
       text and status as one `TaskUpdated` carrying `changed_fields`, so both are covered by a single
       handler over the existing `_rows_from_changed_fields`, which already produces one row per changed
       field. See *Decisions taken (Phase 2)*.
-- [ ] **Both of those handlers inherited work from Phase 5, which this criterion predates.** That
+      **Delivered as three handlers on a `"task"` entity type**, keyed on the task id, with the
+      **journal** marker convention (`__created__` carrying the text, `__deleted__` carrying
+      nothing) rather than the contact one — see *Decisions taken* for why the two conventions
+      exist and which a task belongs to.
+- [x] **Both of those handlers inherited work from Phase 5, which this criterion predates.** That
       phase made contact membership a *field* of the task rather than an event type, so:
       **(a)** the `TaskUpdated` handler now also receives `contact:{id}` keys, and
       `_rows_from_changed_fields` projects them with no change — an id in `old_value`/`new_value` and
@@ -5797,17 +5986,91 @@ list rather than only in a test file.
       removal with no matching addition. That is the exact asymmetry Phase 5's payload decision
       existed to prevent, and it is this phase that has to finish it.
       **Add ~1 handler-branch of production and ~150 test lines to this phase's estimate for the two.**
-- [ ] `HistoryProjectionConsumer` subscribes to the task event patterns; writes stay idempotent
+      **Both delivered**, and the estimate was right about their shape: (a) cost no production at
+      all, and (b) cost the loop and its explanation. The create fans `contact_ids` out through the
+      **same `contact_field_name()` the service builds with**, imported rather than re-spelt, so the
+      format cannot drift between the two halves that have to agree about it.
+- [x] `HistoryProjectionConsumer` subscribes to the task event patterns; writes stay idempotent
       (`ON CONFLICT DO NOTHING` on `(event_id, entity_type, entity_id, field_name)`), so stream redelivery
-      is safe.
-- [ ] Row `created_at` comes from `event.occurred_at`, not projection time.
-- [ ] If ITER18-001 Phase 1 chose a UUID primary key, this phase also migrates `field_history.entity_id`
+      is safe. — three types, not six: the retarget and journal-link types are **deliberately
+      unsubscribed** until Phase 7, asserted in both directions (no subscribed type without a
+      handler, no deferred type with one) and end to end. Idempotency is asserted by replaying the
+      **whole stream** through the consumer, which is what a restart or an `XAUTOCLAIM` does.
+- [x] Row `created_at` comes from `event.occurred_at`, not projection time. — **and it did not,
+      before this phase.** Asserting it found a live defect in the shared projection; see *Decisions
+      taken*.
+- [x] If ITER18-001 Phase 1 chose a UUID primary key, this phase also migrates `field_history.entity_id`
       off `Integer` — a shared table — and its estimate rises accordingly. With the integer default, no
-      migration is needed.
-- [ ] The consumer table in `docs/architecture/integration-architecture.md` is updated.
+      migration is needed. — **`tasks.id` is `sa.Integer` (migration `0105`), so no migration.**
+- [x] The consumer table in `docs/architecture/integration-architecture.md` is updated.
 
 **Required Test Coverage:** unit — projected rows per event type and that an unknown type projects to none.
 Integration — publish → relay → projection per type, asserting idempotency on redelivery. No e2e.
+
+**Delivered: 19 unit tests and 7 integration tests.** 17 unit tests in
+`tests/unit/history/test_history_service.py` across `TestTaskCreated`, `TestTaskUpdated`,
+`TestTaskDeleted` and `TestTaskEventsThisPhaseDoesNotProject`, 2 in
+`test_field_history_repository.py`, and 4 rewritten or added in the consumer's unit test. The
+integration file is new: `tests/integration/infrastructure/events/test_task_history_projection_e2e.py`,
+mirroring the journal one over a real `TaskService`.
+
+**No e2e**, and as in Phases 4 and 5 the absence is checked rather than assumed: no UI reaches
+these endpoints and none renders task history. Phase 9 builds the surface.
+
+**Documentation.** `docs/architecture/integration-architecture.md` — the consumer table row names
+tasks and records which three types are subscribed and why the other three are not.
+`docs/architecture/domain-architecture.md` — the paragraph that used to say *"no consumer group
+subscribes to a task event"* now describes where task events land in history, and keeps the
+statement for the consumers where it is still true (permanently, for the search indexer).
+
+**Decisions taken (Phase 6):**
+
+- **The journal marker convention, not the contact one.** Journals write `__created__`/`__deleted__`
+  and contacts write `field_name="status"` with `"created"`/`"deleted"` as the value — two
+  conventions in one table, and this phase had to pick. A task follows the journal: both are
+  top-level aggregates keyed by their own integer id, while the contact shape exists because contact
+  history spreads across a family of sub-entity rows (`contact_method`, `contact_note`, …) that need
+  a *per-row* status. A task has no sub-entities. `__created__` carries the task's **text** as the
+  journal's carries its title, so the first line of a task's history says what the task was.
+- **The create marker does not itemise the payload — contacts are the one exception, and the reason
+  is asymmetry rather than importance.** `TaskCreated` also carries the status and both anchors, and
+  none of them is projected. A later status move and a later retarget each publish a self-describing
+  `(old, new)` pair, so neither needs an opening value to read correctly; a contact **unlink**
+  publishes `(id, None)`, which reads as a removal with nothing before it unless the create named the
+  person. That is the whole test for whether a field belongs in a create marker, and it is worth
+  stating because "the payload has it, so project it" would have produced three more rows per task
+  and one of them (the due journal) would then disagree with the retarget rows above it.
+- **Asserting `created_at` found a real defect, which is why the criterion is worth having.**
+  `outbox_events.occurred_at` is a `timestamp` **without** time zone, so the offset is already gone
+  when the relay serialises the row; the projection then bound that naive value into
+  `field_history.created_at`, a `timestamptz`, and PostgreSQL resolved it against the *database
+  session's* timezone — **ten hours** on the workspace this was written in. Every history row this
+  system has written since ITER12 carries that shift wherever the session is not UTC, journals and
+  contacts included, and nothing caught it because every existing assertion compares a row against
+  another value that travelled the same path. The fix is one branch in
+  `SqlFieldHistoryRepository._coerce_created_at` — a naive value is read as UTC, which is what every
+  producer in this system stamps — rather than a migration of the outbox column, because the
+  ambiguity only matters at the one place a naive value meets a `timestamptz`. *The lesson is about
+  the assertion, not the bug:* a test comparing a projected timestamp to the source it was derived
+  from is only meaningful if one of the two is anchored in UTC, which is the same trap as comparing
+  wall clocks.
+- **A pre-existing red test on the base branch, fixed here.** ITER18-001 Phase 14 added
+  `TaskRepository.find_upcoming_tasks` on a branch parallel to the one that added Phase 5's port
+  inventory, so the merge into `main` left it neither listed as a read nor covered by a write path
+  and `test_every_port_method_is_a_read_or_a_classified_write` failing. It is classified as a read.
+  This is the guard doing exactly what Phase 5 built it for — *a new port method fails the suite
+  until somebody says which kind it is* — and the failure mode worth recording is that the two
+  branches were individually green.
+- **The relay/project/replay helpers moved to a shared `projection_harness.py`** rather than being
+  copied into the new file. Both end-to-end tests drive the same three-step chain, and a second copy
+  is a second place for "how the projection is exercised" to drift from the consumer it is
+  exercising. The journal file lost ~120 lines and gained an import; one of its tests had inlined
+  the engine patch a fourth time and now uses the helper too.
+- **Mutation-checked, four ways.** Reversing the create's contact direction fails 2 tests;
+  collapsing `contact:{id}` to a shared `"contacts"` field fails 3 — including the one that exists
+  to say *why* the key names the contact, since the two rows collide on all four dedup columns;
+  dropping the event-time stamp fails 7 across three domains; and unsubscribing the task types fails
+  9, which is the "both halves move together" claim tested rather than asserted.
 
 #### Phase 7: History Projection — Retarget and Link Events, and Search Isolation
 
@@ -5825,6 +6088,14 @@ Integration — publish → relay → projection per type, asserting idempotency
       covers it over the existing `_rows_from_changed_fields`. What this phase still owes the contact
       case is a **test**, not a handler — that a link and an unlink project one `field_history` row
       each, under distinct field names, in the right direction. See *Decisions taken (Phase 5)*.
+      **Amended by Phase 6, which delivered that too:** the contact case is tested at both levels
+      there (`TestTaskUpdated` for the mapping, `test_a_link_and_an_unlink_project_the_pair_opposite_ways_round`
+      end to end), so this phase owes it nothing at all. What Phase 6 leaves behind for this one is
+      **three assertions that must be deleted or inverted rather than merely satisfied**:
+      `TestTaskEventsThisPhaseDoesNotProject`, `test_the_retarget_and_link_events_are_not_subscribed_yet`
+      and `test_no_handler_exists_for_an_unsubscribed_task_type` all state the gap positively, and
+      `test_a_retarget_is_filtered_out_rather_than_dead_lettered` asserts it end to end. They are
+      written to fail the moment a handler and its subscription arrive, which is the point.
 - [ ] The **search indexer ignores task events**: no tasks index, no task document, no task event
       dead-lettering in the `search-indexer` group, and global search never returns a task. This holds by
       construction because the consumer only sees subscribed patterns — this phase **pins it with a test**
@@ -5841,7 +6112,12 @@ No e2e.
 #### Phase 8: Task History Read Surface — REST and MCP
 
 **Prerequisites:** Phase 7.
-**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple
+**Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple.
+**Revised by Phase 6's review (delivery rule 3): ~230 production → ~800 tracked.** The read surface
+itself is unchanged; what is added is the ownership carrier and the one backfill that populates it and
+re-projects the historic events at the same time — a migration on a shared table, a query over
+`outbox_events`, and a test that runs against a consumer group which has *already* acknowledged the
+events it is being asked to project.
 
 **Acceptance Criteria:**
 
@@ -5850,6 +6126,26 @@ No e2e.
 - [ ] **The delete case is the decision's discriminator:** tasks are hard-deleted, so a task-scoped read
       must resolve history by id **without requiring the task row to exist**, with ownership carried on the
       history rows — otherwise the `TaskDeleted` projection is written to a surface that can never read it.
+      **Two consequences of Phase 6, raised in its review and recorded here because this is the phase that
+      has to act on them:**
+      **(a) `field_history` has no ownership column**, so the rows Phase 6 writes carry none. Every other
+      history read authorises by loading the aggregate and comparing `user_id` (see
+      `get_journal_history`), which is exactly what a hard-deleted task has nothing to load. Whatever
+      carries ownership — a column on `field_history`, or a task-scoped mapping table — has to be
+      **backfilled**, and it cannot be backfilled from `tasks`: the deleted ones are not there. It must
+      come from **`outbox_events`**, which retains every event forever (the relay only stamps
+      `relayed_at`; nothing prunes the table) and whose `TaskDeleted` payload carries `user_id` for
+      precisely this reason. That is why Phase 6 could leave it alone: the information is not lost, it is
+      merely not on the row yet.
+      **(b) Historic task events were skip-acknowledged, not replayed.** A deployed `history-projection`
+      group has been consuming task events since Phase 1 and acknowledging them as non-matching, so
+      widening its patterns only projects events published *after* the deploy — tasks that already exist
+      get no lifecycle history, and Phase 6's tests cannot catch this because a fresh stream and a fresh
+      group have nothing already acknowledged. The fix is the same mechanism as (a): re-project the
+      retained `Task%` rows from `outbox_events` through `HistoryService`, which is idempotent on
+      `(event_id, entity_type, entity_id, field_name)` and therefore safe to run repeatedly and safe to
+      overlap with live projection. **Do both in one backfill**, and assert it against a group that has
+      already acknowledged the events rather than against a fresh one.
 - [ ] `GET /api/tasks/{id}/history` (paginated, most recent first) using the shared
       `History{Attributes,Resource,ListResponse}` schemas, scoped to the authenticated user so history
       cannot leak across users (the ITER12-002 lesson).

@@ -270,14 +270,30 @@ the *creating* journal where it arose and the *due* journal where it matters.
   exclusion**: `TaskAnchorRepository.repoint_journal_links`, which a journal merge uses to re-point
   a task's anchors and links while publishing nothing task-scoped. That gap is asserted positively
   rather than left implicit, and closing it is its own phase.
-  The history projection that consumes these events arrives in a later phase of
-  [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md). Until then **no consumer group
-  subscribes to a task event**: `SearchIndexerConsumer` and `HistoryProjectionConsumer` match event
-  types exactly and list none, `InboundEventConsumer`'s patterns are all prefixes of other domains,
-  and `SummaryConsumer` is contact-scoped. `StreamConsumer` acknowledges an unmatched event
-  immediately, so a task event is discarded rather than left pending, and nothing dead-letters. For
-  search this is permanent — the specification's *Tasks and search* requires that tasks never be
-  indexed and that the indexer ignore their events rather than fail on them.
+  **The history projection reads the lifecycle events.** `HistoryProjectionConsumer` subscribes to
+  `TaskCreated`, `TaskUpdated` and `TaskDeleted`, and `HistoryService` maps each to `field_history`
+  rows under `entity_type='task'`, keyed on the **task id** — an integer, so task history shares the
+  table's `entity_id` column with no migration, unlike routes and gear whose UUID ids are why those
+  are filed under their journal. A create writes a `__created__` marker carrying the task's text and
+  a delete writes a `__deleted__` marker, the journal convention rather than the contact one, because
+  a task is a top-level aggregate rather than a family of sub-entity rows. A `TaskUpdated` needs no
+  special handling at all: the shared `changed_fields` fan-out gives one row per field, which is a
+  reword, a status move and a person each reading as their own line.
+  **The create also fans out `contact_ids` itself**, one marker row per person under the same
+  `contact:{id}` key a later link publishes. That list is not an `(old, new)` pair, so the generic
+  helper cannot do it — and without it a task created with somebody would show none of them while a
+  later unlink showed a removal with no matching addition. Row `created_at` comes from
+  `event.occurred_at`, so history records when the change happened rather than when the consumer got
+  to it, and writes are idempotent on `(event_id, entity_type, entity_id, field_name)`, so stream
+  redelivery is safe.
+  **The retarget and journal-link events are published but not yet projected**, which is why the
+  subscription lists three types rather than six; the remaining handlers are their own phase of
+  [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md). `StreamConsumer` acknowledges an
+  unmatched event immediately, so those are discarded rather than left pending, and nothing
+  dead-letters. **No other consumer group subscribes to a task event**: `InboundEventConsumer`'s
+  patterns are all prefixes of other domains, and `SummaryConsumer` is contact-scoped. For
+  `SearchIndexerConsumer` this is permanent — the specification's *Tasks and search* requires that
+  tasks never be indexed and that the indexer ignore their events rather than fail on them.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch

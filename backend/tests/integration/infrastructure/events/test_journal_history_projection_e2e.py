@@ -12,9 +12,8 @@ the right old/new values and provenance. This is the closest backend equivalent
 to a user-facing E2E for ITER12-002 Phase 1 (which has no UI surface yet).
 """
 
-from contextlib import asynccontextmanager
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -57,13 +56,17 @@ from app.infrastructure.events.history_projection_consumer import (
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.outbox_relay import OutboxRelay
+from tests.integration.infrastructure.events.projection_harness import (
+    GROUP_NAME,
+    patched_projection_engine,
+    relay_and_project,
+    replay_stream_through_projection,
+)
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
     initialize_mcp_session,
     mcp_headers,
 )
-
-GROUP_NAME = "history-projection"
 
 
 def _make_journal(title: str = "Original title") -> Journal:
@@ -76,83 +79,6 @@ def _make_journal(title: str = "Original title") -> Journal:
             start=datetime(2024, 1, 1), end=datetime(2024, 1, 1)
         ),
     )
-
-
-def _patched_projection_engine(async_connection: AsyncConnection):
-    """Patch the projection consumer's engine to yield the test connection.
-
-    Keeps the consumer's writes on the test ``async_connection`` so they share the
-    test savepoint and roll back at teardown.
-    """
-    mock_engine = MagicMock()
-
-    @asynccontextmanager
-    async def mock_begin():
-        yield async_connection
-
-    mock_engine.begin = mock_begin
-
-    return patch(
-        "app.infrastructure.events.history_projection_consumer.get_async_database_engine",
-        return_value=mock_engine,
-    )
-
-
-async def _relay_and_project(
-    stream_client: StreamClient,
-    stream_name: str,
-    async_connection: AsyncConnection,
-    consumer_name: str,
-) -> None:
-    """Relay outbox events to the stream and run the projection consumer once."""
-    relay = OutboxRelay(
-        stream_client=stream_client, stream_name=stream_name, batch_size=50
-    )
-    await relay.relay_batch(async_connection)
-
-    consumer = HistoryProjectionConsumer(
-        stream_client=stream_client,
-        stream_name=stream_name,
-        consumer_name=consumer_name,
-        block_ms=100,
-    )
-    await stream_client.ensure_consumer_group(stream_name, GROUP_NAME)
-
-    with _patched_projection_engine(async_connection):
-        await consumer._process_batch()
-
-
-async def _replay_stream_through_projection(
-    stream_client: StreamClient,
-    stream_name: str,
-    async_connection: AsyncConnection,
-    redis_client: Redis,
-) -> None:
-    """Re-project every entry already on the stream, as a redelivery would.
-
-    Redis Streams are at-least-once: a consumer restart, or a pending message
-    reclaimed by ``XAUTOCLAIM``, hands the projection an event it has already
-    processed. Replaying the raw entries through ``_handle_event`` leaves the
-    ``event_id`` dedup index as the only thing preventing duplicate rows.
-    """
-    consumer = HistoryProjectionConsumer(
-        stream_client=stream_client,
-        stream_name=stream_name,
-        consumer_name="test-replay",
-        block_ms=100,
-    )
-
-    # redis-py types xrange's entries as optionally-None pairs; a stream that has
-    # been relayed to always yields real ones, so skip anything else rather than
-    # silently replaying a half-empty message.
-    entries = await redis_client.xrange(stream_name) or []
-    with _patched_projection_engine(async_connection):
-        for message_id, fields in entries:
-            if message_id is None or fields is None:
-                continue
-            await consumer._handle_event(
-                stream_client._parse_message(message_id, dict(fields))
-            )
 
 
 def _mock_write_service(
@@ -258,18 +184,7 @@ class TestJournalHistoryProjectionE2E:
         )
         await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
 
-        mock_engine = MagicMock()
-
-        @asynccontextmanager
-        async def mock_begin():
-            yield async_connection
-
-        mock_engine.begin = mock_begin
-
-        with patch(
-            "app.infrastructure.events.history_projection_consumer.get_async_database_engine",
-            return_value=mock_engine,
-        ):
+        with patched_projection_engine(async_connection):
             await consumer._process_batch()
 
         # 4. History is retrievable via the journal aggregation strategy.
@@ -331,7 +246,7 @@ class TestJournalHistoryProjectionE2E:
             source=Provenance.UI,
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-typedata-e2e"
         )
 
@@ -391,7 +306,7 @@ class TestJournalHistoryProjectionE2E:
             source=Provenance.UI,
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-climbing-e2e"
         )
 
@@ -479,7 +394,7 @@ class TestJournalHistoryProjectionE2E:
             source=Provenance.UI,
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-plan-e2e"
         )
 
@@ -568,7 +483,7 @@ class TestJournalHistoryProjectionE2E:
             source=Provenance.UI,
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-abseil-e2e"
         )
 
@@ -628,7 +543,7 @@ class TestJournalHistoryProjectionE2E:
             source=Provenance.UI,
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-route-e2e"
         )
 
@@ -732,7 +647,7 @@ class TestJournalHistoryProjectionE2E:
             )
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-immich-e2e"
         )
 
@@ -818,7 +733,7 @@ class TestJournalTagHistoryProjectionE2E:
             changed_by="ui",
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-journal-tags-e2e"
         )
 
@@ -855,7 +770,7 @@ class TestJournalTagHistoryProjectionE2E:
         await tag_service.remove_tag(
             journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
         )
-        await _relay_and_project(
+        await relay_and_project(
             stream_client,
             test_stream_name,
             async_connection,
@@ -864,7 +779,7 @@ class TestJournalTagHistoryProjectionE2E:
         after_first = await self._tags_history(async_connection, journal_id)
         assert len(after_first) == 2
 
-        await _replay_stream_through_projection(
+        await replay_stream_through_projection(
             stream_client, test_stream_name, async_connection, redis_client
         )
 
@@ -915,7 +830,7 @@ class TestJournalTagHistoryProjectionE2E:
             changed_by="mcp",
             source=Provenance.MCP,
         )
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-mcp-tags-e2e"
         )
 
@@ -931,7 +846,7 @@ class TestJournalTagHistoryProjectionE2E:
             changed_by="mcp",
             source=Provenance.MCP,
         )
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-mcp-tags-e2e"
         )
 
@@ -981,7 +896,7 @@ class TestJournalTagHistoryProjectionE2E:
             changed_by="ui",
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-tag-rename-e2e"
         )
 
@@ -1023,7 +938,7 @@ class TestJournalTagHistoryProjectionE2E:
             source=Provenance.UI,
             changed_by="ui",
         )
-        await _relay_and_project(
+        await relay_and_project(
             stream_client,
             test_stream_name,
             async_connection,
@@ -1032,7 +947,7 @@ class TestJournalTagHistoryProjectionE2E:
         after_first = await self._tags_history(async_connection, journal_id)
         assert len(after_first) == 2
 
-        await _replay_stream_through_projection(
+        await replay_stream_through_projection(
             stream_client, test_stream_name, async_connection, redis_client
         )
 
@@ -1079,7 +994,7 @@ class TestJournalTagHistoryProjectionE2E:
             changed_by="ui",
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-tag-delete-e2e"
         )
 
@@ -1112,7 +1027,7 @@ class TestJournalTagHistoryProjectionE2E:
         await tag_service.delete_tag(
             tag.id, async_connection, source=Provenance.UI, changed_by="ui"
         )
-        await _relay_and_project(
+        await relay_and_project(
             stream_client,
             test_stream_name,
             async_connection,
@@ -1121,7 +1036,7 @@ class TestJournalTagHistoryProjectionE2E:
         after_first = await self._tags_history(async_connection, journal_id)
         assert len(after_first) == 2
 
-        await _replay_stream_through_projection(
+        await replay_stream_through_projection(
             stream_client, test_stream_name, async_connection, redis_client
         )
 
@@ -1175,7 +1090,7 @@ class TestJournalTagHistoryProjectionE2E:
             changed_by="ui",
         )
 
-        await _relay_and_project(
+        await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-tag-merge-e2e"
         )
 
@@ -1220,7 +1135,7 @@ class TestJournalTagHistoryProjectionE2E:
             source=Provenance.UI,
             changed_by="ui",
         )
-        await _relay_and_project(
+        await relay_and_project(
             stream_client,
             test_stream_name,
             async_connection,
@@ -1229,7 +1144,7 @@ class TestJournalTagHistoryProjectionE2E:
         after_first = await self._tags_history(async_connection, journal_id)
         assert len(after_first) == 2
 
-        await _replay_stream_through_projection(
+        await replay_stream_through_projection(
             stream_client, test_stream_name, async_connection, redis_client
         )
 
@@ -1307,7 +1222,7 @@ class TestMcpTypeDataHistoryProjectionE2E:
             assert "error" not in payload, payload
 
             # Relay the outbox JournalUpdated event and project it into history.
-            await _relay_and_project(
+            await relay_and_project(
                 stream_client, test_stream_name, async_connection, "test-mcp-typedata"
             )
 

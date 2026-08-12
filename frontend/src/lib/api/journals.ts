@@ -39,6 +39,7 @@ import {
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
+import { taskKeys } from './tasks';
 
 // Query Keys
 export const journalKeys = {
@@ -1316,7 +1317,13 @@ export function useUpdateJournal() {
         void invalidateAfterMutation(
           queryClient,
           { queryKey: journalKeys.detail(id) },
-          { queryKey: journalKeys.lists() }
+          { queryKey: journalKeys.lists() },
+          // A task's read shapes embed their journals — title, date, cancelled,
+          // and the lapse derived from them — so a journal write changes what a
+          // task query would answer. Moving a date into the past or cancelling
+          // the journal is what *lapses* its due tasks, and the journal detail
+          // view is showing those very tasks.
+          { queryKey: taskKeys.all }
         );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_UPDATED);
@@ -1334,9 +1341,13 @@ export function useDeleteJournal() {
     mutationFn: deleteJournal,
     onSuccess: () => {
       setTimeout(() => {
-        void invalidateAfterMutation(queryClient, {
-          queryKey: journalKeys.lists(),
-        });
+        void invalidateAfterMutation(
+          queryClient,
+          { queryKey: journalKeys.lists() },
+          // Deleting a journal that is only an *intermediate* link is
+          // permitted, and it removes that link from every task that held it.
+          { queryKey: taskKeys.all }
+        );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_DELETED);
     },
@@ -1367,7 +1378,10 @@ export function useMergeJournal() {
         { queryKey: journalKeys.detail(targetId) },
         { queryKey: journalKeys.detail(sourceId) },
         { queryKey: journalKeys.lists() },
-        { queryKey: reviewItemKeys.all }
+        { queryKey: reviewItemKeys.all },
+        // A merge re-points the absorbed journal's task links at the survivor,
+        // so a listing cached before it would omit the tasks that moved.
+        { queryKey: taskKeys.all }
       );
       toast.success('Journals merged successfully');
     },
@@ -1395,7 +1409,10 @@ export function useUpdateJournalField() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        // See useUpdateJournal: a task embeds its journals, so an inline field
+        // save — the date range above all — can change a task's lapse state.
+        { queryKey: taskKeys.all }
       );
     },
     onError: (error: Error) => {
