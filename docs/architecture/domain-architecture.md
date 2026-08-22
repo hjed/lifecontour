@@ -270,8 +270,8 @@ the *creating* journal where it arose and the *due* journal where it matters.
   exclusion**: `TaskAnchorRepository.repoint_journal_links`, which a journal merge uses to re-point
   a task's anchors and links while publishing nothing task-scoped. That gap is asserted positively
   rather than left implicit, and closing it is its own phase.
-  **The history projection reads the lifecycle events.** `HistoryProjectionConsumer` subscribes to
-  `TaskCreated`, `TaskUpdated` and `TaskDeleted`, and `HistoryService` maps each to `field_history`
+  **The history projection reads every task event.** `HistoryProjectionConsumer` subscribes to all
+  six types, and `HistoryService` maps each to `field_history`
   rows under `entity_type='task'`, keyed on the **task id** — an integer, so task history shares the
   table's `entity_id` column with no migration, unlike routes and gear whose UUID ids are why those
   are filed under their journal. A create writes a `__created__` marker carrying the task's text and
@@ -286,14 +286,32 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `event.occurred_at`, so history records when the change happened rather than when the consumer got
   to it, and writes are idempotent on `(event_id, entity_type, entity_id, field_name)`, so stream
   redelivery is safe.
-  **The retarget and journal-link events are published but not yet projected**, which is why the
-  subscription lists three types rather than six; the remaining handlers are their own phase of
-  [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md). `StreamConsumer` acknowledges an
-  unmatched event immediately, so those are discarded rather than left pending, and nothing
-  dead-letters. **No other consumer group subscribes to a task event**: `InboundEventConsumer`'s
+  **The retarget shares `TaskUpdated`'s handler rather than having one of its own.** Its payload is
+  the same `changed_fields` shape, chosen for exactly that reason: the pair projects as a
+  `due_journal_id` row naming both journals, plus a `status` row on the deferrals that reopened the
+  task. A second handler would be two places for "how a task field change becomes a row" to disagree.
+  **The two link events project a `journal:{id}` row**, `(None, id)` for a link and the reverse for
+  an unlink — the same shape `contact:{id}` keys and `JournalTagAssigned` produce, and the key names
+  the journal for the same dedup reason contact keys name the contact. `journal_field_name()` in the
+  events module owns that format. **`origin` is deliberately not projected**: `field_history` has no
+  column for it, so it could only live in the field name, and a link and the unlink that later
+  removes it must share a name to read as a pair — an unlink has no origin to spell. What history
+  carries instead is the *role*: `due_journal_id` is the anchor, `journal:{id}` is an intermediate
+  link.
+  **Nothing a task write announces goes unread.** The subscription list and `HistoryService._HANDLERS`
+  are asserted against each other in both directions and against the event classes in the events
+  module, so a type published without a handler — or a handler without a subscription — fails the
+  suite rather than silently losing a line from somebody's history. The one task write that publishes
+  nothing at all is the named merge exclusion above.
+  **No other consumer group subscribes to a task event**: `InboundEventConsumer`'s
   patterns are all prefixes of other domains, and `SummaryConsumer` is contact-scoped. For
-  `SearchIndexerConsumer` this is permanent — the specification's *Tasks and search* requires that
-  tasks never be indexed and that the indexer ignore their events rather than fail on them.
+  `SearchIndexerConsumer` this is **permanent** — the specification's *Tasks and search* requires that
+  tasks never be indexed and that the indexer ignore their events rather than fail on them, and it
+  holds twice over: no task type is in its pattern list, and `SearchIndexer.process_event` branches on
+  `Contact`/`Journal` and skips everything else. `StreamConsumer` acknowledges an unmatched event
+  immediately, so a task event is discarded rather than left pending, and nothing dead-letters. Both
+  halves are pinned by tests, because a guarantee that holds by construction is one a pattern-list
+  change can quietly remove.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch

@@ -6,13 +6,14 @@ list of :class:`FieldHistoryEntry` rows that should be written for it. It perfor
 no I/O, so it is trivially unit-testable; the :class:`HistoryProjectionConsumer`
 owns the repository and the idempotent writes.
 
-Tasks (ITER18-003 Phase 6): a task is a top-level aggregate keyed by its own
+Tasks: a task is a top-level aggregate keyed by its own
 integer id, so its rows go under ``("task", task_id)`` and use the *journal*
 marker convention (``__created__``/``__deleted__``) rather than the contact one
 (``field_name="status"``). The contact shape exists because contact history
-spreads across a family of sub-entity rows; a task has none. Only the three
-lifecycle types are mapped here — the retarget and journal-link types are
-Phase 7.
+spreads across a family of sub-entity rows; a task has none. Every type the
+domain publishes is mapped: the three lifecycle types, the due-anchor move, and
+the intermediate-journal pair. Nothing a task write announces is written to the
+stream and then never read.
 
 Contacts (ITER12-003 Phase 1): each contact handler reproduces the EXACT rows the
 synchronous dual-write (``ContactHistoryService.record_*``) writes today, keyed to
@@ -49,7 +50,7 @@ from typing import Any
 from core_shared.models.history import Provenance
 
 from app.core.history.models import FieldHistoryEntry
-from app.core.tasks.models.events import contact_field_name
+from app.core.tasks.models.events import contact_field_name, journal_field_name
 from app.infrastructure.events.outbox_repository import OutboxEvent
 
 _JOURNAL_ENTITY_TYPE = "journal"
@@ -591,7 +592,7 @@ class HistoryService:
             changed_fields=data.get("changed_fields"),
         )
 
-    # -- task handlers (ITER18-003 Phase 6) ----------------------------------
+    # -- task handlers ------------------------------------------------------
 
     def _project_task_created(
         self, event: OutboxEvent, data: dict[str, Any]
@@ -606,11 +607,10 @@ class HistoryService:
         neither needs an opening value to read correctly. A contact *unlink*
         does — it publishes ``(id, None)`` — so a create that named people has to
         announce them, or a task created with Sarah and later unlinked from her
-        shows a removal with no addition before it. That asymmetry is what
-        Phase 5's decision to carry ``contact_ids`` on this event exists to
-        prevent, and fanning the list out here is the half that finishes it:
-        ``contact_ids`` is a list rather than an ``(old, new)`` pair, so
-        ``_rows_from_changed_fields`` cannot do it.
+        shows a removal with no addition before it. That asymmetry is why the
+        event carries ``contact_ids`` at all, and fanning the list out here is
+        the half that finishes it: ``contact_ids`` is a list rather than an
+        ``(old, new)`` pair, so ``_rows_from_changed_fields`` cannot do it.
 
         The keys come from ``contact_field_name`` — the same function
         ``TaskService`` builds them with — because a format that lives in two
@@ -631,9 +631,9 @@ class HistoryService:
         ]
         # ``or []`` rather than a required key: the history-projection group
         # reads the stream from id 0, so it can be handed a TaskCreated from
-        # before Phase 5 added contact_ids. Raising would dead-letter the batch
-        # and stall history for every event queued behind it, to record a task
-        # that had no contacts anyway.
+        # before contact_ids joined the payload. Raising would dead-letter the
+        # batch and stall history for every event queued behind it, to record a
+        # task that had no contacts anyway.
         for contact_id in data.get("contact_ids") or []:
             rows.append(
                 self._row(
@@ -658,6 +658,17 @@ class HistoryService:
         and never looks at the key, so a ``contact:{id}`` key linking somebody
         (``(None, id)``) or unlinking them (``(id, None)``) projects like any
         other field — one row, naming the person, the right way round.
+
+        **``TaskDueJournalRetargeted`` is mapped here too**, which is why this
+        docstring is not only about updates. That event carries a
+        ``changed_fields`` payload *for this reason*: ``due_journal_id: (old,
+        new)`` and, only when the deferral reopened the task, ``status: (old,
+        "not_done")``, so the anchor move and the reopen each read as their own
+        line with no handler of its own. The retarget's retained intermediate
+        link is not in that payload either — it is a :class:`TaskJournalLinked`
+        of its own — so nothing is left for a second handler to do, and writing
+        one would be two places for "how a task field change becomes a row" to
+        disagree.
         """
         return self._rows_from_changed_fields(
             event,
@@ -666,6 +677,55 @@ class HistoryService:
             entity_id=data["task_id"],
             changed_fields=data.get("changed_fields"),
         )
+
+    def _project_task_journal_linked(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """A journal joined the task's intermediate links."""
+        return self._task_journal_link_rows(event, data, linked=True)
+
+    def _project_task_journal_unlinked(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """A journal left them."""
+        return self._task_journal_link_rows(event, data, linked=False)
+
+    def _task_journal_link_rows(
+        self, event: OutboxEvent, data: dict[str, Any], *, linked: bool
+    ) -> list[FieldHistoryEntry]:
+        """One row naming the journal, in the direction the event announces.
+
+        ``old=None, new=<journal>`` for a link and the reverse for an unlink —
+        the ``JournalTagAssigned``/``JournalTagRemoved`` shape that
+        :class:`TaskJournalLinked`'s own docstring names as its model, and the
+        one ``contact:{id}`` keys already produce for a task's people. Direction
+        is positional and nothing else on the row carries it, so an unlink
+        projected the wrong way round reads in the feed as the journal being
+        added with nothing to contradict it.
+
+        A payload naming no journal projects nothing rather than raising. The row
+        would read as "linked journal None", and a raising handler dead-letters
+        the whole batch and stalls history for every event queued behind it —
+        the same trade ``_journal_tag_rows`` makes.
+
+        **``origin`` is not projected**, and :func:`journal_field_name` records
+        why: the link and the unlink that removes it have to share a field name
+        to read as a pair, and an unlink has no origin to spell.
+        """
+        journal_id = data.get("journal_id")
+        if journal_id is None:
+            return []
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_TASK_ENTITY_TYPE,
+                entity_id=data["task_id"],
+                field_name=journal_field_name(journal_id),
+                old_value=None if linked else journal_id,
+                new_value=journal_id if linked else None,
+            )
+        ]
 
     def _project_task_deleted(
         self, event: OutboxEvent, data: dict[str, Any]
@@ -678,8 +738,7 @@ class HistoryService:
 
         Everything the row needs comes off the payload. Tasks are hard-deleted,
         so this row can never be joined back to a ``tasks`` row, which is why the
-        event carries ``user_id`` and why the task-scoped read Phase 8 adds can
-        still find it.
+        event carries ``user_id`` and why a task-scoped read can still find it.
         """
         return [
             self._row(
@@ -816,13 +875,19 @@ _HANDLERS = {
     "ContactRelationshipUpdated": HistoryService._project_contact_relationship_updated,
     "ContactRelationshipDeleted": HistoryService._project_contact_relationship_deleted,
     "ContactSummaryUpdated": HistoryService._project_contact_summary_updated,
-    # Task lifecycle events (ITER18-003 Phase 6). TaskDueJournalRetargeted,
-    # TaskJournalLinked and TaskJournalUnlinked are deliberately absent until
-    # Phase 7: the consumer subscribes to exactly the types listed here, so an
-    # entry added without the subscription writes history nobody reads, and a
+    # Task events. The consumer subscribes to exactly the types listed here, so
+    # an entry added without the subscription writes history nobody reads, and a
     # subscription added without an entry consumes an event and drops it
-    # silently. Both halves move together.
+    # silently. Both halves move together, asserted in both directions by
+    # test_history_projection_consumer.py.
+    #
+    # Every type the tasks domain publishes is mapped — and the retarget shares
+    # TaskUpdated's handler rather than having one of its own, because it carries
+    # the same changed_fields payload. See that method.
     "TaskCreated": HistoryService._project_task_created,
     "TaskUpdated": HistoryService._project_task_updated,
+    "TaskDueJournalRetargeted": HistoryService._project_task_updated,
+    "TaskJournalLinked": HistoryService._project_task_journal_linked,
+    "TaskJournalUnlinked": HistoryService._project_task_journal_unlinked,
     "TaskDeleted": HistoryService._project_task_deleted,
 }

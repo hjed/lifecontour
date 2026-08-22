@@ -66,15 +66,22 @@ _CONTACT_HISTORY_EVENT_TYPES: list[str] = [
     "ContactSummaryUpdated",
 ]
 
-# Task-domain event types the projection maps (ITER18-003 Phase 6) — the
-# lifecycle set only. ``TaskDueJournalRetargeted``, ``TaskJournalLinked`` and
-# ``TaskJournalUnlinked`` are published today and deliberately absent until
-# Phase 7 adds their handlers: an unsubscribed type is filtered out here, while a
-# subscribed one with no handler would be consumed, acknowledged and dropped with
-# nothing in the logs. The two halves move together.
+# Task-domain event types the projection maps: the lifecycle set plus the
+# due-anchor move and the intermediate-journal pair. That is every type the tasks
+# domain publishes, so nothing a task write announces reaches the stream unread.
+#
+# This list and ``HistoryService._HANDLERS`` move together, in both directions: an
+# unsubscribed type is filtered out here and its history is never written, while a
+# subscribed one with no handler is consumed, acknowledged and dropped with
+# nothing in the logs. The tests read the event classes out of
+# ``app.core.tasks.models.events`` rather than this list, so a new type fails
+# here on the day its class lands.
 _TASK_HISTORY_EVENT_TYPES: list[str] = [
     "TaskCreated",
     "TaskUpdated",
+    "TaskDueJournalRetargeted",
+    "TaskJournalLinked",
+    "TaskJournalUnlinked",
     "TaskDeleted",
 ]
 
@@ -86,8 +93,9 @@ class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
     ``pms:domain-events`` stream using the ``history-projection`` consumer group
     and delegates the event-to-rows mapping to :class:`HistoryService`. Since
     ITER12-003 Phase 2 it is the sole writer of contact history (the synchronous
-    dual-write was removed), and since ITER18-003 Phase 6 it is the only writer
-    of task history, which has never had a dual-write.
+    dual-write was removed), and it is the only writer of task history, which has
+    never had a dual-write. Every type the tasks domain publishes is projected
+    here.
     """
 
     def __init__(

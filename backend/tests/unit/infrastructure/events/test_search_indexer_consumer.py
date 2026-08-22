@@ -12,6 +12,7 @@ import pytest
 from core_shared.stream_client import StreamClient, StreamEvent
 
 from app.infrastructure.events.search_indexer_consumer import SearchIndexerConsumer
+from tests.task_event_inventory import task_event_types
 
 
 class TestSearchIndexerConsumerEventMatching:
@@ -141,6 +142,49 @@ class TestSearchIndexerConsumerEventMatching:
     ) -> None:
         """Verify non-search events are not matched (acked and skipped by base class)."""
         assert consumer._matches_event_type(event_type) is False
+
+
+class TestTasksAreNeverIndexed:
+    """The specification's *"tasks are not indexed"*, pinned rather than assumed.
+
+    From the home-dashboard specification, §*Tasks and search*: there is no tasks
+    index, a global search never returns a task, and the indexer *ignores* task
+    events rather than failing on them. It follows from the no-accumulating-
+    backlog principle — a searchable task corpus is a backlog by another name.
+
+    True by construction today, and true twice over: nothing subscribes the
+    patterns and ``SearchIndexer.process_event`` has no branch for them either.
+    That is exactly why it needs a test — the *history* projection subscribes
+    every one of these types, so the next person widening a pattern list has
+    nothing to stop them widening this one.
+    """
+
+    @pytest.fixture
+    def consumer(self) -> SearchIndexerConsumer:
+        return SearchIndexerConsumer(
+            stream_client=MagicMock(spec=StreamClient),
+            stream_name="pms:domain-events",
+        )
+
+    @pytest.mark.parametrize("event_type", sorted(task_event_types()))
+    def test_no_task_event_is_matched_for_indexing(
+        self, consumer: SearchIndexerConsumer, event_type: str
+    ) -> None:
+        """An unmatched event is acknowledged and skipped by the base class, so it
+        neither indexes anything nor sits pending until it dead-letters.
+
+        Parametrised over the event classes in the tasks module rather than a
+        list written here, so a type added later is covered the day it lands.
+        """
+        assert consumer._matches_event_type(event_type) is False
+
+    def test_the_inventory_is_not_empty(self) -> None:
+        """A guard on the parametrisation above, not on the consumer.
+
+        An inventory that silently returned nothing would turn every case in this
+        class into zero cases and the file would still pass.
+        """
+        assert len(task_event_types()) >= 6
 
 
 def _make_stream_event(

@@ -12,6 +12,7 @@ from meilisearch.errors import MeilisearchError
 
 from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.search.search_indexer import SearchIndexer
+from tests.task_event_inventory import task_event_types
 
 
 class TestSearchIndexer:
@@ -303,6 +304,41 @@ class TestSearchIndexer:
 
         # Assert - no MeiliSearch operations should be called
         indexer.client.index.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", sorted(task_event_types()))
+    async def test_a_task_event_is_ignored_rather_than_failing(
+        self, indexer, event_type
+    ):
+        """The specification's *"tasks are not indexed"*, at the indexer itself.
+
+        The ``search-indexer`` group never delivers one of these — its pattern
+        list has no task type in it — so this is the second, independent half of
+        that guarantee: even a widened subscription indexes nothing, because
+        ``process_event`` branches on ``Contact``/``Journal`` and a task event
+        falls to the log-and-skip arm.
+
+        Both halves are worth having: the *history* projection subscribes every
+        one of these types, and widening a pattern list is exactly the change
+        that would otherwise start a task down this path. And *"ignore rather
+        than fail"* is the spec's own wording — raising here would dead-letter
+        the event instead.
+        """
+        task_event = OutboxEvent(
+            id=5,
+            event_id=f"{event_type}-1",
+            event_type=event_type,
+            aggregate_id=1,
+            event_data={"task_id": 1, "user_id": "u1"},
+            occurred_at=datetime(2024, 1, 1, 15, 0, 0),
+            retry_count=0,
+            created_at=datetime(2024, 1, 1, 15, 0, 0),
+        )
+
+        await indexer.process_event(task_event)
+
+        indexer.client.index.assert_not_called()
+        indexer.client.create_index.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ensure_contacts_index_creation(

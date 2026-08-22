@@ -6,7 +6,7 @@ mirroring the SearchIndexerConsumer setup.
 
 ITER12-003 Phase 2 switched contacts onto the projection: the contact event types
 are now part of the live subscription (the synchronous dual-write was removed).
-ITER18-003 Phase 6 added the three task lifecycle types.
+Every type the tasks domain publishes is projected.
 """
 
 from unittest.mock import MagicMock
@@ -18,6 +18,7 @@ from app.infrastructure.events.history_projection_consumer import (
     _TASK_HISTORY_EVENT_TYPES,
     HistoryProjectionConsumer,
 )
+from tests.task_event_inventory import task_event_types
 
 _JOURNAL_EVENT_TYPES = {
     "JournalCreated",
@@ -60,18 +61,18 @@ _CONTACT_EVENT_TYPES = {
     "ContactSummaryUpdated",
 }
 
-# Task event types the projection maps (ITER18-003 Phase 6) — the lifecycle set.
+# Task event types the projection maps: the lifecycle set plus the anchor move
+# and the intermediate-journal pair. Every type the tasks domain publishes is
+# projected, which ``test_every_task_event_type_is_subscribed`` asserts against
+# the events module rather than against this list — a list is a thing somebody
+# has to remember to extend.
 _TASK_EVENT_TYPES = {
     "TaskCreated",
     "TaskUpdated",
-    "TaskDeleted",
-}
-
-# Published by TaskService today and deliberately NOT projected until Phase 7.
-_TASK_EVENT_TYPES_DEFERRED_TO_PHASE_7 = {
     "TaskDueJournalRetargeted",
     "TaskJournalLinked",
     "TaskJournalUnlinked",
+    "TaskDeleted",
 }
 
 
@@ -101,19 +102,16 @@ def test_task_lifecycle_events_are_projected() -> None:
     assert _TASK_EVENT_TYPES.issubset(set(consumer._event_type_patterns))
 
 
-def test_the_retarget_and_link_events_are_not_subscribed_yet() -> None:
-    """Phase 7 adds these three, and should delete this test when it does.
+def test_every_task_event_type_is_subscribed() -> None:
+    """Nothing the tasks domain publishes goes unread.
 
-    They are published today, so leaving them unsubscribed is a choice rather
-    than an oversight, and it is the safe half of the pair: an unsubscribed type
-    is filtered out by the consumer, while a subscribed one with no handler is
-    consumed, acknowledged and dropped with nothing in the logs.
+    The subscription and the projection's handler table move together, and this is
+    the half that fails when a *new* event type arrives, because it reads the
+    event classes out of the module rather than the list above.
     """
     consumer = _consumer()
 
-    assert not _TASK_EVENT_TYPES_DEFERRED_TO_PHASE_7 & set(
-        consumer._event_type_patterns
-    )
+    assert task_event_types() <= set(consumer._event_type_patterns)
 
 
 def test_contact_projection_is_live() -> None:
@@ -155,11 +153,15 @@ def test_every_subscribed_event_type_has_a_projection_handler() -> None:
     assert subscribed <= set(_HANDLERS)
 
 
-def test_no_handler_exists_for_an_unsubscribed_task_type() -> None:
+def test_no_task_handler_exists_without_a_subscription() -> None:
     """The reverse direction: history written and never read.
 
     A handler added without the matching subscription projects nothing, because
     the consumer never sees the event — the failure is silent in the other
-    direction, and only checking both ways catches it.
+    direction, and only checking both ways catches it: this half catches a
+    handler somebody adds for a type the consumer was never told about.
     """
-    assert not _TASK_EVENT_TYPES_DEFERRED_TO_PHASE_7 & set(_HANDLERS)
+    consumer = _consumer()
+    task_handlers = {key for key in _HANDLERS if key.startswith("Task")}
+
+    assert task_handlers <= set(consumer._event_type_patterns)

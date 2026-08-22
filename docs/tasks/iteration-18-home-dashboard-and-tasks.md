@@ -29,8 +29,8 @@ not-done tasks due in it with the cancellation reason, while touching none of th
 being refused). Delivery rule 9 is satisfied for all three shipped journal operations; **the rest of
 ITER18-001 is next**, per the Sequencing Strategy. ITER18-002's remaining phases are 5 (the
 delete-failure UI and its e2e) and 6 (the retarget/merge lock order).
-**ITER18-003 Phases 1–6 complete: the specification's full event set is published, and the
-lifecycle half of it is now read.** The events (task
+**ITER18-003 Phases 1–7 complete: the specification's full event set is published, and all of it is
+now read.** The events (task
 created and deleted; text updated and status changed as one `TaskUpdated`; the due-journal retarget,
 carrying any reopen; journal linked/unlinked, which took the automatic link out of the retarget's
 payload and gave it its own event — so a retarget now publishes **two** events, the link it retains
@@ -42,8 +42,15 @@ carries provenance from the caller, and Phase 5 pinned the **completeness rule**
 to the repository ports rather than to `TaskService`'s method list. **Phase 6 projects the three
 lifecycle types into `field_history` under a `task` entity type** — a create marker carrying the
 text, one row per changed field, one per person, and a delete marker that outlives the hard-deleted
-row — leaving the retarget and journal-link types to Phase 7, where they are asserted absent rather
-than assumed. Nothing is user-visible yet — the read surface is Phase 8 and the first screen that
+row — and **Phase 7 completed the set**: the anchor move projects as a `due_journal_id` pair (plus a
+status line on the deferrals that reopened a task) and the intermediate links as `journal:{id}` rows
+the right way round, so a task's trail says which journal, in which role, and when. Nothing a task
+write announces is now written and left unread, and the invariant is asserted in a form that
+**fails** for a new type rather than a list to extend — which is what Phase 10 will meet. Phase 7
+also pins the specification's *"tasks are not indexed"* at three independent levels: the
+`search-indexer` group matches no task type, `SearchIndexer` skips one anyway, and a real task
+lifecycle through that group creates no index, dead-letters nothing and is findable nowhere.
+Nothing is user-visible yet — the read surface is Phase 8 and the first screen that
 shows it is Phase 9. Phase 3's review added
 **Phase 10**: a journal merge re-points task anchors and publishes no task event, which is now the
 completeness test's one **named exclusion** and asserted positively rather than merely absent.
@@ -6072,14 +6079,33 @@ statement for the consumers where it is still true (permanently, for the search 
   dropping the event-time stamp fails 7 across three domains; and unsubscribing the task types fails
   9, which is the "both halves move together" claim tested rather than asserted.
 
-#### Phase 7: History Projection — Retarget and Link Events, and Search Isolation
+#### Phase 7: History Projection — Retarget and Link Events, and Search Isolation ✅ COMPLETE
 
 **Prerequisites:** Phases 3–6.
 **Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Actual:** **127 production insertions (98 net) → ~1,448 test lines**, plus 29 documentation lines
+outside this entry. **Production came in *under* estimate — the first time in this sub-iteration —
+and tests overran the tracked figure by ~2.6×, landing at 11.4× production.** Both halves are worth
+recording, and they have the same cause.
+
+Production is small because the phase mostly *closes* things: one 25-line helper, two handlers over a
+shared row builder, three dispatch entries — one of which is an existing method reused — and three
+strings added to a list. There was no new module, no new construction site and no signature change,
+which is the combination Phase 1's calibration addition identified as the expensive kind.
+
+The test figure is where the phase actually is, and the ×4 rule does not describe it because *what
+this phase delivers is assertions*. Three of its four deliverables are test-only by nature: deleting
+Phase 6's deferred-gap assertions and inverting them, pinning a guarantee (search isolation) that
+already held by construction at three independent levels, and building an invariant that has to fail
+for a type nobody has written yet. Only the first deliverable has production code at all.
+*Calibration addition:* **estimate a phase from the number of claims it makes, not the number of
+behaviours it adds.** A phase that closes a deliberate gap has production proportional to the gap and
+tests proportional to everything the gap was protecting — and the second number is the larger one
+whenever the earlier phase did its job of asserting the gap positively.
 
 **Acceptance Criteria:**
 
-- [ ] Handlers for retarget and journal linked/unlinked, producing rows that read as a trail (which
+- [x] Handlers for retarget and journal linked/unlinked, producing rows that read as a trail (which
       journal, in which role, when). **That is two handlers, not four, and the contact half is gone
       entirely — amended by Phase 5, which delivered it.** This criterion originally read "…and
       contact linked/unlinked". Phase 5 made contact membership a **field** of the task rather than
@@ -6096,18 +6122,145 @@ statement for the consumers where it is still true (permanently, for the search 
       and `test_no_handler_exists_for_an_unsubscribed_task_type` all state the gap positively, and
       `test_a_retarget_is_filtered_out_rather_than_dead_lettered` asserts it end to end. They are
       written to fail the moment a handler and its subscription arrive, which is the point.
-- [ ] The **search indexer ignores task events**: no tasks index, no task document, no task event
+      **Delivered as two handlers and one reuse**, and all four assertions are gone or inverted —
+      none merely satisfied. The retarget maps to the *existing* `_project_task_updated`, because
+      Phase 3 gave it a `changed_fields` payload for exactly that purpose and Phase 4 removed the one
+      key that would have needed a marker; see *Decisions taken*. The link pair projects a
+      `journal:{id}` row, `(None, id)` one way and the reverse the other. The "role" half of the
+      criterion is carried by the *key* — `due_journal_id` is the anchor, `journal:{id}` is an
+      intermediate link — and **not** by `origin`, which is deliberately absent for a reason recorded
+      below.
+- [x] The **search indexer ignores task events**: no tasks index, no task document, no task event
       dead-lettering in the `search-indexer` group, and global search never returns a task. This holds by
       construction because the consumer only sees subscribed patterns — this phase **pins it with a test**
       so a future pattern change cannot silently start indexing tasks.
-- [ ] With this phase every published task event has a projection; none is written and then unread.
+      **Pinned at three independent levels**, because it holds by construction *twice* over and a
+      test at one level would let the other change silently: the consumer's patterns match no task
+      type, `SearchIndexer.process_event` branches on `Contact`/`Journal` and skips a task without
+      touching a client, and a real task lifecycle through the group leaves nothing pending, no
+      `dead_letter_events` row, no tasks index and nothing findable. A contact **and** a journal ride
+      the same batch as controls — without them, every assertion is satisfied by an indexer that did
+      nothing at all, which is the way this test would most plausibly rot.
+- [x] With this phase every published task event has a projection; none is written and then unread.
       **Phase 10 adds a type after this one**, so it carries its own handler rather than relying on this
       criterion having closed the set permanently — and this phase should assert the invariant in a form
       that *fails* for an unhandled task type, so the next one to arrive cannot land unprojected.
+      **Delivered as an inventory that reads the event classes out of the module** rather than a list
+      anybody has to remember to extend — `backend/tests/task_event_inventory.py`, shared by the three
+      test files that make a claim about this set. Asserted at unit level in both directions and at
+      integration level against the types the write-path inventory **actually publishes**, which is
+      the stronger form. Mutation-checked with a seventh, unhandled event class standing in for
+      Phase 10's: **3 tests fail**, which is the criterion doing what it was written for.
 
 **Required Test Coverage:** unit — projected rows per event type. Integration — end-to-end projection per
 type with idempotency; the `search-indexer` group consumes a task event without indexing or dead-lettering.
 No e2e.
+
+**Delivered: 29 unit cases and 32 integration cases**, counting parametrised cases throughout so the
+two halves are in the same units. Unit: 15 in `tests/unit/history/test_history_service.py` across
+`TestTaskDueJournalRetargeted` (5), `TestTaskJournalLinked` (4), `TestTaskJournalUnlinked` (3) and
+`TestEveryTaskEventTypeIsProjected` (3), replacing the one deleted; 7 in
+`test_search_indexer_consumer.py` and 6 in `test_search_indexer.py`, both parametrised over the
+shared inventory; and `test_history_projection_consumer.py` is **net zero** — one deferral test
+deleted, one added in its place and one rewritten, so the file collects 9 before and after.
+Integration: 6 new cases in
+`tests/integration/infrastructure/events/test_task_history_projection_e2e.py` (7 → 12, with the
+deferral test inverted and the idempotency test widened to drive all six types), the new
+`test_task_search_isolation_integration.py` (4), and 22 cases from two tests × the **11** write paths
+in `test_task_event_completeness_integration.py` (42 → 64).
+
+**No e2e**, and the absence is a **checked fact rather than an inherited one** — worth saying,
+because the sentence Phases 4 and 5 used ("no task API client exists") **went stale** when ITER18-001
+Phase 16 added `frontend/src/lib/api/tasks.ts`. The current check is narrower and still holds: that
+client has no history endpoint, `ActivityFeed` is journal-scoped, and nothing under `frontend/src`
+reads task history. Phase 8 builds the read surface and Phase 9 the UI. *The lesson is about the
+form of the claim:* an absence justified by "X does not exist" expires the day somebody adds X, and
+a phase that repeats it without re-running the check is asserting something it has not verified.
+
+**Documentation.** `docs/architecture/integration-architecture.md` — the `HistoryProjectionConsumer`
+row now lists all six task types and records that the two halves are asserted against each other,
+and the `SearchIndexerConsumer` row gains the **permanent** task exclusion and why.
+`docs/architecture/domain-architecture.md` — the paragraph saying the retarget and link events were
+"published but not yet projected" is replaced by how each projects, the `journal:{id}` key, why
+`origin` is not projected, and the completeness invariant.
+
+**Decisions taken (Phase 7):**
+
+- **The retarget shares `TaskUpdated`'s handler rather than getting one of its own**, which is why
+  the criterion's "two handlers" is two and not three. Phase 3 chose that payload's shape *for this
+  phase* — `changed_fields` carrying `due_journal_id: (old, new)` plus, on a reopen only,
+  `status: (old, "not_done")` — and recorded the intent as "the existing `_rows_from_changed_fields`
+  plus a marker row". The marker was for `auto_linked_journal_id`, and **Phase 4 deleted that key**
+  when the retained link became an event in its own right, so nothing was left for a bespoke handler
+  to do. Writing one anyway would be two places for "how a task field change becomes a row" to
+  disagree. *Worth recording because it is a decision made three phases earlier and collected here:*
+  the cheapest phase in this sub-iteration is cheap because an earlier one shaped a payload for a
+  consumer that did not exist yet.
+- **`origin` is deliberately not projected, and the reason is the unlink.** `TaskJournalLinked`
+  carries `manual` or `retarget`, and `field_history` has no column for it — so the only place it
+  could go is the field name. It must not: a link and the `TaskJournalUnlinked` that later removes it
+  have to land under the same key to read as a pair, and an unlink has **no origin to spell**.
+  `journal:retarget:{id}` followed by `journal:{id}` would show the user a removal with nothing added
+  before it, which is the exact asymmetry Phase 6's create marker fans `contact_ids` out to prevent.
+  What history carries instead is the *role* the criterion asks for: `due_journal_id` for the anchor,
+  `journal:{id}` for an intermediate link. Pinned twice — a unit test that both origins project the
+  same key, and an integration test that a derived link and a manual one land under keys
+  distinguished only by their journal.
+- **The event inventory is a module, not three lists.** Three test files claim something about the
+  same set of event types, and this iteration has already paid for a hand-maintained inventory once:
+  the "tasks need nine event types" count enumerated `TaskService`'s methods and missed the write the
+  journal domain performs on tasks, which became Phase 10. `tests/task_event_inventory.py` reads the
+  `DomainEvent` subclasses out of the module and builds one of each from `inspect.signature`, so an
+  unrecognised argument type raises rather than silently skipping a class. A companion test pins that
+  each class's `event_type` **is** its class name, which is what makes reading class names legitimate.
+- **The end-to-end search test needed a positive control, and noticing that was the useful part.**
+  Every assertion in it is an absence — nothing indexed, nothing pending, nothing dead-lettered,
+  nothing found — and all four are satisfied by an indexer that never ran: a broken client, a
+  misconfigured URL, a consumer that read zero messages. A contact and a journal travel the same
+  batch, so the contacts and journals indexes demonstrably appear in the run that creates no tasks
+  index. *Related trap avoided:* asserting on those control **documents** would have reintroduced
+  flake, because MeiliSearch writes are asynchronous and a freshly indexed document is not
+  necessarily searchable when the batch returns. The index existing is synchronous; the document
+  being findable is not.
+- **`get_meilisearch_client` is an `lru_cache` over the *application's* settings**, so an integration
+  test that constructs `SearchService` talks to port 7700 rather than the workspace's test container
+  and fails with a connection error that looks like MeiliSearch being down. The fixture patches the
+  settings the factory reads and clears the cache either side. Recorded because the failure mode is
+  indistinguishable from an infrastructure problem, and the next test that needs a real search client
+  will meet it.
+- **Mutation-checked, seven ways, all caught.** Removing the retarget's dispatch entry fails **13**
+  tests; removing the two link handlers fails **17**; removing the three subscriptions fails **16**;
+  adding a seventh event class with no handler — the Phase 10 shape — fails exactly **3**, in both
+  directions; removing one link handler fails **2** of the completeness inventory's cases;
+  subscribing the task types to the **search indexer** fails **8**, including the dead-letter test;
+  and making the contact-indexing path raise fails **2**, which is the positive control above.
+  Two of those are the ones worth having. The seventh-class probe says the two halves still move
+  together now that neither is deferred — and note that all three failures are *unit* tests, because
+  a class nobody publishes cannot reach the integration invariant; that one is checked by the
+  fifth probe instead, which is why both levels exist. The search probe is what makes the
+  dead-letter test non-vacuous — see the review note below.
+- **The positive control needed three attempts, and each was weaker than it looked.** The search
+  tests all assert an *absence* — nothing indexed, nothing dead-lettered, no tasks index, nothing
+  found — so each needs something in the same run proving the indexer works, or it passes against an
+  indexer that never ran. **First form:** a contact rides the same batch and the contacts index
+  exists afterwards. Wrong, because MeiliSearch is not rolled back between tests and its indexes
+  carry a fixed per-workspace prefix, so an index left by an earlier test satisfies it. **Second
+  form:** also assert the batch consumed every message. Still wrong, and this is the subtle one —
+  `_process_batch` counts a matched event whose handler **raised**, so a completely broken contact
+  path passes. **Third form:** wrap the *real* `SearchIndexer` and record which events returned from
+  it without raising. Mutation-checked by making the contact path raise: the first two forms pass,
+  the third fails 2 tests. *The lesson is that "a control ran" and "a control succeeded" are
+  different assertions, and the machinery that counts work done rarely distinguishes them.*
+- **The dead-letter test as first written could not fail, and the review caught it.** It asserted
+  `dead_letter_events` was empty after one `_process_batch()`. Dead-lettering is only reachable from
+  `_retry_pending`, and only for an entry that failed and stayed pending — but a task event is
+  *unmatched*, so the first batch acknowledges it and it is never pending. The assertion was true of
+  a consumer that raised on every task event too. It now makes the indexer fail on everything it is
+  handed and asserts that the **contact** riding the same batch dead-letters while no task event
+  does: the same machinery, in the same run, demonstrably capable of writing the row the task events
+  do not write. *The general lesson is the one the search tests already had a name for:* an
+  absence-assertion needs a positive control, and "the failure mode is unreachable" is a stronger
+  version of the same bug than "the setup happens to avoid it".
 
 #### Phase 8: Task History Read Surface — REST and MCP
 
@@ -6141,7 +6294,11 @@ events it is being asked to project.
       group has been consuming task events since Phase 1 and acknowledging them as non-matching, so
       widening its patterns only projects events published *after* the deploy — tasks that already exist
       get no lifecycle history, and Phase 6's tests cannot catch this because a fresh stream and a fresh
-      group have nothing already acknowledged. The fix is the same mechanism as (a): re-project the
+      group have nothing already acknowledged. **Phase 7 widened the patterns again and leaves the same
+      hole behind it**, so the backfill covers all six types rather than the three Phase 6 named: a
+      retarget or a journal link published before that deploy was skip-acknowledged and will never be
+      redelivered. Raised by Phase 7's review and recorded here rather than fixed there, because the
+      mechanism that fixes it is the one this phase builds. The fix is the same mechanism as (a): re-project the
       retained `Task%` rows from `outbox_events` through `HistoryService`, which is idempotent on
       `(event_id, entity_type, entity_id, field_name)` and therefore safe to run repeatedly and safe to
       overlap with live projection. **Do both in one backfill**, and assert it against a group that has
