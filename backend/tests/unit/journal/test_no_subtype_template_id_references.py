@@ -6,7 +6,7 @@ ITER16-001 Phase 5 consolidates the template reference onto
 ``journal_climbing_data`` / ``journal_caving_data``.
 
 This is the automated form of the "grep gate" precedent used in prior
-drop-column migrations (e.g. 0093). Two complementary checks:
+drop-column migrations (e.g. 0093). Three complementary checks:
 
 1. The subtype domain entities (``CanyoningData`` / ``CavingData`` /
    ``ClimbingData``) no longer declare a ``template_id`` field. Every read path
@@ -15,6 +15,9 @@ drop-column migrations (e.g. 0093). Two complementary checks:
 2. A source scan of the subtype repository SQL and the MCP tool builders/updaters
    confirms no lingering ``template_id`` reference that would break at runtime once
    the columns are gone.
+3. The type metadata behind ``list_journal_types`` no longer advertises the field
+   on a subtype — a retired field there is worse than useless, since a caller who
+   follows it has their value silently discarded.
 
 The consolidated ``AbseilingData.template_id`` reference is intentionally allowed.
 """
@@ -29,6 +32,8 @@ from core_shared.models.journals import (
     CavingData,
     ClimbingData,
 )
+
+from app.core.journal.services.journal_type_metadata import JOURNAL_TYPE_DATA_FIELDS
 
 _THIS = Path(__file__).resolve()
 _BACKEND_ROOT = _THIS.parents[3]  # …/backend
@@ -70,6 +75,24 @@ class TestNoSubtypeTemplateIdReferences:
         assert not offenders, (
             "Subtype repository still references template_id:\n" + "\n".join(offenders)
         )
+
+    def test_type_metadata_advertises_template_id_only_for_abseiling(self) -> None:
+        """list_journal_types must not offer a field the write path discards.
+
+        The metadata is what an MCP client reads before composing ``type_data``;
+        a retired ``template_id`` on a subtype sends the caller's value into a
+        column that no longer exists, and it is dropped without a word.
+        """
+        offenders = [
+            type_name
+            for type_name, fields in JOURNAL_TYPE_DATA_FIELDS.items()
+            if "template_id" in fields and type_name != "ABSEILING_TRIP"
+        ]
+        assert not offenders, (
+            "Type metadata still advertises a subtype template_id for: "
+            + ", ".join(offenders)
+        )
+        assert "template_id" in JOURNAL_TYPE_DATA_FIELDS["ABSEILING_TRIP"]
 
     def test_mcp_tools_have_no_subtype_template_id(self) -> None:
         text = _MCP_TOOLS_FILE.read_text(encoding="utf-8")

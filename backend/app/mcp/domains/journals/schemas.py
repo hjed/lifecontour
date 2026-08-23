@@ -516,6 +516,16 @@ class JournalCreateRequest(BaseModel):
     )
     tags: list[str] = Field(default_factory=list, description="Tag names to assign")
     parent_id: int | None = Field(default=None, description="Parent journal ID")
+    template_id: str | None = Field(
+        default=None,
+        description="Activity template to create this journal from (UUID from "
+        "search_templates). Records the durable template reference and fills in "
+        "the template's standard pitches, the abseil counts derived from those "
+        "pitches, and its own type fields (french grade, climbing grade, …). "
+        "Anything you pass in type_data wins over the template, including counts "
+        "you set yourself. Requires an abseiling-derived type: ABSEILING_TRIP, "
+        "CANYONING, CLIMBING or CAVING.",
+    )
 
 
 class JournalUpdateRequest(BaseModel):

@@ -179,6 +179,9 @@ from app.core.journal.services.outdoor_dashboard_service import (
     OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
+from app.core.journal.services.template_application import (
+    apply_template_to_type_data,
+)
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -1817,6 +1820,33 @@ async def list_journal_types() -> str:
     return json.dumps(describe_journal_types(), indent=2)
 
 
+async def _load_own_template(
+    template_id: str,
+    user_id: str,
+    activity_template_repo: SqlActivityTemplateRepository,
+) -> ActivityTemplate:
+    """Load a template the caller owns, refusing anything they cannot use.
+
+    Another user's template is reported as missing rather than forbidden: the
+    caller has no way to tell it exists, and no way to act on the difference.
+    """
+    try:
+        UUID(template_id)
+    except ValueError as e:
+        raise JournalValidationError(
+            "template_id", f"Template ID {template_id!r} must be a valid UUID"
+        ) from e
+
+    template = await activity_template_repo.find_by_id(template_id)
+    if template is None or template.user_id != user_id:
+        raise JournalValidationError(
+            "template_id",
+            f"Template {template_id} not found. Call search_templates to list "
+            "your templates.",
+        )
+    return template
+
+
 @tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_journal_entry", "journal")
 async def create_journal_entry(
@@ -1835,6 +1865,14 @@ async def create_journal_entry(
     Type dependencies are added automatically (e.g. BUSHWALKING adds
     OUTDOOR_ACTIVITY and FITNESS).
 
+    For a trip down a known canyon, cave or climb, pass that activity template's
+    id as ``template_id`` (find one with search_templates) instead of copying its
+    pitches yourself: the journal records the template reference and is filled in
+    with the template's standard pitches, the abseil counts derived from them,
+    and the template's own type fields. Anything you also pass in ``type_data``
+    wins over the template — your own ``pitches`` replace the template's, and the
+    abseil counts are derived from whichever pitches are stored unless you set
+    the counts yourself.
 
     Returns:
         JSON string containing AI-friendly journal information including:
@@ -1903,10 +1941,25 @@ async def create_journal_entry(
     if request.contact_relationships:
         _validate_contact_relationships(request.contact_relationships)
 
-    # --- All inputs validated, proceed with DB writes ---
-
-    # Repositories are still needed to read back enrichment data for the response.
+    # Repositories are needed to resolve the template below, and to read back
+    # enrichment data for the response.
     repos = _create_journal_tool_repositories(db_connection)
+
+    # A template contributes its standard pitches and its own type fields — the
+    # same thing selecting one in the UI does (the abseil counts then follow from
+    # the pitches, in AbseilingService). Resolved here, before any write, so an
+    # unusable template_id creates no journal.
+    type_data = request.type_data
+    # ``is not None`` rather than truthiness: an explicit empty string is a
+    # malformed id, and must be refused rather than quietly creating an
+    # untemplated journal.
+    if request.template_id is not None:
+        template = await _load_own_template(
+            request.template_id, user_id, repos.activity_template_repo
+        )
+        type_data = apply_template_to_type_data(template, request.types, type_data)
+
+    # --- All inputs validated, proceed with DB writes ---
 
     # Create journal entity
     journal = Journal(
@@ -1932,7 +1985,7 @@ async def create_journal_entry(
     created_journal = await write_service.create_journal(
         journal,
         request.types,
-        request.type_data,
+        type_data,
         relationships,
         db_connection,
         tags=request.tags,
