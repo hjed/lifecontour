@@ -42,30 +42,39 @@ def discovery_url(settings: Settings) -> str:
     return settings.oauth_issuer.rstrip("/") + DISCOVERY_SUFFIX
 
 
-def select_algorithm(advertised: Sequence[str] | None, *, source: str) -> str | None:
-    """Pick the token signing algorithm the IdP advertises.
+def supported_algorithms(
+    advertised: Sequence[str] | None, *, source: str
+) -> tuple[str, ...]:
+    """Return every advertised signing algorithm we are willing to accept.
 
-    Returns the first advertised algorithm we support, honoring the IdP's
-    ordering. Returns ``None`` when the IdP advertises nothing, in which case
-    the caller's verifier applies its own default.
+    ``id_token_signing_alg_values_supported`` is the *set* of algorithms the OP
+    supports, not a declaration of the one it will use. Which algorithm a given
+    client actually receives is fixed at registration
+    (``id_token_signed_response_alg``) and is not published, so an OP
+    advertising both RS256 and ES256 may legitimately sign this client's tokens
+    with either. Callers must therefore be prepared for all of them; picking one
+    would reject perfectly valid sessions.
 
-    Passing the result on matters: FastMCP's ``JWTVerifier`` falls back to
-    RS256, so an ES256-only IdP (Kanidm signs ES256 unless legacy crypto is
-    enabled) would have every one of its tokens rejected.
+    Order is preserved so a caller that can only accept a single algorithm has a
+    sensible default to fall back on (OPs conventionally list theirs first).
+    Returns empty when the OP advertises nothing, in which case the caller's
+    verifier applies its own default.
 
     Raises:
-        RuntimeError: if the IdP advertises algorithms but none are supported.
+        RuntimeError: if the OP advertises algorithms but none are supported.
             Failing loud beats silently defaulting to RS256 and then rejecting
             every token.
     """
-    supported = [alg for alg in advertised or () if alg in SUPPORTED_ALGORITHMS]
+    supported = tuple(
+        dict.fromkeys(alg for alg in advertised or () if alg in SUPPORTED_ALGORITHMS)
+    )
     if advertised and not supported:
         raise RuntimeError(
             f"OIDC discovery document at {source} advertises no supported "
             f"asymmetric signing algorithm (got {list(advertised)!r}; "
             f"supported: {sorted(SUPPORTED_ALGORITHMS)})."
         )
-    return supported[0] if supported else None
+    return supported
 
 
 def assert_issuer_matches(

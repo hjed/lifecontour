@@ -10,7 +10,7 @@ import pytest
 from app.infrastructure.auth.oidc_discovery import (
     assert_issuer_matches,
     discovery_url,
-    select_algorithm,
+    supported_algorithms,
 )
 from app.infrastructure.config import Settings
 
@@ -55,29 +55,46 @@ class TestDiscoveryUrl:
         assert url == "https://idp/meta"
 
 
-class TestSelectAlgorithm:
-    def test_none_when_nothing_advertised(self) -> None:
-        """The verifier then applies its own default."""
-        assert select_algorithm(None, source="https://idp/meta") is None
-        assert select_algorithm([], source="https://idp/meta") is None
+class TestSupportedAlgorithms:
+    """Discovery publishes what the OP *supports*, not what this client gets.
 
-    def test_follows_the_idp_ordering(self) -> None:
-        """IdPs list their signing default first; this is not a preference order."""
-        assert select_algorithm(["ES256", "RS256"], source="s") == "ES256"
-        assert select_algorithm(["RS256", "ES256"], source="s") == "RS256"
+    Which algorithm a given client receives is fixed at registration
+    (``id_token_signed_response_alg``) and is never published, so an OP
+    advertising both RS256 and ES256 may legitimately sign this client's tokens
+    with either. Callers have to be ready for all of them.
+    """
 
-    def test_skips_algorithms_we_do_not_accept(self) -> None:
-        assert select_algorithm(["EdDSA", "ES256"], source="s") == "ES256"
+    def test_empty_when_nothing_advertised(self) -> None:
+        """The caller's verifier then applies its own default."""
+        assert supported_algorithms(None, source="https://idp/meta") == ()
+        assert supported_algorithms([], source="https://idp/meta") == ()
+
+    def test_returns_every_advertised_algorithm_we_accept(self) -> None:
+        assert supported_algorithms(["RS256", "ES256"], source="s") == (
+            "RS256",
+            "ES256",
+        )
+
+    def test_preserves_the_idp_ordering(self) -> None:
+        """Callers pinned to one algorithm fall back on the OP's first."""
+        assert supported_algorithms(["ES256", "RS256"], source="s")[0] == "ES256"
+        assert supported_algorithms(["RS256", "ES256"], source="s")[0] == "RS256"
+
+    def test_drops_algorithms_we_do_not_accept(self) -> None:
+        assert supported_algorithms(["EdDSA", "ES256"], source="s") == ("ES256",)
+
+    def test_drops_duplicates(self) -> None:
+        assert supported_algorithms(["RS256", "RS256"], source="s") == ("RS256",)
 
     def test_rejects_symmetric_algorithms(self) -> None:
         """HS* with JWKS verification would open a key-confusion hole."""
         with pytest.raises(RuntimeError, match="signing algorithm"):
-            select_algorithm(["HS256"], source="https://idp/meta")
+            supported_algorithms(["HS256"], source="https://idp/meta")
 
     def test_raises_when_nothing_advertised_is_supported(self) -> None:
         """Failing loud beats defaulting to RS256 and rejecting every token."""
         with pytest.raises(RuntimeError, match="signing algorithm"):
-            select_algorithm(["EdDSA"], source="https://idp/meta")
+            supported_algorithms(["EdDSA"], source="https://idp/meta")
 
 
 class TestAssertIssuerMatches:

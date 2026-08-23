@@ -14,6 +14,7 @@ JWKS. See :class:`McpOidcProxy` for the two things it needs on top of that.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import Any
 
 import structlog
@@ -26,7 +27,7 @@ from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.discord import DiscordProvider
 from fastmcp.server.auth.providers.github import GitHubProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from fastmcp.utilities.auth import decode_jwt_payload
+from fastmcp.utilities.auth import decode_jwt_header, decode_jwt_payload
 from key_value.aio.protocols.key_value import AsyncKeyValue
 from key_value.aio.stores.redis import RedisStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
@@ -35,7 +36,7 @@ from pydantic import AnyHttpUrl
 from app.infrastructure.auth.oidc_discovery import (
     assert_issuer_matches,
     discovery_url,
-    select_algorithm,
+    supported_algorithms,
 )
 from app.infrastructure.config import Settings
 
@@ -73,6 +74,19 @@ class _LoggingFernetEncryptionWrapper(FernetEncryptionWrapper):
         return result
 
 
+class _UnacceptableAlgorithmError(Exception):
+    """A token was signed with an algorithm the IdP does not advertise."""
+
+
+def _header_algorithm(token: str) -> str | None:
+    """The ``alg`` a JWT claims in its header, or None if it cannot be read."""
+    try:
+        algorithm = decode_jwt_header(token).get("alg")
+    except Exception:  # noqa: BLE001 - malformed: let the verifier reject it
+        return None
+    return algorithm if isinstance(algorithm, str) else None
+
+
 class _IdTokenVerifier(JWTVerifier):
     """A ``JWTVerifier`` that also enforces the ID Token rules OIDC requires.
 
@@ -92,15 +106,62 @@ class _IdTokenVerifier(JWTVerifier):
 
     Both are checked against the payload the signature check already validated,
     never against a raw decode.
+
+    It also accepts **any** of the algorithms the OP advertises rather than one.
+    ``JWTVerifier`` pins a single algorithm, but discovery publishes the set the
+    OP supports, not the one this client gets — that is fixed at registration
+    and never published. So one verifier is kept per advertised algorithm and
+    the token's own ``alg`` header chooses. The advertised set is still the
+    guard: an algorithm outside it never reaches a verifier at all, which is
+    what keeps a token from selecting, say, a symmetric algorithm that JWKS
+    verification cannot safely use.
     """
 
-    def __init__(self, *, authorized_party: str, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        authorized_party: str,
+        algorithms: Sequence[str] = (),
+        **kwargs: Any,
+    ) -> None:
+        accepted = tuple(dict.fromkeys(algorithms))
+        # An empty set means the OP advertised nothing; JWTVerifier's own
+        # default (RS256) then stands, and self is the only verifier.
+        super().__init__(algorithm=accepted[0] if accepted else None, **kwargs)
         self._authorized_party = authorized_party
-        super().__init__(**kwargs)
+        self._accepted_algorithms = frozenset(accepted)
+        self._verifier_kwargs = kwargs
+        self._delegates: dict[str, JWTVerifier] = {}
+
+    def _verifier_for(self, algorithm: str | None) -> JWTVerifier | None:
+        """The verifier for a token's ``alg``, or None if we do not accept it."""
+        if algorithm is None or algorithm == self.algorithm:
+            return None  # our own super() handles it
+        if algorithm not in self._accepted_algorithms:
+            logger.warning(
+                "MCP: refusing an upstream id_token signed with an algorithm "
+                "the IdP does not advertise.",
+                algorithm=algorithm,
+                accepted=sorted(self._accepted_algorithms),
+            )
+            raise _UnacceptableAlgorithmError
+        delegate = self._delegates.get(algorithm)
+        if delegate is None:
+            delegate = JWTVerifier(algorithm=algorithm, **self._verifier_kwargs)
+            self._delegates[algorithm] = delegate
+        return delegate
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         """Verify the JWT, then apply the ID Token rules on its verified claims."""
-        verified = await super().load_access_token(token)
+        try:
+            delegate = self._verifier_for(_header_algorithm(token))
+        except _UnacceptableAlgorithmError:
+            return None
+        verified = (
+            await super().load_access_token(token)
+            if delegate is None
+            else await delegate.load_access_token(token)
+        )
         if verified is None:
             return None
 
@@ -226,8 +287,9 @@ class McpOidcProxy(OIDCProxy):
             authorized_party=self._settings.oauth_client_id,
             jwks_uri=str(self.oidc_config.jwks_uri),
             issuer=str(self.oidc_config.issuer),
-            algorithm=algorithm
-            or select_algorithm(
+            algorithms=(algorithm,)
+            if algorithm
+            else supported_algorithms(
                 self.oidc_config.id_token_signing_alg_values_supported,
                 source=str(self.oidc_config.issuer),
             ),

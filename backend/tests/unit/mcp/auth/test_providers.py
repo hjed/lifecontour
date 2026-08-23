@@ -428,6 +428,15 @@ class TestMcpOidcProxyTokenVerifier:
         verifier = _verifier(_hook_proxy(_document()), audience="generic-id")
         assert verifier.algorithm == "ES256"
 
+    def test_every_advertised_algorithm_is_accepted(self) -> None:
+        """The OP may sign this client's tokens with any that it supports."""
+        document = _document(
+            id_token_signing_alg_values_supported=["RS256", "ES256"],
+        )
+        verifier = _verifier(_hook_proxy(document))
+        assert isinstance(verifier, _IdTokenVerifier)
+        assert verifier._accepted_algorithms == {"RS256", "ES256"}
+
     def test_first_advertised_supported_algorithm_wins(self) -> None:
         """IdPs list their signing default first."""
         document = _document(
@@ -617,7 +626,7 @@ async def _verify(**claims: Any) -> AccessToken | None:
         authorized_party="generic-id",
         jwks_uri="https://auth.example.com/jwks",
         issuer="https://auth.example.com",
-        algorithm="ES256",
+        algorithms=("ES256",),
     )
     with patch.object(
         JWTVerifier, "load_access_token", return_value=_verified(**claims)
@@ -644,6 +653,7 @@ class TestIdTokenExpiryIsMandatory:
             authorized_party="generic-id",
             jwks_uri="https://auth.example.com/jwks",
             issuer="https://auth.example.com",
+            algorithms=("ES256",),
         )
         with patch.object(JWTVerifier, "load_access_token", return_value=None):
             assert await verifier.load_access_token("nonsense") is None
@@ -697,3 +707,73 @@ class TestProxyBuildsTheStrictVerifier:
         verifier = _hook_proxy(_document()).get_token_verifier(audience="generic-id")
         assert isinstance(verifier, _IdTokenVerifier)
         assert verifier._authorized_party == "generic-id"
+
+
+class TestSigningAlgorithmIsChosenPerToken:
+    """`id_token_signing_alg_values_supported` is a set, not a declaration.
+
+    Which algorithm this client's tokens are signed with is fixed at
+    registration and never published, so an OP advertising both RS256 and ES256
+    may use either. Pinning one would reject valid sessions; the token's own
+    `alg` header picks, bounded by what the OP advertises.
+    """
+
+    def _verifier(self) -> _IdTokenVerifier:
+        document = _document(
+            id_token_signing_alg_values_supported=["RS256", "ES256"],
+        )
+        verifier = _hook_proxy(document).get_token_verifier(audience="generic-id")
+        assert isinstance(verifier, _IdTokenVerifier)
+        return verifier
+
+    async def test_verifies_a_token_signed_with_a_later_advertised_algorithm(
+        self,
+    ) -> None:
+        """The case that would previously have been rejected outright."""
+        verifier = self._verifier()
+        assert verifier.algorithm == "RS256"
+
+        delegate = verifier._verifier_for("ES256")
+
+        assert delegate is not None
+        assert delegate.algorithm == "ES256"
+        assert delegate.jwks_uri == verifier.jwks_uri
+        assert delegate.issuer == verifier.issuer
+        assert delegate.audience == verifier.audience
+
+    def test_the_delegate_is_reused_across_tokens(self) -> None:
+        verifier = self._verifier()
+        assert verifier._verifier_for("ES256") is verifier._verifier_for("ES256")
+
+    def test_its_own_algorithm_needs_no_delegate(self) -> None:
+        assert self._verifier()._verifier_for("RS256") is None
+
+    def test_an_unreadable_header_falls_back_to_its_own_algorithm(self) -> None:
+        assert self._verifier()._verifier_for(None) is None
+
+    async def test_refuses_an_algorithm_the_idp_does_not_advertise(self) -> None:
+        """The advertised set is the guard against algorithm substitution."""
+        verifier = self._verifier()
+        with patch.object(
+            JWTVerifier, "load_access_token", return_value=_verified(exp=1)
+        ):
+            assert await verifier.load_access_token(_jwt_signed_with("HS256")) is None
+
+    async def test_accepts_an_algorithm_the_idp_does_advertise(self) -> None:
+        verifier = self._verifier()
+        with patch.object(
+            JWTVerifier,
+            "load_access_token",
+            return_value=_verified(sub="a-user", aud="generic-id", exp=1),
+        ):
+            token = await verifier.load_access_token(_jwt_signed_with("ES256"))
+        assert token is not None
+
+
+def _jwt_signed_with(algorithm: str) -> str:
+    """A JWT whose header claims ``algorithm``; the body does not matter here."""
+
+    def segment(data: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
+
+    return f"{segment({'alg': algorithm})}.{segment({'sub': 'a-user'})}.signature"

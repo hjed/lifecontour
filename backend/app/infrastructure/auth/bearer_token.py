@@ -19,7 +19,7 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier
 from app.infrastructure.auth.oidc_discovery import (
     assert_issuer_matches,
     discovery_url,
-    select_algorithm,
+    supported_algorithms,
 )
 from app.infrastructure.config import Settings
 
@@ -72,9 +72,13 @@ async def create_jwt_verifier(
             issuer=settings.oauth_issuer,
         )
 
-    algorithm = select_algorithm(
+    # JWTVerifier pins a single algorithm, and no discovery field publishes
+    # which one the OP uses for *access* tokens, so take the first the OP
+    # advertises for id_tokens as the best available signal.
+    algorithms = supported_algorithms(
         document.get("id_token_signing_alg_values_supported"), source=url
     )
+    algorithm = algorithms[0] if algorithms else None
 
     logger.info(
         "Bearer-token auth enabled",
