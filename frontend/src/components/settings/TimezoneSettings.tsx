@@ -22,23 +22,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
+  getDefaultTimezone,
   TIMEZONE_STORAGE_KEY,
   useUpdateTimezone,
   useUserSettings,
 } from '@/lib/api/settings';
 
 /**
- * Get the user's default timezone from the localStorage cache.
- * Falls back to the browser's timezone. Synchronous so it can be used when
- * constructing new events without an async fetch.
+ * Re-exported from the API layer, where it has to live: `lib/` reaches for it
+ * too, and `lib/` importing a `'use client'` component would pull Card, Input
+ * and Button into every module that wanted the timezone.
  */
-export function getDefaultTimezone(): string {
-  if (typeof window === 'undefined') {
-    return 'UTC';
-  }
-  const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
-  return stored || Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
+export { getDefaultTimezone };
 
 /**
  * Resolve the browser's timezone. Safe for SSR (returns 'UTC').

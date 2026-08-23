@@ -10,6 +10,7 @@
 
 import {
   lapseWording,
+  retargetAction,
   statusActions,
   statusChangeWording,
   statusWording,
@@ -189,6 +190,94 @@ describe('statusChangeWording', () => {
   it('never reports a status change as the generic update message', () => {
     Object.values(TaskStatus).forEach(status => {
       expect(statusChangeWording(status)).not.toBe('Task updated successfully');
+    });
+  });
+});
+
+describe('retargetAction', () => {
+  /**
+   * The four cases the wording has to tell apart. A retarget is one call to
+   * one endpoint, but it is four different things to ask for: bringing a
+   * lapsed commitment back, bringing a cancelled one back, moving a live one,
+   * and reopening one that was finished.
+   */
+  const LAPSED = retargetAction(TaskStatus.NOT_DONE, true);
+  const CANCELLED = retargetAction(TaskStatus.CANCELLED, false);
+  const LIVE = retargetAction(TaskStatus.NOT_DONE, false);
+  const DONE = retargetAction(TaskStatus.DONE, false);
+
+  it('offers a lapsed task resurrection', () => {
+    expect(LAPSED.label).toBe('Resurrect');
+  });
+
+  it('offers a cancelled task resurrection — its one exit', () => {
+    expect(CANCELLED.label).toBe('Resurrect');
+  });
+
+  it('offers a live task a reschedule rather than a resurrection', () => {
+    expect(LIVE.label).toBe('Reschedule');
+  });
+
+  it('offers a done task a reopen, naming what retargeting will do to it', () => {
+    expect(DONE.label).toBe('Reopen');
+  });
+
+  /**
+   * A cancelled task is never reported lapsed by the read model — a commitment
+   * called off cannot then be let slide — but the offer must not depend on
+   * that being true, since the caller passes both values through.
+   */
+  it('offers resurrection for a cancelled task whatever the lapse flag says', () => {
+    expect(retargetAction(TaskStatus.CANCELLED, true).label).toBe('Resurrect');
+  });
+
+  it('is one action under one key, whatever it is called', () => {
+    [LAPSED, CANCELLED, LIVE, DONE].forEach(offer => {
+      expect(offer.key).toBe('retarget');
+    });
+  });
+
+  /**
+   * WCAG 2.5.3, as `statusActions` already guards: a control's accessible name
+   * must contain its visible label.
+   */
+  it('contains each visible label within its accessible name', () => {
+    [LAPSED, CANCELLED, LIVE, DONE].forEach(({ label, accessibleName }) => {
+      expect(accessibleName.toLowerCase()).toContain(label.toLowerCase());
+    });
+  });
+
+  it('words three distinct acts, resurrection shared by the two that need it', () => {
+    const labels = [LAPSED, CANCELLED, LIVE, DONE].map(offer => offer.label);
+
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  /**
+   * The dialog is the surface the specification's "the UI must say so before
+   * it happens" lands on, so the done case's own text has to carry the reopen
+   * rather than leaving it to the confirmation step alone.
+   */
+  it('warns a done task that retargeting reopens it as not done', () => {
+    expect(DONE.dialogDescription).toMatch(/not done/i);
+    expect(DONE.dialogDescription).toMatch(/reopen/i);
+  });
+
+  it('tells a cancelled task that a new future journal is the way back', () => {
+    expect(CANCELLED.dialogDescription).toMatch(/future/i);
+    expect(CANCELLED.dialogDescription).toMatch(/journal/i);
+  });
+
+  it('distinguishes a lapsed task from a live one in the dialog, not only in the button', () => {
+    expect(LAPSED.dialogTitle).not.toBe(LIVE.dialogTitle);
+    expect(LAPSED.dialogDescription).not.toBe(LIVE.dialogDescription);
+  });
+
+  it('gives every case a non-empty title, description and submit label', () => {
+    [LAPSED, CANCELLED, LIVE, DONE].forEach(offer => {
+      expect(offer.dialogTitle.length).toBeGreaterThan(0);
+      expect(offer.dialogDescription.length).toBeGreaterThan(0);
+      expect(offer.submitLabel.length).toBeGreaterThan(0);
     });
   });
 });

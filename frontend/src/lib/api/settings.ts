@@ -24,6 +24,22 @@ export const userSettingsKeys = {
   detail: () => [...userSettingsKeys.all, 'detail'] as const,
 };
 
+/**
+ * The user's default timezone from the localStorage cache, falling back to the
+ * browser's. Synchronous, so a caller can use it without awaiting the settings
+ * read — and so it can be reached from `lib/` without importing a component.
+ *
+ * It lives here rather than beside the settings UI that writes it because the
+ * cache key does, and because `lib/api/` must not depend on `components/`.
+ */
+export function getDefaultTimezone(): string {
+  if (typeof window === 'undefined') {
+    return 'UTC';
+  }
+  const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
+  return stored || Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 /** Write the timezone to the localStorage cache (no-op during SSR). */
 export function cacheTimezone(timezone: string): void {
   if (typeof window === 'undefined') return;

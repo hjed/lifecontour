@@ -2,7 +2,7 @@
  * Tests for date utility functions.
  */
 
-import { formatDateOnly, formatDateRange } from '../date-utils';
+import { formatDateOnly, formatDateRange, formatIsoDate } from '../date-utils';
 
 describe('formatDateOnly', () => {
   it('formats a date as YYYY-MM-DD', () => {
@@ -72,5 +72,22 @@ describe('formatDateRange', () => {
   it('handles leap year correctly', () => {
     const result = formatDateRange('2024-02-28', '2024-02-29');
     expect(result).toBe('28 - 29 Feb 2024');
+  });
+});
+
+describe('formatIsoDate', () => {
+  it('writes an ISO calendar date the way the rest of the app writes dates', () => {
+    expect(formatIsoDate('2026-09-01')).toBe('1 Sep 2026');
+  });
+
+  /**
+   * Its whole reason to exist, and the reason `formatDateRange` cannot be used
+   * for this: `new Date('2026-01-01')` is parsed as UTC midnight, so in any
+   * zone behind UTC it formats as the previous day. A date already resolved in
+   * the user's timezone must not be shifted a second time.
+   */
+  it('does not shift a date that has already been resolved', () => {
+    expect(formatIsoDate('2026-01-01')).toBe('1 Jan 2026');
+    expect(formatIsoDate('2026-12-31')).toBe('31 Dec 2026');
   });
 });

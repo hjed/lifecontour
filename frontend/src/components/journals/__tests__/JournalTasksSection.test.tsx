@@ -22,7 +22,11 @@ jest.mock('@/lib/api/tasks', () => ({
   useJournalTasks: jest.fn(),
   useUpdateTask: () => ({ mutate: jest.fn(), isPending: false }),
   useDeleteTask: () => ({ mutate: jest.fn(), isPending: false }),
+  useRetargetTask: () => ({ mutate: jest.fn(), isPending: false }),
   useTaskWriteInFlight: () => false,
+  TaskApiError: class TaskApiError extends Error {},
+  TASK_REOPEN_NOT_ACKNOWLEDGED: 'TASK_REOPEN_NOT_ACKNOWLEDGED',
+  TASK_DUE_JOURNAL_NOT_FUTURE: 'TASK_DUE_JOURNAL_NOT_FUTURE',
 }));
 
 const mockUseJournalTasks = useJournalTasks as jest.MockedFunction<

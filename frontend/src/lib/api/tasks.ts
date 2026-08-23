@@ -64,6 +64,17 @@ import { invalidateAfterMutation } from './invalidate-after-mutation';
 export const TASK_REOPEN_NOT_ACKNOWLEDGED = 'TASK_REOPEN_NOT_ACKNOWLEDGED';
 
 /**
+ * The refusal a due journal draws when it is not dated after today.
+ *
+ * Exported for the same reason as the acknowledgement, one step further on:
+ * this one belongs *against the due-journal field*, because it names the
+ * choice the user just made. The toast it also raises is left in place — a
+ * user who has scrolled away from the field would otherwise get no report at
+ * all — so branching on it adds an inline message rather than replacing one.
+ */
+export const TASK_DUE_JOURNAL_NOT_FUTURE = 'TASK_DUE_JOURNAL_NOT_FUTURE';
+
+/**
  * Query keys for tasks.
  *
  * `details`, `journalLists` and `upcoming` are **siblings** under `all`, never

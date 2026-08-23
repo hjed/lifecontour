@@ -4323,23 +4323,365 @@ two-shape patch, the lapse asymmetry, the toast-as-announcement, and the accessi
 diverging from it, and that delete and the empty cancelled row are journal-only. `api-design.md` is
 unchanged: no backend file was touched.
 
-#### Phase 18: Frontend — Retarget and Resurrect Dialog
+#### Phase 18: Frontend — Retarget and Resurrect Dialog ✅ COMPLETE
 
 **Prerequisites:** Phases 8 and 17.
 **Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Estimate revised before work started:** **~500–600 production → ~1,800–2,300 tracked.** Delivery rule 3
+caps a PR at ~500 changed lines *unless splitting would break rule 9, in which case the overrun is
+recorded in the phase before work starts* — so it is recorded here first, as Phase 17 did. Applying
+Phase 17's calibration refinement (*"for a frontend phase, count the production sites and multiply by
+~140 lines each"*), this phase has **five** production sites, not the one the ~140 implies: a
+future-journal query hook, the picker component, the dialog, the retarget entry in the wording module,
+and the row wiring. The picker is the site the original estimate could not have seen — `GET /api/journals`
+is `ORDER BY event_date_range_start DESC` with **no `sort` parameter**, so "nearest future journal first"
+cannot be asked for and has to be assembled in the browser over a bounded forward window.
+**Actual:** **1,163 production → 3,888 tracked** (865 tracked insertions across 14 files plus 3,023 lines
+in 7 new, untracked ones — `git diff --stat` alone would undercount this phase by three quarters, which
+is the trap Phase 8 recorded: *check `git status` for untracked paths before quoting a total*).
+Production 1,163: the dialog 396, the picker 305, the pure future-journal module 170, the query hook and
+its paging walk 134, the wording entry 89, the timezone helper's move into the API layer 31, the row
+wiring 11, the second error-code export 11, the shared date formatter 16. Tests 2,395. Docs 352,
+counting this entry.
 
-**Acceptance Criteria:**
+**The revised estimate was right about the shape and low by ~2× on the size — the same direction as
+Phase 17, and for a related reason.** The five production sites were the right five; four came in at
+170–396 lines against the ~140-per-site rule of thumb. What that rule misses here is that **two of the
+five sites are a rule rather than a component**: `future-journals.ts` is 170 lines to say "strictly after
+today, in the *configured* zone, nearest first", and the wording entry 89 lines for four labels. Phase 17
+recorded exactly this about its offer table (*"81 lines for what reads as three buttons"*), so the
+refinement is confirmed twice and is worth stating as its own rule: **count the product *decisions*, not
+the components — a decision with a docstring costs about as much as a component without one.** The
+multiplier landed at **3.3×**, consistent with Phases 15 (2.8×), 16 and 17 (3.7×): the ×4 calibration
+continues to hold on the frontend, and it is the production estimate that keeps missing.
 
-- [ ] A retarget dialog offering **future** journals, used both to extend a deadline and to resurrect a
-      lapsed or cancelled task.
-- [ ] Reopening a **done** task shows an explicit confirmation before it happens, and only then sends the
-      acknowledgement from Phase 7.
-- [ ] Lapsed rows expose resurrect, cancel and done inline, per the specification.
-- [ ] The dialog surfaces the service's rejection (a journal that is no longer future-dated) against the
-      field rather than as a toast-only failure.
+**A third of the production total arrived in the review round**, which is itself calibration data: 991 →
+1,163 and 3,097 → 3,888 after review. Two of the findings were defects that needed real code (the paging
+walk, the already-due guard), not polish.
+
+**Splitting is rejected rather than overlooked.** The natural cut — the picker first, the dialog after —
+ships a component nothing mounts, i.e. no user-visible surface at all, which breaks rule 9 far more
+plainly than the overrun breaks rule 3. The other candidate cut, resurrect-from-lapsed now and
+resurrect-from-cancelled later, would leave a cancelled row with **no exit whatsoever**, since Phase 17
+deliberately gives it no status action and names this phase as the way out.
+
+**Acceptance criteria, ticked:**
+
+- [x] A retarget dialog offering **future** journals, used both to extend a deadline and to resurrect a
+      lapsed or cancelled task. — `frontend/src/components/journals/RetargetTaskDialog.tsx`, mounted by
+      `JournalTaskActions` between the status actions and the secondary delete, and offered in **all
+      three** statuses. One dialog, four acts: `retargetAction(status, lapsed)` in `lib/task-display.ts`
+      words the trigger, the heading, the explanation and the submit button as **Resurrect** (lapsed or
+      cancelled), **Reschedule** (live) or **Reopen** (done).
+- [x] Reopening a **done** task shows an explicit confirmation before it happens, and only then sends the
+      acknowledgement from Phase 7. — and **the confirmation is the server's refusal, not a prediction of
+      it**; see decision 1.
+- [x] Lapsed rows expose resurrect, cancel and done inline, per the specification. — cancel and done are
+      Phase 17's; this adds the resurrect and asserts all three on one lapsed row, because "expose them
+      inline" is a claim about the row rather than about any one control.
+- [x] The dialog surfaces the service's rejection (a journal that is no longer future-dated) against the
+      field rather than as a toast-only failure. — `form.setError` on the due-journal field, with
+      `aria-invalid`, `aria-describedby` and focus following it. The toast stays; see decision 5.
+
+**Decisions taken (Phase 18):**
+
+1. **The reopen confirmation is driven by the server's refusal, not by a client-side prediction.** A done
+   task's retarget is sent *without* the acknowledgement, refused with `TASK_REOPEN_NOT_ACKNOWLEDGED` —
+   the 409 Phase 8 proved writes nothing, and which Phase 15 deliberately does not toast — and only then
+   confirmed and re-sent with `acknowledge_reopen: true`. A client-side gate reading `status === DONE`
+   would be a second copy of the service's rule, free to drift from it; worse, **it would sit ahead of
+   the future-date check**, so a done task retargeted onto a past journal would be asked to confirm a
+   request that was never going to succeed. Phase 7 put the acknowledgement gate last for exactly that
+   reason and Phase 8 pinned the ordering at both surfaces; predicting it here would have quietly undone
+   that. This is also the flow Phase 15 built for, which is the strongest evidence it is the intended one.
+2. **A new `FutureJournalPicker` rather than an extension of `JournalSearchCombobox`.** The existing
+   combobox searches *all* journals, renders nothing until typed into, and has no date filter — and the
+   merge dialog and the parent-journal field depend on all three. Four new branches under two existing
+   consumers is a worse trade than one narrow component, which Phase 20's create form can then mount
+   unchanged.
+3. **Nearest-first has to be assembled in the browser, and the reason is a gap in the list endpoint.**
+   `GET /api/journals` answers `ORDER BY event_date_range_start DESC` and takes **no `sort` parameter**,
+   so "everything from today, first page" returns the journals *furthest* away and hides the near ones
+   from anyone with a busy calendar. The picker therefore asks for a **bounded forward window** —
+   `start_date=today`, `end_date=today+90d`, `limit=100` — and sorts ascending; typing drops the far
+   bound, because a search that could not reach past ninety days would be worse than no search at all.
+   **Recorded as a constraint rather than worked around silently: a `sort` parameter on the journal list
+   is the change that would retire this**, and it is a candidate follow-up for whoever owns that endpoint.
+4. **`start_date` is sent as *today*, not tomorrow, and the strictly-after rule is applied client-side.**
+   The backend compares a date against a stored *timestamp*, so a journal starting at local midnight
+   tomorrow can be an instant that reads as today in UTC. One day of slack keeps it in the page, and
+   `option.date > today` — mirroring `is_future_dated`'s strictly-after — is applied where the zone is
+   known. The zone is the user's **configured** one (`useUserSettings`), with the value the settings UI
+   caches standing in while that read is in flight.
+5. **The `TASK_DUE_JOURNAL_NOT_FUTURE` toast stays, and the field error is *added*.** The criterion says
+   "rather than as a toast-**only** failure", which adding satisfies; and Phase 15 asserts that every
+   retarget failure but the acknowledgement toasts *"so the exception cannot widen by accident"*, so
+   suppressing this one would have meant deliberately breaking a guard written to stop exactly that. A
+   user who has scrolled away from the field would otherwise get no report at all.
+6. **A cancelled future journal is shown and cannot be chosen.** Nothing in the write rule refuses one —
+   only the date is checked — but a task made due in a cancelled journal is lapsed the instant it is read
+   back (`DUE_JOURNAL_CANCELLED`), which for a *resurrection* means resurrecting nothing. Hiding it would
+   send the user hunting for a journal they can see on every other surface, so it is rendered with its
+   marker, `aria-disabled`, and one line saying why. Not one of the four criteria; recorded because it is
+   a product rule this phase decided rather than inherited.
+7. **The automatic mention link is stated once, for every case, rather than in one of the four
+   descriptions.** "The previous due journal is automatically retained as an intermediate journal" is the
+   model's one automatic link and it happens on every retarget, not only on a deferral. The first draft
+   mentioned it only in the *Reschedule* wording, which would have made the model's one piece of implicit
+   behaviour invisible on the three paths a user is least likely to expect it.
+8. **Focus moves in an effect, not in the handler that causes the move.** Each of the three moments that
+   decide where focus belongs — the dialog opening, the reopen gate appearing, the gate being declined —
+   swaps which half of the dialog is mounted, so a `focus()` inside the click handler reaches for an
+   element React has not rendered yet. **Found by a failing test rather than by reading**, which is worth
+   recording: the first version passed every other focus assertion and failed only the one that crossed a
+   remount.
+9. **The picker is not wrapped in `FormControl`.** `FormControl` clones `id`, `aria-describedby` and
+   `aria-invalid` onto the child's **root** element, which here is the picker's container rather than its
+   input, so the three are passed to the input explicitly instead. The rest of the project's form standard
+   — `Form`, `FormField`, `FormItem`, `FormLabel`, `FormMessage`, react-hook-form and Zod — is followed as
+   written, and `FormLabel`'s `htmlFor` is pointed at the picker's input so the label still names it.
+10. **The picker walks to the *last* page of the listing, and the first draft had the reason exactly
+    backwards.** The listing is `ORDER BY event_date_range_start DESC`, so within any window the
+    **nearest** journals sort last — and a first page of 100 is the hundred *furthest* away, dropping
+    precisely the ones a picker exists for. The first draft bounded the window and wrote in a comment
+    that a truncated page "would be silently missing its far end, which is the harmless end to lose",
+    which is the opposite of what happens. `fetchNearestFutureJournals` now reads `page_count` off the
+    response and fetches the last page — one extra round trip, only when the listing overflows one —
+    and takes the page before it as well when the last page is short, or a total just past a page
+    boundary would offer two journals where a hundred exist. The window stays bounded for a different
+    reason: ninety days is what an unsearched picker should *offer*. **A `sort` parameter on
+    `GET /api/journals` would retire all of it**, and is the follow-up worth making if this grows again.
+11. **The journal the task is already due in is offered, marked and unselectable.** `retarget_due_journal`
+    treats a request naming the current due journal as a **no-op**: it validates nothing, writes nothing
+    and asks for no reopen acknowledgement. So a *done* task retargeted onto its own due journal answers
+    **200 and stays done** — the dialog would have toasted a move that never happened and skipped the
+    confirmation criterion 2 requires. The refusal has to be client-side because the server has no
+    reason to object. It shares a `refusalFor` table with the cancelled rule so both live in one place.
+12. **`superRefine` rather than `refine` on the due-journal field.** `refine` narrows the schema's
+    *output* away from `null` while its input keeps it, which leaves react-hook-form with two shapes for
+    one field and a type error that is easy to silence with a cast and hard to reason about afterwards.
+
+**Two defects this phase found in itself, after the tests were green.** Both were invisible for the same
+reason — every test drove the dialog down its happy path and stopped there.
+
+- **A *confirmed* reopen that then fails** — on the future-date rule or on anything else — left the dialog
+  on the confirmation panel, offering one button the service had just refused, with the explanation
+  rendered where the picker was not mounted. The one path in this dialog that could strand a user. The
+  error handler now leaves the confirmation step on any outcome but the acknowledgement 409, and three
+  tests cover it. The shape generalises: **a two-step dialog needs a test for a failure on the *second*
+  step, not only on the first.**
+- **Two of the three ways this dialog closes skipped its own reset.** Radix calls `onOpenChange` when
+  *it* closes the dialog — Escape, the overlay, the close button — but **not** when a controlled `open`
+  is set to false from inside, which is how both of the component's own closes worked: the Cancel button
+  and a successful move. So the form was never reset on either, and reopening restored the journal
+  already chosen, its submit already enabled — and, worst of the three, a *done* task whose reopen
+  confirmation had been dismissed with Escape reopened straight back into that confirmation on an
+  unrelated later retarget. Every close now goes through the one handler. Three tests, and removing the
+  fix fails two of them.
 
 **Required Test Coverage:** unit (RTL) — resurrect from lapsed and from cancelled, the done-reopen
 confirmation gate, rejection rendering, and dialog focus management. E2E deferred to Phase 22.
+
+**Delivered: 140 tests added, all passing, across four new files and three extended ones.**
+
+- **Pure (23):** `frontend/src/lib/__tests__/future-journals.test.ts` — the strictly-after-today boundary
+  (today and yesterday dropped, tomorrow kept), nearest-first assembled from a deliberately *newest-first*
+  fixture so a missing sort fails rather than passes, dates resolved in the supplied zone rather than the
+  browser's, the cancelled-event flag and the three states that are **not** cancellations, and the date
+  helpers.
+- **Hook (15):** `frontend/src/lib/api/__tests__/future-journals.test.ts` — the window's parameters, the
+  search dropping the far bound, nearest-first end to end, the configured timezone and its cached
+  fallback, a failed listing surfaced rather than answered as empty, and no request while disabled.
+- **Picker (35):** `FutureJournalPicker.test.tsx` — a list before any typing, debounced search, the two
+  distinct empty states, the loading and unavailable lines, a cancelled option shown-marked-unselectable
+  by mouse *and* by keyboard, arrow/Enter operation over `aria-activedescendant`, Escape left to the
+  dialog, and **no date input of any kind**.
+- **Dialog (46):** `RetargetTaskDialog.test.tsx` — resurrect from lapsed and from cancelled with the
+  request body pinned whole; the confirmation gate in four parts (it appears, it raises no toast,
+  declining sends nothing further, confirming re-sends *the same journal* with the acknowledgement); the
+  field-level rejection with its ARIA wiring and the selection preserved; four focus assertions; the
+  second-step failure above; the automatic-mention line on all four cases; and the fifth invariant
+  asserted twice — no date input in the dialog, and the request's attribute keys pinned to exactly
+  `due_journal_id` and `acknowledge_reopen`; and the three closing-and-reopening tests above.
+- **Dates (2 added; 12 in the file):** `date-utils.test.ts` — `formatIsoDate` and, its reason to exist,
+  that a date already resolved in the user's zone is not shifted a second time (`new Date('2026-01-01')`
+  is UTC midnight, so `formatDateRange` would render it as the previous day anywhere behind UTC).
+- **Row (8 added; 41 in the file):** `JournalTaskActions.test.tsx` — the trigger in all three statuses
+  with the right wording, all three of resurrect/cancel/done on a lapsed row, its position between the
+  status actions and the delete, that it is not the destructive variant and does not navigate, that
+  opening it writes nothing, and that it locks with the task's **twin** row mid-write.
+- **Wording (12 added; 34 in the file):** `task-display.test.ts` — the four cases, the WCAG 2.5.3
+  label-containment table, and that `statusActions` is untouched.
+- **Nothing below the component is mocked in the dialog suite.** The picker's listing, the user's
+  timezone and the retarget itself all go through `fetch`, so what is asserted is the request the user's
+  clicks actually produce rather than a hook standing in for them.
+- **Nineteen mutation checks, each confirmed caught and reverted:** dropping the ascending sort (3 tests
+  failed), making the future filter inclusive of today (3), always sending the acknowledgement (1 before
+  the review fixed the fake endpoint, **11** after), dropping the field-level mapping (3), letting a
+  cancelled journal be chosen (3), treating the 409 as an ordinary failure (6), closing without the reset
+  (2), taking the first page instead of walking to the last (3), acknowledging on the first request (11),
+  allowing the journal the task is already due in (3), hardcoding `aria-expanded` (3), dropping
+  `keepPreviousData` (1), dropping the far-bound slack (2), leaving the picker live during a write (1),
+  letting a user-initiated close through mid-write (1), rendering cached options through a failed read
+  (1), promising a date search again (1), leaving "Keep it done" live over the acknowledged write (1), and
+  submitting on `chosen` alone while the live due journal had moved (1).
+
+**Two existing tests were updated rather than worked around.** `JournalTaskActions`' tab-order and
+"delete last" assertions both enumerate the group's buttons, and the row genuinely has a fourth now, so
+both name it in its new position. `JournalTasksSection`'s module mock gained the three task-client exports
+the dialog reaches for. Neither assertion was weakened.
+
+**Recorded limitation, and it is Phase 20's to close.** *(The empty state now says so in a way that
+covers having no future journals at all, rather than only none in the window.)* With no future journals at all, this dialog says
+so plainly but does **not** offer to create one — the specification's "say so plainly and offer to create
+one" sits under *Creating a task*, and the offer is Phase 20's own acceptance criterion. A user in that
+state can read why the picker is empty but cannot act on it from here. Stated rather than left for
+someone to find, because the empty state is the one place this dialog is currently a dead end.
+
+**What the review round found, and two of them were defects rather than polish.** An independent review
+against the specification and this document turned up eight things worth acting on; the first two are the
+ones that would have shipped as bugs.
+
+- **The bounded window's reasoning was backwards, and the fix was the wrong fix** — decision 10. The
+  review put a number on it that the phase had not: an ordinary calendar-synced user fills ninety days
+  with more than a hundred journals, so this was not an edge case.
+- **The already-due-journal no-op** — decision 11. Reachable by marking a task done ahead of time and
+  then retargeting it onto the journal it was already due in.
+- **The reopen-gate tests could not fail on the thing they were for.** The suite queued responses by
+  *position*, so nothing asserted that the **first** request carried `acknowledge_reopen: false`. A
+  component that acknowledged on the first submit — skipping the confirmation entirely against a real
+  server — passed all five gate tests. The fake endpoint now answers the 409 from **what was sent**, and
+  the first body is asserted whole. Breaking the component that way now fails **11** tests; before the
+  fix it failed none. This is the most valuable thing the review found, because it is the difference
+  between a criterion being tested and appearing to be.
+- **`aria-expanded` was a literal `'true'`** while the listbox is hidden whenever it is empty, loading or
+  failed — pointing assistive technology at an element that is not displayed. It now follows the list,
+  and the test that asserted the literal now covers all three empty states.
+- **The picker blanked to a loading line on every keystroke**, because each debounced search is a new
+  query key. `placeholderData: keepPreviousData` fixes it; the picker's own suite mocks the hook, so only
+  the hook's suite could catch it.
+- **`lib/api/journals.ts` imported a `'use client'` component** for `getDefaultTimezone`, dragging Card,
+  Input and Button behind it. The helper moved to `lib/api/settings.ts`, where the cache key it reads
+  already lived; `TimezoneSettings` re-exports it so its existing callers are untouched.
+- **Focus on open raced Radix rather than using its hook.** `onOpenAutoFocus` is now explicit, which also
+  stops a control added above the picker later from moving focus silently.
+- Smaller: the date formatter moved to `date-utils`, where the format string belongs; `localDateIn`'s
+  fallback now survives an unparseable instant instead of throwing out of the catch; the duplicate
+  per-row `useMutationState` subscription is gone; the chosen option carries a check glyph as well as a
+  background (WCAG 1.4.1); and a test whose name promised an assertion it did not make was renamed.
+
+**What the PR's automated review then found — three more, all real.** Reviewed against the code before
+acting, since two of the three were framed more severely than they turned out to be.
+
+- **The window's far bound lost a day for users behind UTC.** `end_date` is a bare date and the backend
+  reads one as the end of that day in **UTC**, so the later hours of a user's own day-90 fell past the
+  cutoff. Asked for a day wide now; the largest offset in use is UTC-12, so one day covers every zone and
+  overshooting the far edge costs nothing. Graded *medium* by the reviewer and recorded here as **low** —
+  it is the far edge of a window whose size is our own choice, and search reaches past it either way —
+  but it is a real omission and the fix is one line.
+- **The picker stayed live while the write was in flight.** The consequence that matters is not the
+  cosmetic one: the reopen confirmation reads the *current* choice, so a selection changed mid-flight
+  would have had the panel describe a refusal that was about a different journal, and the server's
+  field-level rejection would have landed against a journal the request never named.
+- **Cancel could close the dialog over a request it could not recall**, so a task could move after the
+  user had explicitly cancelled. Cancel and Escape are both refused until the write settles.
+  **Aborting the request was considered and rejected**: a `POST` that has reached the server may already
+  have committed, so cancelling it client-side would make the UI's claim *less* true rather than more.
+  Holding the dialog open for the moment the write takes is the honest version.
+
+**A second automated round found two more, and one of them was a promise this phase had made and could
+not keep.**
+
+- **The picker's placeholder advertised "by title or date"; the endpoint searches
+  `(j.title ILIKE :search OR j.content ILIKE :search)`** and touches neither event-date column, so a date
+  query could never match. The wording now says *title*. Matching dates against the loaded window
+  client-side was considered and rejected: it would leave one control searching everything by title and
+  only ninety days by date, failing silently at exactly the range a date search is for. **The
+  specification does ask for date search** (§*Creating a task*), so this is a genuine gap rather than a
+  wording preference — recorded as a backend follow-up beside the `sort` parameter, since the two are the
+  same change to the same query.
+- **A failed read still offered the last list that worked.** `keepPreviousData` — added in the first
+  review round — holds the previous key's `data` across a search, so a failed refetch arrives with `data`
+  populated *and* `isError` set. The picker said the journals could not be loaded while offering a usable
+  list from a search the user had moved on from, `aria-expanded` still true. A fix that arrived with the
+  defect its predecessor introduced, which is worth recording as a shape: **a caching option changes what
+  every downstream `isError` branch means.**
+
+**A third round found the half the first one's fix had missed, and one narrow race.**
+
+- **"Keep it done" was still live over the acknowledged write.** Round 1 refused Cancel and Escape while a
+  retarget was in flight; the confirmation panel's own way out was not covered, so a user could press
+  *Reopen and move task*, change their mind, press *Keep it done*, and watch the task reopen anyway. The
+  incomplete half of a fix is worse than no fix, because the reply claiming it was made reads as
+  complete — recorded for that reason rather than for the line it took to close.
+- **A chosen journal could become the task's current due journal under an open dialog.** The picker
+  refuses that journal, but judges it from the snapshot taken when it was picked; the *task* is a prop, so
+  a refresh elsewhere can reclassify it afterwards. Submitting then draws a **no-op**: a 200 that moved
+  nothing, reported as a move, and for a done task a reopen that never happened. The submit condition now
+  re-reads the rule against the live prop.
+- **Declined: journals on local day 91 being shown.** The extra day is UTC-offset slack and
+  `futureJournalOptions` has no upper bound, so a day-91 journal can appear while the empty state says
+  "the next 90 days". No user-visible statement is false: that message renders **only** when the 91-day
+  window is empty, and a window with nothing in 91 days certainly has nothing in 90, so the two are never
+  on screen together. Showing one extra day of future journals is a superset, not a lie. Recorded as
+  considered and declined rather than silently ignored.
+
+**A latent flake of this phase's own, found while fixing the review's earlier round.** The hook suite let the localStorage
+timezone cache disagree with the settings response, which produces *two* query keys and two request
+walks — and the assertions read the **first** request, judged in the wrong zone. On a machine set to
+`Australia/Sydney` the two zones give the same date for fourteen hours a day and different ones for the
+other ten: a suite that passes all afternoon and fails overnight. `settingsRespondWith` now seeds the
+cache with the zone it answers, which is also the honest case, since the settings UI keeps the two in
+step. Verified by running the phase's four suites under `UTC`, `Pacific/Kiritimati` (UTC+14) and
+`Pacific/Midway` (UTC-11) as well as the machine's own zone: green in all four.
+
+**Recorded while doing that, and not this phase's to fix:** under those extreme zones **nine** tests fail
+in four suites this phase does not touch — `DayGroupedJournalList`, `IncompleteOutdoorActivitiesList`,
+`UpcomingActivitiesList` and `CheckedOutGearList`. They are green in the machine's own zone, which is
+what the gate runs in, so this is a latent condition rather than a regression; named here so whoever
+meets it does not go looking in the task surface.
+
+**Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
+clean, **0 errors**; the 112 remaining warnings are the pre-existing Playwright-plugin ones in
+`tests/e2e/`, the same 112 Phase 17 recorded, so this phase added none. The **full** Jest suite rather
+than the changed files alone, because `lib/api/journals.ts`, `lib/task-display.ts` and `lib/date-utils.ts`
+are imported far beyond this surface: **175 suites and 2,065 tests, all passing** (171 and 1,925 before).
+Re-run in full after each round of fixes rather than trusting the pass that preceded it. No backend
+gates — `ruff`, `mypy` and pytest all had nothing to run, since no Python file changed; and no e2e run,
+since no e2e file changed.
+
+**One ESLint suppression, and it is the only one.** `jsx-a11y/click-events-have-key-events` fires on the
+listbox option's `onClick`. The APG's combobox pattern puts every key on the *input* and leaves options
+unfocusable, so a keyboard handler on the option would be unreachable code standing in for the one on the
+combobox — which has its own arrow, Enter and Escape tests. Suppressed with that reason written next to
+it rather than satisfied with a handler nothing can reach.
+
+**Follow-ups this phase records rather than does.** None of the three is scope it dropped; each is work
+that belongs to something other than a frontend phase, and each is named here so it is tracked rather
+than remembered.
+
+1. **A `sort` parameter on `GET /api/journals`, and a date-aware `search`.** One change to one query,
+   and it retires two workarounds. The listing is DESC-only, which is why `fetchNearestFutureJournals`
+   exists at all — with an ascending sort the picker's read collapses back to one request and roughly
+   forty lines disappear. And `search` is `(j.title ILIKE OR j.content ILIKE)`, which is why the picker
+   advertises a title search where the specification asks for "title and date". Backend work, unowned by
+   any current phase.
+2. **The "no future journals at all" offer** — ITER18-001 **Phase 20**, whose acceptance criteria already
+   carry it. This dialog is a dead end for a user in that state until then, which is stated above.
+3. **Three readings of "is this a cancelled event journal?"** — `lib/future-journals.ts`,
+   `components/journals/JournalListItem.tsx` and `lib/calendarEventHelpers.ts`, each over a different
+   input type (`JournalResource`, and `DisplayJournal` twice). Unifying them means changing signatures in
+   files this phase has no other business in, so it is named rather than done under cover of an unrelated
+   change.
+
+**Docs:** `frontend-design.md` gains two subsections under *The Journal Task Surface* — *Retarget and
+resurrect* (the server-driven confirmation and why not to predict it, why the affordance is outside the
+status offer table, the toast-plus-field rule, the focus effect, and the `FormControl` exception) and
+*The future-journal picker* (the DESC-only endpoint and the bounded window, the today-not-tomorrow slack,
+the configured-versus-browser zone, the cancelled-journal rule, why `JournalSearchCombobox` was not
+extended, and the ARIA). `home-dashboard-wireframe.md` gains gap 10: the retarget affordance is
+journal-only for the same reason delete is, and the dashboard's own row stays exactly as W24 draws it.
+`api-design.md` is deliberately untouched: no backend file was changed.
 
 #### Phase 19: Frontend — Attach and Detach Mention Links
 

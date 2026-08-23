@@ -18,6 +18,14 @@
  *   both status calls out of it, so a button here could only draw a 409. The
  *   offer table in `lib/task-display.ts` is where that rule lives.
  *
+ * That exit is `RetargetTaskDialog`, mounted here between the status actions
+ * and the delete. It is not part of the status offer table — retargeting is
+ * not a status transition, and it is offered in **every** status: on a live
+ * task it extends a deadline, on a lapsed or cancelled one it is the
+ * resurrection the specification names, and on a done one it is a reopen the
+ * dialog confirms first. It shares this group's in-flight guard, because it is
+ * a write against the same task.
+ *
  * The optimistic update and its rollback belong to `useUpdateTask`, not here:
  * the criterion pairs them with `invalidateAfterMutation`, which is the hook's
  * responsibility, and the retarget dialog and the dashboard reuse the same
@@ -39,6 +47,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { RetargetTaskDialog } from '@/components/journals/RetargetTaskDialog';
 import {
   useDeleteTask,
   useTaskWriteInFlight,
@@ -116,6 +125,8 @@ export function JournalTaskActions({
           </Button>
         );
       })}
+
+      <RetargetTaskDialog task={task} disabled={writing} />
 
       <AlertDialog>
         <AlertDialogTrigger asChild>

@@ -5,7 +5,7 @@
  * with proper timezone handling and Australian locale support.
  */
 
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { enAU } from 'date-fns/locale';
 
 /**
@@ -62,4 +62,18 @@ export function formatDateRange(
 
   // Different months, show full range
   return `${format(startDate, 'd MMM yyyy', { locale: enAU })} - ${format(endDate, 'd MMM yyyy', { locale: enAU })}`;
+}
+
+/**
+ * Format an ISO **calendar date** (`YYYY-MM-DD`) as `d MMM yyyy`.
+ *
+ * Distinct from {@link formatDateRange}, which takes instants: `new
+ * Date('2026-09-01')` is parsed as UTC midnight, so in any zone behind UTC it
+ * formats as the previous day. A date that has already been resolved in the
+ * user's timezone must not be shifted again, so this parses it as local.
+ *
+ * @example formatIsoDate('2026-09-01') // "1 Sep 2026"
+ */
+export function formatIsoDate(date: string): string {
+  return format(parseISO(date), 'd MMM yyyy', { locale: enAU });
 }

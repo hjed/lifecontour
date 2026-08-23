@@ -6,6 +6,7 @@
  */
 
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -40,6 +41,33 @@ import {
 } from '@/lib/constants';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { taskKeys } from './tasks';
+import { getDefaultTimezone, useUserSettings } from './settings';
+import {
+  addDaysToIsoDate,
+  futureJournalOptions,
+  todayIn,
+  FUTURE_WINDOW_DAYS,
+} from '@/lib/future-journals';
+import type { FutureJournalOption } from '@/lib/future-journals';
+
+/** The largest page the listing endpoint will answer with. */
+const FUTURE_PAGE_LIMIT = 100;
+
+/**
+ * One day of slack on the window's far bound.
+ *
+ * `end_date` is sent as a bare date, and the backend reads a bare date as the
+ * end of that day in **UTC** (`event_date_range_start <= end_date`). For a user
+ * behind UTC the later hours of their own day-90 fall *past* that cutoff, so
+ * journals inside a window advertised as ninety days would be dropped from it.
+ * The largest offset in use is UTC-12, so one day covers every zone.
+ *
+ * Overshooting the far edge costs nothing that matters: the window's size is
+ * our own choice, the picker shows the nearest journals first, and nothing
+ * downstream trims by it — only the strictly-after-today rule filters, and that
+ * is at the other end.
+ */
+const FUTURE_WINDOW_SLACK_DAYS = 1;
 
 // Query Keys
 export const journalKeys = {
@@ -54,6 +82,16 @@ export const journalKeys = {
   details: () => [...journalKeys.all, 'detail'] as const,
   detail: (id: string) => [...journalKeys.details(), id] as const,
   search: (query: string) => [...journalKeys.all, 'search', query] as const,
+  /**
+   * The future-journal options behind a due-journal picker.
+   *
+   * `today` and `timezone` are part of the key rather than incidental inputs:
+   * the answer is "which journals are still ahead of the user", so a result
+   * cached yesterday, or judged in a zone they have since changed, is a
+   * different answer to a different question.
+   */
+  future: (params: { search: string; today: string; timezone: string }) =>
+    [...journalKeys.all, 'future', params] as const,
   contactJournals: (contactId: string, filters?: ContactJournalsFilters) =>
     [...journalKeys.all, 'contact', contactId, filters] as const,
 };
@@ -925,6 +963,123 @@ export function useJournals(
     queryFn: () => fetchJournals(filters),
     staleTime: 5 * 60 * 1000, // 5 minutes
     enabled: options.enabled,
+  });
+}
+
+/**
+ * The journals nearest the front of a filtered listing, which is the **last**
+ * page of it.
+ *
+ * This exists because the ordering is fixed and cannot be asked for. The
+ * listing answers `ORDER BY event_date_range_start DESC`, so within any window
+ * the *nearest* journals sort last — and a naive first page of 100 therefore
+ * returns the hundred furthest away and silently drops exactly the ones a
+ * picker is for. Bounding the window does not fix that: it caps how far the far
+ * end reaches, while the end that gets cut is still the near one. An ordinary
+ * calendar-synced user fills ninety days with more than a hundred journals.
+ *
+ * So the page count is read from the response and the **last** page is
+ * fetched — one extra round trip, and only for a listing that overflows a page.
+ * When that last page is short (a total just past a page boundary leaves it
+ * holding one or two) the page before it is taken as well, or a busy user would
+ * be offered two journals where a hundred exist.
+ *
+ * A `sort` parameter on `GET /api/journals` would retire all of this, and is
+ * the change worth making if this file grows again.
+ */
+async function fetchNearestFutureJournals(
+  filters: JournalFilters
+): Promise<JournalListResponse['data']> {
+  const first = await fetchJournals({
+    ...filters,
+    page: 1,
+    limit: FUTURE_PAGE_LIMIT,
+  });
+
+  const { pageCount } = getJournalPaginationMeta(first.meta);
+  if (pageCount === undefined || pageCount <= 1) {
+    return first.data;
+  }
+
+  const last = await fetchJournals({
+    ...filters,
+    page: pageCount,
+    limit: FUTURE_PAGE_LIMIT,
+  });
+  if (last.data.length >= FUTURE_PAGE_LIMIT) {
+    return last.data;
+  }
+
+  const penultimate =
+    pageCount === 2
+      ? first
+      : await fetchJournals({
+          ...filters,
+          page: pageCount - 1,
+          limit: FUTURE_PAGE_LIMIT,
+        });
+  return [...penultimate.data, ...last.data];
+}
+
+/**
+ * The journals a task can be made **due** in: future-dated, nearest first.
+ *
+ * A thin shell over {@link futureJournalOptions}, which owns the strictly-
+ * after-today rule and the ordering, and {@link fetchNearestFutureJournals},
+ * which owns getting the *near* end of a listing whose order is fixed the wrong
+ * way round. Two choices live here.
+ *
+ * **The window is bounded, and the search's is not.** Ninety days is what an
+ * unsearched picker offers, because "the trip I already planned" is almost
+ * always inside it and a year of plans would bury it. A search drops the far
+ * bound, because a search that could not reach past ninety days would be a
+ * worse answer than no search at all.
+ *
+ * **`start_date` is sent as today, not tomorrow.** The filter it drives is
+ * `event_date_range_end >= start_date`, so it is generous by construction — a
+ * journal already under way still matches — and asking for tomorrow would risk
+ * dropping a journal starting at local midnight in a zone ahead of UTC. The
+ * strictly-after rule is applied afterwards, in the zone where it means
+ * something.
+ *
+ * The zone is the user's **configured** one, because that is the one the
+ * server judges by. While that read is in flight the cached value the settings
+ * UI writes stands in — and because the two can still disagree, the server's
+ * `TASK_DUE_JOURNAL_NOT_FUTURE` remains the authority. This list only keeps a
+ * doomed choice off the screen.
+ */
+export function useFutureJournals(
+  options: { search?: string; enabled?: boolean } = {}
+) {
+  const search = options.search?.trim() ?? '';
+  const { data: settings } = useUserSettings();
+  const timezone = settings?.data.attributes.timezone ?? getDefaultTimezone();
+  const today = todayIn(timezone);
+
+  return useQuery({
+    queryKey: journalKeys.future({ search, today, timezone }),
+    queryFn: async (): Promise<FutureJournalOption[]> => {
+      const journals = await fetchNearestFutureJournals({
+        ...(search ? { search } : {}),
+        date_from: today,
+        // Search reaches past the window; the unsearched list does not, or the
+        // near future would be buried under a year of plans.
+        ...(search
+          ? {}
+          : {
+              date_to: addDaysToIsoDate(
+                today,
+                FUTURE_WINDOW_DAYS + FUTURE_WINDOW_SLACK_DAYS
+              ),
+            }),
+      });
+      return futureJournalOptions(journals, { timezone, today });
+    },
+    enabled: options.enabled ?? true,
+    // Each debounced keystroke is a new key, and without this the list is
+    // replaced by a loading line every time the user types another letter.
+    placeholderData: keepPreviousData,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
 
