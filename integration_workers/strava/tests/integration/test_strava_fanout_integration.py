@@ -171,9 +171,7 @@ async def _run_child(
     job_try: int = 1,
 ) -> None:
     """Run one batch child under stubbed Strava (raises if ``error`` is set)."""
-    async with _stubbed_strava(
-        list_batches=None, sync_side=error if error else _BATCH_RESULT
-    ):
+    async with _stubbed_strava(list_batches=None, sync_side=error or _BATCH_RESULT):
         ctx = _ctx(session_factory, redis_pool, child_job_id, job_try=job_try)
         await _worker_fn("sync_strava_activity_batch")(ctx, "user-1", [1], parent_id)
 

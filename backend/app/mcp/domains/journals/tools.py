@@ -417,7 +417,7 @@ def _parse_optional_datetime_filter(
                 tzinfo=UTC,
             )
         else:
-            parsed_datetime = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+            parsed_datetime = datetime.fromisoformat(normalized)
     except ValueError as exc:
         raise ValueError(
             f"Invalid {field_name} '{value}'. Must be a valid ISO date or datetime."

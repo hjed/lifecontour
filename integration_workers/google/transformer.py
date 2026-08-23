@@ -487,13 +487,11 @@ class GoogleContactTransformer:
 
         company = None
         if hasattr(selected_org, "name") and selected_org.name:
-            company = selected_org.name.strip() if selected_org.name.strip() else None
+            company = selected_org.name.strip() or None
 
         job_title = None
         if hasattr(selected_org, "title") and selected_org.title:
-            job_title = (
-                selected_org.title.strip() if selected_org.title.strip() else None
-            )
+            job_title = selected_org.title.strip() or None
 
         logger.debug(
             "Extracted organization info",

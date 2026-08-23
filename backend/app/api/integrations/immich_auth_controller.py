@@ -283,7 +283,7 @@ async def list_immich_conflicts(
         name = " ".join(part for part in (first_name, last_name) if part)
         return ImmichConflictCandidate(
             id=contact_id,
-            name=name if name else f"Contact {contact_id}",
+            name=name or f"Contact {contact_id}",
             photo_url=photo_url,
         )
 

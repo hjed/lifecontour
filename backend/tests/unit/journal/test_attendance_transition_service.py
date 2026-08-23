@@ -72,7 +72,7 @@ class TestAttendanceTransitionEligibility:
         assert mock_repo.update_status.call_count == 2
         # Verify each call was made with ATTENDED
         for call in mock_repo.update_status.call_args_list:
-            args = call[1] if call[1] else {}
+            args = call[1] or {}
             if args:
                 assert args.get("status") == AttendeeStatus.ATTENDED
             else:

@@ -46,7 +46,7 @@ def generate_gpx(
         return None
 
     # Parse start time
-    start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+    start_dt = datetime.fromisoformat(start_date)
 
     # Register namespace to avoid ns0: prefixes in output
     ET.register_namespace("", _GPX_NS)

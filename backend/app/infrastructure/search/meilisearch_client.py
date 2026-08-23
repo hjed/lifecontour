@@ -23,7 +23,7 @@ def get_meilisearch_client() -> MeiliSearchClient:
 
     client = MeiliSearchClient(
         url=settings.meilisearch_url,
-        api_key=settings.meilisearch_api_key if settings.meilisearch_api_key else None,
+        api_key=settings.meilisearch_api_key or None,
     )
 
     logger.info("MeiliSearch client created", url=settings.meilisearch_url)

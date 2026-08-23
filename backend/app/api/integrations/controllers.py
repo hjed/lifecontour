@@ -274,7 +274,7 @@ async def list_sync_jobs(
 
         if date_from:
             try:
-                date_from_dt = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+                date_from_dt = datetime.fromisoformat(date_from)
             except ValueError as e:
                 raise HTTPException(
                     status_code=400,
@@ -283,7 +283,7 @@ async def list_sync_jobs(
 
         if date_to:
             try:
-                date_to_dt = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+                date_to_dt = datetime.fromisoformat(date_to)
             except ValueError as e:
                 raise HTTPException(
                     status_code=400,

@@ -281,7 +281,7 @@ async def _populate_contact_names(
             name_parts = [part for part in (first_name, last_name) if part]
             name = " ".join(name_parts)
             contact_cache[cid] = {
-                "name": name if name else f"Contact {cid}",
+                "name": name or f"Contact {cid}",
                 "first_name": first_name,
                 "last_name": last_name,
                 "photo_url": photo_url,
@@ -1227,8 +1227,8 @@ async def list_journals(
         offset=pagination.offset,
         limit=pagination.limit,
         journal_type=journal_type,
-        start_date=start_date if start_date else None,
-        end_date=end_date if end_date else None,
+        start_date=start_date or None,
+        end_date=end_date or None,
         contact_id=str(contact_id) if contact_id else None,
         tag_ids=requested_tag_ids or None,
         calendar_id=calendar_id,
@@ -1239,8 +1239,8 @@ async def list_journals(
     total_count = await journal_service.get_journals_count(
         user_id=user.id,
         journal_type=journal_type,
-        start_date=start_date if start_date else None,
-        end_date=end_date if end_date else None,
+        start_date=start_date or None,
+        end_date=end_date or None,
         contact_id=str(contact_id) if contact_id else None,
         tag_ids=requested_tag_ids or None,
         calendar_id=calendar_id,

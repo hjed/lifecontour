@@ -514,9 +514,9 @@ def _transform_organizations(contact: dict[str, Any]) -> list[dict[str, Any]] | 
 
     # Normalize whitespace - strip and convert empty strings to None
     if company:
-        company = company.strip() if company.strip() else None
+        company = company.strip() or None
     if job_title:
-        job_title = job_title.strip() if job_title.strip() else None
+        job_title = job_title.strip() or None
 
     # Only create organization if at least one field is present
     if not company and not job_title:

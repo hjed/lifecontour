@@ -351,7 +351,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         # Perform search
         results = search_service.search_contacts(
             query=query,
-            filters=filters if filters else None,
+            filters=filters or None,
             limit=limit,
             offset=0,
         )

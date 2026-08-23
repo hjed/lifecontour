@@ -88,7 +88,7 @@ def search_contacts(
     try:
         results = search_service.search_contacts(
             query=q,
-            filters=filters if filters else None,
+            filters=filters or None,
             limit=limit,
             offset=offset,
             sort=sort,

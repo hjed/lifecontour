@@ -90,7 +90,7 @@ async def list_routes(
         page,
         limit,
         total_count,
-        additional_params=additional_params if additional_params else None,
+        additional_params=additional_params or None,
     )
 
     return RouteListResponse(

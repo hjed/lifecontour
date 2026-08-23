@@ -997,8 +997,7 @@ async def update_gear_maintenance_type_data(
         # Extract the original message to prevent "field: field: message" duplication
         raw_msg = str(e)
         prefix = f"{e.field}: "
-        if raw_msg.startswith(prefix):
-            raw_msg = raw_msg[len(prefix) :]
+        raw_msg = raw_msg.removeprefix(prefix)
         raise JournalValidationError(e.field, raw_msg) from e
 
 
@@ -1051,8 +1050,7 @@ async def update_gear_usage_type_data(
     except GearUsageDataValidationError as e:
         raw_msg = str(e)
         prefix = f"{e.field}: "
-        if raw_msg.startswith(prefix):
-            raw_msg = raw_msg[len(prefix) :]
+        raw_msg = raw_msg.removeprefix(prefix)
         raise JournalValidationError(e.field, raw_msg) from e
 
 

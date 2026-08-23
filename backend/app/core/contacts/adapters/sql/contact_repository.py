@@ -558,7 +558,7 @@ class SqlContactRepository(ContactRepository):
             WHERE id = :contact_id
             """
         )
-        conn = transaction if transaction else self.conn
+        conn = transaction or self.conn
         result = await conn.execute(query, {"contact_id": contact_id})
         if result.rowcount == 0:
             raise ContactNotFoundError(contact_id)

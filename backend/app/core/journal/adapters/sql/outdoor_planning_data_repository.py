@@ -39,7 +39,7 @@ class SqlOutdoorPlanningDataRepository(OutdoorPlanningDataRepository):
         return OutdoorPlanningData(
             journal_id=row.journal_id,
             topics=row.topics,
-            activity_types=activity_types if activity_types else [],
+            activity_types=activity_types or [],
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -87,7 +87,7 @@ class SqlOutdoorPlanningDataRepository(OutdoorPlanningDataRepository):
 
         data.created_at = row.created_at
         data.updated_at = row.updated_at
-        data.activity_types = activity_types if activity_types else []
+        data.activity_types = activity_types or []
 
         return data
 
