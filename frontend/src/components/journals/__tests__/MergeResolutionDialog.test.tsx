@@ -283,6 +283,138 @@ describe('MergeResolutionDialog', () => {
     });
   });
 
+  describe('event timing', () => {
+    const CAL_ID = '11111111-1111-1111-1111-111111111111';
+
+    /**
+     * An event's timing is stored twice: `event_date_range` carries UTC
+     * datetimes and the calendar row carries the clock times.
+     */
+    const makeTimedEvent = (
+      id: string,
+      range: { start: string; end: string },
+      times: { start_time: string; end_time: string }
+    ) =>
+      ({
+        id,
+        type: 'journals',
+        attributes: {
+          title: 'Same Title',
+          content: 'Same Content',
+          event_date_range: range,
+          created_at: '',
+          updated_at: '',
+          is_archived: false,
+          journal_date: '',
+          type_data: {
+            event: { calendar_id: CAL_ID, is_all_day: false, ...times },
+          },
+        },
+        relationships: {},
+      }) as unknown as JournalResource;
+
+    const targetEvent = () =>
+      makeTimedEvent(
+        '1',
+        { start: '2026-08-23T09:00:00Z', end: '2026-08-23T10:00:00Z' },
+        { start_time: '09:00:00', end_time: '10:00:00' }
+      );
+
+    const sourceEvent = () =>
+      makeTimedEvent(
+        '2',
+        { start: '2026-08-23T19:30:00Z', end: '2026-08-23T22:00:00Z' },
+        { start_time: '19:30:00', end_time: '22:00:00' }
+      );
+
+    const renderDialog = (target: JournalResource, source: JournalResource) =>
+      render(
+        <MergeResolutionDialog
+          targetJournal={target}
+          sourceJournal={source}
+          open={true}
+          isPending={false}
+          onOpenChange={mockOnOpenChange}
+          onResolve={mockOnResolve}
+        />
+      );
+
+    it('asks about the event timing once, not three times', () => {
+      renderDialog(targetEvent(), sourceEvent());
+
+      expect(screen.getByText('Event Dates & Times')).toBeInTheDocument();
+      expect(screen.queryByText('Event — Start Time')).not.toBeInTheDocument();
+      expect(screen.queryByText('Event — End Time')).not.toBeInTheDocument();
+      expect(screen.queryByText('19:30:00')).not.toBeInTheDocument();
+      expect(screen.queryByText('22:00:00')).not.toBeInTheDocument();
+    });
+
+    it('sends the clock times of whichever side won the dates', async () => {
+      const user = userEvent.setup();
+      renderDialog(targetEvent(), sourceEvent());
+
+      await user.click(screen.getByTestId('radio-source-event_date_range'));
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T19:30:00Z',
+            end: '2026-08-23T22:00:00Z',
+          },
+          type_data: {
+            event: { start_time: '19:30:00', end_time: '22:00:00' },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('keeps the target dates and target clock times together', async () => {
+      const user = userEvent.setup();
+      renderDialog(targetEvent(), sourceEvent());
+
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T09:00:00Z',
+            end: '2026-08-23T10:00:00Z',
+          },
+          type_data: {
+            event: { start_time: '09:00:00', end_time: '10:00:00' },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('still asks about a clock time that differs on its own', () => {
+      const sameRange = {
+        start: '2026-08-23T09:00:00Z',
+        end: '2026-08-23T10:00:00Z',
+      };
+      renderDialog(
+        makeTimedEvent('1', sameRange, {
+          start_time: '09:00:00',
+          end_time: '10:00:00',
+        }),
+        makeTimedEvent('2', sameRange, {
+          start_time: '09:00:00',
+          end_time: '11:00:00',
+        })
+      );
+
+      expect(screen.queryByText('Event Dates & Times')).not.toBeInTheDocument();
+      expect(screen.getByText('Event — End Time')).toBeInTheDocument();
+    });
+  });
+
   describe('fitness merge mode', () => {
     const makeFitnessJournal = (id: string, fitness: Record<string, unknown>) =>
       ({

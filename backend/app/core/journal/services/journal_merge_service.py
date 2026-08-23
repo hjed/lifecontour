@@ -21,6 +21,7 @@ from app.core.journal.models.events import (
     JournalUpdated,
 )
 from app.core.journal.models.repositories import JournalRepository
+from app.core.journal.services.type_data_coercion import coerce_type_data_override
 from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
@@ -54,6 +55,9 @@ class JournalMergeService:
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
         self.task_anchor_repo = task_anchor_repo
+        # Column types describe the schema, not any one journal, so they are
+        # worth keeping for as long as this service lives.
+        self._column_type_cache: dict[str, dict[str, str]] = {}
 
     def has_base_conflicts(self, target: Journal, source: Journal) -> bool:
         """Check whether two journals have conflicting base fields.
@@ -703,6 +707,31 @@ class JournalMergeService:
         )
         changed_fields[f"{table_name}_added"] = True
 
+    async def _column_types(
+        self, table_name: str, transaction: AsyncConnection
+    ) -> dict[str, str]:
+        """Map each column of ``table_name`` to its Postgres data type.
+
+        Cached per merge: a journal has at most one row per type table, so the
+        lookup runs once for each table that actually carries overrides.
+        """
+        cached = self._column_type_cache.get(table_name)
+        if cached is not None:
+            return cached
+
+        result = await transaction.execute(
+            text("""
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name
+            """),
+            {"table_name": table_name},
+        )
+        column_types = {row.column_name: row.data_type for row in result.fetchall()}
+        self._column_type_cache[table_name] = column_types
+        return column_types
+
     async def _merge_existing_type_data(
         self,
         table_name: str,
@@ -732,6 +761,17 @@ class JournalMergeService:
         type_data_overrides = overrides.get("type_data") or {}
         for type_key in type_keys:
             type_overrides.update(type_data_overrides.get(type_key, {}))
+
+        # Overrides arrive as JSON, so a clock time is the string '19:30:00'
+        # while its column is a TIME. asyncpg encodes each parameter against the
+        # column's type and refuses the string, so give every override the type
+        # its column takes before it reaches the UPDATE below.
+        if type_overrides:
+            column_types = await self._column_types(table_name, transaction)
+            type_overrides = {
+                col: coerce_type_data_override(col, value, column_types.get(col))
+                for col, value in type_overrides.items()
+            }
 
         combined = (
             self._combine_fitness_metrics(target_dict, source_dict)
