@@ -2768,6 +2768,18 @@ async def merge_journal(
         include_routes=False,
     )
 
+    # A merge keeps the survivor's own parent and adopts the source's children,
+    # so the response has to describe that hierarchy — reporting neither reads
+    # as though the merge orphaned the survivor.
+    parent, children, children_count = await _fetch_parent_and_children(
+        target_journal, user.id, journal_service
+    )
+
+    depth_map = await HierarchyService.compute_depth_map(
+        [journal_id], journal_service.journal_repo
+    )
+    depth = depth_map.get(journal_id, 1)
+
     base_url = get_request_base_url(request)
     resource = JournalConverter.to_resource(
         journal=target_journal,
@@ -2776,6 +2788,10 @@ async def merge_journal(
         contacts=contacts,
         tags=tags,
         calendar=calendar,
+        parent=parent,
+        children=children,
+        children_count=children_count,
+        depth=depth,
         base_url=base_url,
     )
     return await _build_journal_response(resource, contact_repo)

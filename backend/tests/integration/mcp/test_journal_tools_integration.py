@@ -932,6 +932,101 @@ class TestJournalToolsIntegration:
             assert payload["parent"]["id"] == sample_journal_id
 
     @pytest.mark.asyncio
+    async def test_get_journal_returns_parent_summary_integration(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        """Reading a child back reports the parent it was created under.
+
+        The create response already carried the parent, so a link that is
+        absent here looks to an agent like ``parent_id`` was ignored on create
+        even though it was persisted.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            create_response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "create_journal_entry",
+                        "arguments": {
+                            "request": {
+                                "title": "Child Journal Read Back",
+                                "content": "Created under a parent",
+                                "event_date_range": {
+                                    "start": "2024-01-15T00:00:00Z",
+                                    "end": "2024-01-15T01:00:00Z",
+                                },
+                                "parent_id": sample_journal_id,
+                            }
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert create_response.status_code == 200
+            create_payload = extract_mcp_json_payload(create_response.text)
+            assert "error" not in create_payload
+            child_id = create_payload["id"]
+
+            read_response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_journal",
+                        "arguments": {"journal_id": child_id},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert read_response.status_code == 200
+        read_payload = extract_mcp_json_payload(read_response.text)
+
+        assert "error" not in read_payload
+        assert read_payload["id"] == child_id
+        assert read_payload["parent"]["id"] == sample_journal_id
+        assert read_payload["parent"]["title"] == "Test Journal"
+        assert "Child of: Test Journal" in read_payload["summary"]
+
+    @pytest.mark.asyncio
+    async def test_get_journal_root_journal_has_no_parent_integration(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        """A journal with no parent still reports ``parent`` as null."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            response = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_journal",
+                        "arguments": {"journal_id": sample_journal_id},
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+        assert response.status_code == 200
+        payload = extract_mcp_json_payload(response.text)
+
+        assert "error" not in payload
+        assert payload["id"] == sample_journal_id
+        assert payload["parent"] is None
+        assert "Child of" not in payload["summary"]
+
+    @pytest.mark.asyncio
     async def test_update_journal_parent_id_integration(
         self, authenticated_lifespan_client, sample_journal_id: int
     ) -> None:
@@ -2433,6 +2528,93 @@ class TestMergeMcpToolsMountedIntegration:
         assert row.creating_journal_id == target_id
         assert row.due_journal_id == due_id
         assert row.status == "not_done"
+
+    @pytest.mark.asyncio
+    async def test_merge_journals_keeps_target_parent(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """The merge response reports the parent the target still hangs off.
+
+        The merge never touches ``parent_id``, so a response without it reads
+        as though the survivor was orphaned by the merge.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            parent_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Parent Journal",
+                            "content": "Parent content",
+                            "event_date_range": {
+                                "start": "2024-06-01T00:00:00Z",
+                                "end": "2024-06-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert parent_response.status_code == 201
+            parent_id = int(parent_response.json()["data"]["id"])
+
+            target_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Child Target",
+                            "content": "Target content",
+                            "event_date_range": {
+                                "start": "2024-06-01T00:00:00Z",
+                                "end": "2024-06-01T23:59:59Z",
+                            },
+                            "parent_id": parent_id,
+                        },
+                    }
+                },
+            )
+            assert target_response.status_code == 201
+            target_id = int(target_response.json()["data"]["id"])
+
+            source_response = await authenticated_client.post(
+                "/api/journals",
+                json={
+                    "data": {
+                        "type": "journals",
+                        "attributes": {
+                            "title": "Source Journal",
+                            "content": "Source content",
+                            "event_date_range": {
+                                "start": "2024-06-01T00:00:00Z",
+                                "end": "2024-06-01T23:59:59Z",
+                            },
+                        },
+                    }
+                },
+            )
+            assert source_response.status_code == 201
+            source_id = int(source_response.json()["data"]["id"])
+
+            session_id = await initialize_mcp_session(authenticated_client)
+            import json
+
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "merge_journals",
+                {
+                    "target_journal_id": target_id,
+                    "merge_data": json.dumps({"source_journal_id": source_id}),
+                },
+            )
+
+        assert payload["id"] == target_id
+        assert payload["parent"]["id"] == parent_id
+        assert payload["parent"]["title"] == "Parent Journal"
 
     @pytest.mark.asyncio
     async def test_merge_journals_simple(
