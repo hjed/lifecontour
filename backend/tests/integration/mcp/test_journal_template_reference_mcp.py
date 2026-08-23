@@ -519,6 +519,19 @@ async def test_mcp_create_rejects_a_malformed_template_id(
 
 
 @pytest.mark.asyncio
+async def test_mcp_create_rejects_an_empty_template_id(
+    authenticated_lifespan_client,
+) -> None:
+    """An empty template_id is malformed, not "no template"."""
+    async with authenticated_lifespan_client() as client:
+        session_id = await initialize_mcp_session(client)
+
+        created = await _create_from_template(client, session_id, "CANYONING", "")
+        assert "error" in created, created
+        assert "template_id" in created["message"]
+
+
+@pytest.mark.asyncio
 async def test_mcp_create_rejects_a_template_on_a_non_abseiling_journal(
     authenticated_lifespan_client,
 ) -> None:

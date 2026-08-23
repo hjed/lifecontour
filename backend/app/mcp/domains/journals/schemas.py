@@ -520,10 +520,11 @@ class JournalCreateRequest(BaseModel):
         default=None,
         description="Activity template to create this journal from (UUID from "
         "search_templates). Records the durable template reference and fills in "
-        "the template's standard pitches, the abseil counts derived from them, "
-        "and its own type fields (french grade, climbing grade, …). Anything you "
-        "pass in type_data wins over the template. Requires an abseiling-derived "
-        "type: ABSEILING_TRIP, CANYONING, CLIMBING or CAVING.",
+        "the template's standard pitches, the abseil counts derived from those "
+        "pitches, and its own type fields (french grade, climbing grade, …). "
+        "Anything you pass in type_data wins over the template, including counts "
+        "you set yourself. Requires an abseiling-derived type: ABSEILING_TRIP, "
+        "CANYONING, CLIMBING or CAVING.",
     )
 
 

@@ -1819,7 +1819,8 @@ async def create_journal_entry(
     with the template's standard pitches, the abseil counts derived from them,
     and the template's own type fields. Anything you also pass in ``type_data``
     wins over the template — your own ``pitches`` replace the template's, and the
-    counts then follow yours.
+    abseil counts are derived from whichever pitches are stored unless you set
+    the counts yourself.
 
     Returns:
         JSON string containing AI-friendly journal information including:
@@ -1897,7 +1898,10 @@ async def create_journal_entry(
     # the pitches, in AbseilingService). Resolved here, before any write, so an
     # unusable template_id creates no journal.
     type_data = request.type_data
-    if request.template_id:
+    # ``is not None`` rather than truthiness: an explicit empty string is a
+    # malformed id, and must be refused rather than quietly creating an
+    # untemplated journal.
+    if request.template_id is not None:
         template = await _load_own_template(
             request.template_id, user_id, repos.activity_template_repo
         )
