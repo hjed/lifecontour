@@ -26,6 +26,15 @@
  * dialog confirms first. It shares this group's in-flight guard, because it is
  * a write against the same task.
  *
+ * The remove-a-mention affordance is mounted here too, between the retarget
+ * and the delete, and only on a row whose link role `linkRemovable` permits.
+ * It sits inside this group rather than beside it so it shares the group's
+ * `aria-busy` and the per-task in-flight lock — it is a write against the same
+ * task as everything else here. It does **not** inherit the group's
+ * `aria-describedby`: that names the commitment when the group is entered, and
+ * a user tabbing straight to one button hears its name without the task, as
+ * they already do for delete.
+ *
  * The optimistic update and its rollback belong to `useUpdateTask`, not here:
  * the criterion pairs them with `invalidateAfterMutation`, which is the hook's
  * responsibility, and the retarget dialog and the dashboard reuse the same
@@ -47,18 +56,34 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { DetachMentionButton } from '@/components/journals/DetachMentionButton';
 import { RetargetTaskDialog } from '@/components/journals/RetargetTaskDialog';
 import {
   useDeleteTask,
   useTaskWriteInFlight,
   useUpdateTask,
 } from '@/lib/api/tasks';
-import { statusActions, type TaskStatusAction } from '@/lib/task-display';
-import type { JournalTaskResource } from '@/types/tasks';
+import {
+  linkRemovable,
+  statusActions,
+  type TaskStatusAction,
+} from '@/lib/task-display';
+import type { JournalTaskResource, TaskLinkRole } from '@/types/tasks';
 
 interface JournalTaskActionsProps {
   /** The task these actions act on. */
   readonly task: JournalTaskResource;
+  /** The journal being viewed — the other end of the link a remove breaks. */
+  readonly journalId: string;
+  /**
+   * The role this row's link holds in this journal, which decides whether a
+   * remove is offered.
+   *
+   * The row's group, not the task: a task can be due here *and* mentioned
+   * here, in which case the listing renders it twice and only the mention is
+   * removable.
+   */
+  readonly role: TaskLinkRole;
   /**
    * The id of the element carrying the task's text.
    *
@@ -78,6 +103,8 @@ const ACTION_ICONS: Record<TaskStatusAction['key'], typeof Check> = {
 
 export function JournalTaskActions({
   task,
+  journalId,
+  role,
   describedById,
 }: JournalTaskActionsProps) {
   const update = useUpdateTask();
@@ -127,6 +154,14 @@ export function JournalTaskActions({
       })}
 
       <RetargetTaskDialog task={task} disabled={writing} />
+
+      {linkRemovable(role) && (
+        <DetachMentionButton
+          taskId={task.id}
+          journalId={journalId}
+          disabled={writing}
+        />
+      )}
 
       <AlertDialog>
         <AlertDialogTrigger asChild>

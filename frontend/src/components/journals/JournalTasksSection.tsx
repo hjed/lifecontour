@@ -10,6 +10,14 @@
  * Every linked task appears here in every status, lapsed ones included. A
  * lapsed task leaves the dashboard silently and its journals are where the user
  * is meant to meet it again, so this listing must never filter one out.
+ *
+ * **A journal with no tasks still renders the card**, which narrows a decision
+ * Phase 16 made. That decision's reason was a skeleton flashing on nearly every
+ * journal detail view, and it still holds — the *loading* pass renders nothing.
+ * What changed is that Phase 19 gives the card an affordance of its own, and
+ * the journal most likely to want "attach an existing task" is exactly the one
+ * with nothing on it yet; a card that hid itself would put the control out of
+ * reach precisely where it is wanted.
  */
 
 'use client';
@@ -17,7 +25,12 @@
 import { useId } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useJournalTasks } from '@/lib/api/tasks';
-import type { JournalTaskGroupIds, JournalTaskResource } from '@/types/tasks';
+import { AttachTaskDialog } from './AttachTaskDialog';
+import {
+  TaskLinkRole,
+  type JournalTaskGroupIds,
+  type JournalTaskResource,
+} from '@/types/tasks';
 import { JournalTaskRow } from './JournalTaskRow';
 
 interface JournalTasksSectionProps {
@@ -34,10 +47,25 @@ interface JournalTasksSectionProps {
 const GROUPS: ReadonlyArray<{
   readonly key: keyof JournalTaskGroupIds;
   readonly heading: string;
+  /**
+   * The link role the group's rows hold in this journal, which is what decides
+   * whether a row offers to remove its link. Carried by the group rather than
+   * read off a task's `link_roles`, because a task holding two roles is
+   * rendered once per group and `link_roles` cannot tell the two rows apart.
+   */
+  readonly role: TaskLinkRole;
 }> = [
-  { key: 'due', heading: 'Due in this journal' },
-  { key: 'created', heading: 'Created in this journal' },
-  { key: 'mentioned', heading: 'Mentioned in this journal' },
+  { key: 'due', heading: 'Due in this journal', role: TaskLinkRole.DUE },
+  {
+    key: 'created',
+    heading: 'Created in this journal',
+    role: TaskLinkRole.CREATED,
+  },
+  {
+    key: 'mentioned',
+    heading: 'Mentioned in this journal',
+    role: TaskLinkRole.MENTIONED,
+  },
 ];
 
 export function JournalTasksSection({ journalId }: JournalTasksSectionProps) {
@@ -56,7 +84,19 @@ export function JournalTasksSection({ journalId }: JournalTasksSectionProps) {
   // indistinguishable from "this journal has no tasks", and a journal whose
   // lapsed tasks failed to load would read as clean — the one outcome the
   // lapsed design exists to prevent.
-  if (isError) {
+  //
+  // It carries no attach affordance, though: the dialog excludes tasks already
+  // linked here, and it reads that set from this listing. Offering it over a
+  // listing that failed would be offering a picker that cannot keep the
+  // server's two refusals off the screen.
+  //
+  // `&& !data` is the whole of the difference between a listing that failed and
+  // a *refresh* that failed. A refetch error — a window refocus while the
+  // network is down, say — leaves the previous `data` in place and only sets
+  // the status, so without this the card would be replaced by an error line
+  // while it had perfectly good tasks to show, taking any open attach dialog
+  // down with it and closing over a request that had already left.
+  if (isError && !data) {
     return (
       <Card data-testid='journal-tasks-section'>
         <CardHeader>
@@ -87,16 +127,24 @@ export function JournalTasksSection({ journalId }: JournalTasksSectionProps) {
       .filter((task): task is JournalTaskResource => task !== undefined),
   })).filter(group => group.tasks.length > 0);
 
-  // Nothing rather than an empty container, and an empty group is omitted
-  // rather than shown as a heading with nothing under it.
-  if (groups.length === 0) return null;
+  // Every task the journal holds in any role, which is what the attach dialog
+  // has to exclude: one already mentioned here would be a no-op, and one
+  // anchored here is a 409. Read from the listing already in hand rather than
+  // fetched again.
+  const linkedTaskIds = data.data.map(resource => resource.id);
 
   return (
     <Card data-testid='journal-tasks-section'>
-      <CardHeader>
+      <CardHeader className='flex flex-row items-center justify-between gap-3 space-y-0'>
         <CardTitle className='text-lg'>Tasks</CardTitle>
+        <AttachTaskDialog journalId={journalId} linkedTaskIds={linkedTaskIds} />
       </CardHeader>
       <CardContent className='space-y-6'>
+        {groups.length === 0 && (
+          <p className='text-muted-foreground text-sm'>
+            No tasks are linked to this journal yet.
+          </p>
+        )}
         {groups.map(group => (
           <section
             key={group.key}
@@ -115,6 +163,7 @@ export function JournalTasksSection({ journalId }: JournalTasksSectionProps) {
                   key={task.id}
                   task={task}
                   journalId={journalId}
+                  role={group.role}
                 />
               ))}
             </ul>

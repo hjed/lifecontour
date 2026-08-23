@@ -20,7 +20,7 @@ import {
   createMockTaskJournalRef,
   createTestQueryClient,
 } from '../test-helpers';
-import { LapseReason, TaskStatus } from '@/types/tasks';
+import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
 import type { JournalTaskResource } from '@/types/tasks';
 
 // `jest.setup.ts` narrows `@/lib/constants` to the auth endpoints, which would
@@ -28,11 +28,15 @@ import type { JournalTaskResource } from '@/types/tasks';
 jest.mock('@/lib/constants', () => jest.requireActual('@/lib/constants'));
 
 /** Render the row inside the list — and the provider — it always lives in. */
-function renderRow(task: JournalTaskResource, journalId = '1') {
+function renderRow(
+  task: JournalTaskResource,
+  journalId = '1',
+  role: TaskLinkRole = TaskLinkRole.DUE
+) {
   return render(
     <QueryClientProvider client={createTestQueryClient()}>
       <ul>
-        <JournalTaskRow task={task} journalId={journalId} />
+        <JournalTaskRow task={task} journalId={journalId} role={role} />
       </ul>
     </QueryClientProvider>
   );
@@ -252,5 +256,32 @@ describe('JournalTaskRow', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Mark done' })).toBeEnabled();
+  });
+
+  /**
+   * The row does not decide the rule — `linkRemovable` does, and it is tested
+   * exhaustively over the enum there. What the row owes is the wiring: the
+   * role it was rendered with reaches the actions group, so the same task in
+   * two groups gets two different offers.
+   */
+  describe('the role it was rendered in', () => {
+    const REMOVE = 'Remove mention from this journal';
+
+    it('offers a remove on a mentioned row', () => {
+      renderRow(createMockJournalTask(), '1', TaskLinkRole.MENTIONED);
+
+      expect(screen.getByRole('button', { name: REMOVE })).toBeInTheDocument();
+    });
+
+    it.each([TaskLinkRole.DUE, TaskLinkRole.CREATED])(
+      'offers none on a %s row',
+      role => {
+        renderRow(createMockJournalTask(), '1', role);
+
+        expect(
+          screen.queryByRole('button', { name: REMOVE })
+        ).not.toBeInTheDocument();
+      }
+    );
   });
 });

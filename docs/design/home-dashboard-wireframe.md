@@ -140,3 +140,10 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     commitment is *reminded of*, not where it is worked with, and a lapsed task — the one this control
     exists for — is deliberately absent from the dashboard altogether (gap 5). The dashboard's own row
     stays exactly as W24 draws it.
+11. **Mention links are journal-only, and there is no wireframe surface for them at all.** ITER18-001
+    Phase 19 adds two controls the wireframe could not have shown: an *Attach task* button in the journal
+    detail view's `Tasks` card header, and a remove on rows in that card's *mentioned* group. Both are
+    about a link between a task and **the journal being viewed**, which is a relationship the dashboard
+    has no way to express — its rows are not shown in the context of any journal, so there is no "this
+    journal" for a mention to attach to or be removed from. The dashboard's own row stays exactly as W24
+    draws it, and gains nothing from this phase.

@@ -12,7 +12,7 @@
  * function is what lets a test assert that without rendering anything.
  */
 
-import { LapseReason, TaskStatus } from '@/types/tasks';
+import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
 
 /** The two parts of a lapse marker: what it reads, and what it explains. */
 export interface LapseMarker {
@@ -234,4 +234,33 @@ export function retargetAction(
   if (status === TaskStatus.CANCELLED) return RESURRECT_CANCELLED;
   if (status === TaskStatus.DONE) return REOPEN;
   return lapsed ? RESURRECT_LAPSED : RESCHEDULE;
+}
+
+/**
+ * Whether a link in this role can be removed from the journal that carries it.
+ *
+ * The specification is explicit: "intermediate links can be removed. The
+ * creating and due links cannot be removed, only replaced in the case of the
+ * due journal." So this is a product rule rather than a rendering detail, and
+ * it belongs beside the status offer table for the same reason that one does —
+ * a table can be asserted exhaustively over the enum without rendering
+ * anything, where an inline comparison in a component can only be asserted
+ * through whichever rows a test happens to build.
+ *
+ * The rule is stated per **role**, not per task, because the listing renders a
+ * task holding two roles in one journal **once per group**: a retarget onto a
+ * journal the task already mentioned leaves it due *and* mentioned here, and
+ * the intermediate link stays removable while the anchor does not. The
+ * affordance therefore belongs to the row's group, and one commitment can show
+ * a remove under *Mentioned* and none under *Due*.
+ */
+const REMOVABLE_LINK_ROLES: Record<TaskLinkRole, boolean> = {
+  [TaskLinkRole.DUE]: false,
+  [TaskLinkRole.CREATED]: false,
+  [TaskLinkRole.MENTIONED]: true,
+};
+
+/** Whether a row in this link role offers to remove the link. */
+export function linkRemovable(role: TaskLinkRole): boolean {
+  return REMOVABLE_LINK_ROLES[role] ?? false;
 }
