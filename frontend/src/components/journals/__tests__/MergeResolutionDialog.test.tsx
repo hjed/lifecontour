@@ -484,7 +484,58 @@ describe('MergeResolutionDialog', () => {
             start: '2026-08-23T19:30:00Z',
             end: '2026-08-23T22:00:00Z',
           },
-          type_data: { event: { is_all_day: false } },
+          type_data: {
+            event: {
+              is_all_day: false,
+              start_time: '19:30:00',
+              end_time: '22:00:00',
+            },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('clears a zone the winning side does not have', async () => {
+      // Only one side carrying a timezone is the common case (a synced event
+      // has one, a hand-written journal may not). The absent side has no value
+      // to fold, so keeping its times has to say "no zone" out loud — otherwise
+      // the other side's zone survives and re-reads those clock times.
+      const user = userEvent.setup();
+      renderDialog(
+        makeTimedEvent(
+          '1',
+          { start: '2026-08-23T09:00:00Z', end: '2026-08-23T10:00:00Z' },
+          { start_time: '09:00:00', end_time: '10:00:00' }
+        ),
+        makeTimedEvent(
+          '2',
+          { start: '2026-08-23T19:30:00Z', end: '2026-08-23T22:00:00Z' },
+          {
+            start_time: '19:30:00',
+            end_time: '22:00:00',
+            timezone: 'Pacific/Auckland',
+          }
+        )
+      );
+
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T09:00:00Z',
+            end: '2026-08-23T10:00:00Z',
+          },
+          type_data: {
+            event: {
+              start_time: '09:00:00',
+              end_time: '10:00:00',
+              timezone: null,
+            },
+          },
         },
         'replace'
       );

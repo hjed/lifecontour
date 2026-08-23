@@ -92,19 +92,70 @@ function setTypeDataOverride(
 /**
  * The calendar-row half of an event's timing. The clock times are meaningless
  * without the zone they were recorded in, and `is_all_day` decides whether they
- * exist at all — an all-day journal carries no clock times for the fold to pick
- * up, so left on its own it would keep an event marked all-day while the other
- * side's timed range wins. All three belong to the same answer as the times.
+ * exist at all. All of it belongs to the same answer as the date range, which
+ * already shows the times.
  */
-const EVENT_TIMING_FIELDS = new Set([
+const EVENT_TIMING_FIELDS = [
   'start_time',
   'end_time',
   'timezone',
   'is_all_day',
-]);
+];
+
+/** The read API keys `type_data` by lowercase type; older payloads use the enum name. */
+const EVENT_TYPE_KEYS = ['event', 'EVENT'] as const;
 
 function isEventTimingField(typeKey: string, fieldKey: string): boolean {
-  return typeKey.toLowerCase() === 'event' && EVENT_TIMING_FIELDS.has(fieldKey);
+  return (
+    typeKey.toLowerCase() === 'event' && EVENT_TIMING_FIELDS.includes(fieldKey)
+  );
+}
+
+function findEventTypeKey(journal: JournalResource | null): string | null {
+  const typeData = journal?.attributes?.type_data as
+    Record<string, unknown> | undefined;
+  if (!typeData) return null;
+  return EVENT_TYPE_KEYS.find(key => typeData[key]) ?? null;
+}
+
+/**
+ * The timing fields that have to move with the date range's chosen side.
+ *
+ * Deliberately built from a fixed field list rather than from the conflicts
+ * found above: a field only one side carries never becomes a conflict, and
+ * those are exactly the cases that go wrong. An all-day journal has no clock
+ * times, and a hand-written one often has no timezone while its synced twin
+ * does — leaving either out lets the absent side inherit the other's value and
+ * re-read its clock times. A `null` here is an answer ("this side has no
+ * zone"), not a missing one.
+ */
+function buildEventTimingCompanions(
+  targetJournal: JournalResource | null,
+  sourceJournal: JournalResource | null
+): CompanionOverride[] {
+  const targetKey = findEventTypeKey(targetJournal);
+  const sourceKey = findEventTypeKey(sourceJournal);
+  if (!targetKey || !sourceKey) return [];
+
+  const targetEvent = (
+    targetJournal?.attributes?.type_data as Record<
+      string,
+      Record<string, unknown>
+    >
+  )[targetKey];
+  const sourceEvent = (
+    sourceJournal?.attributes?.type_data as Record<
+      string,
+      Record<string, unknown>
+    >
+  )[sourceKey];
+
+  return EVENT_TIMING_FIELDS.map(fieldKey => ({
+    typeKey: sourceKey,
+    fieldKey,
+    targetValue: targetEvent[fieldKey] ?? null,
+    sourceValue: sourceEvent[fieldKey] ?? null,
+  })).filter(companion => companion.targetValue !== companion.sourceValue);
 }
 
 /**
@@ -456,19 +507,13 @@ export function MergeResolutionDialog({
               tVal !== undefined &&
               sVal !== tVal
             ) {
-              // The event's clock times (and the zone they are read in) are
-              // the same fact as its date range, which already shows both date
-              // and time: asking twice reads as duplication, and answering the
-              // rows differently would leave the merged event's range, times
-              // and zone contradicting each other. So they ride along with the
-              // range's choice.
-              if (eventTiming && isEventTimingField(typeKey, fieldKey)) {
-                eventTiming.companions = [
-                  ...(eventTiming.companions ?? []),
-                  { typeKey, fieldKey, targetValue: tVal, sourceValue: sVal },
-                ];
-                return;
-              }
+              // The event's clock times (and the zone they are read in, and
+              // whether it is all-day at all) are the same fact as its date
+              // range, which already shows both date and time: asking twice
+              // reads as duplication, and answering the rows differently would
+              // leave the merged event contradicting itself. They ride along
+              // with the range's choice instead — see the companions below.
+              if (eventTiming && isEventTimingField(typeKey, fieldKey)) return;
 
               const fieldId = `type_data.${typeKey}.${fieldKey}`;
               const isCalendar = fieldKey === 'calendar_id';
@@ -494,8 +539,14 @@ export function MergeResolutionDialog({
       });
     }
 
-    if (eventTiming?.companions?.length) {
-      eventTiming.label = 'Event Dates & Times';
+    if (eventTiming) {
+      eventTiming.companions = buildEventTimingCompanions(
+        targetJournal,
+        sourceJournal
+      );
+      if (eventTiming.companions.length) {
+        eventTiming.label = 'Event Dates & Times';
+      }
     }
 
     setConflicts(newConflicts);

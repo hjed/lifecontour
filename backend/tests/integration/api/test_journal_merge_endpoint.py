@@ -1273,3 +1273,60 @@ async def test_merge_endpoint_turns_an_allday_target_timed_when_asked(
     assert row.is_all_day is False
     assert row.start_time == time(19, 30)
     assert row.end_time == time(22, 0)
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_honours_an_explicit_null_timezone_override(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """ "No zone" is an answer, and must beat the fill-from-source default.
+
+    A synced event carries a timezone where a hand-written one does not. Keeping
+    the zoneless side's clock times has to keep them zoneless too, or the other
+    side's zone survives and re-reads them.
+    """
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+    target_id = await _create_event_journal(
+        authenticated_client, "Target event", "01", calendar_id, "09:00:00", "10:00:00"
+    )
+    source_id = await _create_event_journal(
+        authenticated_client, "Source event", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+    await async_connection.execute(
+        text("UPDATE journal_calendar_info SET timezone = :tz WHERE journal_id = :id"),
+        {"tz": "Pacific/Auckland", "id": source_id},
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {
+                        "type_data": {
+                            "event": {
+                                "start_time": "09:00:00",
+                                "end_time": "10:00:00",
+                                "timezone": None,
+                            }
+                        }
+                    },
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 200, res.text
+
+    row = (
+        await async_connection.execute(
+            text("SELECT timezone FROM journal_calendar_info WHERE journal_id = :id"),
+            {"id": target_id},
+        )
+    ).fetchone()
+    assert row is not None
+    assert row.timezone is None
