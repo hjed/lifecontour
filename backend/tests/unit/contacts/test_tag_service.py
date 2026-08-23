@@ -1,5 +1,7 @@
 """Unit tests for tag mutation service."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 from core_shared.models.contacts.entities import Tag
 from core_shared.models.contacts.exceptions import ContactValidationError
@@ -261,7 +263,9 @@ async def test_delete_tag(service, repo, publisher):
     tag = Tag(id=1, name=TagName("To_Delete"))
     await repo.save(tag)
 
-    await service.delete_tag(tag_id=1, transaction=None)
+    # A real connection stand-in: deleting a tag now also marks the contacts
+    # that lose it, which is SQL this service issues itself.
+    await service.delete_tag(tag_id=1, transaction=AsyncMock())
 
     assert 1 in repo.deleted_ids
     assert len(publisher.events) == 1

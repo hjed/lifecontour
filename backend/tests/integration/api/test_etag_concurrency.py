@@ -583,3 +583,82 @@ class TestTheTagCoversTheWholeJournal:
 
         assert response.status_code == 200
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
+
+
+@pytest.mark.integration
+class TestTheContactTagCoversItsTags:
+    """A read of a contact returns its tags, so its version must track them.
+
+    The bulk tag rewrites change contacts the caller never names, and the MCP
+    ``update_contact`` tool *replaces* the whole tag set under the caller's
+    precondition — so a stale version there clobbers the change rather than
+    merely missing it. Backdating, as in the journal suite, because ``now()``
+    is the transaction timestamp under this fixture.
+    """
+
+    BACKDATED = datetime(2000, 1, 1, tzinfo=UTC)
+
+    async def _backdate(self, connection: AsyncConnection, contact_id: str) -> None:
+        await connection.execute(
+            text("UPDATE contacts SET updated_at = :ts WHERE id = :row_id"),
+            {"ts": self.BACKDATED, "row_id": int(contact_id)},
+        )
+
+    async def _updated_at(
+        self, connection: AsyncConnection, contact_id: str
+    ) -> datetime:
+        result = await connection.execute(
+            text("SELECT updated_at FROM contacts WHERE id = :row_id"),
+            {"row_id": int(contact_id)},
+        )
+        stored: datetime = result.scalar_one()
+        return stored
+
+    async def _create_tag(self, client, name: str) -> str:
+        created = await client.post(
+            "/api/tags",
+            json={"data": {"type": "tags", "attributes": {"name": name}}},
+        )
+        assert created.status_code == 201
+        return str(created.json()["data"]["id"])
+
+    async def _tagged_contact(self, client, tag_id: str) -> str:
+        created = await client.post("/api/contacts", json=contact_payload())
+        contact_id = str(created.json()["data"]["id"])
+        assigned = await client.post(
+            f"/api/contacts/{contact_id}/tags",
+            json={"data": {"type": "tags", "id": tag_id}},
+        )
+        assert assigned.status_code == 204
+        return contact_id
+
+    async def test_merging_a_tag_moves_the_version_of_every_contact_holding_it(
+        self, integration_api_client, async_connection
+    ):
+        source = await self._create_tag(integration_api_client, "source-contact-tag")
+        target = await self._create_tag(integration_api_client, "target-contact-tag")
+        contact_id = await self._tagged_contact(integration_api_client, source)
+        await self._backdate(async_connection, contact_id)
+
+        response = await integration_api_client.post(
+            f"/api/tags/{source}/merge",
+            json={
+                "data": {"type": "tags", "attributes": {"target_tag_id": int(target)}}
+            },
+        )
+
+        assert response.status_code == 204
+        assert await self._updated_at(async_connection, contact_id) != self.BACKDATED
+
+    async def test_deleting_a_tag_moves_the_version_of_every_contact_holding_it(
+        self, integration_api_client, async_connection
+    ):
+        """The assignments go by cascade, which no application code path sees."""
+        tag_id = await self._create_tag(integration_api_client, "doomed-contact-tag")
+        contact_id = await self._tagged_contact(integration_api_client, tag_id)
+        await self._backdate(async_connection, contact_id)
+
+        response = await integration_api_client.delete(f"/api/tags/{tag_id}")
+
+        assert response.status_code == 204
+        assert await self._updated_at(async_connection, contact_id) != self.BACKDATED
