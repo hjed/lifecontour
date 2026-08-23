@@ -5,26 +5,39 @@ Creates the appropriate FastMCP auth provider based on application settings.
 Uses FastMCP's built-in OAuth proxy providers (GitHubProvider, AzureProvider,
 DiscordProvider) which handle .well-known discovery, authorization flows,
 token issuance, and consent screens.
+
+The generic-OAuth path uses FastMCP's :class:`OIDCProxy`, which discovers the
+upstream IdP's configuration and verifies its tokens against the advertised
+JWKS. See :class:`McpOidcProxy` for the two things it needs on top of that.
 """
 
 from __future__ import annotations
 
+import time
+from collections.abc import Sequence
 from typing import Any
 
 import structlog
 from cryptography.fernet import Fernet
-from fastmcp.server.auth.auth import AuthProvider
+from fastmcp.server.auth.auth import AccessToken, AuthProvider, TokenVerifier
 from fastmcp.server.auth.jwt_issuer import derive_jwt_key
-from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
+from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
+from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.azure import AzureProvider
-from fastmcp.server.auth.providers.debug import DebugTokenVerifier
 from fastmcp.server.auth.providers.discord import DiscordProvider
 from fastmcp.server.auth.providers.github import GitHubProvider
-from fastmcp.utilities.auth import decode_jwt_payload
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.utilities.auth import decode_jwt_header, decode_jwt_payload
 from key_value.aio.protocols.key_value import AsyncKeyValue
 from key_value.aio.stores.redis import RedisStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from pydantic import AnyHttpUrl
 
+from app.infrastructure.auth.oidc_discovery import (
+    assert_issuer_matches,
+    discovery_url,
+    supported_algorithms,
+)
 from app.infrastructure.config import Settings
 
 logger = structlog.get_logger()
@@ -61,62 +74,240 @@ class _LoggingFernetEncryptionWrapper(FernetEncryptionWrapper):
         return result
 
 
-# Identity claims worth carrying from the upstream token. ``sub`` is the one
-# that matters — it becomes the row owner — the rest are for display.
-_UPSTREAM_IDENTITY_CLAIMS = ("sub", "email", "name", "preferred_username")
+class _UnacceptableAlgorithmError(Exception):
+    """A token was signed with an algorithm the IdP does not advertise."""
 
 
-class UpstreamIdentityOAuthProxy(OAuthProxy):
-    """An ``OAuthProxy`` that carries the upstream user's identity forward.
+def _header_algorithm(token: str) -> str | None:
+    """The ``alg`` a JWT claims in its header, or None if it cannot be read."""
+    try:
+        algorithm = decode_jwt_header(token).get("alg")
+    except Exception:  # noqa: BLE001 - malformed: let the verifier reject it
+        return None
+    return algorithm if isinstance(algorithm, str) else None
 
-    The generic-OAuth branch pairs the proxy with ``DebugTokenVerifier``, whose
-    ``AccessToken`` carries no identity at all — only the raw upstream token and
-    the verifier's own ``client_id`` default. Without this hook the acting user
-    fell through to that ``client_id``, so every MCP write was attributed to the
-    literal owner ``"debug-client"``: shared by every caller, and invisible to
-    the signed-in user, whose owner-scoped reads then answered 404.
 
-    FastMCP calls :meth:`_extract_upstream_claims` once per upstream exchange
-    (and again on refresh), embeds the result in the FastMCP JWT, and re-attaches
-    it to ``AccessToken.claims["upstream_claims"]`` on every verified request —
-    so the identity survives without a storage lookup per call.
+class _IdTokenVerifier(JWTVerifier):
+    """A ``JWTVerifier`` that also enforces the ID Token rules OIDC requires.
+
+    ``JWTVerifier`` is a general-purpose JWT checker, so two rules from OIDC
+    Core fall outside it. Both matter here because the ID Token is the whole
+    basis on which an MCP request authenticates.
+
+    - ``exp`` is REQUIRED in an ID Token (Core §2), but the verifier only
+      compares it *when present*. An ID Token minted without one would
+      authenticate forever — outliving the upstream grant it stands for, and
+      surviving the refresh failure that is otherwise what ends a dead session.
+    - When ``aud`` holds more than one value the ID Token must carry ``azp``,
+      and when ``azp`` is present it must be this client (Core §3.1.3.7). The
+      verifier only checks that our client id appears *somewhere* in ``aud``,
+      so without this a token minted for a different relying party that happens
+      to list us alongside itself would authenticate here.
+
+    Both are checked against the payload the signature check already validated,
+    never against a raw decode.
+
+    It also accepts **any** of the algorithms the OP advertises rather than one.
+    ``JWTVerifier`` pins a single algorithm, but discovery publishes the set the
+    OP supports, not the one this client gets — that is fixed at registration
+    and never published. So one verifier is kept per advertised algorithm and
+    the token's own ``alg`` header chooses. The advertised set is still the
+    guard: an algorithm outside it never reaches a verifier at all, which is
+    what keeps a token from selecting, say, a symmetric algorithm that JWKS
+    verification cannot safely use.
     """
 
-    async def _extract_upstream_claims(
-        self, idp_tokens: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        """Return the upstream user's identity claims, or ``None`` if unknowable.
+    def __init__(
+        self,
+        *,
+        authorized_party: str,
+        algorithms: Sequence[str] = (),
+        **kwargs: Any,
+    ) -> None:
+        accepted = tuple(dict.fromkeys(algorithms))
+        # An empty set means the OP advertised nothing; JWTVerifier's own
+        # default (RS256) then stands, and self is the only verifier.
+        super().__init__(algorithm=accepted[0] if accepted else None, **kwargs)
+        self._authorized_party = authorized_party
+        self._accepted_algorithms = frozenset(accepted)
+        self._verifier_kwargs = kwargs
+        self._delegates: dict[str, JWTVerifier] = {}
 
-        The ``id_token`` is preferred and the access token is only a fallback:
-        under OIDC the id_token is always a JWT, whereas the access token may be
-        opaque (Hydra issues opaque tokens in dev), in which case it cannot be
-        decoded at all.
+    def _verifier_for(self, algorithm: str | None) -> JWTVerifier | None:
+        """The verifier for a token's ``alg``, or None if we do not accept it."""
+        if algorithm is None or algorithm == self.algorithm:
+            return None  # our own super() handles it
+        if algorithm not in self._accepted_algorithms:
+            logger.warning(
+                "MCP: refusing an upstream id_token signed with an algorithm "
+                "the IdP does not advertise.",
+                algorithm=algorithm,
+                accepted=sorted(self._accepted_algorithms),
+            )
+            raise _UnacceptableAlgorithmError
+        delegate = self._delegates.get(algorithm)
+        if delegate is None:
+            delegate = JWTVerifier(algorithm=algorithm, **self._verifier_kwargs)
+            self._delegates[algorithm] = delegate
+        return delegate
 
-        Returning ``None`` is deliberate when no subject can be found — the
-        request then fails to authenticate rather than resolving to something
-        that is not a user.
-        """
-        for token in (idp_tokens.get("id_token"), idp_tokens.get("access_token")):
-            if not token:
-                continue
-            try:
-                payload = decode_jwt_payload(token)
-            except Exception:  # noqa: BLE001 - opaque or malformed: try the next
-                continue
-
-            claims = {
-                key: payload[key]
-                for key in _UPSTREAM_IDENTITY_CLAIMS
-                if payload.get(key) is not None
-            }
-            if "sub" in claims:
-                return claims
-
-        logger.warning(
-            "MCP: upstream token response carried no usable subject; the "
-            "request will not authenticate"
+    async def load_access_token(self, token: str) -> AccessToken | None:
+        """Verify the JWT, then apply the ID Token rules on its verified claims."""
+        try:
+            delegate = self._verifier_for(_header_algorithm(token))
+        except _UnacceptableAlgorithmError:
+            return None
+        verified = (
+            await super().load_access_token(token)
+            if delegate is None
+            else await delegate.load_access_token(token)
         )
-        return None
+        if verified is None:
+            return None
+
+        claims = verified.claims or {}
+
+        if claims.get("exp") is None:
+            logger.warning(
+                "MCP: refusing an upstream id_token with no 'exp' claim. OIDC "
+                "requires one; without it the token would never expire and the "
+                "MCP session could outlive the upstream grant indefinitely.",
+                subject=claims.get("sub"),
+            )
+            return None
+
+        audience = claims.get("aud")
+        authorized_party = claims.get("azp")
+        if authorized_party is None:
+            if isinstance(audience, list) and len(audience) > 1:
+                logger.warning(
+                    "MCP: refusing an upstream id_token with several audiences "
+                    "and no 'azp' claim, so the party it was issued to cannot "
+                    "be established.",
+                    audience=audience,
+                )
+                return None
+        elif authorized_party != self._authorized_party:
+            logger.warning(
+                "MCP: refusing an upstream id_token issued to a different "
+                "relying party.",
+                authorized_party=authorized_party,
+                expected=self._authorized_party,
+            )
+            return None
+
+        return verified
+
+
+class McpOidcProxy(OIDCProxy):
+    """An ``OIDCProxy`` that trusts the IdP's own metadata about its keys.
+
+    Two gaps in the stock proxy matter here:
+
+    - It builds its ``JWTVerifier`` without an algorithm, and ``JWTVerifier``
+      falls back to RS256. Kanidm signs id_tokens with **ES256** unless legacy
+      crypto is enabled, so production would reject every token while Hydra
+      (which advertises RS256 only) looked perfectly healthy in dev. The
+      algorithm therefore comes from the document, honoring the IdP's ordering.
+    - It treats the discovery URL as the sole trust anchor. In dev that
+      document is fetched from a container-internal address that is not the
+      issuer tokens are minted under, so the issuer it advertises is
+      cross-checked against ``OAUTH_ISSUER`` before its keys are trusted.
+
+    Its verifier is :class:`_IdTokenVerifier` rather than a bare
+    ``JWTVerifier``, and it makes one failure mode diagnosable — see
+    :meth:`_get_verification_token`.
+    """
+
+    def __init__(self, *, settings: Settings, **kwargs: Any) -> None:
+        # Assigned before super().__init__ because discovery — and with it both
+        # hooks below — runs inside the parent constructor.
+        self._settings = settings
+        super().__init__(**kwargs)
+
+    def get_oidc_configuration(
+        self,
+        config_url: AnyHttpUrl,
+        strict: bool | None,
+        timeout_seconds: int | None,
+    ) -> OIDCConfiguration:
+        """Fetch the document, then refuse it if it disowns the issuer."""
+        config = super().get_oidc_configuration(config_url, strict, timeout_seconds)
+        assert_issuer_matches(
+            str(config.issuer) if config.issuer else None,
+            self._settings,
+            source=str(config_url),
+        )
+        return config
+
+    def _get_verification_token(
+        self, upstream_token_set: UpstreamTokenSet
+    ) -> str | None:
+        """Return the id_token to verify, warning when it has gone stale.
+
+        OIDC lets a refresh response omit ``id_token``, and FastMCP *merges*
+        each response into ``raw_token_data`` — so with such an IdP a refresh
+        succeeds, resets the access token's expiry, and leaves the **old**
+        id_token in place. Verification then fails on an expired id_token while
+        the refresh that would replace it is not due again until the fresh
+        access token nears expiry, so the session 401s for that whole window.
+
+        Neither IdP this project targets behaves that way (Hydra reissues the
+        id_token on refresh; Kanidm is expected to), and the semantics are
+        FastMCP's rather than ours. But the symptom — sudden re-auth despite a
+        healthy refresh — gives no clue as to its cause, so name it in the log.
+        """
+        token = super()._get_verification_token(upstream_token_set)
+        if (
+            token is not None
+            and _is_expired(token)
+            and upstream_token_set.expires_at > time.time()
+        ):
+            logger.warning(
+                "MCP: the stored upstream id_token has expired while its "
+                "access token has not. The IdP most likely omitted id_token "
+                "from a refresh response, which leaves the previous one in "
+                "place. MCP requests will fail to authenticate until the "
+                "access token expires and a full re-auth happens.",
+                access_token_expires_at=upstream_token_set.expires_at,
+            )
+        return token
+
+    def get_token_verifier(
+        self,
+        *,
+        algorithm: str | None = None,
+        audience: str | None = None,
+        required_scopes: list[str] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> TokenVerifier:
+        """Build the verifier: IdP-advertised algorithm, ID Token rules enforced."""
+        del timeout_seconds  # unused by the parent too; JWKS fetches set their own
+        return _IdTokenVerifier(
+            authorized_party=self._settings.oauth_client_id,
+            jwks_uri=str(self.oidc_config.jwks_uri),
+            issuer=str(self.oidc_config.issuer),
+            algorithms=(algorithm,)
+            if algorithm
+            else supported_algorithms(
+                self.oidc_config.id_token_signing_alg_values_supported,
+                source=str(self.oidc_config.issuer),
+            ),
+            audience=audience,
+            required_scopes=required_scopes,
+        )
+
+
+def _is_expired(token: str, *, now: float | None = None) -> bool:
+    """Whether a JWT's ``exp`` has passed. Undecodable or unbounded => False."""
+    try:
+        payload = decode_jwt_payload(token)
+    except Exception:  # noqa: BLE001 - opaque or malformed: nothing to say
+        return False
+    exp = payload.get("exp")
+    if not isinstance(exp, int | float):
+        return False
+    return exp <= (time.time() if now is None else now)
 
 
 def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
@@ -149,56 +340,8 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
         return None
 
     # Priority 1: Generic OAuth provider
-    if (
-        settings.oauth_client_id
-        and settings.oauth_client_secret
-        and settings.oauth_authorization_url
-        and settings.oauth_token_url
-    ):
-        logger.info(
-            "MCP: Configuring generic OAuth provider",
-            provider_name=settings.oauth_provider_name or "generic",
-        )
-        # DebugTokenVerifier is the only TokenVerifier implementation in
-        # FastMCP and is required by OAuthProxy. Named providers (GitHub,
-        # Azure, Discord) have their own built-in verification. For
-        # generic OAuth, tokens are validated via the upstream provider's
-        # authorization flow; DebugTokenVerifier handles the local JWT
-        # that OAuthProxy issues after a successful upstream exchange.
-        #
-        # It also returns an AccessToken with no identity claims, which is why
-        # the proxy must be the UpstreamIdentityOAuthProxy subclass: it decodes
-        # the upstream id_token so the acting user is the person who logged in
-        # rather than the verifier's client_id default.
-        logger.warning(
-            "MCP: Generic OAuth uses DebugTokenVerifier for local token "
-            "validation. Consider using a named provider (GitHub, Azure, "
-            "Discord) for stronger token verification."
-        )
-        return UpstreamIdentityOAuthProxy(
-            upstream_authorization_endpoint=settings.oauth_authorization_url,
-            upstream_token_endpoint=settings.oauth_token_url,
-            upstream_client_id=settings.oauth_client_id,
-            upstream_client_secret=settings.oauth_client_secret,
-            token_verifier=DebugTokenVerifier(),
-            base_url=base_url,
-            issuer_url=_get_mcp_issuer_url(settings),
-            extra_authorize_params={"scope": settings.oauth_scopes}
-            if settings.oauth_scopes
-            else None,
-            # Refresh the upstream token shortly before it expires so MCP
-            # sessions survive without a full re-auth (relies on the upstream
-            # issuing a refresh token).
-            token_expiry_threshold_seconds=(
-                settings.oauth_token_refresh_threshold_seconds
-            ),
-            # Pin the signing key so issued tokens stay valid across restarts;
-            # None preserves FastMCP's HKDF-from-client-secret default.
-            jwt_signing_key=settings.mcp_jwt_signing_key or None,
-            # Persist client registrations and refresh tokens in Redis so they
-            # survive restarts/redeploys instead of the per-container file store.
-            client_storage=_build_mcp_client_storage(settings),
-        )
+    if settings.oauth_client_id and settings.oauth_client_secret:
+        return _create_generic_oauth_provider(settings, base_url)
 
     # Priority 2: GitHub
     if settings.github_client_id and settings.github_client_secret:
@@ -237,6 +380,58 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
 
     logger.info("MCP: No OAuth providers configured, MCP auth unavailable")
     return None
+
+
+def _create_generic_oauth_provider(settings: Settings, base_url: str) -> McpOidcProxy:
+    """Build the generic-OAuth proxy, or raise if its tokens can't be verified."""
+    config_url = discovery_url(settings)
+    if not config_url:
+        raise RuntimeError(
+            "Generic OAuth is configured for MCP but OIDC discovery is not. "
+            "Set OAUTH_ISSUER (or OAUTH_DISCOVERY_URL) so upstream tokens can "
+            "be verified against the IdP's JWKS. Without it the MCP server has "
+            "no way to check the upstream token at all."
+        )
+    logger.info(
+        "MCP: Configuring generic OAuth provider",
+        provider_name=settings.oauth_provider_name or "generic",
+        discovery_url=config_url,
+    )
+    return McpOidcProxy(
+        settings=settings,
+        config_url=config_url,
+        client_id=settings.oauth_client_id,
+        client_secret=settings.oauth_client_secret,
+        # Verify the id_token rather than the access token. Under OIDC the
+        # id_token is always a JWT, whereas the access token may be opaque
+        # — Hydra's are — and so cannot be verified at all. Its `aud` is the
+        # OAuth client_id (OIDC Core 2), which OIDCProxy configures the
+        # verifier with. The verified claims also carry the acting user's
+        # identity, so nothing has to decode an unverified token for it.
+        #
+        # Note this is signature-and-expiry verification against the IdP's
+        # JWKS, not a liveness check: revoking a session upstream does not
+        # retire the signing key, so an already-issued id_token stays valid
+        # until its `exp`. Revocation surfaces at the next refresh, which the
+        # IdP refuses — bounded by the upstream token lifetime, not immediate.
+        # Detecting it sooner needs introspection or userinfo per request (#1322).
+        verify_id_token=True,
+        base_url=base_url,
+        issuer_url=_get_mcp_issuer_url(settings),
+        extra_authorize_params={"scope": settings.oauth_scopes}
+        if settings.oauth_scopes
+        else None,
+        # Refresh the upstream token shortly before it expires so MCP
+        # sessions survive without a full re-auth (relies on the upstream
+        # issuing a refresh token).
+        token_expiry_threshold_seconds=(settings.oauth_token_refresh_threshold_seconds),
+        # Pin the signing key so issued tokens stay valid across restarts;
+        # None preserves FastMCP's HKDF-from-client-secret default.
+        jwt_signing_key=settings.mcp_jwt_signing_key or None,
+        # Persist client registrations and refresh tokens in Redis so they
+        # survive restarts/redeploys instead of the per-container file store.
+        client_storage=_build_mcp_client_storage(settings),
+    )
 
 
 def _build_mcp_client_storage(settings: Settings) -> AsyncKeyValue | None:

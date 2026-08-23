@@ -5,11 +5,36 @@ Tests the MCP server integration with the main FastAPI application,
 including OAuth authentication and .well-known discovery endpoints.
 """
 
+from contextlib import AbstractContextManager
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
+from fastmcp.server.auth.oidc_proxy import OIDCConfiguration
 
 from app.infrastructure.config import Settings
 from app.main import create_app
+
+# What the upstream IdP advertises. Stubbed because OIDC discovery happens
+# synchronously while the app is being built, and these tests must not depend on
+# a reachable IdP. ES256 is the Kanidm shape.
+_DISCOVERY_DOCUMENT: dict[str, object] = {
+    "issuer": "https://auth.example.com",
+    "authorization_endpoint": "https://auth.example.com/authorize",
+    "token_endpoint": "https://auth.example.com/token",
+    "jwks_uri": "https://auth.example.com/jwks",
+    "response_types_supported": ["code"],
+    "subject_types_supported": ["public"],
+    "id_token_signing_alg_values_supported": ["ES256"],
+}
+
+
+def _stub_discovery() -> AbstractContextManager[MagicMock]:
+    return patch.object(
+        OIDCConfiguration,
+        "get_oidc_configuration",
+        return_value=OIDCConfiguration.model_validate(_DISCOVERY_DOCUMENT),
+    )
 
 
 class TestMCPFastAPIIntegration:
@@ -275,10 +300,10 @@ class TestMCPOAuthIntegration:
     def test_generic_oauth_with_redis_storage_builds(self, db_config):
         """Generic OAuth + Redis-backed auto-refresh storage builds cleanly.
 
-        Exercises the full provider wiring (refresh threshold, pinned signing
-        key, Redis-backed Fernet-encrypted client_storage) so a config error
-        in that path fails fast at app creation. RedisStore connects lazily,
-        so no live Redis is required to construct the app.
+        Exercises the full provider wiring (OIDC discovery, refresh threshold,
+        pinned signing key, Redis-backed Fernet-encrypted client_storage) so a
+        config error in that path fails fast at app creation. RedisStore
+        connects lazily, so no live Redis is required to construct the app.
         """
         settings = Settings(
             database_url=db_config.get_async_url().replace(
@@ -291,14 +316,38 @@ class TestMCPOAuthIntegration:
             oauth_client_secret="generic-secret",
             oauth_authorization_url="https://auth.example.com/authorize",
             oauth_token_url="https://auth.example.com/token",
+            oauth_issuer="https://auth.example.com",
             oauth_scopes="openid profile email offline_access",
             mcp_jwt_signing_key="pinned-test-signing-secret",
             mcp_oauth_use_redis_storage=True,
             allowed_hosts=["*"],
         )
-        app = create_app(settings)
+        with _stub_discovery():
+            app = create_app(settings)
         client = TestClient(app)
 
         response = client.get("/.well-known/oauth-authorization-server")
         assert response.status_code == 200
         assert "token_endpoint" in response.json()
+
+    def test_generic_oauth_without_an_issuer_refuses_to_start(self, db_config):
+        """Fail closed at startup rather than accept unverifiable tokens.
+
+        Without discovery there is no JWKS to check the upstream token against,
+        which is how the MCP server ended up accepting any non-empty string.
+        """
+        settings = Settings(
+            database_url=db_config.get_async_url().replace(
+                "postgresql+asyncpg://", "postgresql://"
+            ),
+            mcp_enabled=True,
+            mcp_mount_path="/mcp-server",
+            webhook_base_url="https://test.example.com",
+            oauth_client_id="generic-id",
+            oauth_client_secret="generic-secret",
+            oauth_authorization_url="https://auth.example.com/authorize",
+            oauth_token_url="https://auth.example.com/token",
+            allowed_hosts=["*"],
+        )
+        with pytest.raises(RuntimeError, match="OAUTH_ISSUER"):
+            create_app(settings)

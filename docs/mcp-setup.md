@@ -103,7 +103,7 @@ The MCP server uses FastMCP's built-in OAuth proxy authentication, providing ful
 1. **Provider Selection**: The first configured OAuth provider is used (priority: Generic > GitHub > Microsoft > Discord)
 2. **OAuth Proxy**: FastMCP acts as an OAuth proxy, forwarding authorization to the upstream provider
 3. **`.well-known` Discovery**: Standard OAuth discovery endpoints are exposed at root level
-4. **Token Validation**: FastMCP issues its own JWT tokens after validating with the upstream provider
+4. **Token Validation**: FastMCP issues its own JWT tokens after validating the upstream token against the IdP's JWKS
 
 ### Who an MCP request acts as
 
@@ -112,13 +112,26 @@ endpoints filter on it — so getting this wrong makes MCP-created data invisibl
 in the web UI rather than merely mislabelled.
 
 The identity comes from the **upstream `id_token`**, not from the FastMCP token.
-Under the generic provider FastMCP verifies its own JWT with `DebugTokenVerifier`,
-which carries no identity claims at all, so `UpstreamIdentityOAuthProxy`
-(`app/mcp/auth/providers.py`) decodes the `id_token` at exchange time and embeds
-`sub`/`email`/`name` in the FastMCP JWT; FastMCP re-attaches them to every
-verified request. The `id_token` is used in preference to the access token
-because OIDC guarantees it is a JWT, whereas access tokens may be opaque (Hydra's
-are, in development).
+Under the generic provider, `McpOidcProxy` (`app/mcp/auth/providers.py`) verifies
+that `id_token` against the IdP's JWKS on every request, and its verified
+`sub`/`email`/`name` claims name the acting user. The `id_token` is verified in
+preference to the access token because OIDC guarantees it is a JWT, whereas
+access tokens may be opaque (Hydra's are, in development).
+
+### What the JWKS check does and does not cover
+
+Verification is a local, offline check against the IdP's published keys: it enforces
+the token's signature, issuer, audience and expiry. An expired upstream session
+therefore stops working — the request either refreshes transparently (when the IdP
+issued a refresh token) or returns 401 and the client re-authenticates.
+
+It is **not** a liveness check. Revoking a session at the IdP does not retire the
+signing key, so an already-issued `id_token` keeps verifying until its own `exp`.
+Revocation surfaces indirectly at the next refresh, which the IdP refuses, so the
+exposure window after a revocation is roughly the upstream access-token lifetime.
+Shortening that lifetime shortens the window; detecting revocation sooner needs
+introspection or a userinfo probe per request, tracked in
+[#1322](https://github.com/hjed/personal-management-system/issues/1322).
 
 This requires the `openid` scope, which `OAUTH_SCOPES` includes by default. A
 token that reaches the server with no `sub` claim is **refused** — it does not
@@ -141,6 +154,11 @@ OAUTH_CLIENT_ID=your-client-id
 OAUTH_CLIENT_SECRET=your-client-secret
 OAUTH_AUTHORIZATION_URL=https://auth.example.com/authorize
 OAUTH_TOKEN_URL=https://auth.example.com/token
+# REQUIRED for the generic provider. MCP discovers the IdP's configuration from
+# {OAUTH_ISSUER}/.well-known/openid-configuration at startup and verifies
+# upstream id_tokens against the JWKS it advertises. The server refuses to start
+# without it rather than accepting tokens it cannot check.
+OAUTH_ISSUER=https://auth.example.com
 
 # GitHub
 GITHUB_CLIENT_ID=your-github-client-id
@@ -155,6 +173,34 @@ MICROSOFT_TENANT_ID=common  # optional, defaults to "common"
 DISCORD_CLIENT_ID=your-discord-client-id
 DISCORD_CLIENT_SECRET=your-discord-client-secret
 ```
+
+#### Provider notes
+
+**Kanidm.** The issuer is scoped to the OAuth client, so `OAUTH_ISSUER` is not the
+bare Kanidm URL:
+
+```bash
+OAUTH_ISSUER=https://idm.example.com/oauth2/openid/<client-id>
+```
+
+Kanidm signs `id_token`s with **ES256** unless legacy crypto is enabled. The
+signing algorithm is read from the discovery document, so nothing needs
+configuring — but note that an IdP advertising only algorithms we do not accept
+(or only symmetric `HS*`, which JWKS verification cannot use) fails at startup
+instead of rejecting every token later.
+
+**Hydra (development).** Note the dev Hydra client does not yet register FastMCP's
+own OAuth callback, so a local MCP flow is rejected at the authorize step
+([#1323](https://github.com/hjed/personal-management-system/issues/1323)).
+
+Hydra derives every advertised endpoint from its issuer,
+which has to stay browser-facing. The backend reaches it over the Docker network
+instead, so `docker-compose.yml` sets `WEBFINGER_OIDC_DISCOVERY_TOKEN_URL` and
+`WEBFINGER_OIDC_DISCOVERY_JWKS_URL` to the container-internal address and points
+the backend at `OAUTH_DISCOVERY_URL` there. `OAUTH_DISCOVERY_URL` exists for
+exactly this split: it is where the metadata is *fetched from*, while
+`OAUTH_ISSUER` remains the issuer tokens are minted under, and the two are
+cross-checked before the document's keys are trusted.
 
 ### Discovery Endpoints
 

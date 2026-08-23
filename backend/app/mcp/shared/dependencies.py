@@ -109,11 +109,11 @@ async def get_session_user() -> SessionUser:
     When auth is disabled (dev mode), resolves the SessionUser from the
     Dishka container to stay consistent with API endpoint user identity.
 
-    Under the generic-OAuth proxy the identity lives in the nested
-    ``upstream_claims`` block that :class:`UpstreamIdentityOAuthProxy` embeds in
-    the FastMCP JWT, because the flat claims hold only the raw upstream token.
-    Named providers (GitHub, Azure, Discord) verify upstream themselves and
-    expose their claims flat, so both shapes are supported.
+    Every provider exposes the identity as flat claims on the verified token:
+    the named providers (GitHub, Azure, Discord) verify upstream themselves,
+    and the generic-OAuth proxy verifies the upstream ``id_token`` against the
+    IdP's JWKS, so its payload — ``sub``, ``email``, ``name`` — arrives the
+    same way.
     """
     from fastmcp.server.dependencies import get_access_token
 
@@ -124,13 +124,8 @@ async def get_session_user() -> SessionUser:
 
     if token is not None:
         # Authenticated via OAuth — extract user identity from token claims
-        claims = token.claims or {}
-        upstream_claims = claims.get("upstream_claims")
-        identity_claims = (
-            upstream_claims if isinstance(upstream_claims, dict) else claims
-        )
         return session_user_from_claims(
-            identity_claims, token.client_id, provider="mcp-oauth"
+            token.claims, token.client_id, provider="mcp-oauth"
         )
 
     # No access token — auth is disabled (dev mode).
