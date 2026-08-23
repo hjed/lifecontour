@@ -13,9 +13,11 @@ from meilisearch.errors import MeilisearchError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.search.meilisearch_client import (
     JOURNAL_INDEX_SETTINGS,
+    JOURNAL_REQUIRED_FILTERABLE_ATTRIBUTES,
     get_index_name,
     get_meilisearch_client,
 )
@@ -141,7 +143,9 @@ class JournalIndexingService:
 
             # Check if settings are configured (implicit creation leaves them empty)
             filterable = index.get_filterable_attributes()
-            if not filterable or "user_id" not in filterable:
+            if not filterable or not set(
+                JOURNAL_REQUIRED_FILTERABLE_ATTRIBUTES
+            ).issubset(filterable):
                 needs_settings = True
 
         except MeilisearchError:
@@ -205,45 +209,9 @@ class JournalIndexingService:
             if not journal_row:
                 return None
 
-            # Fetch journal types using a single query with LEFT JOINs
-            # This is more efficient than UNION ALL as it scans each table only once
-            types_query = text("""
-                SELECT
-                    CASE WHEN jci.journal_id IS NOT NULL THEN 'EVENT' END as event_type,
-                    CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
-                    CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
-                    CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
-                    CASE WHEN sm_pa.internal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type
-                FROM journals j
-                LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
-                LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
-                LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
-                LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
-                LEFT JOIN sync_metadata sm_pa ON sm_pa.internal_id = j.id
-                    AND sm_pa.integration_source = 'immich_album'
-                WHERE j.id = :journal_id
-            """)
-            types_result = await self.db_connection.execute(
-                types_query, {"journal_id": journal_id}
-            )
-            types_row = types_result.fetchone()
-
-            # NOTE: By business design, every existing journal is always treated as having
-            # a default type of 'NOTE', even if there is no separate NOTE-specific data row.
-            # This allows all journals to function as basic notes while optionally having
-            # additional type-specific data (EVENT, MOOD_RATING, PLAN, TRAVEL, PHOTO_ALBUM).
-            types = ["NOTE"]
-            if types_row:
-                # Add non-null type values
-                for type_value in [
-                    types_row.event_type,
-                    types_row.mood_type,
-                    types_row.plan_type,
-                    types_row.travel_type,
-                    types_row.photo_type,
-                ]:
-                    if type_value:
-                        types.append(type_value)
+            # Every journal is a NOTE plus whatever typed rows it has; the
+            # repository owns the (generated) type-detection query.
+            types = await SqlJournalRepository(self.db_connection).get_types(journal_id)
 
             # Fetch contact IDs
             contacts_query = text("""

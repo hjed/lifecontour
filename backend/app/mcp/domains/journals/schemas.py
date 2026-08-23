@@ -8,9 +8,9 @@ All schemas include contextual summaries to help AI understand the data.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from core_shared.models.journals import FitnessMergeMode
+from core_shared.models.journals import FitnessMergeMode, JournalType
 from pydantic import BaseModel, Field
 
 # Field description constants
@@ -21,6 +21,52 @@ EVENT_DATE_RANGE_DESC = "Event date range"
 TOTAL_DISTANCE_DESC = "Total distance in metres"
 TOTAL_DURATION_DESC = "Total duration in seconds"
 TOTAL_ELEVATION_GAIN_DESC = "Total elevation gain in metres"
+
+
+# Every journal type name, for tool descriptions. Generated so a new type can
+# never be missing from the documented list.
+VALID_JOURNAL_TYPE_NAMES = ", ".join(journal_type.name for journal_type in JournalType)
+
+
+# Closed vocabularies, spelled out as Literal types so FastMCP publishes them as
+# JSON-schema ``enum`` lists (an agent sees the options before calling rather
+# than discovering them through validation failures). Each must match the
+# corresponding VALID_* list in core_shared; tests/unit/mcp/test_journal_enums.py
+# fails if they drift.
+AnchorType = Literal[
+    "chains",
+    "double bolt",
+    "single bolt",
+    "sling on tree",
+    "sling on log",
+    "sling on boulder",
+    "sling on bollard",
+    "artificial removable",
+]
+AnchorLocation = Literal["TR", "TL", "Centre"]
+PitchType = Literal["abseil", "jump", "down_climb"]
+CanyonType = Literal["vertical", "aquatic", "mixed"]
+ClimbingType = Literal["sport", "trad", "bouldering", "top_rope"]
+TemplateType = Literal["abseiling", "canyoning", "caving", "climbing"]
+
+
+class TemplatePitchInput(BaseModel):
+    """One pitch of an activity template, as accepted by create/update_template."""
+
+    pitch_number: int = Field(description="Pitch number in sequence (1-based)")
+    height: int | None = Field(default=None, description="Pitch height in metres")
+    anchor_location: AnchorLocation | None = Field(
+        default=None,
+        description="Where the anchor sits (TR = top right, TL = top left)",
+    )
+    anchor_type: AnchorType | None = Field(default=None, description="Anchor type")
+    did_rescue: bool | None = Field(default=None, description="A rescue occurred")
+    did_setup: bool | None = Field(default=None, description="User set up the anchor")
+    notes: str | None = Field(default=None, description="Short notes for the pitch")
+    pitch_type: PitchType | None = Field(
+        default=None,
+        description="How the pitch is descended (null is treated as abseil)",
+    )
 
 
 class ExternalLinkSchema(BaseModel):
@@ -152,7 +198,21 @@ class JournalResponse(BaseModel):
 
     external_links: list[ExternalLinkSchema] = Field(
         default_factory=list,
-        description="External system links (e.g. Strava activity, Google Calendar event)",
+        description=(
+            "External system links (e.g. Strava activity, Google Calendar event). "
+            "Always populated on get/create/update responses; search results "
+            "omit links — call get_journal for them."
+        ),
+    )
+
+    external_links_preserved: bool | None = Field(
+        default=None,
+        description=(
+            "Update responses only: true when the journal had external links "
+            "before the update and every one of them is still present; false "
+            "when a link was lost; null on create/read responses. Updates never "
+            "touch integration links unless a type that carries one is removed."
+        ),
     )
 
     types_removed: list[str] = Field(
@@ -213,6 +273,31 @@ class JournalHierarchyResponse(BaseModel):
     summary: str = Field(description="AI-friendly summary of hierarchy")
 
 
+class SearchDiagnostics(BaseModel):
+    """Why a search came back empty, so an agent can tell "nothing exists"
+    from "wrong query" instead of acting on a silent zero."""
+
+    search_backend: str = Field(
+        description="Which backend answered: 'meilisearch' (word matching, typo "
+        "tolerance) or 'database' (exact listing without a text query)"
+    )
+    filters: dict[str, Any] = Field(
+        default_factory=dict, description="Every filter that was applied"
+    )
+    journals_for_user_total: int = Field(
+        description="How many journals the user has in total (0 means the "
+        "account is empty, any other number means the filters excluded them)"
+    )
+    journals_linked_to_source: int | None = Field(
+        default=None,
+        description="When integration_source was given: how many journals are "
+        "linked to that source at all, ignoring the query",
+    )
+    suggestions: list[str] = Field(
+        default_factory=list, description="Concrete next steps to try"
+    )
+
+
 class JournalSearchResponse(BaseModel):
     """AI-friendly journal search response format."""
 
@@ -226,6 +311,11 @@ class JournalSearchResponse(BaseModel):
     )
     summary: str = Field(
         description="AI-friendly summary of search results and context"
+    )
+    diagnostics: SearchDiagnostics | None = Field(
+        default=None,
+        description="Present only when total_hits is 0: what was searched, "
+        "how many journals exist regardless, and what to try next",
     )
 
 
@@ -247,6 +337,11 @@ class JournalDateWindowResponse(BaseModel):
         description="Whether there are more journals beyond the current offset+limit"
     )
     summary: str = Field(description="AI-friendly summary of the date window results")
+    diagnostics: SearchDiagnostics | None = Field(
+        default=None,
+        description="Present only when total_count is 0: the window and filters "
+        "used, how many journals exist regardless, and what to try next",
+    )
 
 
 class ActivityTotals(BaseModel):
@@ -407,10 +502,10 @@ class JournalCreateRequest(BaseModel):
     event_date_range: EventDateRangeSchema = Field(description=EVENT_DATE_RANGE_DESC)
     types: list[str] = Field(
         default_factory=list,
-        description="Journal types to add. Valid values: NOTE, EVENT, MOOD_RATING, "
-        "PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, "
-        "JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING. "
-        "Dependencies are added automatically.",
+        description="Journal types to add. Valid values: "
+        + VALID_JOURNAL_TYPE_NAMES
+        + ". Dependencies are added automatically. NOTE is implicit (a journal "
+        "with no typed data) and is ignored when combined with other types.",
     )
     type_data: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
@@ -440,10 +535,11 @@ class JournalUpdateRequest(BaseModel):
     )
     types: list[str] | None = Field(
         default=None,
-        description="Replace all types. Valid values: NOTE, EVENT, MOOD_RATING, "
-        "PLAN, TRAVEL, PHOTO_ALBUM, FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, "
-        "JOGGING, ABSEILING_TRIP, CANYONING, CLIMBING, KAYAKING, CROSS_COUNTRY_SKIING. "
-        "Dependencies are added automatically.",
+        description="Replace all types. Valid values: "
+        + VALID_JOURNAL_TYPE_NAMES
+        + ". Dependencies are added automatically, and types that remain keep "
+        "their type_data. NOTE is implicit (a journal with no typed data) and is "
+        "ignored when combined with other types.",
     )
     type_data: dict[str, dict[str, Any]] | None = Field(
         default=None,
@@ -548,10 +644,10 @@ class TemplatePitchMCPSchema(BaseModel):
     pitch_number: int = Field(description="Pitch number in sequence")
     height: int = Field(description="Height of pitch in metres")
     anchor_location: str | None = Field(
-        default=None, description="Anchor location (e.g., TR, TL)"
+        default=None, description="Anchor location (see list_journal_types enums)"
     )
     anchor_type: str | None = Field(
-        default=None, description="Anchor type (e.g., double bolt)"
+        default=None, description="Anchor type (see list_journal_types enums)"
     )
     did_rescue: bool = Field(default=False, description="Did rescue occur")
     did_setup: bool = Field(default=False, description="Did user setup")
@@ -579,7 +675,7 @@ class ActivityTemplateMCPResponse(BaseModel):
     description: str | None = Field(default=None, description="Description")
     french_grade: str | None = Field(default=None, description="French grade")
     canyon_type: str | None = Field(
-        default=None, description="Canyon type (vertical, horizontal, etc)"
+        default=None, description="Canyon type: vertical, aquatic or mixed"
     )
     water_gauge_name: str | None = Field(default=None, description="Water gauge name")
     is_vertical: bool | None = Field(default=None, description="Is vertical")

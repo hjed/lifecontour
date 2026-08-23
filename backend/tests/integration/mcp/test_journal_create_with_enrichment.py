@@ -10,10 +10,12 @@ Reproduces production bugs where:
 """
 
 import pytest
+from core_shared.models.journals import JournalType
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
+    call_mcp_tool,
     extract_mcp_json_payload,
     initialize_mcp_session,
     mcp_headers,
@@ -1023,4 +1025,168 @@ class TestRetypePreservesSharedTypeData:
                 "outdoor_activity",
                 "fitness",
             }
+            assert updated["type_data_discarded"]["fitness"] == ["strava_activity_id"]
+
+
+# Every type an agent can request on its own: NOTE is implicit, PHOTO_ALBUM is
+# Immich-managed, EVENT/OUTDOOR_PLANNING need a calendar_id and GEAR_* need a
+# gear item, so those are covered by their own tests.
+_SELF_CONTAINED_TYPES = sorted(
+    set(JournalType)
+    - {
+        JournalType.NOTE,
+        JournalType.PHOTO_ALBUM,
+        JournalType.EVENT,
+        JournalType.OUTDOOR_PLANNING,
+        JournalType.GEAR_MAINTENANCE,
+        JournalType.GEAR_USAGE,
+    },
+    key=lambda t: t.value,
+)
+
+
+class TestEveryTypeRoundTrips:
+    """A type that is written must be read back by the MCP tools."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("journal_type", _SELF_CONTAINED_TYPES)
+    async def test_created_type_is_present_on_read_back(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        journal_type: JournalType,
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            created = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": f"{journal_type.value} round trip",
+                    "content": "x",
+                    "event_date_range": {
+                        "start": "2025-05-01",
+                        "end": "2025-05-01",
+                    },
+                    "types": [journal_type.name],
+                },
+            )
+            assert "error" not in created, created
+            assert journal_type.value in created["types"]
+
+            read_back = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "get_journal",
+                {"journal_id": created["id"]},
+            )
+            assert journal_type.value in read_back["types"]
+            assert journal_type.value in read_back["type_data"]
+
+    @pytest.mark.asyncio
+    async def test_note_with_other_types_is_implied_and_explained(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            created = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Goblin Valley -> Moab",
+                    "content": "x",
+                    "event_date_range": {
+                        "start": "2025-10-09",
+                        "end": "2025-10-09",
+                    },
+                    "types": ["NOTE", "TRAVEL"],
+                },
+            )
+            assert "error" not in created, created
+            assert created["types"] == ["travel"]
+            assert "NOTE is implicit" in created["summary"]
+
+
+class TestExternalLinksOnWriteResponses:
+    """Create and update responses carry external_links, not just get_journal."""
+
+    @pytest.mark.asyncio
+    async def test_create_and_update_responses_include_strava_link(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            created = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Echo Canyon",
+                    "content": "x",
+                    "event_date_range": {
+                        "start": "2025-10-13",
+                        "end": "2025-10-13",
+                    },
+                    "types": ["CANYONING"],
+                    "type_data": {"FITNESS": {"strava_activity_id": "16135"}},
+                },
+            )
+            assert "error" not in created, created
+            assert created["external_links"] == [
+                {
+                    "source": "strava",
+                    "url": "https://www.strava.com/activities/16135",
+                    "external_id": "16135",
+                }
+            ]
+            assert created["external_links_preserved"] is None
+
+            updated = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                created["id"],
+                {"title": "Echo Canyon — Zion"},
+            )
+            assert "error" not in updated, updated
+            assert updated["external_links"] == created["external_links"]
+            assert updated["external_links_preserved"] is True
+
+    @pytest.mark.asyncio
+    async def test_dropping_fitness_reports_link_not_preserved(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            created = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Echo Canyon",
+                    "content": "x",
+                    "event_date_range": {
+                        "start": "2025-10-13",
+                        "end": "2025-10-13",
+                    },
+                    "types": ["BUSHWALKING"],
+                    "type_data": {"FITNESS": {"strava_activity_id": "16135"}},
+                },
+            )
+            assert "error" not in created, created
+
+            updated = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                created["id"],
+                {"types": ["MOOD_RATING"]},
+            )
+            assert "error" not in updated, updated
+            assert updated["external_links"] == []
+            assert updated["external_links_preserved"] is False
             assert updated["type_data_discarded"]["fitness"] == ["strava_activity_id"]

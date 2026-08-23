@@ -154,6 +154,62 @@ def _convert_field_value(field_name: str, field_value: str) -> str | bool:
     return field_value
 
 
+# Integration sources that link to contacts in the canonical link store.
+VALID_CONTACT_EXTERNAL_SOURCES = frozenset({"google", "immich"})
+
+
+async def _build_contact_response(
+    contact: Contact, contact_service: ContactService, *, include_history: bool
+) -> str:
+    """Full contact payload (links, summary, optional history) for get_contact*."""
+    from app.core.integrations.external_link_helpers import (
+        build_contact_external_links,
+    )
+    from app.mcp.domains.journals.schemas import ExternalLinkSchema
+
+    contact_id = contact.id
+    assert contact_id is not None  # noqa: S101 — persisted contact
+    external_references = await contact_service.get_external_references(contact_id)
+
+    # Resolve the user's Immich server URL (no API-key decryption) so Immich
+    # person references can be rendered as clickable links.
+    user_id = await get_current_user_id()
+    immich_token_service = await get_immich_token_service()
+    immich_server_url = await immich_token_service.get_server_url(user_id)
+
+    link_infos = build_contact_external_links(
+        external_references=external_references,
+        immich_server_url=immich_server_url,
+    )
+    external_links = [
+        ExternalLinkSchema(
+            source=link.source,
+            url=link.url,
+            external_id=link.external_id,
+        )
+        for link in link_infos
+    ]
+
+    # Convert to AI-friendly response using converter
+    response = ContactConverter.to_contact_response(
+        contact, external_links=external_links
+    )
+
+    # Add history context if requested
+    if include_history:
+        history = await contact_service.get_contact_history(
+            contact_id, limit=DEFAULT_HISTORY_LIMIT
+        )
+        history_summary = (
+            f"Recent changes: {len(history)} field updates recorded"
+            if history
+            else "No recent changes"
+        )
+        response.summary = f"{response.summary}\n\n{history_summary}"
+
+    return MCPResponseBuilder.success_response(response)
+
+
 def register_contact_tools(mcp: FastMCP[None]) -> None:
     """
     Register contact-related MCP tools with the FastMCP server.
@@ -208,51 +264,68 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         if contact is None:
             raise ContactNotFoundError(contact_id)
 
-        # Fetch external references for contact
-        from app.core.integrations.external_link_helpers import (
-            build_contact_external_links,
-        )
-        from app.mcp.domains.journals.schemas import ExternalLinkSchema
-
-        external_references = await contact_service.get_external_references(contact_id)
-
-        # Resolve the user's Immich server URL (no API-key decryption) so Immich
-        # person references can be rendered as clickable links.
-        user_id = await get_current_user_id()
-        immich_token_service = await get_immich_token_service()
-        immich_server_url = await immich_token_service.get_server_url(user_id)
-
-        link_infos = build_contact_external_links(
-            external_references=external_references,
-            immich_server_url=immich_server_url,
-        )
-        external_links = [
-            ExternalLinkSchema(
-                source=link.source,
-                url=link.url,
-                external_id=link.external_id,
-            )
-            for link in link_infos
-        ]
-
-        # Convert to AI-friendly response using converter
-        response = ContactConverter.to_contact_response(
-            contact, external_links=external_links
+        return await _build_contact_response(
+            contact, contact_service, include_history=include_history
         )
 
-        # Add history context if requested
-        if include_history:
-            history = await contact_service.get_contact_history(
-                contact_id, limit=DEFAULT_HISTORY_LIMIT
-            )
-            history_summary = (
-                f"Recent changes: {len(history)} field updates recorded"
-                if history
-                else "No recent changes"
-            )
-            response.summary = f"{response.summary}\n\n{history_summary}"
+    @mcp.tool
+    @mcp_unified_error_handler("get_contact_by_external_id", "contact")
+    async def get_contact_by_external_id(
+        source: Annotated[
+            str,
+            Field(
+                description="Integration source the id belongs to. One of: "
+                + ", ".join(sorted(VALID_CONTACT_EXTERNAL_SOURCES))
+                + ". Any other value is rejected."
+            ),
+        ],
+        external_id: Annotated[
+            str,
+            Field(
+                description="The external system's identifier, e.g. a Google "
+                "People resource name ('people/c123') or an Immich person UUID."
+            ),
+        ],
+        include_history: Annotated[
+            bool,
+            Field(default=False, description="Optional: Include field history"),
+        ] = False,
+        contact_service: ContactService = mcp_depends(get_contact_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Find the contact linked to an external system's record.
 
-        return MCPResponseBuilder.success_response(response)
+        Resolves ``(source, external_id)`` — e.g. ('google', 'people/c123') —
+        to a contact and returns the same payload as get_contact.
+
+        Raises:
+            ValueError: If ``source`` is not a recognised contact integration
+
+        Returns a "Not found" error payload when no contact is linked to that id.
+        """
+        normalized_source = source.strip().lower()
+        if normalized_source not in VALID_CONTACT_EXTERNAL_SOURCES:
+            allowed = ", ".join(sorted(VALID_CONTACT_EXTERNAL_SOURCES))
+            raise ValueError(f"Invalid source '{source}'. Must be one of: {allowed}")
+        normalized_id = external_id.strip()
+        if not normalized_id:
+            raise ValueError("external_id must not be empty")
+
+        contact = await contact_service.find_contact_by_external_reference(
+            normalized_source, normalized_id, connection
+        )
+        if contact is None or contact.id is None:
+            return MCPResponseBuilder.error_response(
+                error_type="Not found",
+                message=(
+                    f"No contact is linked to {normalized_source} id '{normalized_id}'"
+                ),
+                context={"source": normalized_source, "external_id": normalized_id},
+            )
+        return await _build_contact_response(
+            contact, contact_service, include_history=include_history
+        )
 
     @mcp.tool
     @mcp_unified_error_handler("merge_contacts", "contact")

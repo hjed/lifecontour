@@ -16,6 +16,7 @@ from meilisearch.errors import MeilisearchError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.infrastructure.search.meilisearch_client import (
     CONTACTS_INDEX_SETTINGS,
     JOURNAL_INDEX_SETTINGS,
@@ -416,48 +417,7 @@ class ReindexService:
             if not journal_row:
                 return None
 
-            types_result = await self.db_connection.execute(
-                text("""
-                    SELECT
-                        CASE WHEN jci.journal_id IS NOT NULL
-                            THEN 'EVENT' END as event_type,
-                        CASE WHEN jmd.journal_id IS NOT NULL
-                            THEN 'MOOD_RATING' END as mood_type,
-                        CASE WHEN jpd.journal_id IS NOT NULL
-                            THEN 'PLAN' END as plan_type,
-                        CASE WHEN jtd.journal_id IS NOT NULL
-                            THEN 'TRAVEL' END as travel_type,
-                        CASE WHEN sm_pa.internal_id IS NOT NULL
-                            THEN 'PHOTO_ALBUM' END as photo_type
-                    FROM journals j
-                    LEFT JOIN journal_calendar_info jci
-                        ON j.id = jci.journal_id
-                    LEFT JOIN journal_mood_data jmd
-                        ON j.id = jmd.journal_id
-                    LEFT JOIN journal_plan_data jpd
-                        ON j.id = jpd.journal_id
-                    LEFT JOIN journal_travel_data jtd
-                        ON j.id = jtd.journal_id
-                    LEFT JOIN sync_metadata sm_pa
-                        ON sm_pa.internal_id = j.id
-                        AND sm_pa.integration_source = 'immich_album'
-                    WHERE j.id = :journal_id
-                """),
-                {"journal_id": journal_id},
-            )
-            types_row = types_result.fetchone()
-
-            types = ["NOTE"]
-            if types_row:
-                for type_value in [
-                    types_row.event_type,
-                    types_row.mood_type,
-                    types_row.plan_type,
-                    types_row.travel_type,
-                    types_row.photo_type,
-                ]:
-                    if type_value:
-                        types.append(type_value)
+            types = await SqlJournalRepository(self.db_connection).get_types(journal_id)
 
             contacts_result = await self.db_connection.execute(
                 text("""

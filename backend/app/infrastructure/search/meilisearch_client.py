@@ -146,6 +146,11 @@ CONTACTS_INDEX_SETTINGS = {
 }
 
 # Index configuration for journals
+# Filterable attributes that every deployed journals index must have. An index
+# created before one of these was added is re-configured on the next indexing
+# pass (see JournalIndexingService._ensure_journals_index_exists).
+JOURNAL_REQUIRED_FILTERABLE_ATTRIBUTES = ("user_id", "id")
+
 JOURNAL_INDEX_SETTINGS = {
     "searchableAttributes": [
         "title",
@@ -153,6 +158,7 @@ JOURNAL_INDEX_SETTINGS = {
         "location",
     ],
     "filterableAttributes": [
+        "id",
         "user_id",
         "event_date_range_start",
         "event_date_range_end",
