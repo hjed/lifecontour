@@ -15,8 +15,14 @@ import { TaskLinkRole } from '@/types/tasks';
 import type { JournalTaskResource, JournalTasksResponse } from '@/types/tasks';
 import { useJournalTasks } from '@/lib/api/tasks';
 
+// The rows mount inline status actions, whose mutation hooks would otherwise
+// want a `QueryClientProvider` this suite has no use for: what it asserts is
+// the grouping contract, and the actions carry their own tests.
 jest.mock('@/lib/api/tasks', () => ({
   useJournalTasks: jest.fn(),
+  useUpdateTask: () => ({ mutate: jest.fn(), isPending: false }),
+  useDeleteTask: () => ({ mutate: jest.fn(), isPending: false }),
+  useTaskWriteInFlight: () => false,
 }));
 
 const mockUseJournalTasks = useJournalTasks as jest.MockedFunction<

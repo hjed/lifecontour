@@ -204,6 +204,82 @@ where tasks are worked with; there is no `/tasks` route.
   list, under the card's own `h3`, so a group is announced by name with its item
   count rather than as a flat run of text.
 
+#### Inline status actions
+
+`JournalTaskActions` (`components/journals/JournalTaskActions.tsx`) carries the
+row's done / return-to-not-done / cancel buttons and its confirmed delete. It is
+a component of its own rather than markup inside `JournalTaskRow` because it
+holds mutations and an offer table, while the row is a pure rendering of the
+listing's payload.
+
+- **What a row offers is a table, not a condition**, and it lives in
+  `lib/task-display.ts` beside the lapse wording: `statusActions(status)`
+  returns `done + cancel` for a not-done task, `not-done + cancel` for a done
+  one, and **nothing at all for a cancelled one**. That last entry is the rule
+  the table exists to state — the service gives cancelled exactly one exit,
+  retargeting onto a new future journal, and refuses `cancelled → done` and
+  `cancelled → not done` alike, so either button could do nothing but draw a
+  409. A test guards the table against drifting from that matrix. A **lapsed**
+  task is still not done and keeps the full offer: lapsing is a marker on a live
+  commitment, never a disabled state.
+- **Cancel is the ordinary action and delete is the exception**, which the
+  specification states twice. Delete is last, icon-only, `ghost` and
+  `text-muted-foreground` — never a `destructive` button sitting beside the
+  ordinary ones — and is gated by an `AlertDialog` whose body says what
+  cancelling would keep instead.
+- **The optimistic update belongs to `useUpdateTask`, not to the component.**
+  `onMutate` cancels `taskKeys.all`, snapshots it with `getQueriesData` and
+  patches it with `setQueriesData`; `onError` restores every snapshot;
+  `onSettled` invalidates through `invalidateAfterMutation`. Keeping it in the
+  hook is what lets the retarget dialog and the dashboard inherit it, and it is
+  the shape this document already sanctions under *Invalidating After a
+  Mutation*.
+- **The patch is shape-aware because the attributes are embedded in two
+  shapes** — the single-resource detail read and the array-shaped journal
+  listing and upcoming window. Patching one and not the other would leave a
+  namespace showing the status the user just changed.
+- **Leaving `not_done` clears `lapsed`/`lapse_reason`; returning to it does
+  not.** Lapse is derived from "still not done and the due journal is no longer
+  ahead of it", so a task that has just been ticked off cannot be lapsed and its
+  marker must go at once — otherwise completing a lapsed task leaves it reading
+  `Done · Lapsed` until the refetch. The reverse is not knowable client-side, as
+  it needs the day boundary in the user's timezone, so it is left to the
+  invalidation a beat later.
+- **The toast is the announcement.** `useUpdateTask` words its success message
+  from what changed — "Task marked done" / "Task returned to not done" / "Task
+  cancelled", from `statusChangeWording` — rather than the generic "Task updated
+  successfully", which a text-only update still uses. Sonner's `Toaster` is
+  already a polite live region, so a second `role="status"` node on the row
+  would make a screen reader say the same thing twice.
+- **`aria-busy` sits on the group, not on the button that was pressed.** The
+  optimistic patch rewrites the cached status before the request settles, so the
+  listing rerenders and the row comes back offering the *new* status's actions —
+  press *Done* and a moment later the screen shows *Not done* and *Cancel*. A
+  busy flag matched to the pending action is then false on everything visible.
+  The group is what is mid-write, and the group is what says so.
+- **The in-flight guard is scoped to the task, not to the hook instance.**
+  `useTaskWriteInFlight(taskId)` reads the mutation cache through
+  `useMutationState`, because a journal renders a task holding two roles **once
+  per group** — one commitment, two `JournalTaskActions`, two independent
+  mutations. A guard reading its own `isPending` locks only the copy that was
+  clicked; the optimistic patch then rerenders the twin offering the opposite
+  move, one click from racing the write already in flight. Any surface showing
+  that task locks with it, which is also what should happen when a retarget is
+  open elsewhere on the page.
+- **The rollback is per task *and* per cache entry.** Per task, because two rows
+  share a cache entry and restoring the whole entry would undo a row the user
+  had just ticked because an unrelated one failed. Per entry, because the detail
+  read and the journal listing are fetched independently and can legitimately
+  disagree — writing one entry's captured value into all of them would replace a
+  fresher cached value with a staler one. Both were got wrong once, in the same
+  six lines, in opposite directions: a rollback coarser than the thing it undoes.
+- Accessibility: real buttons, so keyboard reach is structural; each accessible
+  name **contains** its visible label (WCAG 2.5.3 — "Done" inside "Mark done");
+  every action is disabled while any write against that task is in flight; and
+  the group is `role="group"`
+  `aria-describedby` the row's task text, because every row's buttons are named
+  the same and the text is what tells them apart.
+
 #### Journal and contact writes invalidate `taskKeys.all`
 
 A task's read shapes **embed** the entities they reference rather than pointing
