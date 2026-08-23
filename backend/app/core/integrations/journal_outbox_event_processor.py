@@ -62,6 +62,7 @@ from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
 from app.core.journal.adapters.sql.journal_series_repository import (
     SqlJournalSeriesRepository,
 )
+from app.core.journal.adapters.sql.journal_touch import touch_journal
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.unit_of_work import savepoint
@@ -1462,8 +1463,17 @@ class JournalOutboxEventProcessor:
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]
     ) -> None:
-        """Save calendar info for a journal using raw SQL."""
+        """Save calendar info for a journal using raw SQL.
+
+        An inbound sync can change a journal's EVENT data without touching the
+        journal row, which would leave an already-issued entity-tag naming a
+        version that no longer describes what a client would read. Marking the
+        journal first keeps conditional writes honest about calendar changes
+        that arrived from Google rather than from a user.
+        """
         calendar_id = UUID(calendar_info_data["calendar_id"])
+
+        await touch_journal(self.connection, journal_id)
 
         start_time = self._parse_time(calendar_info_data.get("start_time"))
         end_time = self._parse_time(calendar_info_data.get("end_time"))

@@ -120,6 +120,23 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         """
         params = {"source_id": source_id, "survivor_id": survivor_id}
 
+        # Every journal linked to the absorbed contact ends up with a different
+        # relationship set, and none of them is named by the caller — so they
+        # are marked as changed while the rows still point at the source, and
+        # their locks are taken ahead of the rewrites below.
+        await transaction.execute(
+            text(
+                """
+                UPDATE journals SET updated_at = now()
+                WHERE id IN (
+                    SELECT journal_id FROM journal_contact_relationships
+                    WHERE contact_id = :source_id
+                )
+                """
+            ),
+            {"source_id": source_id},
+        )
+
         await transaction.execute(
             text(
                 """

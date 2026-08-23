@@ -175,6 +175,19 @@ hole in the guarantee — including bulk rewrites no caller names journal-by-jou
 like merging or deleting a tag, which touch every journal holding it *before* the
 assignments stop pointing there.
 
+**Where the aggregate stops.** The tag tracks the journal's own rows and its
+*child* rows — types, type-specific data, tag assignments, contact
+relationships — including changes that arrive from an integration worker rather
+than a user, such as an inbound calendar sync writing only
+`journal_calendar_info`.
+
+It deliberately does **not** track the *referenced* entities a read merely
+embeds: renaming or recolouring a journal tag changes the tag resource, not the
+journals carrying it, and bumping every one of them would turn a single rename
+into a mass update. A client that needs to detect that has the tag's own
+resource to watch. Assignment changes are a different matter and are tracked,
+because they change which tags a journal has.
+
 **Lock ordering matters.** A conditional write takes the journal's lock first
 and then writes child rows. A child write that touched the parent afterwards
 would take the same two locks in the opposite order, and PostgreSQL would break

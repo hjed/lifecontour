@@ -539,3 +539,47 @@ class TestTheTagCoversTheWholeJournal:
 
         assert response.status_code in (200, 204)
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
+
+    async def test_merging_a_contact_moves_the_version_of_its_linked_journals(
+        self, integration_api_client, async_connection
+    ):
+        """Contact merge rewrites relationships without naming the journals.
+
+        Same shape as the tag merge: the journals are found from the rows about
+        to be re-pointed, before they stop naming the absorbed contact.
+        """
+        journal_id = await self._create_journal(integration_api_client)
+        absorbed = await integration_api_client.post(
+            "/api/contacts", json=contact_payload("Absorbed")
+        )
+        survivor = await integration_api_client.post(
+            "/api/contacts", json=contact_payload("Survivor")
+        )
+        absorbed_id = absorbed.json()["data"]["id"]
+        survivor_id = survivor.json()["data"]["id"]
+        await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts",
+            json={
+                "data": {
+                    "type": "journal-contact-relationships",
+                    "attributes": {
+                        "contact_id": str(absorbed_id),
+                        "relationship_type": "PARTICIPANT",
+                    },
+                }
+            },
+        )
+        await self._backdate(async_connection, journal_id)
+
+        response = await integration_api_client.post(
+            f"/api/contacts/{survivor_id}/merge",
+            json={
+                "data": {
+                    "type": "contact-merges",
+                    "attributes": {"source_contact_id": int(absorbed_id)},
+                }
+            },
+        )
+
+        assert response.status_code in (200, 201, 204)
+        assert await self._updated_at(async_connection, journal_id) != self.BACKDATED

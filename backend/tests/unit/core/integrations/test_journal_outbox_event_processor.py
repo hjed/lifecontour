@@ -202,6 +202,28 @@ def _mock_fetchone(row: MagicMock) -> MagicMock:
 # ── Tests ────────────────────────────────────────────────────────────
 
 
+def _execute_call_with_sql(mock_connection, needle: str):
+    """The ``execute`` call whose SQL mentions ``needle``.
+
+    Picking a statement by its position in ``call_args_list`` re-breaks every
+    time the processor gains one — as it did when journal writes started
+    marking the aggregate as changed. Naming what the call *is* does not.
+    """
+    for call in mock_connection.execute.call_args_list:
+        if needle in str(call[0][0].text):
+            return call
+    raise AssertionError(f"no execute call whose SQL mentions {needle!r}")
+
+
+def _execute_call_with_param(mock_connection, name: str):
+    """The ``execute`` call that bound a parameter named ``name``."""
+    for call in mock_connection.execute.call_args_list:
+        params = call[0][1] if len(call[0]) > 1 else None
+        if isinstance(params, dict) and name in params:
+            return call
+    raise AssertionError(f"no execute call binding a {name!r} parameter")
+
+
 class TestJournalOutboxEventProcessor:
     """Test cases for JournalOutboxEventProcessor."""
 
@@ -255,6 +277,7 @@ class TestJournalOutboxEventProcessor:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
             _mock_resolve_contact(100),  # contact resolver
@@ -272,7 +295,7 @@ class TestJournalOutboxEventProcessor:
         assert result["status"] == "success"
         assert result["event_type"] == "journal_event.created"
         assert result["journal_id"] == 42
-        assert mock_connection.execute.call_count == 7
+        assert mock_connection.execute.call_count == 8
 
     @pytest.mark.asyncio
     async def test_ensure_calendar_exists_called_with_correct_params(
@@ -302,6 +325,7 @@ class TestJournalOutboxEventProcessor:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -337,6 +361,7 @@ class TestJournalOutboxEventProcessor:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -345,7 +370,7 @@ class TestJournalOutboxEventProcessor:
 
         assert result["status"] == "success"
         # 3 DB calls: _find_external_event_link + calendar info + external link
-        assert mock_connection.execute.call_count == 4
+        assert mock_connection.execute.call_count == 5
 
     # ── journal_event.updated ──────────────────────────────────────────
 
@@ -371,6 +396,7 @@ class TestJournalOutboxEventProcessor:
             _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
             _mock_fetchone(_make_link_row()),  # _find_external_event_link
             _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
             _mock_resolve_contact(200),  # contact resolver
@@ -416,6 +442,7 @@ class TestJournalOutboxEventProcessor:
             _mock_fetchone(journal_row),  # _find_journal_by_id
             _mock_fetchone(link_row),  # _find_external_event_link
             _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -542,6 +569,7 @@ class TestJournalOutboxEventProcessor:
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(_make_link_row(external_version=None)),
             _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -576,6 +604,7 @@ class TestJournalOutboxEventProcessor:
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(_make_link_row()),
             _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -610,6 +639,7 @@ class TestJournalOutboxEventProcessor:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -617,7 +647,7 @@ class TestJournalOutboxEventProcessor:
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        calendar_call = mock_connection.execute.call_args_list[2]
+        calendar_call = _execute_call_with_sql(mock_connection, "journal_calendar_info")
         sql_text = str(calendar_call[0][0].text)
         assert "updated_at" in sql_text
 
@@ -644,6 +674,7 @@ class TestJournalOutboxEventProcessor:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
             _mock_resolve_contact(100),  # resolve_by_email
@@ -654,7 +685,7 @@ class TestJournalOutboxEventProcessor:
         await processor.process_event(event)
 
         # The get_relationships call should query for INVITEE type only
-        get_rels_call = mock_connection.execute.call_args_list[5]
+        get_rels_call = _execute_call_with_param(mock_connection, "relationship_type")
         params = get_rels_call[0][1]
         assert params["relationship_type"] == "INVITEE"
 
@@ -722,6 +753,7 @@ class TestJournalOutboxEventProcessor:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
             resolve_no_match,  # resolve_by_email → None
@@ -732,7 +764,7 @@ class TestJournalOutboxEventProcessor:
 
         assert result["status"] == "success"
         # 6 calls: ensure_calendar, find link, calendar, link, resolve, get_rels
-        assert mock_connection.execute.call_count == 6
+        assert mock_connection.execute.call_count == 7
 
     # ── Invitee sync: handles role and status updates ─────────────────
 
@@ -797,6 +829,7 @@ class TestJournalOutboxEventProcessor:
             _mock_fetchone(_make_journal_row()),  # find journal
             _mock_fetchone(_make_link_row()),  # find link
             _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # save calendar info
             _mock_empty_result(),  # update etag
             resolve_match,  # resolve email 1 (update_me)
@@ -859,6 +892,7 @@ class TestJournalOutboxEventProcessor:
             _mock_fetchone(journal_row),
             _mock_fetchone(link_row),
             _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -906,6 +940,7 @@ class TestJournalOutboxEventProcessor:
             _mock_fetchone(journal_row),  # _find_journal_by_id
             _mock_fetchone(link_row),  # _find_external_event_link
             calendar_info_result,  # _find_calendar_info (private_description=True)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -1165,6 +1200,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -1188,6 +1224,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert_result,  # SqlFitnessDataRepository.save UPSERT
@@ -1246,6 +1283,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             MagicMock(),  # _ensure_type_data_rows: bushwalking INSERT
@@ -1284,6 +1322,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -1292,7 +1331,7 @@ class TestStravaFitnessDataProcessing:
         assert result["status"] == "success"
 
         # No fitness data or type calls expected
-        assert mock_connection.execute.call_count == 4
+        assert mock_connection.execute.call_count == 5
         mock_journal_service.add_type_to_journal.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1321,6 +1360,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -1328,7 +1368,7 @@ class TestStravaFitnessDataProcessing:
         result = await processor.process_event(event)
         assert result["status"] == "success"
         # No fitness data SQL should have been called
-        assert mock_connection.execute.call_count == 4
+        assert mock_connection.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_created_event_with_unknown_journal_type_logs_warning(
@@ -1359,6 +1399,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -1421,6 +1462,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # SqlFitnessDataRepository.save
@@ -1501,6 +1543,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # SqlFitnessDataRepository.save
@@ -1549,6 +1592,7 @@ class TestStravaFitnessDataProcessing:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -1556,7 +1600,7 @@ class TestStravaFitnessDataProcessing:
         result = await processor.process_event(event)
         assert result["status"] == "success"
         # No fitness data UPSERT should have been called
-        assert mock_connection.execute.call_count == 4
+        assert mock_connection.execute.call_count == 5
 
 
 def _make_strava_event_data(
@@ -1671,6 +1715,7 @@ class TestGPXRouteAndSyncMetadata:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
@@ -1732,6 +1777,7 @@ class TestGPXRouteAndSyncMetadata:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
@@ -1790,6 +1836,7 @@ class TestGPXRouteAndSyncMetadata:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
@@ -1831,6 +1878,7 @@ class TestGPXRouteAndSyncMetadata:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
         ]
@@ -1939,6 +1987,7 @@ class TestStravaMatchDetectionEmission:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
@@ -2004,6 +2053,7 @@ class TestStravaMatchDetectionEmission:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
@@ -2063,6 +2113,7 @@ class TestStravaMatchDetectionEmission:
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
+            _mock_empty_result(),  # touch_journal (aggregate version)
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
             fitness_upsert,  # fitness data save
@@ -2512,6 +2563,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
         ]
@@ -2545,6 +2597,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         mock_connection.execute.side_effect = [
             MagicMock(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
         ]
@@ -2575,6 +2628,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
             _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
             _mock_fetchone(_make_link_row()),  # _find_external_event_link
             _mock_empty_result(),  # _find_calendar_info (private_description)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
@@ -2606,13 +2660,16 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
             _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
             _mock_fetchone(_make_link_row()),  # _find_external_event_link
             _mock_empty_result(),  # _find_calendar_info (private_description)
+            _mock_empty_result(),  # touch_journal (aggregate version)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
         ]
 
         await processor.process_event(event)
 
-        etag_update_call = mock_connection.execute.call_args_list[5]
+        etag_update_call = _execute_call_with_param(
+            mock_connection, "recurring_event_id"
+        )
         sql_text = str(etag_update_call[0][0].text)
         assert "recurring_event_id" in sql_text
         assert "COALESCE" in sql_text
@@ -2733,7 +2790,7 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
 
         assert result["status"] == "skipped"
         assert result["reason"] == "etag_unchanged"
-        backfill_call = mock_connection.execute.call_args_list[3]
+        backfill_call = _execute_call_with_param(mock_connection, "recurring_event_id")
         sql_text = str(backfill_call[0][0].text)
         assert "recurring_event_id" in sql_text
         assert backfill_call[0][1]["recurring_event_id"] == "master-1"
