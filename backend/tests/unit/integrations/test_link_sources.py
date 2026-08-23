@@ -45,3 +45,9 @@ def test_contact_sources_accept_their_displayed_names() -> None:
     assert "google_contacts" in contact_source_names()
     with pytest.raises(ValueError, match="google, google_contacts, immich"):
         resolve_contact_source("strava")
+
+
+def test_displayed_immich_shared_link_resolves_to_the_album_store() -> None:
+    """`immich_shared` is how a shared album link is displayed; it is an alias."""
+    assert resolve_journal_source("immich_shared") == "immich_album"
+    assert "immich_shared" in journal_source_names()

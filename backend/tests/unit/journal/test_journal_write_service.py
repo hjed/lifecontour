@@ -536,6 +536,8 @@ class TestUpdateJournalComposite:
         write_service.mood_data_repo.find_by_journal_id.return_value = MagicMock(
             mood_value=None, mood_label=None, energy_level=None
         )
+        # A defaulted boolean (false) is not "held data" and must not be reported.
+        write_service.fitness_data_repo.find_by_journal_id.return_value.calories = False
 
         result = await write_service.update_journal_composite(
             _journal(journal_id=9), mock_transaction, types=["mood_rating"]

@@ -89,6 +89,7 @@ async def test_list_journal_types_states_units_and_enums() -> None:
         == VALID_CLIMBING_TYPES
     )
     assert by_name["EVENT"]["type_data_fields"]["calendar_id"]["required"] is True
+    assert "url" in by_name["PLAN"]["type_data_fields"]["documents"]["description"]
     assert by_name["OUTDOOR_TRAINING"]["type_data_fields"]["focus_areas"]["type"] == (
         "list[string]"
     )

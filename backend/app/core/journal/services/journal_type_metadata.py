@@ -29,7 +29,7 @@ JOURNAL_TYPE_DESCRIPTIONS: dict[str, str] = {
     "NOTE": "Simple text note using only base journal fields (no type_data needed)",
     "EVENT": "Calendar event with time and location",
     "MOOD_RATING": "Mood and energy level tracking",
-    "PLAN": "Event planning (no specific type_data fields)",
+    "PLAN": "Event planning with a list of linked documents",
     "TRAVEL": "Travel itinerary (no specific type_data fields)",
     "PHOTO_ALBUM": "Photo album linked to Immich",
     "FITNESS": "Base fitness activity with optional metrics",
@@ -104,6 +104,13 @@ JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, TypeDataFieldSpec]] = {
         "mood_label": TypeDataFieldSpec("string", "Free-text mood label"),
         "energy_level": TypeDataFieldSpec(
             "int", "Energy on a 1-10 scale", unit="1-10 scale"
+        ),
+    },
+    "PLAN": {
+        "documents": TypeDataFieldSpec(
+            "list",
+            "Linked documents, replacing the whole list. Each: url (str, "
+            "required), title (str), description (str), order (int)",
         ),
     },
     "PHOTO_ALBUM": {

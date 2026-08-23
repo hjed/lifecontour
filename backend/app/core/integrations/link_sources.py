@@ -187,9 +187,17 @@ CONTACT_LINK_SOURCES: dict[str, ContactLinkSource] = {
 }
 
 
+# Displayed link names that are a view of another source's store: an Immich
+# album with a public share link is reported as 'immich_shared' with the same
+# album UUID, so it resolves through the 'immich_album' store.
+JOURNAL_SOURCE_ALIASES: dict[str, str] = {
+    "immich_shared": IntegrationSource.IMMICH_ALBUM,
+}
+
+
 def journal_source_names() -> list[str]:
     """Every ``source`` value accepted for journal filters and lookups."""
-    return sorted(JOURNAL_LINK_SOURCES)
+    return sorted({*JOURNAL_LINK_SOURCES, *JOURNAL_SOURCE_ALIASES})
 
 
 def contact_source_names() -> list[str]:
@@ -201,7 +209,9 @@ def contact_source_names() -> list[str]:
 
 def resolve_journal_source(value: str) -> str:
     """Normalise a journal source name; unknown values raise with the allowed list."""
-    normalized = value.strip().lower()
+    normalized = JOURNAL_SOURCE_ALIASES.get(
+        value.strip().lower(), value.strip().lower()
+    )
     if normalized not in JOURNAL_LINK_SOURCES:
         allowed = ", ".join(journal_source_names())
         raise ValueError(

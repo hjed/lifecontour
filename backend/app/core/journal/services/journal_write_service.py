@@ -1538,8 +1538,12 @@ class JournalWriteService:
         row = await repo.find_by_journal_id(journal_id)
         if row is None:
             return []
+        # None, "" and False are all "never set": boolean columns default to
+        # false, so reporting them would bury the fields that actually held data.
         return [
-            field for field in tracked if getattr(row, field, None) not in (None, "")
+            field
+            for field in tracked
+            if getattr(row, field, None) not in (None, "", False)
         ]
 
     async def _replace_contact_relationships(
