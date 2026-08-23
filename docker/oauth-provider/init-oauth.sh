@@ -15,6 +15,26 @@ FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
 PUBLIC_PORT=${PUBLIC_PORT:-4444}
 ADMIN_PORT_EXTERNAL=${ADMIN_PORT_EXTERNAL:-4445}
 
+# The MCP server's OAuth proxy serves its own callback under the mount path it
+# is served from, so the client has to allow that URI as well as the web app's
+# or Hydra rejects the MCP flow at the authorize step. Both parts come from the
+# variables the backend itself reads (WEBHOOK_BASE_URL / MCP_MOUNT_PATH), and
+# the defaults match docker-compose.yml, so the two cannot drift apart.
+BACKEND_URL=${WEBHOOK_BASE_URL:-http://localhost:8000}
+MCP_MOUNT_PATH=${MCP_MOUNT_PATH:-/mcp-server}
+BACKEND_URL=${BACKEND_URL%/}
+MCP_MOUNT_PATH=${MCP_MOUNT_PATH%/}
+WEB_CALLBACK_URL="${FRONTEND_URL}/auth/callback"
+MCP_CALLBACK_URL="${BACKEND_URL}${MCP_MOUNT_PATH}/auth/callback"
+REDIRECT_URIS="[\"${WEB_CALLBACK_URL}\", \"${MCP_CALLBACK_URL}\"]"
+
+# Print the redirect URIs this run would register and exit. Nothing else may be
+# written to stdout before this point: the tests parse the output as JSON.
+if [ "$1" = "--print-redirect-uris" ]; then
+    echo "${REDIRECT_URIS}"
+    exit 0
+fi
+
 echo "🔧 Starting OAuth provider initialization for ${ENVIRONMENT}..."
 echo "DEBUG: Script started successfully"
 echo "DEBUG: Environment variables:"
@@ -22,6 +42,8 @@ echo "  OAUTH_PROVIDER_HOST=${OAUTH_PROVIDER_HOST}"
 echo "  OAUTH_ADMIN_PORT=${OAUTH_ADMIN_PORT}"
 echo "  CLIENT_ID=${CLIENT_ID}"
 echo "  ENVIRONMENT=${ENVIRONMENT}"
+echo "  BACKEND_URL=${BACKEND_URL}"
+echo "  MCP_MOUNT_PATH=${MCP_MOUNT_PATH}"
 
 # Colors for output (if supported)
 if [ -t 1 ]; then
@@ -136,7 +158,7 @@ CLIENT_CONFIG=$(cat <<EOF
     "client_secret": "${CLIENT_SECRET}",
     "grant_types": ["authorization_code", "refresh_token"],
     "response_types": ["code"],
-    "redirect_uris": ["${FRONTEND_URL}/auth/callback"],
+    "redirect_uris": ${REDIRECT_URIS},
     "post_logout_redirect_uris": ["${FRONTEND_URL}/"],
     "scope": "openid profile email offline_access",
     "audience": [],
@@ -183,12 +205,19 @@ CLIENT_INFO=$(curl -s "${CLIENT_CHECK_URL}" 2>/dev/null || echo "")
 if [ -n "$CLIENT_INFO" ] && echo "$CLIENT_INFO" | grep -q "\"client_id\":\"${CLIENT_ID}\""; then
     print_success "Client verification successful"
 
+    # Without this URI Hydra refuses the MCP flow at the authorize step, which
+    # surfaces in the client rather than in any log on this side.
+    if ! echo "$CLIENT_INFO" | grep -q "${MCP_CALLBACK_URL}"; then
+        print_warning "MCP callback ${MCP_CALLBACK_URL} is not registered - MCP OAuth will fail"
+    fi
+
     # Extract and display key configuration
     echo ""
     print_step "OAuth Client Configuration (${ENVIRONMENT}):"
     echo "  Client ID: ${CLIENT_ID}"
     echo "  Client Name: Personal Management System (${ENVIRONMENT})"
-    echo "  Redirect URI: ${FRONTEND_URL}/auth/callback"
+    echo "  Redirect URI (web app): ${WEB_CALLBACK_URL}"
+    echo "  Redirect URI (MCP): ${MCP_CALLBACK_URL}"
     echo "  Grant Types: authorization_code, refresh_token"
     echo "  Scope: openid profile email"
     echo "  Skip Consent: true"
@@ -211,7 +240,7 @@ else
     echo "Using localhost URL: $PUBLIC_URL"
 fi
 
-AUTH_URL="${PUBLIC_URL}/oauth2/auth?client_id=${CLIENT_ID}&response_type=code&scope=openid%20profile%20email&redirect_uri=${FRONTEND_URL}/auth/callback&state=test"
+AUTH_URL="${PUBLIC_URL}/oauth2/auth?client_id=${CLIENT_ID}&response_type=code&scope=openid%20profile%20email&redirect_uri=${WEB_CALLBACK_URL}&state=test"
 
 echo "Testing authorization endpoint: $AUTH_URL"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL" 2>/dev/null || echo "000")

@@ -1,10 +1,14 @@
 import { runGlobalSetup } from '../../../tests/global-setup';
 import {
+  FRONTEND_TEST_CALLBACK_URL,
   FRONTEND_TEST_PORT,
   FRONTEND_TEST_URL,
   getFrontendCorsOrigins,
   workspaceEnv,
   BACKEND_TEST_PORT,
+  BACKEND_TEST_URL,
+  MCP_TEST_CALLBACK_URL,
+  MCP_TEST_MOUNT_PATH,
   OAUTH_ADMIN_TEST_PORT,
   MEILI_TEST_PORT,
 } from '../../../tests/e2e/utils/frontend-test-config';
@@ -26,7 +30,10 @@ describe('runGlobalSetup', () => {
   >();
   const printServiceLogs = jest.fn();
   const hasExpectedBackendConfig = jest.fn<boolean, [string, string]>();
-  const hasExpectedOAuthClientRedirect = jest.fn<Promise<boolean>, [string]>();
+  const hasExpectedOAuthClientRedirect = jest.fn<
+    Promise<boolean>,
+    [string[]]
+  >();
   const chdir = jest.fn();
   const logger = { log: jest.fn(), error: jest.fn() };
   const oauthUiPort = workspaceEnv.OAUTH_UI_TEST_PORT || '3002';
@@ -43,6 +50,8 @@ describe('runGlobalSetup', () => {
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
+    WEBHOOK_BASE_URL: BACKEND_TEST_URL,
+    MCP_MOUNT_PATH: MCP_TEST_MOUNT_PATH,
   };
 
   beforeEach(() => {
@@ -170,5 +179,36 @@ describe('runGlobalSetup', () => {
       '/workspace',
       { env: expectedDockerEnv, ignoreError: true }
     );
+  });
+
+  it('requires the OAuth client to allow the web app and MCP callbacks', async () => {
+    // A stack left running from before the MCP callback was registered has a
+    // client the MCP flow cannot use, so it has to count as stale.
+    areServicesRunning.mockReturnValue(true);
+    // Stale on the pre-restart check, present once the stack comes back up.
+    hasExpectedOAuthClientRedirect
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+
+    await runGlobalSetup({
+      env: testEnv,
+      cwd: () => '/workspace/frontend',
+      chdir,
+      logger,
+      waitForService,
+      getDockerComposeCommand,
+      areServicesRunning,
+      removeExistingContainers,
+      execCommand,
+      printServiceLogs,
+      hasExpectedBackendConfig,
+      hasExpectedOAuthClientRedirect,
+    });
+
+    expect(hasExpectedOAuthClientRedirect).toHaveBeenCalledWith([
+      FRONTEND_TEST_CALLBACK_URL,
+      MCP_TEST_CALLBACK_URL,
+    ]);
+    expect(removeExistingContainers).toHaveBeenCalledTimes(1);
   });
 });

@@ -1621,9 +1621,11 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pyyaml" },
     { name = "respx" },
     { name = "ruff" },
     { name = "types-authlib" },
+    { name = "types-pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -1632,9 +1634,11 @@ dev = [
     { name = "pypdf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
     { name = "respx" },
     { name = "ruff" },
     { name = "types-authlib" },
+    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
@@ -1681,12 +1685,14 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "python-stdnum", specifier = ">=1.20" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.3" },
     { name = "reportlab", specifier = ">=5.0.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.23.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.1" },
     { name = "sqlalchemy", specifier = ">=2.0.52" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "types-authlib", marker = "extra == 'dev'", specifier = ">=1.7.2.20260807" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12" },
     { name = "uvicorn", specifier = ">=0.52.3" },
 ]
 provides-extras = ["dev"]
@@ -1697,9 +1703,11 @@ dev = [
     { name = "pypdf", specifier = ">=6.15.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "respx", specifier = ">=0.23.1" },
     { name = "ruff", specifier = ">=0.16.1" },
     { name = "types-authlib", specifier = ">=1.7.2.20260807" },
+    { name = "types-pyyaml", specifier = ">=6.0.12" },
 ]
 
 [[package]]
@@ -2410,6 +2418,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1f/22/65cb4329b70160bc536ea3f1a73a0a6b6a79c498056ab9da20a3e144f13c/types_authlib-1.7.2.20260814.tar.gz", hash = "sha256:07031e85ca4e3e0b853315dfb98c69006df3989adb118cc1d51d5e3dd4861110", size = 50543, upload-time = "2026-08-14T03:53:13.808Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ea/6e/ef164d2ce305dc36e21a88ab421e062b21adc4cbf620fe1a9e4238e420a3/types_authlib-1.7.2.20260814-py3-none-any.whl", hash = "sha256:ffaf14972303d51125ecafdb7923eb4266568e9e65939f2c29a205313e28832b", size = 110311, upload-time = "2026-08-14T03:53:12.793Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260815"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/72/b56089aeee6c496d969bac42376bedb6e3eeab4682e1018fa3137122f94b/types_pyyaml-6.0.12.20260815.tar.gz", hash = "sha256:28764110c9cf35846e733da32d8d734df7473c5dde9ef67c3b7332ec0e819858", size = 18545, upload-time = "2026-08-15T02:41:51.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/52/eefeba09be4ef2a1eb989eb92934561e8e502a6ee3c32654996e4be7e399/types_pyyaml-6.0.12.20260815-py3-none-any.whl", hash = "sha256:6f332212b7e191f3afd5016a713c510b6340593b7ebec573c7d5d20aa5386d3b", size = 21148, upload-time = "2026-08-15T02:41:50.555Z" },
 ]
 
 [[package]]

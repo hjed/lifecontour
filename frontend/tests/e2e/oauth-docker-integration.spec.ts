@@ -14,6 +14,7 @@ import { test, expect } from './fixtures';
 import {
   FRONTEND_TEST_CALLBACK_URL,
   FRONTEND_TEST_URL,
+  MCP_TEST_CALLBACK_URL,
   OAUTH_ADMIN_TEST_PORT,
   OAUTH_PUBLIC_TEST_PORT,
 } from './utils/frontend-test-config';
@@ -49,9 +50,41 @@ test.describe('OAuth Docker Integration', () => {
     const client = await response!.json();
     expect(client.client_id).toBe('test-client-id');
     expect(client.redirect_uris).toContain(FRONTEND_TEST_CALLBACK_URL);
+    // FastMCP's OAuth proxy serves its own callback under the MCP mount path.
+    // Without it registered, Hydra rejects the MCP flow at the authorize step.
+    expect(client.redirect_uris).toContain(MCP_TEST_CALLBACK_URL);
     expect(client.post_logout_redirect_uris).toContain(`${FRONTEND_TEST_URL}/`);
     expect(client.client_uri).toBe(FRONTEND_TEST_URL);
     expect(client.grant_types).toContain('authorization_code');
     expect(client.response_types).toContain('code');
+  });
+
+  test('Hydra accepts an authorization request for the MCP callback', async ({
+    unauthenticatedPage: page,
+  }) => {
+    // This is the step the MCP flow used to die at: an unregistered redirect
+    // URI is refused before any login happens, so the failure never reaches
+    // the backend. A registered one gets handed on to the login/consent app.
+    const authorizeUrl = new URL(
+      `http://localhost:${OAUTH_PUBLIC_TEST_PORT}/oauth2/auth`
+    );
+    authorizeUrl.searchParams.set('client_id', 'test-client-id');
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('scope', 'openid profile email');
+    authorizeUrl.searchParams.set('redirect_uri', MCP_TEST_CALLBACK_URL);
+    authorizeUrl.searchParams.set('state', 'mcp-redirect-uri-check');
+
+    const response = await page.request.get(authorizeUrl.toString(), {
+      maxRedirects: 0,
+    });
+
+    // A registered redirect URI is handed on to the login app with a
+    // challenge; a rejected one never gets that far.
+    expect(response.status()).toBe(302);
+    const location = response.headers()['location'];
+    expect(location).toBeTruthy();
+    const redirected = new URL(location);
+    expect(redirected.searchParams.get('error')).toBeNull();
+    expect(redirected.searchParams.get('login_challenge')).toBeTruthy();
   });
 });

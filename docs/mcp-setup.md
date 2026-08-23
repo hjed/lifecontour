@@ -189,9 +189,14 @@ configuring — but note that an IdP advertising only algorithms we do not accep
 (or only symmetric `HS*`, which JWKS verification cannot use) fails at startup
 instead of rejecting every token later.
 
-**Hydra (development).** Note the dev Hydra client does not yet register FastMCP's
-own OAuth callback, so a local MCP flow is rejected at the authorize step
-([#1323](https://github.com/hjed/personal-management-system/issues/1323)).
+**Hydra (development).** FastMCP's OAuth proxy serves its own callback at
+`{WEBHOOK_BASE_URL}{MCP_MOUNT_PATH}/auth/callback` — `http://localhost:8000/mcp-server/auth/callback`
+on the default dev stack — and Hydra refuses an authorization request whose
+`redirect_uri` is not registered on the client. `docker/oauth-provider/init-oauth.sh`
+therefore registers that URI alongside the web app's, building it from the same
+`WEBHOOK_BASE_URL` and `MCP_MOUNT_PATH` that `docker-compose.yml` passes to the
+backend, so the registered address cannot drift from the one the MCP server
+listens on. Override either variable and both sides follow.
 
 Hydra derives every advertised endpoint from its issuer,
 which has to stay browser-facing. The backend reaches it over the Docker network

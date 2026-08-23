@@ -18,10 +18,19 @@ import {
   getFrontendCorsOrigins,
   CONTAINER_PREFIX,
   BACKEND_TEST_PORT,
+  BACKEND_TEST_URL,
+  MCP_TEST_CALLBACK_URL,
+  MCP_TEST_MOUNT_PATH,
   OAUTH_ADMIN_TEST_PORT,
   MEILI_TEST_PORT,
   workspaceEnv,
 } from './e2e/utils/frontend-test-config';
+
+/** Every redirect URI the Hydra test client must allow. */
+const EXPECTED_OAUTH_CALLBACK_URLS = [
+  FRONTEND_TEST_CALLBACK_URL,
+  MCP_TEST_CALLBACK_URL,
+];
 
 type Logger = Pick<Console, 'log' | 'error'>;
 
@@ -163,6 +172,11 @@ function getDockerTestEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     FRONTEND_URL: FRONTEND_TEST_URL,
     FRONTEND_PORT: FRONTEND_TEST_PORT,
     CORS_ORIGINS: getFrontendCorsOrigins(),
+    // The backend is published on this workspace's own port, so its public
+    // base URL — and with it the MCP OAuth callback registered with Hydra —
+    // has to follow it rather than the compose default of port 8000.
+    WEBHOOK_BASE_URL: BACKEND_TEST_URL,
+    MCP_MOUNT_PATH: MCP_TEST_MOUNT_PATH,
   };
 }
 
@@ -180,18 +194,23 @@ function hasExpectedBackendConfig(
       }
     );
 
-    return result.includes(`FRONTEND_URL=${frontendUrl}`);
+    return (
+      result.includes(`FRONTEND_URL=${frontendUrl}`) &&
+      result.includes(`WEBHOOK_BASE_URL=${BACKEND_TEST_URL}`)
+    );
   } catch {
     return false;
   }
 }
 
 async function hasExpectedOAuthClientRedirect(
-  callbackUrl: string
+  callbackUrls: string[]
 ): Promise<boolean> {
   try {
     const url = `http://localhost:${OAUTH_ADMIN_TEST_PORT}/admin/clients/test-client-id`;
-    console.log(`Checking client at ${url} expecting callback: ${callbackUrl}`);
+    console.log(
+      `Checking client at ${url} expecting callbacks: ${callbackUrls.join(', ')}`
+    );
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -203,7 +222,10 @@ async function hasExpectedOAuthClientRedirect(
 
     const client = (await response.json()) as { redirect_uris?: string[] };
     console.log(`Found client redirect uris:`, client.redirect_uris);
-    const hasMatch = client.redirect_uris?.includes(callbackUrl) ?? false;
+    const registered = client.redirect_uris ?? [];
+    const hasMatch = callbackUrls.every(callback =>
+      registered.includes(callback)
+    );
     console.log(`Matched? ${hasMatch}`);
     return hasMatch;
   } catch (err) {
@@ -333,7 +355,7 @@ async function ensureLocalDockerServices(
     : false;
   const oauthClientMatches = servicesRunning
     ? await dependencies.hasExpectedOAuthClientRedirect(
-        FRONTEND_TEST_CALLBACK_URL
+        EXPECTED_OAUTH_CALLBACK_URLS
       )
     : false;
 
@@ -377,7 +399,7 @@ async function verifyCoreServiceHealth(
   const maxRetries = 20;
   for (let i = 0; i < maxRetries; i++) {
     const hasClient = await dependencies.hasExpectedOAuthClientRedirect(
-      FRONTEND_TEST_CALLBACK_URL
+      EXPECTED_OAUTH_CALLBACK_URLS
     );
     if (hasClient) {
       break;

@@ -214,6 +214,11 @@ services:
       - CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-dev-client-secret}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      # The MCP OAuth proxy's callback is registered from the same two values
+      # the backend builds its own base_url from, so the registered redirect
+      # URI cannot drift from the address the MCP server actually serves.
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-http://localhost:8000}
+      - MCP_MOUNT_PATH=${MCP_MOUNT_PATH:-/mcp-server}
       - PUBLIC_PORT=${OAUTH_PUBLIC_PORT:-4444}
       - ADMIN_PORT_EXTERNAL=${OAUTH_ADMIN_PORT:-4445}
     entrypoint: ["/bin/sh"]
@@ -268,6 +273,9 @@ services:
       MCP_JWT_SIGNING_KEY: ${MCP_JWT_SIGNING_KEY:-dev-mcp-signing-secret-change-in-production}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://localhost:8000}
+      # Must stay identical to the oauth-init value above: this is the path the
+      # MCP OAuth callback is served under and registered with the IdP.
+      MCP_MOUNT_PATH: ${MCP_MOUNT_PATH:-/mcp-server}
       DISABLE_AUTH: ${DISABLE_AUTH:-false}
       HOME: /app/.cache
       ENABLE_TEST_REVIEW_ITEMS: ${ENABLE_TEST_REVIEW_ITEMS:-false}
