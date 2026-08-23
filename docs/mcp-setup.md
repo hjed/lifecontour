@@ -105,6 +105,27 @@ The MCP server uses FastMCP's built-in OAuth proxy authentication, providing ful
 3. **`.well-known` Discovery**: Standard OAuth discovery endpoints are exposed at root level
 4. **Token Validation**: FastMCP issues its own JWT tokens after validating with the upstream provider
 
+### Who an MCP request acts as
+
+Everything an MCP tool writes is stamped with a `user_id`, and owner-scoped REST
+endpoints filter on it — so getting this wrong makes MCP-created data invisible
+in the web UI rather than merely mislabelled.
+
+The identity comes from the **upstream `id_token`**, not from the FastMCP token.
+Under the generic provider FastMCP verifies its own JWT with `DebugTokenVerifier`,
+which carries no identity claims at all, so `UpstreamIdentityOAuthProxy`
+(`app/mcp/auth/providers.py`) decodes the `id_token` at exchange time and embeds
+`sub`/`email`/`name` in the FastMCP JWT; FastMCP re-attaches them to every
+verified request. The `id_token` is used in preference to the access token
+because OIDC guarantees it is a JWT, whereas access tokens may be opaque (Hydra's
+are, in development).
+
+This requires the `openid` scope, which `OAUTH_SCOPES` includes by default. A
+token that reaches the server with no `sub` claim is **refused** — it does not
+fall back to the OAuth client id, because a client identifies the application
+rather than the person using it, and treating it as a user makes every caller
+sharing that client look like one account.
+
 ### Configuration
 
 The MCP OAuth auth reuses the existing OAuth provider credentials and the `WEBHOOK_BASE_URL` setting:
