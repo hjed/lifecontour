@@ -345,6 +345,22 @@ class SqlJournalRepository(JournalRepository):
 
         return ["NOTE", *type_names_from_projection_row(row)]
 
+    async def get_concrete_types(self, journal_id: int) -> list[str]:
+        """Types as the read paths report them: NOTE only when nothing else is.
+
+        :meth:`get_types` always leads with NOTE (every journal can act as a
+        note); the MCP/API read paths and the ``types`` search filter instead
+        treat NOTE as the absence of typed rows. The search index uses this
+        form so ``types=NOTE`` means the same thing with or without a query.
+        """
+        result = await self.conn.execute(
+            text(GET_TYPES_SQL), {"journal_id": journal_id}
+        )
+        row = result.fetchone()
+        if not row:
+            return []
+        return type_names_from_projection_row(row) or ["NOTE"]
+
     async def find_by_ids_for_user(
         self, user_id: str, journal_ids: list[int]
     ) -> list[Journal]:

@@ -417,7 +417,9 @@ class ReindexService:
             if not journal_row:
                 return None
 
-            types = await SqlJournalRepository(self.db_connection).get_types(journal_id)
+            types = await SqlJournalRepository(self.db_connection).get_concrete_types(
+                journal_id
+            )
 
             contacts_result = await self.db_connection.execute(
                 text("""

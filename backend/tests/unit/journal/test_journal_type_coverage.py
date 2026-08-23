@@ -134,7 +134,7 @@ def test_search_indexers_take_types_from_the_repository(owner, method) -> None:
     were indexed as plain notes and a ``types`` filter never matched them.
     """
     source = inspect.getsource(getattr(owner, method))
-    assert ".get_types(" in source
+    assert ".get_concrete_types(" in source
     assert "CASE WHEN" not in source
 
 

@@ -121,9 +121,13 @@ class JournalIndexingService:
             )
             raise
 
-    def _ensure_journals_index_exists(self, index_name: str) -> None:
+    def _ensure_journals_index_exists(self, index_name: str) -> bool:
         """
         Ensure the journals search index exists and is configured.
+
+        Returns True when the index settings were (re)applied — i.e. the index
+        was missing or predated a required filterable attribute — which means
+        existing documents may need a reindex to carry the current schema.
 
         Args:
             index_name: Name of the journals index
@@ -176,6 +180,8 @@ class JournalIndexingService:
 
             logger.info("Journals search index created", index_name=index_name)
 
+        return needs_settings
+
     async def _fetch_complete_journal_data(
         self, journal_id: int
     ) -> dict[str, Any] | None:
@@ -209,9 +215,12 @@ class JournalIndexingService:
             if not journal_row:
                 return None
 
-            # Every journal is a NOTE plus whatever typed rows it has; the
-            # repository owns the (generated) type-detection query.
-            types = await SqlJournalRepository(self.db_connection).get_types(journal_id)
+            # The repository owns the (generated) type-detection query; NOTE is
+            # indexed only for journals with no typed rows, matching the read
+            # paths so a types=NOTE filter means the same thing everywhere.
+            types = await SqlJournalRepository(self.db_connection).get_concrete_types(
+                journal_id
+            )
 
             # Fetch contact IDs
             contacts_query = text("""
@@ -471,3 +480,28 @@ class JournalIndexingService:
         logger.debug(
             "Journal removed from search", journal_id=journal_id, index_name=index_name
         )
+
+
+def ensure_journal_search_index(client: MeiliSearchClient | None = None) -> bool:
+    """Create or reconfigure the journals index at application startup.
+
+    Index settings used to be applied only when the next indexing event
+    arrived, so a deployment that added a required filterable attribute (the
+    ``id`` filter behind the MCP ``integration_source`` search) kept failing
+    until a journal happened to change. Calling this from the app lifespan
+    applies the settings immediately. Returns True when settings were
+    (re)applied; existing documents then still carry the old schema (e.g. an
+    incomplete ``types`` list) until ``POST /api/search/reindex`` is run, and
+    a warning says so.
+    """
+    service = JournalIndexingService(client=client)
+    index_name = get_index_name("journals")
+    reconfigured = service._ensure_journals_index_exists(index_name)
+    if reconfigured:
+        logger.warning(
+            "Journals search index settings were (re)applied; existing documents "
+            "may predate the current schema. Run POST /api/search/reindex to "
+            "backfill filterable attributes and full type lists.",
+            index_name=index_name,
+        )
+    return reconfigured

@@ -290,3 +290,47 @@ class TestZeroResultDiagnostics:
             "window_end": "2025-09-09",
         }
         assert any("Widen the window" in s for s in diagnostics["suggestions"])
+
+
+@pytest.mark.integration
+@pytest.mark.meilisearch
+class TestNoteFilterMeansUntyped:
+    """``types=NOTE`` means "no typed rows" on both the Meili and SQL paths."""
+
+    @pytest.mark.asyncio
+    async def test_note_filter_excludes_typed_journals(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        index_journal,
+    ) -> None:
+        typed_id = await _insert_journal(
+            clean_database,
+            title="Echo Canyon — Zion",
+            content="Zion canyoning day.",
+            start=datetime(2025, 10, 13, 15, tzinfo=UTC),
+            strava_activity_id="16135",
+        )
+        note_id = await _insert_journal(
+            clean_database,
+            title="Zion Drive",
+            content="Plain note about Zion.",
+            start=datetime(2025, 10, 12, 6, tzinfo=UTC),
+        )
+        await index_journal(typed_id)
+        await index_journal(note_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            with_query = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"query": "Zion", "types": "note"},
+            )
+            without_query = await call_mcp_tool(
+                client, session_id, "search_journals", {"types": "note"}
+            )
+
+        assert [r["id"] for r in with_query["results"]] == [note_id]
+        assert [r["id"] for r in without_query["results"]] == [note_id]
