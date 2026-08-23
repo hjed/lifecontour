@@ -1,5 +1,6 @@
 """Main journal service with transaction management and type dependency resolution."""
 
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -38,6 +39,7 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
 from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import savepoint, transactional
+from app.shared.preconditions import enforce_etag_precondition
 
 logger = structlog.get_logger()
 
@@ -165,6 +167,7 @@ class JournalService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
     ) -> Journal:
         """
         Update an existing journal.
@@ -182,6 +185,10 @@ class JournalService:
             transaction: Database transaction
             changed_by: Who/what made the change (for history provenance)
             source: Provenance of the change (for history provenance)
+            expected_etags: Optional entity-tags the caller expects the journal
+                to be at, from ``If-Match`` (REST) or ``expected_version``
+                (MCP). ``None`` writes unconditionally, as every caller did
+                before conditional writes existed.
 
         Returns:
             The updated journal
@@ -189,11 +196,23 @@ class JournalService:
         Raises:
             JournalValidationError: If validation fails or journal has no ID
             JournalNotFoundError: If journal doesn't exist
+            PreconditionFailedError: If ``expected_etags`` names a version the
+                journal has already moved on from
             JournalMaxDepthExceededError: If hierarchy depth exceeds maximum
             JournalCycleError: If parent relationship would create a cycle
         """
         if journal.id is None:
             raise JournalValidationError("id", "Journal ID is required for update")
+
+        # Refuse a stale write before anything is read or written, holding the
+        # row lock for the rest of this unit of work so the version cannot move
+        # between the check and the save.
+        await enforce_etag_precondition(
+            resource_type="journals",
+            resource_id=journal.id,
+            expected_etags=expected_etags,
+            lock_and_get_updated_at=self.journal_repo.lock_and_get_updated_at,
+        )
 
         # Load the persisted journal so the service owns the change calculation.
         existing_journal = await self.journal_repo.find_by_id(journal.id)
@@ -765,6 +784,12 @@ class JournalService:
         if journal is None:
             raise JournalNotFoundError(journal_id)
 
+        # The journal's types are part of what a read of it returns, so the
+        # aggregate's version has to move with them. Done before the type-data
+        # rows are written (by the caller) so every writer takes the journal's
+        # lock first and none can deadlock against a conditional update.
+        await self.journal_repo.touch(journal_id)
+
         # Get all types to add (including dependencies)
         types_to_add = self._resolve_type_dependencies(journal_type)
 
@@ -817,6 +842,8 @@ class JournalService:
         journal = await self.journal_repo.find_by_id(journal_id)
         if journal is None:
             raise JournalNotFoundError(journal_id)
+
+        await self.journal_repo.touch(journal_id)
 
         # Publish type removed event
         # Note: Type-specific data deletion is handled by database CASCADE

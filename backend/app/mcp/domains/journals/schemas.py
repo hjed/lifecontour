@@ -220,6 +220,15 @@ class JournalResponse(BaseModel):
 
     updated_at: datetime = Field(description="Last update timestamp (UTC)")
 
+    version: str | None = Field(
+        default=None,
+        description=(
+            "Opaque version token for this journal. Pass it back as "
+            "expected_version on update_journal_entry to have the write "
+            "refused if somebody else changed the journal in the meantime."
+        ),
+    )
+
 
 class JournalSearchResult(BaseModel):
     """AI-friendly journal search result format."""
@@ -539,6 +548,17 @@ class JournalUpdateRequest(BaseModel):
     )
     tags: list[str] | None = Field(default=None, description="Replace all tags")
     parent_id: int | None = Field(default=None, description="Parent journal ID")
+    expected_version: str | None = Field(
+        default=None,
+        description=(
+            "Optional: the version string returned by get_journal. When given, "
+            "the update is refused if the journal has changed since then, and "
+            "nothing is written — not the core fields, and not the types, tags "
+            "or relationships. Re-read the journal, re-apply the change and "
+            "retry with the version from the refusal. Omit to overwrite "
+            "whatever is there."
+        ),
+    )
 
 
 class MergeJournalMCPRequest(BaseModel):

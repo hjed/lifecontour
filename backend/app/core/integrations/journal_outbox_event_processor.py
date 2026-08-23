@@ -1462,7 +1462,16 @@ class JournalOutboxEventProcessor:
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]
     ) -> None:
-        """Save calendar info for a journal using raw SQL."""
+        """Save calendar info for a journal using raw SQL.
+
+        Deliberately does **not** mark the journal as changed, even though this
+        alters what a read of it returns. ``journals.updated_at`` is also the
+        merge-protection signal — an inbound sync compares it against the
+        link's anchor to decide whether the user edited the journal since the
+        last sync — so writing it from inside a sync would mix "the user
+        changed this" with "the sync changed this". See the Conditional Writes
+        docs for the trade-off.
+        """
         calendar_id = UUID(calendar_info_data["calendar_id"])
 
         start_time = self._parse_time(calendar_info_data.get("start_time"))

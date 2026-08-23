@@ -202,6 +202,28 @@ def _mock_fetchone(row: MagicMock) -> MagicMock:
 # ── Tests ────────────────────────────────────────────────────────────
 
 
+def _execute_call_with_sql(mock_connection, needle: str):
+    """The ``execute`` call whose SQL mentions ``needle``.
+
+    Picking a statement by its position in ``call_args_list`` re-breaks every
+    time the processor gains one — as it did when journal writes started
+    marking the aggregate as changed. Naming what the call *is* does not.
+    """
+    for call in mock_connection.execute.call_args_list:
+        if needle in str(call[0][0].text):
+            return call
+    raise AssertionError(f"no execute call whose SQL mentions {needle!r}")
+
+
+def _execute_call_with_param(mock_connection, name: str):
+    """The ``execute`` call that bound a parameter named ``name``."""
+    for call in mock_connection.execute.call_args_list:
+        params = call[0][1] if len(call[0]) > 1 else None
+        if isinstance(params, dict) and name in params:
+            return call
+    raise AssertionError(f"no execute call binding a {name!r} parameter")
+
+
 class TestJournalOutboxEventProcessor:
     """Test cases for JournalOutboxEventProcessor."""
 
@@ -617,7 +639,7 @@ class TestJournalOutboxEventProcessor:
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        calendar_call = mock_connection.execute.call_args_list[2]
+        calendar_call = _execute_call_with_sql(mock_connection, "journal_calendar_info")
         sql_text = str(calendar_call[0][0].text)
         assert "updated_at" in sql_text
 
@@ -654,7 +676,7 @@ class TestJournalOutboxEventProcessor:
         await processor.process_event(event)
 
         # The get_relationships call should query for INVITEE type only
-        get_rels_call = mock_connection.execute.call_args_list[5]
+        get_rels_call = _execute_call_with_param(mock_connection, "relationship_type")
         params = get_rels_call[0][1]
         assert params["relationship_type"] == "INVITEE"
 
@@ -2612,7 +2634,9 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
 
         await processor.process_event(event)
 
-        etag_update_call = mock_connection.execute.call_args_list[5]
+        etag_update_call = _execute_call_with_param(
+            mock_connection, "recurring_event_id"
+        )
         sql_text = str(etag_update_call[0][0].text)
         assert "recurring_event_id" in sql_text
         assert "COALESCE" in sql_text
@@ -2733,7 +2757,7 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
 
         assert result["status"] == "skipped"
         assert result["reason"] == "etag_unchanged"
-        backfill_call = mock_connection.execute.call_args_list[3]
+        backfill_call = _execute_call_with_param(mock_connection, "recurring_event_id")
         sql_text = str(backfill_call[0][0].text)
         assert "recurring_event_id" in sql_text
         assert backfill_call[0][1]["recurring_event_id"] == "master-1"

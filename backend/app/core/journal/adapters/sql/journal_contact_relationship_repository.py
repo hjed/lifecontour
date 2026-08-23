@@ -11,6 +11,7 @@ from core_shared.models.journals.contact_event_role import ContactEventRole
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_touch import lock_journal, touch_journal
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 
 
@@ -47,6 +48,10 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         self, relationship: JournalContactRelationship
     ) -> JournalContactRelationship:
         """Create a new journal-contact relationship."""
+        # Parent lock before the child write, so this cannot deadlock against a
+        # conditional update that locks the journal first; see ``lock_journal``.
+        await lock_journal(self.conn, relationship.journal_id)
+
         query = text(
             """
             INSERT INTO journal_contact_relationships
@@ -69,6 +74,11 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         if row is not None:
             relationship.created_at = row.created_at
 
+        # A journal's contact relationships are part of what a read of it
+        # returns, so the aggregate's version moves with them; see
+        # ``touch_journal``.
+        await touch_journal(self.conn, relationship.journal_id)
+
         return relationship
 
     async def delete(
@@ -78,6 +88,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         relationship_type: JournalContactRelationshipType,
     ) -> None:
         """Delete a specific journal-contact relationship."""
+        await lock_journal(self.conn, journal_id)
+
         query = text(
             """
             DELETE FROM journal_contact_relationships
@@ -94,6 +106,7 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
                 "relationship_type": relationship_type.value,
             },
         )
+        await touch_journal(self.conn, journal_id)
 
     async def repoint_contact(
         self, source_id: int, survivor_id: int, transaction: AsyncConnection
@@ -106,6 +119,23 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         re-pointed to the survivor.
         """
         params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # Every journal linked to the absorbed contact ends up with a different
+        # relationship set, and none of them is named by the caller — so they
+        # are marked as changed while the rows still point at the source, and
+        # their locks are taken ahead of the rewrites below.
+        await transaction.execute(
+            text(
+                """
+                UPDATE journals SET updated_at = now()
+                WHERE id IN (
+                    SELECT journal_id FROM journal_contact_relationships
+                    WHERE contact_id = :source_id
+                )
+                """
+            ),
+            {"source_id": source_id},
+        )
 
         await transaction.execute(
             text(
@@ -245,6 +275,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         update_role: bool = False,
     ) -> JournalContactRelationship | None:
         """Update the attributes (status, role) of a journal-contact relationship."""
+        await lock_journal(self.conn, journal_id)
+
         set_clauses = []
         from typing import Any
 
@@ -298,6 +330,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         row = result.fetchone()
         if row is None:
             return None
+
+        await touch_journal(self.conn, journal_id)
         return self._row_to_entity(row)
 
     async def find_attending_for_past_events(

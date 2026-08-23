@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -54,6 +55,7 @@ from app.core.contacts.services.contact_validation_service import (
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
 from app.infrastructure.unit_of_work import unit_of_work
+from app.shared.preconditions import enforce_etag_precondition
 
 if TYPE_CHECKING:
     from app.core.contacts.services.tag_service import TagService
@@ -353,6 +355,7 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         tag_names: list[str] | None = None,
+        expected_etags: Sequence[str] | None = None,
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -367,12 +370,18 @@ class ContactService:
         Args:
             contact: Contact entity with ID and optional attached methods, addresses, and notes
             transaction: Database transaction
+            expected_etags: Optional entity-tags the caller expects the contact
+                to be at, from ``If-Match`` (REST) or ``expected_version``
+                (MCP). ``None`` writes unconditionally, as every caller did
+                before conditional writes existed.
 
         Returns:
             The updated Contact with all attached entities and assigned IDs
 
         Raises:
             ContactValidationError: If contact ID is missing, contact not found, or validation fails
+            PreconditionFailedError: If ``expected_etags`` names a version the
+                contact has already moved on from
             DuplicateEmailError: If any email method already exists (excluding this contact)
             PrimaryMethodConflictError: If primary method constraints are violated
             PrimaryAddressConflictError: If primary address constraints are violated
@@ -385,6 +394,17 @@ class ContactService:
                 raise ContactValidationError(
                     "id", "Contact ID is required for update operation"
                 )
+
+            # Refuse a stale write first: tag resolution below find-or-creates
+            # rows, so checking any later would leave a refused update having
+            # written something. The row lock is held for the rest of this unit
+            # of work, so the version cannot move between check and save.
+            await enforce_etag_precondition(
+                resource_type="contacts",
+                resource_id=contact.id,
+                expected_etags=expected_etags,
+                lock_and_get_updated_at=self.contact_repo.lock_and_get_updated_at,
+            )
 
             # Resolve any tag names to existing-or-new tags inside this unit of
             # work (replacement strategy: the resolved set replaces all existing
@@ -444,6 +464,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact field with transaction management.
@@ -464,11 +485,24 @@ class ContactService:
         Raises:
             ContactValidationError: If contact not found or field name invalid
             ContactNotFoundError: If contact doesn't exist
+            PreconditionFailedError: If ``expected_etags`` names a version the
+                contact has already moved on from
         """
         # Validate field name
         _validate_contact_field_name(field_name)
 
         async def _update_field_operation() -> tuple[str | None, str | None]:
+            # A single-field edit is guarded the same way a whole-contact one
+            # is: the MCP tool offers ``expected_version`` in both modes, and a
+            # precondition honoured in only one of them would be worse than
+            # none at all.
+            await enforce_etag_precondition(
+                resource_type="contacts",
+                resource_id=contact_id,
+                expected_etags=expected_etags,
+                lock_and_get_updated_at=self.contact_repo.lock_and_get_updated_at,
+            )
+
             # Get current contact
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -559,6 +593,10 @@ class ContactService:
         _validate_method_field_name(field_name)
 
         async def _update_method_field_operation() -> tuple[str | None, str | None]:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Get current contact with methods
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -648,6 +686,10 @@ class ContactService:
         _validate_address_field_name(field_name)
 
         async def _update_address_field_operation() -> tuple[str | None, str | None]:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Get current contact with addresses
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -736,6 +778,10 @@ class ContactService:
         _validate_note_field_name(field_name)
 
         async def _update_note_field_operation() -> tuple[str | None, str | None]:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Get current contact with notes
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -1471,6 +1517,10 @@ class ContactService:
         """Assign a tag to a contact with transaction management."""
 
         async def _assign_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1518,6 +1568,10 @@ class ContactService:
         """Remove a tag from a contact with transaction management."""
 
         async def _remove_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1579,6 +1633,10 @@ class ContactService:
         """
 
         async def _add_method_operation() -> ContactMethod:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1652,6 +1710,10 @@ class ContactService:
         """
 
         async def _add_address_operation() -> ContactAddress:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1723,6 +1785,10 @@ class ContactService:
         """
 
         async def _add_note_operation() -> ContactNote:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1767,6 +1833,10 @@ class ContactService:
         """
 
         async def _add_date_operation() -> ImportantDate:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1822,6 +1892,10 @@ class ContactService:
         """
 
         async def _delete_method_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1873,6 +1947,10 @@ class ContactService:
         """
 
         async def _delete_address_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1915,6 +1993,10 @@ class ContactService:
         """
 
         async def _delete_date_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction

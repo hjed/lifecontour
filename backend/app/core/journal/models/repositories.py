@@ -110,6 +110,41 @@ class JournalRepository(ABC):
         pass
 
     @abstractmethod
+    async def touch(self, journal_id: int) -> None:
+        """
+        Record that a journal changed, without changing its own columns.
+
+        ``GET`` represents the journal aggregate — its own fields plus its
+        types, type-data, tags and contact relationships — and its entity-tag
+        comes from ``updated_at``. A write to any of those child rows must
+        bump the parent, or a conditional write would be accepted despite a
+        concurrent change it was meant to catch.
+
+        Args:
+            journal_id: The journal to mark as changed
+        """
+        pass
+
+    @abstractmethod
+    async def lock_and_get_updated_at(self, journal_id: int) -> datetime | None:
+        """
+        Lock a journal row for update and return its last-write timestamp.
+
+        Backs the optimistic-concurrency check on updates. Comparing an
+        entity-tag against an unlocked read leaves a lost-update window under
+        READ COMMITTED: two callers can both see the version they expected
+        before either of them writes. Taking the row lock here means the second
+        caller waits for the first to commit and then sees the new timestamp.
+
+        Args:
+            journal_id: The journal to lock
+
+        Returns:
+            The journal's ``updated_at``, or None if no such journal exists
+        """
+        pass
+
+    @abstractmethod
     async def get_types(self, journal_id: int) -> list[str]:
         """
         Get the types of a journal.

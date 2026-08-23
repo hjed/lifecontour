@@ -1,5 +1,7 @@
 """SQL implementation of ContactRepository."""
 
+from datetime import datetime
+
 from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
@@ -562,6 +564,32 @@ class SqlContactRepository(ContactRepository):
         result = await conn.execute(query, {"contact_id": contact_id})
         if result.rowcount == 0:
             raise ContactNotFoundError(contact_id)
+
+    async def lock(self, contact_id: int) -> None:
+        """Take the contact's row lock; see the port for the ordering it fixes."""
+        await self.conn.execute(
+            text("SELECT 1 FROM contacts WHERE id = :contact_id FOR UPDATE"),
+            {"contact_id": contact_id},
+        )
+
+    async def lock_and_get_updated_at(self, contact_id: int) -> datetime | None:
+        """Lock the contact row and return its last-write timestamp.
+
+        ``FOR UPDATE`` rather than a plain read: see the port for the
+        lost-update window this closes.
+        """
+        query = text(
+            """
+            SELECT updated_at
+            FROM contacts
+            WHERE id = :contact_id
+            FOR UPDATE
+            """
+        )
+        result = await self.conn.execute(query, {"contact_id": contact_id})
+        row = result.fetchone()
+
+        return row.updated_at if row else None
 
     async def delete(self, contact_id: int) -> None:
         """Delete a contact and all related data."""

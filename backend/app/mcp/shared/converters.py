@@ -7,6 +7,7 @@ reducing duplication and ensuring consistent response structures.
 
 from typing import Any
 
+from core_shared.etag import resource_etag
 from core_shared.models.contacts.entities import Contact, ContactRelationship
 
 from app.mcp.domains.contacts.schemas import (
@@ -151,6 +152,9 @@ class ContactConverter:
             interaction_summary=interaction_summary,
             follow_up_suggestions=ai_follow_up_suggestions,
             external_links=external_links or [],
+            version=resource_etag("contacts", contact.id, contact.updated_at)
+            if contact.id is not None
+            else None,
         )
 
     @staticmethod

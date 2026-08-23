@@ -8,6 +8,7 @@ reducing duplication and ensuring consistent response structures.
 from datetime import UTC, datetime
 from typing import Any
 
+from core_shared.etag import resource_etag
 from core_shared.models.journals import Calendar, GearItem, Journal
 from core_shared.models.journals.activity_template import ActivityTemplate
 
@@ -154,6 +155,13 @@ class JournalConverter:
             type_data_discarded=type_data_discarded or {},
             created_at=journal.created_at or journal.event_date_range.start,
             updated_at=journal.updated_at or journal.event_date_range.start,
+            # Derived from the real ``updated_at`` rather than the fallback
+            # above: a journal with no persisted timestamp has no version to
+            # guard, and inventing one from the event date would hand back a
+            # token that no write could honour.
+            version=resource_etag("journals", journal.id, journal.updated_at)
+            if journal.id is not None
+            else None,
         )
 
     @staticmethod

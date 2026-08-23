@@ -5,7 +5,7 @@ Provides reusable Pydantic models that follow the JSON API specification
 for consistent API responses across all domains.
 """
 
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -75,6 +75,47 @@ class JsonApiErrorResponse(BaseModel):
     errors: list[JsonApiError] = Field(..., description="Array of error objects")
     meta: JsonApiMeta | None = Field(default=None, description="Response metadata")
     links: JsonApiLinks | None = Field(default=None, description="Response links")
+
+
+class PreconditionFailedMeta(BaseModel):
+    """The ``meta`` object on a refused conditional write."""
+
+    resource_type: str = Field(..., description="JSON:API type of the resource")
+    resource_id: str = Field(..., description="The resource whose version moved on")
+    current_etag: str | None = Field(
+        ...,
+        description="The resource's entity-tag now — retry with this after "
+        "re-reading and re-applying the change",
+    )
+
+
+class PreconditionFailedErrorObject(BaseModel):
+    """The JSON:API error object a refused ``If-Match`` returns."""
+
+    id: str = Field(..., description="Unique error identifier")
+    # Required and pinned to their one value rather than defaulted strings, so a
+    # generated client can treat ``code`` as this response's discriminator —
+    # which is the whole reason the 412 is published as a model rather than as
+    # the generic error shape.
+    status: Literal["412"] = Field(..., description="HTTP status code as string")
+    code: Literal["PRECONDITION_FAILED"] = Field(
+        ..., description="Application-specific error code"
+    )
+    title: str = Field(..., description="Short, human-readable summary")
+    detail: str = Field(
+        ..., description="Says the resource has moved on and to re-read it"
+    )
+    meta: PreconditionFailedMeta = Field(
+        ..., description="The current version, as machine-readable data"
+    )
+
+
+class PreconditionFailedErrorResponse(BaseModel):
+    """412 body for a write whose ``If-Match`` named a superseded version."""
+
+    errors: list[PreconditionFailedErrorObject] = Field(
+        ..., description="Array of error objects"
+    )
 
 
 class JsonApiResource(BaseModel):

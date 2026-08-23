@@ -299,6 +299,7 @@ class ImmichAlbumOutboxEventProcessor:
         # (version_hash + reference_data + anchor). The anchor (updated_at) is
         # only advanced when inbound changes were applied, so a locally edited
         # journal stays protected on future syncs.
+
         await self.album_link_repo.upsert_link(
             journal_id,
             payload.external_id,

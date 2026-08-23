@@ -6,6 +6,7 @@ from core_shared.models.contacts.entities import Tag
 from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_touch import touch_contacts_holding_tag
 from app.core.contacts.models.events import TagDeleted, TagUpdated
 from app.core.contacts.models.exceptions import DuplicateTagNameError, TagNotFoundError
 from app.core.contacts.models.repositories import ContactEventPublisher, TagRepository
@@ -237,6 +238,11 @@ class TagService:
         path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
         path_str = _compute_path_string(path_tags, tag)
 
+        # The assignment rows go with it via cascade, which no application code
+        # sees — so the contacts losing the tag are marked as changed here,
+        # before the rows naming them are gone.
+        await touch_contacts_holding_tag(transaction, tag_id)
+
         await self.tag_repo.delete(tag_id)
 
         event = TagDeleted(
@@ -277,6 +283,11 @@ class TagService:
             current = await self.tag_repo.find_by_id(current.parent_id)
 
         from sqlalchemy import text
+
+        # 0. Every contact carrying the source tag ends up with a different tag
+        #    set, so they are marked while the assignments still name them —
+        #    which also takes their locks ahead of the rewrites below.
+        await touch_contacts_holding_tag(transaction, source_id)
 
         # 1. First, delete contact_tags for source_id if the contact already has target_id
         delete_duplicates_query = text(

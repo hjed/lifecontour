@@ -6,6 +6,11 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_touch import (
+    lock_journal,
+    touch_journal,
+    touch_journals_holding_tag,
+)
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import JournalTagRepository
 
@@ -141,7 +146,14 @@ class SqlJournalTagRepository(JournalTagRepository):
         return tag
 
     async def delete(self, tag_id: UUID) -> None:
-        """Delete a tag by ID."""
+        """Delete a tag by ID.
+
+        The assignment rows go with it via ``ON DELETE CASCADE``, which no
+        application code sees — so the journals losing the tag are marked as
+        changed here, before the cascade removes the rows naming them.
+        """
+        await touch_journals_holding_tag(self.conn, tag_id)
+
         query = text("DELETE FROM journal_tags WHERE id = :tag_id")
         await self.conn.execute(query, {"tag_id": tag_id})
 
@@ -159,6 +171,11 @@ class SqlJournalTagRepository(JournalTagRepository):
             )
 
         params = {"source_id": source_id, "target_id": target_id}
+
+        # 0. The journals carrying the source tag all end up with a different
+        #    tag set, so they are marked as changed while the assignments still
+        #    name them — and their locks are taken before the rewrites below.
+        await touch_journals_holding_tag(self.conn, source_id)
 
         # 1. Drop source assignments the journal already holds for the target,
         #    so the re-point below cannot violate the composite primary key.
@@ -323,6 +340,10 @@ class SqlJournalTagRepository(JournalTagRepository):
         ``RETURNING`` yields no row when ``DO NOTHING`` suppresses the insert,
         which is what makes the "did anything change" answer race-free.
         """
+        # Parent lock before the child write, so this cannot deadlock against a
+        # conditional update that locks the journal first; see ``lock_journal``.
+        await lock_journal(self.conn, journal_id)
+
         query = text(
             """
             INSERT INTO journal_tag_assignments (journal_id, tag_id)
@@ -334,10 +355,18 @@ class SqlJournalTagRepository(JournalTagRepository):
         result = await self.conn.execute(
             query, {"journal_id": journal_id, "tag_id": tag_id}
         )
-        return result.fetchone() is not None
+        if result.fetchone() is None:
+            return False
+
+        # The journal's tags are part of what a read of it returns, so the
+        # aggregate's version has to move with them; see ``touch_journal``.
+        await touch_journal(self.conn, journal_id)
+        return True
 
     async def remove_tag(self, journal_id: int, tag_id: UUID) -> bool:
         """Remove a tag from a journal, reporting whether a row was deleted."""
+        await lock_journal(self.conn, journal_id)
+
         query = text(
             """
             DELETE FROM journal_tag_assignments
@@ -347,4 +376,8 @@ class SqlJournalTagRepository(JournalTagRepository):
         result = await self.conn.execute(
             query, {"journal_id": journal_id, "tag_id": tag_id}
         )
-        return result.rowcount > 0
+        if result.rowcount == 0:
+            return False
+
+        await touch_journal(self.conn, journal_id)
+        return True

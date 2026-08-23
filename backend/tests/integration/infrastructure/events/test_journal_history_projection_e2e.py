@@ -13,7 +13,7 @@ to a user-facing E2E for ITER12-002 Phase 1 (which has no UI surface yet).
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -90,6 +90,11 @@ def _mock_write_service(
     the event publisher, so the test can exercise the real type-data → event →
     outbox path for any one type without wiring 20+ repositories. Pass the repos
     that type needs as keyword arguments (e.g. ``mood_data_repo=...``).
+
+    The stand-ins are ``AsyncMock`` rather than ``MagicMock`` because the
+    service awaits its collaborators — a plain ``MagicMock`` returns something
+    that cannot be awaited, so any call the test does not care about still
+    fails the test.
     """
     repo_names = (
         "journal_service",
@@ -121,7 +126,7 @@ def _mock_write_service(
         "gear_usage_data_repo",
         "tag_repo",
     )
-    kwargs: dict[str, object] = {name: MagicMock() for name in repo_names}
+    kwargs: dict[str, object] = {name: AsyncMock() for name in repo_names}
     kwargs.update(real_repos)
     return JournalWriteService(event_publisher=event_publisher, **kwargs)  # type: ignore[arg-type]
 

@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Protocol
 
 from core_shared.models.contacts.entities import (
@@ -112,6 +113,35 @@ class ContactRepository(ABC):
     @abstractmethod
     async def touch(self, contact_id: int, transaction: Any = None) -> None:
         """Update the updated_at timestamp of a contact."""
+        pass
+
+    @abstractmethod
+    async def lock(self, contact_id: int) -> None:
+        """Take a contact's row lock before writing any of its child rows.
+
+        Every child-write path ends by touching the contact, and a conditional
+        write takes the contact's lock *first* (see
+        :meth:`lock_and_get_updated_at`). Without this the two orders invert —
+        one holds the parent and wants the child, the other the reverse — and
+        PostgreSQL breaks the cycle by aborting one with a deadlock, which
+        nothing retries. Locking the parent up front makes every writer take
+        the locks in the same order, so they queue instead.
+        """
+        pass
+
+    @abstractmethod
+    async def lock_and_get_updated_at(self, contact_id: int) -> datetime | None:
+        """Lock a contact row for update and return its last-write timestamp.
+
+        Backs the optimistic-concurrency check on updates. Comparing an
+        entity-tag against an unlocked read leaves a lost-update window under
+        READ COMMITTED: two callers can both see the version they expected
+        before either of them writes. Taking the row lock here means the second
+        caller waits for the first to commit and then sees the new timestamp.
+
+        Returns:
+            The contact's ``updated_at``, or None if no such contact exists.
+        """
         pass
 
     @abstractmethod

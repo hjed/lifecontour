@@ -142,6 +142,132 @@ destructive tool cannot be introduced without someone saying so.
 - Include in application health checks
 - Use Streamable HTTP transport for web compatibility
 
+## Conditional Writes (`ETag` / `If-Match`)
+
+The critical update paths support optimistic concurrency, so a second writer
+cannot silently overwrite a first writer's edit. It is **opt-in**: a client that
+states no precondition writes exactly as it always has.
+
+### The version token
+
+An entity-tag is a truncated SHA-256 of `"<type>:<id>:<updated_at>"`, computed
+by `resource_etag()` in `core_shared/core_shared/etag.py`. There is no version
+column — every write already bumps `updated_at`. The type and id are folded in
+because `now()` is the *transaction* timestamp: rows written together share an
+`updated_at` to the microsecond, and a tag over the timestamp alone would
+collide across them.
+
+### REST
+
+| Route | Behaviour |
+|---|---|
+| `GET /api/journals/{id}`, `GET /api/contacts/{id}` | Return an `ETag` response header |
+| `PUT`/`PATCH /api/journals/{id}`, `PUT /api/contacts/{id}` | Honour `If-Match`, and stamp the new `ETag` on the 200 |
+
+`If-Match` semantics: absent means write unconditionally; `*` means the resource
+need only exist; a list matches if any tag does. Weak tags (`W/"..."`) compare
+equal to strong ones, because every tag this system mints is strong and a weak
+one can only be a strong tag that a compressing proxy weakened in transit. An
+**empty** `If-Match` matches nothing and is refused — the caller asked for a
+guarded write, and answering 200 to a guarantee that was never checked is worse.
+
+A failed precondition is `412 Precondition Failed` with code
+`PRECONDITION_FAILED` and a `meta.current_etag` to retry with, published in the
+OpenAPI schema as `PreconditionFailedErrorResponse`. Nothing is written.
+
+`ETag` is **not** a CORS-safelisted response header, so the CORS middleware
+exposes it explicitly (`expose_headers=["ETag"]` in `backend/app/main.py`).
+Without that, browser JavaScript at an allowed origin could not read the tag and
+so could not send it back in `If-Match`. The `If-Match` *request* header needs
+no entry of its own — `allow_headers=["*"]` already covers it. The deployed
+frontend reaches the API through the same-origin Next.js `/api` proxy and is
+unaffected either way; this is for the origins that call the API directly.
+
+`If-None-Match` / `304 Not Modified` on reads is deliberately **not** supported:
+this is conflict detection, not caching.
+
+### MCP
+
+Tools have no headers, so the same token travels as data: reads report
+`version`, and `update_journal_entry` / `update_contact` accept
+`expected_version`. A conflict comes back as an error payload with
+`code: PRECONDITION_FAILED` and `current_version` — named to match
+`expected_version` rather than REST's `ETag` — so a model can re-read, re-apply
+and retry rather than treating it as a server fault.
+
+### Where the check lives
+
+In the **service layer**, never the controller, so both surfaces share one
+implementation (`enforce_etag_precondition`, `backend/app/shared/preconditions.py`).
+Controllers pass the caller's precondition through untouched.
+
+The comparison reads the row with `SELECT updated_at ... FOR UPDATE` inside the
+write's unit of work. An unlocked read would leave a lost-update window under
+READ COMMITTED — two callers can both see the version they expected before
+either writes — so the lock is what turns the check into a guarantee. It also
+runs **before anything is written**, including the find-or-create of tag rows,
+so a refusal leaves nothing behind.
+
+### The tag covers the whole aggregate
+
+A read of a journal returns more than the `journals` row: its types,
+type-specific data, tags and contact relationships all appear in the
+representation the tag is minted from. A write to any of those child tables
+therefore **touches the parent row** (`touch_journal`,
+`backend/app/core/journal/adapters/sql/journal_touch.py`), so the tag moves with
+anything a client would see.
+
+Without that, a conditional write would be accepted despite a concurrent change
+it was meant to catch — and the MCP composite update *replaces* types, tags and
+relationships under the caller's precondition, so the change would be clobbered
+rather than merely missed.
+
+`now()` is the transaction timestamp, so touching a journal the same transaction
+already wrote costs nothing and lands on the same value. **When adding a new
+write path for journal child data, touch the parent** or that path becomes a
+hole in the guarantee — including bulk rewrites no caller names journal-by-journal,
+like merging or deleting a tag, which touch every journal holding it *before* the
+assignments stop pointing there.
+
+**Where the aggregate stops.** The tag tracks the journal's own rows and its
+*child* rows — types, type-specific data, tag assignments, contact
+relationships — whenever they are written by the application's own write paths,
+whether a user or an MCP client drove them.
+
+It deliberately does **not** track two things.
+
+*Referenced entities a read merely embeds.* Renaming or recolouring a journal
+tag changes the tag resource, not the journals carrying it, and bumping every
+one of them would turn a single rename into a mass update. A client that needs
+to detect that has the tag's own resource to watch. Assignment changes are a
+different matter and are tracked, because they change which tags a journal has.
+
+*Changes applied by an inbound integration sync* — Google Calendar writing
+`journal_calendar_info`, or Immich writing the album link that carries a
+journal's `PHOTO_ALBUM` type. This one is a genuine trade-off rather than a
+definitional line, and it goes this way because **`journals.updated_at` is also
+the merge-protection signal**: both integrations decide whether the user edited
+a journal since the last sync by comparing it against the link's anchor
+(`_has_local_edits`, `_merge_fields_with_protection`), and Immich deliberately
+holds the anchor back while a journal is protected. Writing `updated_at` from
+inside a sync mixes "the user changed this" with "the sync changed this" and
+moves one side of that comparison from within the sync itself — risking silent
+loss of a user's edits, which is a far worse failure than the missed detection
+it would buy.
+
+The cost is stated plainly: a conditional write will **not** notice a
+concurrent inbound sync. Fixing that properly means giving merge protection its
+own column so `updated_at` is free to be purely a version, which is a migration
+and a change to both integrations — worth doing, but not here.
+
+**Lock ordering matters.** A conditional write takes the journal's lock first
+and then writes child rows. A child write that touched the parent afterwards
+would take the same two locks in the opposite order, and PostgreSQL would break
+the resulting cycle by aborting one transaction with a deadlock — which
+`@transactional` does not retry. So every child-write path takes the parent lock
+**up front** (`lock_journal`, or the touch itself where it is unconditional),
+and all writers queue instead of deadlocking.
+
 ## Error Handling Guidelines
 
 ### JSON API Error Format

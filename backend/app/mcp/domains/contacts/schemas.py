@@ -133,6 +133,15 @@ class ContactResponse(BaseModel):
         description="Links to records in external systems (e.g., Google Contacts)",
     )
 
+    version: str | None = Field(
+        default=None,
+        description=(
+            "Opaque version token for this contact. Pass it back as "
+            "expected_version on update_contact to have the write refused if "
+            "somebody else changed the contact in the meantime."
+        ),
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -318,6 +327,17 @@ class ContactUpdateRequest(BaseModel):
     important_dates: list[ImportantDateInfo] | None = Field(
         default=None,
         description="Updated list of important dates (replaces existing dates)",
+    )
+
+    expected_version: str | None = Field(
+        default=None,
+        description=(
+            "Optional: the version string returned by get_contact. When given, "
+            "the update is refused if the contact has changed since then, and "
+            "nothing is written — re-read the contact, re-apply the change and "
+            "retry with the version from the refusal. Omit to overwrite "
+            "whatever is there."
+        ),
     )
 
 

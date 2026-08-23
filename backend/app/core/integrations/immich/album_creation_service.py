@@ -213,6 +213,7 @@ class ImmichAlbumCreationService:
                 thumbnail_asset_id=album.get("albumThumbnailAssetId"),
                 shared_link_url=shared_link_url,
             )
+
             # upsert_link is the single writer of the album sync_metadata link
             # (version_hash + reference_data + anchor).
             await self.album_link_repo.upsert_link(
