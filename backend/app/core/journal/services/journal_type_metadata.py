@@ -136,9 +136,14 @@ JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, TypeDataFieldSpec]] = {
         "weather_conditions": TypeDataFieldSpec(
             "string", "Weather during the activity"
         ),
-        "role": TypeDataFieldSpec("string", "Your role on the trip"),
+        "role": TypeDataFieldSpec(
+            "string",
+            "User's role on trip. Max 5 words. E.g. 'Guide', 'Organiser', 'Course Leader'.",
+        ),
         "in_leadership_role": TypeDataFieldSpec("bool", "Whether you led the trip"),
-        "participant_notes": TypeDataFieldSpec("string", "Notes about participants"),
+        "participant_notes": TypeDataFieldSpec(
+            "string", "Notes about participants not listed via contact relationships"
+        ),
     },
     "BUSHWALKING": {
         "track_grading": TypeDataFieldSpec(
