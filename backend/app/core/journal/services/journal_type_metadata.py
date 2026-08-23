@@ -159,7 +159,10 @@ JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, TypeDataFieldSpec]] = {
         "template_id": TypeDataFieldSpec(
             "uuid",
             "Activity template this abseiling-derived journal was created from "
-            "(preserved when pitches are edited)",
+            "(preserved when pitches are edited). This is the single home for "
+            "the reference on every abseiling-derived journal; on create, prefer "
+            "create_journal_entry's top-level template_id, which also applies "
+            "the template's pitches and type fields",
         ),
         "number_of_abseils": TypeDataFieldSpec("int", "Count of abseils"),
         "total_length": TypeDataFieldSpec("int", "Total abseiled length", unit="m"),
@@ -180,7 +183,6 @@ JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, TypeDataFieldSpec]] = {
         "is_white_water": TypeDataFieldSpec("bool", "Significant white water"),
     },
     "CLIMBING": {
-        "template_id": TypeDataFieldSpec("uuid", "Activity template reference"),
         "climbing_type": TypeDataFieldSpec(
             "string", "Climbing discipline", allowed_values=VALID_CLIMBING_TYPES
         ),
