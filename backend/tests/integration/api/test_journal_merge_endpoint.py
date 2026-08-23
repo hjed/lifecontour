@@ -121,8 +121,14 @@ async def test_merge_journal_endpoint_reports_survivor_hierarchy(
     assert attributes["parent"]["title"] == "Parent Journal"
     assert attributes["depth"] == 2
 
+    # The count reports the child adopted from the source; the children
+    # themselves are summarised (with their types) by the detail route.
     assert attributes["children_count"] == 1
-    assert [child["id"] for child in attributes["children"]] == [str(adopted_id)]
+
+    detail_res = await authenticated_client.get(f"/api/journals/{target_id}")
+    assert detail_res.status_code == 200, detail_res.text
+    detail_attributes = detail_res.json()["data"]["attributes"]
+    assert [child["id"] for child in detail_attributes["children"]] == [str(adopted_id)]
 
 
 @pytest.mark.asyncio

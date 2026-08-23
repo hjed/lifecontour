@@ -126,3 +126,30 @@ async def initialize_mcp_session(authenticated_client: Any) -> str:
     assert initialized_response.status_code in {200, 202, 204}
 
     return session_id
+
+
+async def call_mcp_tool(
+    authenticated_client: Any,
+    session_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    request_id: int = 2,
+) -> dict[str, Any]:
+    """Call one MCP tool over HTTP and return its application payload.
+
+    Every mounted-MCP test builds the same ``tools/call`` envelope, so it lives
+    here rather than being copied per test.
+    """
+    response = await authenticated_client.post(
+        "/mcp-server/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
+        },
+        headers=mcp_headers(session_id),
+    )
+    assert response.status_code == 200, response.text
+    return extract_mcp_json_payload(response.text)

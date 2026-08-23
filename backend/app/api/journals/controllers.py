@@ -2771,7 +2771,12 @@ async def merge_journal(
     # A merge keeps the survivor's own parent and adopts the source's children,
     # so the response has to describe that hierarchy — reporting neither reads
     # as though the merge orphaned the survivor.
-    parent, children, children_count = await _fetch_parent_and_children(
+    #
+    # The children themselves are summarised by the detail route, which has the
+    # per-type repositories needed to label them; listing them here without
+    # their types would report every adopted child as typeless. This carries
+    # the count instead, as the list route does.
+    parent, _children, children_count = await _fetch_parent_and_children(
         target_journal, user.id, journal_service
     )
 
@@ -2789,7 +2794,6 @@ async def merge_journal(
         tags=tags,
         calendar=calendar,
         parent=parent,
-        children=children,
         children_count=children_count,
         depth=depth,
         base_url=base_url,
