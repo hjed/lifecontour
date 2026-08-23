@@ -419,7 +419,7 @@ class TestTheTagCoversTheWholeJournal:
             json={"data": {"type": "journal-tag", "attributes": {"tag_id": tag_id}}},
         )
 
-        assert response.status_code in (200, 201, 204)
+        assert response.status_code == 200
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
 
     async def test_updating_type_data_moves_the_version(
@@ -457,7 +457,7 @@ class TestTheTagCoversTheWholeJournal:
             },
         )
 
-        assert response.status_code in (200, 201, 204)
+        assert response.status_code == 200
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
 
     async def test_linking_a_contact_moves_the_version(
@@ -483,7 +483,7 @@ class TestTheTagCoversTheWholeJournal:
             },
         )
 
-        assert response.status_code in (200, 201, 204)
+        assert response.status_code == 200
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
 
     async def _create_tag(self, client, name: str) -> str:
@@ -523,7 +523,7 @@ class TestTheTagCoversTheWholeJournal:
             },
         )
 
-        assert response.status_code in (200, 201, 204)
+        assert response.status_code == 204
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
 
     async def test_deleting_a_tag_moves_the_version_of_every_journal_holding_it(
@@ -537,7 +537,7 @@ class TestTheTagCoversTheWholeJournal:
 
         response = await integration_api_client.delete(f"/api/journals/tags/{tag_id}")
 
-        assert response.status_code in (200, 204)
+        assert response.status_code == 204
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
 
     async def test_merging_a_contact_moves_the_version_of_its_linked_journals(
@@ -581,5 +581,5 @@ class TestTheTagCoversTheWholeJournal:
             },
         )
 
-        assert response.status_code in (200, 201, 204)
+        assert response.status_code == 200
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED

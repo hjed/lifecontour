@@ -177,9 +177,8 @@ assignments stop pointing there.
 
 **Where the aggregate stops.** The tag tracks the journal's own rows and its
 *child* rows — types, type-specific data, tag assignments, contact
-relationships — including changes that arrive from an integration worker rather
-than a user, such as an inbound calendar sync writing only
-`journal_calendar_info`.
+relationships — whenever they are written by the application's own write paths,
+whether a user or an MCP client drove them.
 
 It deliberately does **not** track two things.
 

@@ -565,6 +565,13 @@ class SqlContactRepository(ContactRepository):
         if result.rowcount == 0:
             raise ContactNotFoundError(contact_id)
 
+    async def lock(self, contact_id: int) -> None:
+        """Take the contact's row lock; see the port for the ordering it fixes."""
+        await self.conn.execute(
+            text("SELECT 1 FROM contacts WHERE id = :contact_id FOR UPDATE"),
+            {"contact_id": contact_id},
+        )
+
     async def lock_and_get_updated_at(self, contact_id: int) -> datetime | None:
         """Lock the contact row and return its last-write timestamp.
 

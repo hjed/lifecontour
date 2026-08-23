@@ -593,6 +593,10 @@ class ContactService:
         _validate_method_field_name(field_name)
 
         async def _update_method_field_operation() -> tuple[str | None, str | None]:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Get current contact with methods
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -682,6 +686,10 @@ class ContactService:
         _validate_address_field_name(field_name)
 
         async def _update_address_field_operation() -> tuple[str | None, str | None]:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Get current contact with addresses
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -770,6 +778,10 @@ class ContactService:
         _validate_note_field_name(field_name)
 
         async def _update_note_field_operation() -> tuple[str | None, str | None]:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Get current contact with notes
             current_contact = await self._get_existing_contact(contact_id)
 
@@ -1505,6 +1517,10 @@ class ContactService:
         """Assign a tag to a contact with transaction management."""
 
         async def _assign_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1552,6 +1568,10 @@ class ContactService:
         """Remove a tag from a contact with transaction management."""
 
         async def _remove_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1613,6 +1633,10 @@ class ContactService:
         """
 
         async def _add_method_operation() -> ContactMethod:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1686,6 +1710,10 @@ class ContactService:
         """
 
         async def _add_address_operation() -> ContactAddress:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1757,6 +1785,10 @@ class ContactService:
         """
 
         async def _add_note_operation() -> ContactNote:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1801,6 +1833,10 @@ class ContactService:
         """
 
         async def _add_date_operation() -> ImportantDate:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1856,6 +1892,10 @@ class ContactService:
         """
 
         async def _delete_method_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1907,6 +1947,10 @@ class ContactService:
         """
 
         async def _delete_address_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
@@ -1949,6 +1993,10 @@ class ContactService:
         """
 
         async def _delete_date_operation() -> None:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
             # Validate contact exists
             await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
