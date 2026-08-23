@@ -19,7 +19,7 @@ class TestSessionUserFromClaims:
         assert user.name == "Ada"
         assert user.provider == "oauth-token"
 
-    def test_id_falls_back_to_id_then_client_id(self) -> None:
+    def test_id_falls_back_to_the_id_claim(self) -> None:
         assert (
             session_user_from_claims(
                 {"id": "alt-id"}, client_id="client-abc", provider="p"
@@ -27,10 +27,29 @@ class TestSessionUserFromClaims:
             == "alt-id"
         )
 
-        assert (
-            session_user_from_claims({}, client_id="client-abc", provider="p").id
-            == "client-abc"
-        )
+    def test_client_id_is_never_a_user_identity(self) -> None:
+        """A client id identifies the application, never the person using it.
+
+        Accepting it as the last fallback is what silently attributed five
+        months of MCP writes to a phantom owner (see
+        ``test_debug_verifier_shaped_claims_are_refused``).
+        """
+        with pytest.raises(ValueError, match="identifier"):
+            session_user_from_claims({}, client_id="client-abc", provider="p")
+
+    def test_debug_verifier_shaped_claims_are_refused(self) -> None:
+        """The exact shape ``DebugTokenVerifier`` produces must not authenticate.
+
+        It returns ``claims={"token": <raw upstream token>}`` and its default
+        ``client_id="debug-client"``, so before this guard every MCP request
+        resolved to the literal user id ``"debug-client"``.
+        """
+        with pytest.raises(ValueError, match="identifier"):
+            session_user_from_claims(
+                {"token": "opaque-upstream-token"},
+                client_id="debug-client",
+                provider="mcp-oauth",
+            )
 
     def test_name_falls_back_to_login_then_username(self) -> None:
         assert (
@@ -57,9 +76,9 @@ class TestSessionUserFromClaims:
         )
         assert user.email == ""
 
-    def test_none_claims_treated_as_empty(self) -> None:
-        user = session_user_from_claims(None, client_id="client-abc", provider="p")
-        assert user.id == "client-abc"
+    def test_none_claims_are_refused(self) -> None:
+        with pytest.raises(ValueError, match="identifier"):
+            session_user_from_claims(None, client_id="client-abc", provider="p")
 
     def test_raises_when_no_identifier(self) -> None:
         with pytest.raises(ValueError, match="identifier"):

@@ -55,6 +55,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     inbound_consumer_task = None
     history_consumer_task = None
     try:
+        # Make sure the journals search index carries the current settings
+        # before any request can search it; a Meili outage must not block the
+        # app from starting, so failures are logged and startup continues.
+        from app.infrastructure.search.journal_indexing_service import (
+            ensure_journal_search_index,
+        )
+
+        try:
+            await asyncio.to_thread(ensure_journal_search_index)
+        except Exception as exc:  # noqa: BLE001 — startup must not depend on Meili
+            logger.warning(
+                "Could not verify journals search index settings at startup",
+                error=str(exc),
+            )
+
         # Start attendance transition background task (hourly)
         attendance_task = asyncio.create_task(
             run_attendance_transition_loop(container, interval_seconds=3600)

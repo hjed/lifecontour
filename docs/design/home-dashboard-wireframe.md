@@ -113,7 +113,17 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
    of data the summary entity already carries, not a new computation.
 7. **Sample content is fictional.** Names, journals and dates in the screenshot are illustrative; they
    are not fixtures and must not be copied into tests.
-8. **No per-section loading or unavailable states are depicted.** Only the summary declares an unavailable
+8. **W24 draws only the done action, because the dashboard only ever needs one.** Everything on the
+   dashboard is not-done, so completion is the only status move a row there can make. A journal shows
+   all three statuses side by side, so ITER18-001 Phase 17 extends the same idiom on the *journal* row
+   with a return-to-not-done, an ordinary cancel, and a secondary confirmed delete — an addition to the
+   wireframe rather than a divergence from it, since W24's own rules (`outline`, `size="sm"`, icon,
+   top-right of the text row, wrapping under it when narrow, never navigating away) are what the whole
+   group follows. Two journal-only rules go with it, neither of which the wireframe could have shown:
+   a **cancelled** row offers no status action at all, because the service lets a cancelled task out
+   only by retargeting; and **delete is never offered on the dashboard**, only where a task is worked
+   with in full. The dashboard's own row stays exactly as W24 draws it.
+9. **No per-section loading or unavailable states are depicted.** Only the summary declares an unavailable
    variant (W9); the agenda, tasks and upcoming-dates cards are drawn in their populated state (and tasks
    additionally in its empty state, W29). The specification requires independence in both directions — a
    summary failure must not blank the other sections, *and vice versa* — so each section needs a loading

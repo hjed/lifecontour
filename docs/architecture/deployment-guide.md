@@ -467,6 +467,16 @@ OAUTH_CLIENT_SECRET=your-oauth-client-secret
 OAUTH_AUTHORIZATION_URL=https://provider.com/oauth/authorize
 OAUTH_TOKEN_URL=https://provider.com/oauth/token
 OAUTH_USERINFO_URL=https://provider.com/oauth/userinfo
+# Required whenever the generic provider above is set. MCP performs OIDC
+# discovery at startup and verifies upstream id_tokens against the advertised
+# JWKS; the backend will not start if this is missing or the IdP is unreachable,
+# rather than accepting tokens it cannot verify. For Kanidm the issuer is scoped
+# to the client: https://idm.example.com/oauth2/openid/<client-id>
+OAUTH_ISSUER=https://provider.com
+# Optional. Where the metadata is fetched from, when that differs from the
+# issuer (split-horizon networking). Defaults to
+# {OAUTH_ISSUER}/.well-known/openid-configuration.
+OAUTH_DISCOVERY_URL=
 
 # Search Engine
 MEILISEARCH_URL=http://meilisearch:7700

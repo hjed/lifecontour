@@ -1883,42 +1883,47 @@ test.describe('Journal List Page', () => {
 
       await dataManager.clearAllJournals();
 
-      const today = new Date();
-      const past = new Date();
-      past.setDate(today.getDate() - 8);
-
       await dataManager.createJournals([
         {
           title: 'Today Journal',
           content: 'Journal for today',
-          event_date_range: {
-            start: today.toISOString(),
-            end: today.toISOString(),
-          },
+          event_date_range: { start: relativeDate(0), end: relativeDate(0) },
         },
         {
           title: 'Past Journal',
           content: 'Journal from 8 days ago',
-          event_date_range: {
-            start: past.toISOString(),
-            end: past.toISOString(),
-          },
+          event_date_range: { start: relativeDate(-8), end: relativeDate(-8) },
         },
       ]);
 
       testCleanup(async () => await dataManager.cleanup());
 
-      // Date jump backwards slightly so both load
       await page.goto('/journals');
       await expect(page.getByTestId('journals-list-ready')).toBeVisible();
 
-      // Wait for rendering
-      // The empty days between (7 days empty) should be collapsed
-      const collapsedText = page.getByText(/empty days/i);
-      await expect(collapsedText).toBeVisible({ timeout: 15000 });
+      // The seven empty days between the two journals — today-7 to today-1 —
+      // are the run that should collapse. Address that group by its own date so
+      // the assertion cannot be satisfied by an unrelated empty run further
+      // down the list.
+      const gapGroup = page.getByTestId(
+        `journal-collapsed-group-${relativeDate(-7).slice(0, 10)}`
+      );
+
+      // The 8-day-old journal sits outside the initial today±3 window, and the
+      // list only expands into the past once the reader scrolls up to it — so
+      // reach for the top of the list before the empty week can exist. toPass
+      // retries the scroll because a single scrollIntoViewIfNeeded does not
+      // reliably fire the IntersectionObserver in headless CI.
+      const topSentinel = page.getByTestId('journal-top-sentinel');
+      await expect(async () => {
+        await topSentinel.scrollIntoViewIfNeeded();
+        await expect(gapGroup).toBeVisible({ timeout: 5000 });
+      }).toPass({ timeout: 30000 });
+
+      await expect(gapGroup).toContainText(/empty days/i);
 
       // Click to expand
-      const toggleBtn = page.getByRole('button', { name: /expand/i });
+      const toggleBtn = gapGroup.getByRole('button', { name: /expand/i });
       await expect(toggleBtn).toBeVisible();
       await toggleBtn.click();
 

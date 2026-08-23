@@ -30,29 +30,20 @@ from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
 from app.core.history.models import FieldHistoryEntry
-from app.core.journal.adapters.sql.bushwalking_data_repository import (
-    SqlBushwalkingDataRepository,
-)
-from app.core.journal.adapters.sql.fitness_data_repository import (
-    SqlFitnessDataRepository,
-)
-from app.core.journal.adapters.sql.jogging_data_repository import (
-    SqlJoggingDataRepository,
-)
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
-    SqlOutdoorActivityDataRepository,
-)
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_type_data_reader import (
+    read_journal_types_and_data as _fetch_journal_types_and_data,
+)
 from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import (
-    _fetch_journal_types_and_data,
+    _create_journal_tool_repositories,
     register_journal_tools,
 )
 from tests.integration.mcp.http_helpers import (
@@ -193,6 +184,7 @@ class TestJournalToolsIntegration:
             expected_tools = [
                 "create_journal_entry",
                 "get_journal",
+                "get_journal_by_external_id",
                 "update_journal_entry",
                 "delete_journal",
                 "search_journals",
@@ -1192,65 +1184,8 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
         self, journal_id: int, conn: AsyncConnection
     ) -> tuple[list[str], dict[str, Any]]:
         """Helper: call _fetch_journal_types_and_data with all repos."""
-        from app.core.journal.adapters.sql.abseiling_data_repository import (
-            SqlAbseilingDataRepository,
-        )
-        from app.core.journal.adapters.sql.album_sync_read_repository import (
-            AlbumSyncReadRepository,
-        )
-        from app.core.journal.adapters.sql.calendar_info_repository import (
-            SqlCalendarInfoRepository,
-        )
-        from app.core.journal.adapters.sql.canyoning_data_repository import (
-            SqlCanyoningDataRepository,
-        )
-        from app.core.journal.adapters.sql.caving_data_repository import (
-            SqlCavingDataRepository,
-        )
-        from app.core.journal.adapters.sql.climbing_data_repository import (
-            SqlClimbingDataRepository,
-        )
-        from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
-            SqlCrossCountrySkiingDataRepository,
-        )
-        from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
-            SqlGearMaintenanceDataRepository,
-        )
-        from app.core.journal.adapters.sql.gear_usage_data_repository import (
-            SqlGearUsageDataRepository,
-        )
-        from app.core.journal.adapters.sql.kayaking_data_repository import (
-            SqlKayakingDataRepository,
-        )
-        from app.core.journal.adapters.sql.mood_data_repository import (
-            SqlMoodDataRepository,
-        )
-        from app.core.journal.adapters.sql.plan_data_repository import (
-            SqlPlanDataRepository,
-        )
-        from app.core.journal.adapters.sql.travel_data_repository import (
-            SqlTravelDataRepository,
-        )
-
         return await _fetch_journal_types_and_data(
-            journal_id,
-            SqlCalendarInfoRepository(conn),
-            SqlMoodDataRepository(conn),
-            SqlPlanDataRepository(conn),
-            SqlTravelDataRepository(conn),
-            AlbumSyncReadRepository(conn),
-            SqlFitnessDataRepository(conn),
-            SqlOutdoorActivityDataRepository(conn),
-            SqlBushwalkingDataRepository(conn),
-            SqlJoggingDataRepository(conn),
-            SqlAbseilingDataRepository(conn),
-            SqlCanyoningDataRepository(conn),
-            SqlCavingDataRepository(conn),
-            SqlClimbingDataRepository(conn),
-            SqlKayakingDataRepository(conn),
-            SqlCrossCountrySkiingDataRepository(conn),
-            SqlGearMaintenanceDataRepository(conn),
-            SqlGearUsageDataRepository(conn),
+            journal_id, _create_journal_tool_repositories(conn)
         )
 
     @pytest.mark.asyncio
@@ -1661,6 +1596,7 @@ class TestActivityMcpToolsMountedIntegration:
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
+        index_journal,
     ) -> None:
         river_note_id = await self._insert_journal(
             clean_database,
@@ -1709,6 +1645,9 @@ class TestActivityMcpToolsMountedIntegration:
             calories=500,
         )
         await self._insert_jogging_data(clean_database, journal_id=jogging_journal_id)
+
+        for journal_id in (river_note_id, kayaking_journal_id, jogging_journal_id):
+            await index_journal(journal_id)
 
         async with authenticated_lifespan_client() as authenticated_client:
             session_id = await initialize_mcp_session(authenticated_client)

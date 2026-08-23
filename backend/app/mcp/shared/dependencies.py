@@ -108,6 +108,12 @@ async def get_session_user() -> SessionUser:
     FastMCP access token claims (populated by the OAuth provider).
     When auth is disabled (dev mode), resolves the SessionUser from the
     Dishka container to stay consistent with API endpoint user identity.
+
+    Every provider exposes the identity as flat claims on the verified token:
+    the named providers (GitHub, Azure, Discord) verify upstream themselves,
+    and the generic-OAuth proxy verifies the upstream ``id_token`` against the
+    IdP's JWKS, so its payload — ``sub``, ``email``, ``name`` — arrives the
+    same way.
     """
     from fastmcp.server.dependencies import get_access_token
 

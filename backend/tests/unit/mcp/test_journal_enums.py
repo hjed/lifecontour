@@ -1,0 +1,100 @@
+"""Closed vocabularies are published through FastMCP and list_journal_types."""
+
+import json
+from typing import Any
+
+import pytest
+from core_shared.models.journals import (
+    AnchorLocation,
+    AnchorType,
+    CanyonType,
+    ClimbingType,
+    PitchType,
+    TemplateType,
+)
+from core_shared.models.journals.constants import (
+    VALID_ANCHOR_LOCATIONS,
+    VALID_ANCHOR_TYPES,
+    VALID_CANYON_TYPES,
+    VALID_CLIMBING_TYPES,
+    VALID_PITCH_TYPES,
+    VALID_TEMPLATE_TYPES,
+)
+
+from app.mcp.domains.journals.tools import list_journal_types
+from app.mcp.server import create_mcp_server
+
+
+@pytest.mark.parametrize(
+    ("enum", "valid"),
+    [
+        (AnchorType, VALID_ANCHOR_TYPES),
+        (AnchorLocation, VALID_ANCHOR_LOCATIONS),
+        (PitchType, VALID_PITCH_TYPES),
+        (CanyonType, VALID_CANYON_TYPES),
+        (ClimbingType, VALID_CLIMBING_TYPES),
+        (TemplateType, VALID_TEMPLATE_TYPES),
+    ],
+)
+def test_valid_lists_are_derived_from_the_enums(enum, valid) -> None:
+    """One definition: the VALID_* lists are derived from the core_shared enums."""
+    assert [member.value for member in enum] == list(valid)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["create_template", "update_template"])
+async def test_template_tools_publish_enums_in_their_schema(tool_name: str) -> None:
+    server = create_mcp_server()
+    tool = await server.get_tool(tool_name)
+    assert tool is not None
+    params: dict[str, Any] = tool.parameters
+    defs: dict[str, Any] = params.get("$defs", {})
+
+    def enum_of(schema: dict[str, Any]) -> list[Any] | None:
+        if "enum" in schema:
+            return list(schema["enum"])
+        for branch in schema.get("anyOf", []):
+            if "enum" in branch:
+                return list(branch["enum"])
+            if "$ref" in branch:
+                return enum_of(defs[branch["$ref"].rsplit("/", 1)[1]])
+        if "$ref" in schema:
+            return enum_of(defs[schema["$ref"].rsplit("/", 1)[1]])
+        return None
+
+    props = params["properties"]
+    assert enum_of(props["canyon_type"]) == VALID_CANYON_TYPES
+    assert enum_of(props["climbing_type"]) == VALID_CLIMBING_TYPES
+    pitch = defs["TemplatePitchInput"]["properties"]
+    assert enum_of(pitch["anchor_type"]) == VALID_ANCHOR_TYPES
+    assert enum_of(pitch["anchor_location"]) == VALID_ANCHOR_LOCATIONS
+    assert enum_of(pitch["pitch_type"]) == VALID_PITCH_TYPES
+
+
+@pytest.mark.asyncio
+async def test_list_journal_types_states_units_and_enums() -> None:
+    payload = json.loads(await list_journal_types())
+    by_name = {t["name"]: t for t in payload["journal_types"]}
+
+    fitness = by_name["FITNESS"]["type_data_fields"]
+    assert fitness["distance"]["unit"] == "km"
+    assert fitness["distance"]["type"] == "int"
+    assert fitness["duration"]["unit"] == "minutes"
+    assert fitness["elevation_gain"]["unit"] == "m"
+    assert fitness["distance"]["summary"] == "int in km (optional)"
+    assert by_name["ABSEILING_TRIP"]["type_data_fields"]["total_length"]["unit"] == "m"
+    assert by_name["CLIMBING"]["type_data_fields"]["length"]["unit"] == "m"
+    assert (
+        by_name["CLIMBING"]["type_data_fields"]["climbing_type"]["allowed_values"]
+        == VALID_CLIMBING_TYPES
+    )
+    assert by_name["EVENT"]["type_data_fields"]["calendar_id"]["required"] is True
+    assert "url" in by_name["PLAN"]["type_data_fields"]["documents"]["description"]
+    assert by_name["OUTDOOR_TRAINING"]["type_data_fields"]["focus_areas"]["type"] == (
+        "list[string]"
+    )
+
+    assert payload["enums"]["anchor_types"] == VALID_ANCHOR_TYPES
+    assert payload["enums"]["canyon_types"] == VALID_CANYON_TYPES
+    assert payload["enums"]["pitch_types"] == VALID_PITCH_TYPES
+    assert payload["units"]["distance"].startswith("km")

@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { eachDayOfInterval, format, parseISO } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { JournalListItem } from '@/components/journals/JournalListItem';
@@ -9,6 +9,24 @@ import { groupJournalsByDay } from '@/lib/journal-grouping';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { DailySummaryView } from '@/components/journals/DailySummaryView';
+
+/**
+ * Layout effects run before paint but do not exist on the server, where React
+ * warns about them. The list only ever measures on the client, so fall back to
+ * a plain effect during SSR.
+ */
+const useIsomorphicLayoutEffect =
+  typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+/**
+ * Days that hold journals carry `data-scroll-anchor` so the list can measure
+ * against one when older days are prepended. Only populated days qualify:
+ * `groupJournalsByDay` merges contiguous runs of *empty* days into a single
+ * collapsed group keyed by the run's start date, so an empty day next to the
+ * incoming chunk is re-keyed and its element replaced — useless as an anchor.
+ * A populated day is never merged, so React keeps its node across the prepend.
+ */
+const SCROLL_ANCHOR_SELECTOR = '[data-scroll-anchor]';
 
 export interface DayGroupedJournalListProps {
   readonly journals: DisplayJournal[];
@@ -43,10 +61,18 @@ export function DayGroupedJournalList({
   focusDate,
   className = '',
 }: DayGroupedJournalListProps) {
+  const listRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
+  // Anchor captured when a previous-page fetch starts, so the days it prepends
+  // don't shove the rest of the list down (see the two effects below).
+  const prependAnchorRef = useRef<{ element: Element; top: number } | null>(
+    null
+  );
+
   const [hasScrolled, setHasScrolled] = useState(false);
+  const [userHasScrolled, setUserHasScrolled] = useState(false);
   const [topInView, setTopInView] = useState(false);
   const [bottomInView, setBottomInView] = useState(false);
   // One fetch per continuous sentinel intersection: cleared when the sentinel
@@ -88,6 +114,55 @@ export function DayGroupedJournalList({
       clearTimeout(stateTimer);
     };
   }, [journals, isLoadingNext, isLoadingPrevious, hasScrolled]);
+
+  // Preserve the reading position across a previous-page fetch. Older days are
+  // inserted *above* everything already on screen, so without compensation the
+  // whole list drops by the height of the new content — the user loses their
+  // place, and anything they were about to click moves out from under the
+  // pointer mid-interaction.
+  //
+  // The anchor is the oldest day that already holds journals: everything the
+  // fetch prepends or re-collapses lands above it, so restoring its viewport
+  // offset restores the whole visible list. A list of nothing but empty days
+  // has no such anchor and falls back to the bottom sentinel, which is always
+  // last and so is also below every change. Measuring a real element rather
+  // than a scrollHeight delta keeps this self-correcting — where the browser's
+  // own scroll anchoring already did the work the delta is zero and we leave
+  // the scroll position alone.
+  useIsomorphicLayoutEffect(() => {
+    if (!isLoadingPrevious) return;
+    const element =
+      listRef.current?.querySelector(SCROLL_ANCHOR_SELECTOR) ??
+      bottomSentinelRef.current;
+    if (!element) return;
+    prependAnchorRef.current = {
+      element,
+      top: element.getBoundingClientRect().top,
+    };
+  }, [isLoadingPrevious]);
+
+  useIsomorphicLayoutEffect(() => {
+    const anchor = prependAnchorRef.current;
+    if (!anchor || isLoadingPrevious) return;
+    prependAnchorRef.current = null;
+
+    if (!anchor.element.isConnected) return;
+    const delta = anchor.element.getBoundingClientRect().top - anchor.top;
+    if (delta !== 0) {
+      window.scrollBy(0, delta);
+    }
+  }, [journals, isLoadingPrevious]);
+
+  // Record the first genuine scroll. Only attached once the initial
+  // scroll-to-today above has settled, so that programmatic scroll is not
+  // mistaken for the user reaching for older entries.
+  useEffect(() => {
+    if (!hasScrolled || userHasScrolled) return;
+
+    const handleScroll = () => setUserHasScrolled(true);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [hasScrolled, userHasScrolled]);
 
   // Track sentinel visibility for bi-directional scroll fetching. The
   // observer only records visibility; the fetch effects below react to it.
@@ -134,10 +209,22 @@ export function DayGroupedJournalList({
   // pages it held before the refetch, appends the new one and marks the result
   // fresh — so a post-mutation refresh is silently thrown away and the list
   // keeps rendering pre-mutation rows for the whole staleTime (#1203).
+  // Expanding into the past additionally waits for the user to scroll. Older
+  // days are inserted *above* everything on screen, and the page is routinely
+  // at the end of its scroll range (its height comes from the filters sidebar,
+  // not the list), so the anchoring above cannot always absorb the insertion.
+  // Fetching unprompted — merely because a short list leaves the top sentinel
+  // inside its 200px margin on arrival — therefore drops a week of empty days
+  // on top of whatever the reader is looking at, moving controls out from under
+  // the pointer mid-click. An empty list is the exception: there is no reading
+  // position to protect, and expanding is how the user finds their entries.
+  const mayExpandIntoThePast = userHasScrolled || journals.length === 0;
+
   useEffect(() => {
     if (!topInView || isLoadingPrevious || isLoadingNext || isRefetching) {
       return;
     }
+    if (!mayExpandIntoThePast) return;
     if (topFetchedThisVisitRef.current) return;
     if (hasPreviousPage && fetchPreviousPage) {
       topFetchedThisVisitRef.current = true;
@@ -149,6 +236,7 @@ export function DayGroupedJournalList({
     isLoadingPrevious,
     isLoadingNext,
     isRefetching,
+    mayExpandIntoThePast,
     fetchPreviousPage,
   ]);
 
@@ -210,6 +298,7 @@ export function DayGroupedJournalList({
 
   return (
     <div
+      ref={listRef}
       className={`space-y-6 ${className}`}
       data-testid={
         hasScrolled ? 'journals-list-ready' : 'journals-list-loading'
@@ -324,6 +413,7 @@ export function DayGroupedJournalList({
           <div
             key={group.date}
             className='space-y-3'
+            data-scroll-anchor={group.isEmpty ? undefined : ''}
             data-testid={`journal-day-group-${group.date}`}
           >
             <h3 className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10 border-b py-2 text-lg font-semibold backdrop-blur'>

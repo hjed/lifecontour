@@ -249,6 +249,12 @@ test.describe('Journals AI Daily Summary', () => {
 
     await authenticatedPage.goto('/journals');
 
+    // The list positions itself on today before it is ready to be driven;
+    // interacting earlier races that scroll.
+    await expect(
+      authenticatedPage.getByTestId('journals-list-ready')
+    ).toBeVisible();
+
     // Wait for initial summary (auto-generated)
     await expect(
       authenticatedPage.getByTestId(`summary-text-${journalDateId}`)

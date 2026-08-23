@@ -72,9 +72,20 @@ docker compose --profile test --env-file .env.test up
 # Run backend integration tests only
 docker compose --profile test-backend up
 
-# Clean up test environment
-docker compose --profile test down -v
+# Clean up this worktree's test environment (all profiles, volumes and networks)
+python3 scripts/teardown_workspace.py
+
+# Same, for a worktree that has already been deleted
+python3 scripts/teardown_workspace.py /path/to/removed/worktree
 ```
+
+Each worktree runs its Docker stack under its own compose project name
+(`pms_test_<N>`, derived from the worktree path by `scripts/workspace_env.py`),
+so several checkouts can run tests side by side. `scripts/teardown_workspace.py`
+removes everything belonging to one such project — it is safe to call from a
+worktree-cleanup hook, and leaves other worktrees and the shared
+`personal-management` network alone. `--prune-stale` sweeps every workspace
+project whose worktree no longer exists.
 
 ### Production Deployment
 

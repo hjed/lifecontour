@@ -1,27 +1,40 @@
 /**
+ * @jest-environment jsdom
+ */
+
+/**
  * Tests for JournalTaskRow — one task as a journal shows it.
  *
- * The row is read-only in this phase: it displays the task text, its status,
- * its linked contacts and, when the task has lapsed, a marker stating which of
- * the two reasons applies. Actions arrive in ITER18-001 Phase 17, and the
- * "no buttons" test below is what keeps this phase honest about that.
+ * The row displays the task text, its status, its linked contacts and, when
+ * the task has lapsed, a marker stating which of the two reasons applies, and
+ * it mounts the inline status actions. What those actions *do* is asserted in
+ * `JournalTaskActions.test.tsx`; what this file pins is that the row offers
+ * them and describes them by the commitment they act on.
  */
 
 import { render, screen, within } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { JournalTaskRow } from '../JournalTaskRow';
 import {
   createMockJournalTask,
   createMockTaskJournalRef,
+  createTestQueryClient,
 } from '../test-helpers';
 import { LapseReason, TaskStatus } from '@/types/tasks';
 import type { JournalTaskResource } from '@/types/tasks';
 
-/** Render the row inside the list it always lives in. */
+// `jest.setup.ts` narrows `@/lib/constants` to the auth endpoints, which would
+// leave the actions' mutation hooks without `API_ENDPOINTS.TASKS`.
+jest.mock('@/lib/constants', () => jest.requireActual('@/lib/constants'));
+
+/** Render the row inside the list — and the provider — it always lives in. */
 function renderRow(task: JournalTaskResource, journalId = '1') {
   return render(
-    <ul>
-      <JournalTaskRow task={task} journalId={journalId} />
-    </ul>
+    <QueryClientProvider client={createTestQueryClient()}>
+      <ul>
+        <JournalTaskRow task={task} journalId={journalId} />
+      </ul>
+    </QueryClientProvider>
   );
 }
 
@@ -203,7 +216,13 @@ describe('JournalTaskRow', () => {
     });
   });
 
-  it('offers no actions — the row is read-only in this phase', () => {
+  /**
+   * The inverse of the assertion this file carried through Phase 16, which
+   * required the busiest row to render zero buttons. It was written so that
+   * adding the actions would have to come back and change it, rather than
+   * leaving a passing test that quietly meant nothing.
+   */
+  it('offers its actions inline, described by the task they act on', () => {
     renderRow(
       createMockJournalTask({
         lapsed: true,
@@ -212,7 +231,26 @@ describe('JournalTaskRow', () => {
       })
     );
 
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
-    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    const group = screen.getByRole('group', { name: 'Task actions' });
+    expect(
+      within(group).getByRole('button', { name: 'Mark done' })
+    ).toBeVisible();
+    expect(
+      within(group).getByRole('button', { name: 'Cancel task' })
+    ).toBeVisible();
+    expect(group.getAttribute('aria-describedby')).toBe(
+      screen.getByTestId('journal-task-text').id
+    );
+  });
+
+  it('keeps a lapsed row actionable rather than presenting it as settled', () => {
+    renderRow(
+      createMockJournalTask({
+        lapsed: true,
+        lapse_reason: LapseReason.DUE_JOURNAL_CANCELLED,
+      })
+    );
+
+    expect(screen.getByRole('button', { name: 'Mark done' })).toBeEnabled();
   });
 });

@@ -1,16 +1,21 @@
 /**
  * One task as a journal shows it.
  *
- * Read-only in ITER18-001 Phase 16: the row displays the commitment and says
- * nothing about acting on it. The inline done / cancel / resurrect affordances
- * (wireframe W24) arrive in Phases 17–18 and hang off this row.
- *
  * The presentation follows the dashboard's task-row idiom so the two surfaces
  * read alike — a bordered rounded row with a left accent bar and a hover shadow
- * (**W22**), the task text as a prominent non-link line (**W23**), and each
- * linked contact as an avatar beside their name in muted text (**W27**).
+ * (**W22**), the task text as a prominent non-link line (**W23**), the inline
+ * status actions top-right of the text row (**W24**), and each linked contact
+ * as an avatar beside their name in muted text (**W27**).
+ *
+ * The actions are a component of their own (`JournalTaskActions`) because they
+ * carry a mutation and an offer table, while everything else here is a pure
+ * rendering of the listing's payload. The resurrect affordance a lapsed row
+ * also wants arrives with the retarget dialog.
  */
 
+'use client';
+
+import { useId } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
@@ -18,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { lapseWording, statusWording } from '@/lib/task-display';
 import { TaskStatus, type JournalTaskResource } from '@/types/tasks';
+import { JournalTaskActions } from './JournalTaskActions';
 
 interface JournalTaskRowProps {
   /** The task, as the journal's listing returned it. */
@@ -56,6 +62,9 @@ function nameParts(displayName: string): { first: string; last: string } {
 export function JournalTaskRow({ task, journalId }: JournalTaskRowProps) {
   const { text, status, lapsed, lapse_reason, due_journal, contacts } =
     task.attributes;
+  // The actions are named the same on every row, so they are described by the
+  // text of the commitment they act on rather than by a label of their own.
+  const textId = useId();
 
   // Terminal statuses are shown, not hidden, and never as if still live — the
   // stance the wireframe takes on cancelled journals (W18).
@@ -80,6 +89,7 @@ export function JournalTaskRow({ task, journalId }: JournalTaskRowProps) {
 
       <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-1'>
         <p
+          id={textId}
           data-testid='journal-task-text'
           className={cn(
             'font-medium',
@@ -89,20 +99,28 @@ export function JournalTaskRow({ task, journalId }: JournalTaskRowProps) {
           {text}
         </p>
 
-        <div className='flex flex-wrap items-center gap-1.5'>
-          <Badge variant={isTerminal ? 'secondary' : 'outline'}>
-            {statusWording(status)}
-          </Badge>
-          {lapse && (
-            <Badge
-              data-testid='journal-task-lapsed'
-              variant='outline'
-              className='border-destructive/50 text-destructive'
-              title={lapse.description}
-            >
-              {lapse.label}
+        {/* W24 puts the actions top-right of the text row and lets them wrap
+            under it when the column is narrow, which is what this cluster
+            does: it shares the text row's `flex-wrap` and carries the status
+            badges alongside. */}
+        <div className='flex flex-wrap items-center justify-end gap-x-3 gap-y-1'>
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Badge variant={isTerminal ? 'secondary' : 'outline'}>
+              {statusWording(status)}
             </Badge>
-          )}
+            {lapse && (
+              <Badge
+                data-testid='journal-task-lapsed'
+                variant='outline'
+                className='border-destructive/50 text-destructive'
+                title={lapse.description}
+              >
+                {lapse.label}
+              </Badge>
+            )}
+          </div>
+
+          <JournalTaskActions task={task} describedById={textId} />
         </div>
       </div>
 

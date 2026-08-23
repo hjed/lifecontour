@@ -76,12 +76,22 @@ The backend integration tests use `test-backend` which is faster to start since 
 ## Stopping Docker Services
 
 ```bash
-# From the project root
+# From the project root — tears down every profile for this worktree
+python3 scripts/teardown_workspace.py
+```
+
+`teardown_workspace.py` resolves this worktree's `pms_test_<N>` compose project,
+brings it down across all profiles and sweeps anything left over, without
+touching other worktrees or the shared `personal-management` network. Pass
+`--keep-volumes` to preserve data between runs (e.g. to avoid re-running
+migrations), or `--dry-run` to see what it would remove.
+
+The equivalent raw command, if you need it:
+
+```bash
 eval "$(python3 scripts/workspace_env.py export)"
 docker compose --profile test-backend --env-file .env.test down -v
 ```
-
-> **Note:** The `-v` flag removes volumes. Omit it if you want to preserve data between runs (e.g. to avoid re-running migrations).
 
 ## Common Troubleshooting
 

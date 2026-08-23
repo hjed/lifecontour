@@ -283,6 +283,285 @@ describe('MergeResolutionDialog', () => {
     });
   });
 
+  describe('event timing', () => {
+    const CAL_ID = '11111111-1111-1111-1111-111111111111';
+
+    /**
+     * An event's timing is stored twice: `event_date_range` carries UTC
+     * datetimes and the calendar row carries the clock times.
+     */
+    const makeTimedEvent = (
+      id: string,
+      range: { start: string; end: string },
+      times: { start_time: string; end_time: string; timezone?: string }
+    ) =>
+      ({
+        id,
+        type: 'journals',
+        attributes: {
+          title: 'Same Title',
+          content: 'Same Content',
+          event_date_range: range,
+          created_at: '',
+          updated_at: '',
+          is_archived: false,
+          journal_date: '',
+          type_data: {
+            event: { calendar_id: CAL_ID, is_all_day: false, ...times },
+          },
+        },
+        relationships: {},
+      }) as unknown as JournalResource;
+
+    const targetEvent = () =>
+      makeTimedEvent(
+        '1',
+        { start: '2026-08-23T09:00:00Z', end: '2026-08-23T10:00:00Z' },
+        { start_time: '09:00:00', end_time: '10:00:00' }
+      );
+
+    const sourceEvent = () =>
+      makeTimedEvent(
+        '2',
+        { start: '2026-08-23T19:30:00Z', end: '2026-08-23T22:00:00Z' },
+        { start_time: '19:30:00', end_time: '22:00:00' }
+      );
+
+    const renderDialog = (target: JournalResource, source: JournalResource) =>
+      render(
+        <MergeResolutionDialog
+          targetJournal={target}
+          sourceJournal={source}
+          open={true}
+          isPending={false}
+          onOpenChange={mockOnOpenChange}
+          onResolve={mockOnResolve}
+        />
+      );
+
+    it('asks about the event timing once, not three times', () => {
+      renderDialog(targetEvent(), sourceEvent());
+
+      expect(screen.getByText('Event Dates & Times')).toBeInTheDocument();
+      expect(screen.queryByText('Event — Start Time')).not.toBeInTheDocument();
+      expect(screen.queryByText('Event — End Time')).not.toBeInTheDocument();
+      expect(screen.queryByText('19:30:00')).not.toBeInTheDocument();
+      expect(screen.queryByText('22:00:00')).not.toBeInTheDocument();
+    });
+
+    it('sends the clock times of whichever side won the dates', async () => {
+      const user = userEvent.setup();
+      renderDialog(targetEvent(), sourceEvent());
+
+      await user.click(screen.getByTestId('radio-source-event_date_range'));
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T19:30:00Z',
+            end: '2026-08-23T22:00:00Z',
+          },
+          type_data: {
+            event: { start_time: '19:30:00', end_time: '22:00:00' },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('keeps the target dates and target clock times together', async () => {
+      const user = userEvent.setup();
+      renderDialog(targetEvent(), sourceEvent());
+
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T09:00:00Z',
+            end: '2026-08-23T10:00:00Z',
+          },
+          type_data: {
+            event: { start_time: '09:00:00', end_time: '10:00:00' },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('sends the timezone those clock times belong to', async () => {
+      // A clock time means nothing without its zone: keeping the source's
+      // times under the target's timezone would re-interpret them.
+      const user = userEvent.setup();
+      renderDialog(
+        makeTimedEvent(
+          '1',
+          { start: '2026-08-23T09:00:00Z', end: '2026-08-23T10:00:00Z' },
+          {
+            start_time: '09:00:00',
+            end_time: '10:00:00',
+            timezone: 'Australia/Sydney',
+          }
+        ),
+        makeTimedEvent(
+          '2',
+          { start: '2026-08-23T19:30:00Z', end: '2026-08-23T22:00:00Z' },
+          {
+            start_time: '19:30:00',
+            end_time: '22:00:00',
+            timezone: 'Pacific/Auckland',
+          }
+        )
+      );
+
+      expect(screen.queryByText('Event — Timezone')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('radio-source-event_date_range'));
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T19:30:00Z',
+            end: '2026-08-23T22:00:00Z',
+          },
+          type_data: {
+            event: {
+              start_time: '19:30:00',
+              end_time: '22:00:00',
+              timezone: 'Pacific/Auckland',
+            },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('carries all-day-ness with the timing, even with no clock times to fold', async () => {
+      // An all-day journal has no clock times at all — the read schema omits
+      // them — so there is nothing for those fields to fold. Left on its own,
+      // `is_all_day` defaults to the target and the merge writes the source's
+      // timed range onto an event still marked all-day.
+      const user = userEvent.setup();
+      const allDayTarget = {
+        id: '1',
+        type: 'journals',
+        attributes: {
+          title: 'Same Title',
+          content: 'Same Content',
+          event_date_range: {
+            start: '2026-08-23T00:00:00Z',
+            end: '2026-08-23T23:59:59Z',
+          },
+          created_at: '',
+          updated_at: '',
+          is_archived: false,
+          journal_date: '',
+          type_data: { event: { calendar_id: CAL_ID, is_all_day: true } },
+        },
+        relationships: {},
+      } as unknown as JournalResource;
+
+      renderDialog(allDayTarget, sourceEvent());
+
+      expect(screen.queryByText('Event — Is All Day')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('radio-source-event_date_range'));
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T19:30:00Z',
+            end: '2026-08-23T22:00:00Z',
+          },
+          type_data: {
+            event: {
+              is_all_day: false,
+              start_time: '19:30:00',
+              end_time: '22:00:00',
+            },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('clears a zone the winning side does not have', async () => {
+      // Only one side carrying a timezone is the common case (a synced event
+      // has one, a hand-written journal may not). The absent side has no value
+      // to fold, so keeping its times has to say "no zone" out loud — otherwise
+      // the other side's zone survives and re-reads those clock times.
+      const user = userEvent.setup();
+      renderDialog(
+        makeTimedEvent(
+          '1',
+          { start: '2026-08-23T09:00:00Z', end: '2026-08-23T10:00:00Z' },
+          { start_time: '09:00:00', end_time: '10:00:00' }
+        ),
+        makeTimedEvent(
+          '2',
+          { start: '2026-08-23T19:30:00Z', end: '2026-08-23T22:00:00Z' },
+          {
+            start_time: '19:30:00',
+            end_time: '22:00:00',
+            timezone: 'Pacific/Auckland',
+          }
+        )
+      );
+
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T09:00:00Z',
+            end: '2026-08-23T10:00:00Z',
+          },
+          type_data: {
+            event: {
+              start_time: '09:00:00',
+              end_time: '10:00:00',
+              timezone: null,
+            },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('still asks about a clock time that differs on its own', () => {
+      const sameRange = {
+        start: '2026-08-23T09:00:00Z',
+        end: '2026-08-23T10:00:00Z',
+      };
+      renderDialog(
+        makeTimedEvent('1', sameRange, {
+          start_time: '09:00:00',
+          end_time: '10:00:00',
+        }),
+        makeTimedEvent('2', sameRange, {
+          start_time: '09:00:00',
+          end_time: '11:00:00',
+        })
+      );
+
+      expect(screen.queryByText('Event Dates & Times')).not.toBeInTheDocument();
+      expect(screen.getByText('Event — End Time')).toBeInTheDocument();
+    });
+  });
+
   describe('fitness merge mode', () => {
     const makeFitnessJournal = (id: string, fitness: Record<string, unknown>) =>
       ({

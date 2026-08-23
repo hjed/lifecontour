@@ -285,6 +285,51 @@ _TYPE_DATA_COLLECTIONS: dict[JournalType, tuple[_CollectionSpec, ...]] = {
 }
 
 
+class TypeReplaceReport(NamedTuple):
+    """What a replace-all type update actually discarded.
+
+    ``types_removed`` lists the type values that were dropped from the journal.
+    ``type_data_discarded`` maps each dropped type to the tracked fields that
+    held a value at the time, so a caller can say exactly what was lost instead
+    of the data vanishing silently.
+    """
+
+    types_removed: list[str]
+    type_data_discarded: dict[str, list[str]]
+
+
+class CompositeUpdateResult(NamedTuple):
+    """Outcome of :meth:`JournalWriteService.update_journal_composite`."""
+
+    journal: Journal
+    types_removed: list[str]
+    type_data_discarded: dict[str, list[str]]
+
+
+def _is_unpopulated(value: object) -> bool:
+    """True for values a type-data column holds when nothing was ever set."""
+    return value is None or value == "" or value is False
+
+
+def expand_type_dependencies(types: set[JournalType]) -> set[JournalType]:
+    """Close ``types`` over :meth:`JournalType.get_dependencies` transitively.
+
+    NOTE is implicit (a journal with no typed rows) so it is never part of the
+    closure when any other type is present.
+    """
+    expanded: set[JournalType] = set()
+    stack = list(types)
+    while stack:
+        journal_type = stack.pop()
+        if journal_type in expanded:
+            continue
+        expanded.add(journal_type)
+        stack.extend(JournalType.get_dependencies(journal_type))
+    if len(expanded) > 1:
+        expanded.discard(JournalType.NOTE)
+    return expanded
+
+
 class JournalWriteService:
     """Service orchestrating composite journal writes as a single unit of work."""
 
@@ -444,7 +489,7 @@ class JournalWriteService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         expected_etags: Sequence[str] | None = None,
-    ) -> Journal:
+    ) -> CompositeUpdateResult:
         """Update a journal's core fields and optionally replace its associations.
 
         Tri-state per association: ``None`` leaves it untouched, while any list
@@ -467,8 +512,9 @@ class JournalWriteService:
             raise JournalValidationError("id", "Journal ID is required after update")
         journal_id = updated.id
 
+        report = TypeReplaceReport(types_removed=[], type_data_discarded={})
         if types is not None:
-            await self._replace_journal_types(
+            report = await self._replace_journal_types(
                 journal_id,
                 types,
                 type_data,
@@ -508,7 +554,11 @@ class JournalWriteService:
                 journal_id, tags, transaction, changed_by=changed_by, source=source
             )
 
-        return updated
+        return CompositeUpdateResult(
+            journal=updated,
+            types_removed=report.types_removed,
+            type_data_discarded=report.type_data_discarded,
+        )
 
     @transactional
     async def delete_journal(
@@ -1411,12 +1461,18 @@ class JournalWriteService:
         *,
         changed_by: str,
         source: Provenance,
-    ) -> None:
+    ) -> TypeReplaceReport:
         """Replace the journal's types with ``types`` (replace-all semantics).
 
+        The requested list is closed over its dependencies *before* diffing, so
+        re-typing BUSHWALKING → CANYONING keeps the FITNESS / OUTDOOR_ACTIVITY /
+        BUSHWALKING rows (and their data, e.g. the Strava link) rather than
+        deleting them and re-adding empty rows as CANYONING's dependencies.
+
         Types present but no longer desired are removed (their type-data row
-        deleted); newly desired types are added (with auto-resolved dependencies)
-        and given default rows; finally any supplied ``type_data`` is applied.
+        deleted) and reported, along with the tracked fields that held a value;
+        newly desired types are added (with auto-resolved dependencies) and
+        given default rows; finally any supplied ``type_data`` is applied.
 
         An unparseable type string raises rather than being skipped: silently
         dropping it from ``desired`` would make ``current - desired`` remove
@@ -1432,6 +1488,7 @@ class JournalWriteService:
                     "types", f"Invalid journal type: {type_str}"
                 ) from exc
 
+        desired = expand_type_dependencies(desired)
         current = await self._get_current_types(journal_id)
 
         # GEAR_* types cannot be created with a default row, so adding one without
@@ -1449,7 +1506,10 @@ class JournalWriteService:
                     "non-empty type_data when added",
                 )
 
-        for journal_type in current - desired:
+        types_removed: list[str] = []
+        type_data_discarded: dict[str, list[str]] = {}
+        for journal_type in sorted(current - desired, key=lambda t: t.value):
+            populated = await self._populated_tracked_fields(journal_type, journal_id)
             await self.journal_service.remove_type_from_journal(
                 journal_id,
                 journal_type,
@@ -1458,8 +1518,13 @@ class JournalWriteService:
                 source=source,
             )
             await self._delete_type_specific_data(journal_type, journal_id)
+            types_removed.append(journal_type.value)
+            if populated:
+                type_data_discarded[journal_type.value] = populated
 
-        for journal_type in desired - current:
+        for journal_type in sorted(desired - current, key=lambda t: t.value):
+            if journal_type == JournalType.NOTE:
+                continue
             added_types = await self.journal_service.add_type_to_journal(
                 journal_id,
                 journal_type,
@@ -1483,6 +1548,28 @@ class JournalWriteService:
             await self._process_journal_type_data(
                 journal_id, scoped_type_data, transaction
             )
+
+        return TypeReplaceReport(
+            types_removed=types_removed, type_data_discarded=type_data_discarded
+        )
+
+    async def _populated_tracked_fields(
+        self, journal_type: JournalType, journal_id: int
+    ) -> list[str]:
+        """Tracked fields of ``journal_type``'s row that currently hold a value."""
+        tracked = _TYPE_DATA_TRACKED_FIELDS.get(journal_type, ())
+        repo = self._type_data_repo(journal_type) if tracked else None
+        if repo is None:
+            return []
+        row = await repo.find_by_journal_id(journal_id)
+        if row is None:
+            return []
+        # None, "" and False are all "never set": boolean columns default to
+        # false, so reporting them would bury the fields that actually held data.
+        # Checked by identity for False so a real 0 (0 == False) is still reported.
+        return [
+            field for field in tracked if not _is_unpopulated(getattr(row, field, None))
+        ]
 
     async def _replace_contact_relationships(
         self,

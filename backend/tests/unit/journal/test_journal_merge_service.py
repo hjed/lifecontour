@@ -107,6 +107,70 @@ def _mock_type_data_execute(query, params=None):
     return mock_res
 
 
+_CALENDAR_COLUMN_TYPES = {
+    "journal_id": "integer",
+    "calendar_id": "uuid",
+    "start_time": "time without time zone",
+    "end_time": "time without time zone",
+    "is_all_day": "boolean",
+    "location": "character varying",
+    "sync_invitees": "boolean",
+    "timezone": "character varying",
+}
+
+
+def _column_type_rows(column_types: dict[str, str]) -> list[Any]:
+    """Rows shaped like ``information_schema.columns`` answers."""
+    rows = []
+    for name, data_type in column_types.items():
+        row = MagicMock()
+        row.column_name = name
+        row.data_type = data_type
+        rows.append(row)
+    return rows
+
+
+def _mock_calendar_execute(query, params=None):
+    """Two timed events on one calendar, plus the column types of their table."""
+    from datetime import time
+
+    q_str = str(query)
+    mock_res = MagicMock()
+    mock_res.fetchone.return_value = None
+    mock_res.fetchall.return_value = []
+
+    if "information_schema.columns" in q_str:
+        mock_res.fetchall.return_value = _column_type_rows(_CALENDAR_COLUMN_TYPES)
+    elif "journal_calendar_info" in q_str and "SELECT" in q_str:
+        if params and (params.get("target_id") == 1 or params.get("id") == 1):
+            row = MagicMock()
+            row._mapping = {
+                "journal_id": 1,
+                "calendar_id": "cal-1",
+                "start_time": time(9, 0),
+                "end_time": time(10, 0),
+                "is_all_day": False,
+                "location": None,
+                "sync_invitees": False,
+                "timezone": None,
+            }
+            mock_res.fetchone.return_value = row
+        elif params and (params.get("source_id") == 2 or params.get("id") == 2):
+            row = MagicMock()
+            row._mapping = {
+                "journal_id": 2,
+                "calendar_id": "cal-1",
+                "start_time": time(19, 30),
+                "end_time": time(22, 0),
+                "is_all_day": False,
+                "location": None,
+                "sync_invitees": False,
+                "timezone": None,
+            }
+            mock_res.fetchone.return_value = row
+    return mock_res
+
+
 class TestJournalMergeService:
     @pytest.mark.asyncio
     async def test_merge_journals_basic_fields(
@@ -266,6 +330,67 @@ class TestJournalMergeService:
 
         assert len(update_calls) == 1
         assert update_calls[0][0][1]["mood_value"] == 8
+
+    @pytest.mark.asyncio
+    async def test_merge_binds_a_clock_time_override_as_a_time(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """A JSON time override must reach the TIME column as a ``time``.
+
+        The merge panel echoes back the read API's ``'19:30:00'``. Bound as a
+        string, asyncpg rejects it outright ("'str' object has no attribute
+        'hour'"), which surfaced as a 500 on every timed-event merge.
+        """
+        from datetime import time
+
+        target = create_test_journal(id=1, title="Timed Event")
+        source = create_test_journal(id=2, title="Other Timed Event")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_calendar_execute
+
+        overrides = {
+            "type_data": {"event": {"start_time": "19:30:00", "end_time": "22:00:00"}}
+        }
+
+        await merge_service.merge_journals(1, 2, mock_transaction, overrides=overrides)
+
+        update_calls = [
+            call
+            for call in mock_transaction.execute.call_args_list
+            if "UPDATE journal_calendar_info" in str(call[0][0])
+        ]
+
+        assert len(update_calls) == 1
+        params = update_calls[0][0][1]
+        assert params["start_time"] == time(19, 30)
+        assert params["end_time"] == time(22, 0)
+
+    @pytest.mark.asyncio
+    async def test_merge_rejects_an_unparseable_time_override(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """Nonsense in a typed column is the caller's error, not a driver crash."""
+        from core_shared.models.journals.exceptions import JournalValidationError
+
+        target = create_test_journal(id=1, title="Timed Event")
+        source = create_test_journal(id=2, title="Other Timed Event")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_calendar_execute
+
+        overrides = {"type_data": {"event": {"start_time": "half past seven"}}}
+
+        with pytest.raises(JournalValidationError):
+            await merge_service.merge_journals(
+                1, 2, mock_transaction, overrides=overrides
+            )
 
     @pytest.mark.asyncio
     async def test_merge_allday_target_with_timed_source_clears_times(

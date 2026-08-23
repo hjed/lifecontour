@@ -35,6 +35,17 @@ interface MergeResolutionDialogProps {
   ) => void;
 }
 
+/**
+ * A type-data value that travels with another conflict's chosen side instead of
+ * being asked about separately, because the two describe the same fact.
+ */
+interface CompanionOverride {
+  typeKey: string;
+  fieldKey: string;
+  targetValue: unknown;
+  sourceValue: unknown;
+}
+
 interface Conflict {
   fieldId: string;
   label: string;
@@ -44,6 +55,8 @@ interface Conflict {
   /** Human-readable stand-ins for opaque values (e.g. a calendar name). */
   targetDisplay?: string;
   sourceDisplay?: string;
+  /** Overrides emitted alongside this conflict's choice. */
+  companions?: CompanionOverride[];
 }
 
 /** Field names whose humanised form is not just a title-cased identifier. */
@@ -63,6 +76,86 @@ function humanise(segment: string): string {
 function buildTypeDataLabel(typeKey: string, fieldKey: string): string {
   const field = FIELD_LABELS[fieldKey] ?? humanise(fieldKey);
   return `${humanise(typeKey)} — ${field}`;
+}
+
+function setTypeDataOverride(
+  overrides: MergeOverrides,
+  typeKey: string,
+  fieldKey: string,
+  value: unknown
+): void {
+  if (!overrides.type_data) overrides.type_data = {};
+  if (!overrides.type_data[typeKey]) overrides.type_data[typeKey] = {};
+  overrides.type_data[typeKey][fieldKey] = value;
+}
+
+/**
+ * The calendar-row half of an event's timing. The clock times are meaningless
+ * without the zone they were recorded in, and `is_all_day` decides whether they
+ * exist at all. All of it belongs to the same answer as the date range, which
+ * already shows the times.
+ */
+const EVENT_TIMING_FIELDS = [
+  'start_time',
+  'end_time',
+  'timezone',
+  'is_all_day',
+];
+
+/** The read API keys `type_data` by lowercase type; older payloads use the enum name. */
+const EVENT_TYPE_KEYS = ['event', 'EVENT'] as const;
+
+function isEventTimingField(typeKey: string, fieldKey: string): boolean {
+  return (
+    typeKey.toLowerCase() === 'event' && EVENT_TIMING_FIELDS.includes(fieldKey)
+  );
+}
+
+function findEventTypeKey(journal: JournalResource | null): string | null {
+  const typeData = journal?.attributes?.type_data as
+    Record<string, unknown> | undefined;
+  if (!typeData) return null;
+  return EVENT_TYPE_KEYS.find(key => typeData[key]) ?? null;
+}
+
+/**
+ * The timing fields that have to move with the date range's chosen side.
+ *
+ * Deliberately built from a fixed field list rather than from the conflicts
+ * found above: a field only one side carries never becomes a conflict, and
+ * those are exactly the cases that go wrong. An all-day journal has no clock
+ * times, and a hand-written one often has no timezone while its synced twin
+ * does — leaving either out lets the absent side inherit the other's value and
+ * re-read its clock times. A `null` here is an answer ("this side has no
+ * zone"), not a missing one.
+ */
+function buildEventTimingCompanions(
+  targetJournal: JournalResource | null,
+  sourceJournal: JournalResource | null
+): CompanionOverride[] {
+  const targetKey = findEventTypeKey(targetJournal);
+  const sourceKey = findEventTypeKey(sourceJournal);
+  if (!targetKey || !sourceKey) return [];
+
+  const targetEvent = (
+    targetJournal?.attributes?.type_data as Record<
+      string,
+      Record<string, unknown>
+    >
+  )[targetKey];
+  const sourceEvent = (
+    sourceJournal?.attributes?.type_data as Record<
+      string,
+      Record<string, unknown>
+    >
+  )[sourceKey];
+
+  return EVENT_TIMING_FIELDS.map(fieldKey => ({
+    typeKey: sourceKey,
+    fieldKey,
+    targetValue: targetEvent[fieldKey] ?? null,
+    sourceValue: sourceEvent[fieldKey] ?? null,
+  })).filter(companion => companion.targetValue !== companion.sourceValue);
 }
 
 /**
@@ -383,14 +476,16 @@ export function MergeResolutionDialog({
     const targetDateStr = target.event_date_range
       ? `${target.event_date_range.start}-${target.event_date_range.end}`
       : null;
+    let eventTiming: Conflict | null = null;
     if (sourceDateStr && targetDateStr && sourceDateStr !== targetDateStr) {
-      newConflicts.push({
+      eventTiming = {
         fieldId: 'event_date_range',
         label: 'Event Dates',
         targetValue: target.event_date_range,
         sourceValue: source.event_date_range,
         isText: false,
-      });
+      };
+      newConflicts.push(eventTiming);
       initialResolutions['event_date_range'] = { choice: defaultChoice };
     }
 
@@ -412,6 +507,14 @@ export function MergeResolutionDialog({
               tVal !== undefined &&
               sVal !== tVal
             ) {
+              // The event's clock times (and the zone they are read in, and
+              // whether it is all-day at all) are the same fact as its date
+              // range, which already shows both date and time: asking twice
+              // reads as duplication, and answering the rows differently would
+              // leave the merged event contradicting itself. They ride along
+              // with the range's choice instead — see the companions below.
+              if (eventTiming && isEventTimingField(typeKey, fieldKey)) return;
+
               const fieldId = `type_data.${typeKey}.${fieldKey}`;
               const isCalendar = fieldKey === 'calendar_id';
               newConflicts.push({
@@ -434,6 +537,16 @@ export function MergeResolutionDialog({
           });
         }
       });
+    }
+
+    if (eventTiming) {
+      eventTiming.companions = buildEventTimingCompanions(
+        targetJournal,
+        sourceJournal
+      );
+      if (eventTiming.companions.length) {
+        eventTiming.label = 'Event Dates & Times';
+      }
     }
 
     setConflicts(newConflicts);
@@ -488,16 +601,26 @@ export function MergeResolutionDialog({
       if (chosenValue !== undefined) {
         if (conflict.fieldId.startsWith('type_data.')) {
           const parts = conflict.fieldId.split('.');
-          const typeKey = parts[1];
-          const fieldKey = parts[2];
-          if (!overrides.type_data) overrides.type_data = {};
-          if (!overrides.type_data[typeKey]) overrides.type_data[typeKey] = {};
-          overrides.type_data[typeKey][fieldKey] = chosenValue;
+          setTypeDataOverride(overrides, parts[1], parts[2], chosenValue);
         } else {
           // @ts-expect-error dynamic assignment
           overrides[conflict.fieldId] = chosenValue;
         }
       }
+
+      // A hand-typed value has no companion to speak of, so the folded-in
+      // fields only follow a target/source choice.
+      if (res.choice === 'custom') return;
+      conflict.companions?.forEach(companion => {
+        setTypeDataOverride(
+          overrides,
+          companion.typeKey,
+          companion.fieldKey,
+          res.choice === 'source'
+            ? companion.sourceValue
+            : companion.targetValue
+        );
+      });
     });
 
     onResolve(overrides, effectiveFitnessMergeMode);

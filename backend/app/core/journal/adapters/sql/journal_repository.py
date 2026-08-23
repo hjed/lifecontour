@@ -3,66 +3,90 @@
 from datetime import UTC, datetime, time
 from typing import Any
 
-from core_shared.models.journals import EventDateRange, Journal, JournalNotFoundError
+from core_shared.models.journals import (
+    EventDateRange,
+    Journal,
+    JournalNotFoundError,
+    JournalType,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.link_sources import JOURNAL_LINK_SOURCES
 from app.core.journal.adapters.sql.journal_touch import touch_journal
 from app.core.journal.models.repositories import JournalRepository
 
-# Module-level constant for journal type to table mapping
-# Supports both uppercase (MOOD_RATING) and lowercase (mood_rating) type names
-_JOURNAL_TYPE_TABLE_MAP = {
-    "MOOD_RATING": "journal_mood_data",
-    "mood_rating": "journal_mood_data",
-    "EVENT": "journal_calendar_info",
-    "event": "journal_calendar_info",
-    "PLAN": "journal_plan_data",
-    "plan": "journal_plan_data",
-    "TRAVEL": "journal_travel_data",
-    "travel": "journal_travel_data",
-    # PHOTO_ALBUM is integration-managed: detected via a sync_metadata row with
-    # integration_source='immich_album' rather than a dedicated data table.
-    "FITNESS": "journal_fitness_data",
-    "fitness": "journal_fitness_data",
-    "OUTDOOR_ACTIVITY": "journal_outdoor_activity_data",
-    "outdoor_activity": "journal_outdoor_activity_data",
-    "BUSHWALKING": "journal_bushwalking_data",
-    "bushwalking": "journal_bushwalking_data",
-    "JOGGING": "journal_jogging_data",
-    "jogging": "journal_jogging_data",
-    "ABSEILING_TRIP": "journal_abseiling_data",
-    "abseiling_trip": "journal_abseiling_data",
-    "CANYONING": "journal_canyoning_data",
-    "canyoning": "journal_canyoning_data",
-    "CLIMBING": "journal_climbing_data",
-    "climbing": "journal_climbing_data",
-    "KAYAKING": "journal_kayaking_data",
-    "kayaking": "journal_kayaking_data",
-    "CROSS_COUNTRY_SKIING": "journal_skiing_data",
-    "cross_country_skiing": "journal_skiing_data",
-    "CAVING": "journal_caving_data",
-    "caving": "journal_caving_data",
-    "CANOEING": "journal_canoeing_data",
-    "canoeing": "journal_canoeing_data",
-    "SNORKELLING": "journal_snorkelling_data",
-    "snorkelling": "journal_snorkelling_data",
-    "DIVING": "journal_diving_data",
-    "diving": "journal_diving_data",
-    "DOWNHILL_SKIING": "journal_downhill_skiing_data",
-    "downhill_skiing": "journal_downhill_skiing_data",
-    "OUTDOOR_PLANNING": "journal_outdoor_planning_data",
-    "outdoor_planning": "journal_outdoor_planning_data",
-    "GEAR_MAINTENANCE": "journal_gear_maintenance_data",
-    "gear_maintenance": "journal_gear_maintenance_data",
-    "GEAR_USAGE": "journal_gear_usage_data",
-    "gear_usage": "journal_gear_usage_data",
+# The type-data table behind every table-backed journal type. NOTE is the
+# absence of any typed row; PHOTO_ALBUM is integration-managed (see below). Every
+# type-detection and type-filter query in this module is generated from this
+# single map, and tests/unit/journal/test_journal_type_coverage.py fails if a
+# JournalType is missing from it.
+TYPE_TABLES: dict[JournalType, str] = {
+    JournalType.EVENT: "journal_calendar_info",
+    JournalType.MOOD_RATING: "journal_mood_data",
+    JournalType.PLAN: "journal_plan_data",
+    JournalType.TRAVEL: "journal_travel_data",
+    JournalType.FITNESS: "journal_fitness_data",
+    JournalType.OUTDOOR_ACTIVITY: "journal_outdoor_activity_data",
+    JournalType.BUSHWALKING: "journal_bushwalking_data",
+    JournalType.JOGGING: "journal_jogging_data",
+    JournalType.ABSEILING_TRIP: "journal_abseiling_data",
+    JournalType.CANYONING: "journal_canyoning_data",
+    JournalType.CLIMBING: "journal_climbing_data",
+    JournalType.KAYAKING: "journal_kayaking_data",
+    JournalType.CROSS_COUNTRY_SKIING: "journal_skiing_data",
+    JournalType.CAVING: "journal_caving_data",
+    JournalType.CANOEING: "journal_canoeing_data",
+    JournalType.SNORKELLING: "journal_snorkelling_data",
+    JournalType.DIVING: "journal_diving_data",
+    JournalType.DOWNHILL_SKIING: "journal_downhill_skiing_data",
+    JournalType.OUTDOOR_PLANNING: "journal_outdoor_planning_data",
+    JournalType.OUTDOOR_TRAINING: "journal_outdoor_training_data",
+    JournalType.GEAR_MAINTENANCE: "journal_gear_maintenance_data",
+    JournalType.GEAR_USAGE: "journal_gear_usage_data",
 }
+
+# Type name (uppercase and lowercase) -> table, for callers passing strings.
+_JOURNAL_TYPE_TABLE_MAP: dict[str, str] = {
+    key: table
+    for journal_type, table in TYPE_TABLES.items()
+    for key in (journal_type.name, journal_type.value)
+}
+
+
+def _type_alias(journal_type: JournalType) -> str:
+    """Stable SQL alias for a type-data table join."""
+    return f"t_{journal_type.value}"
+
 
 # PHOTO_ALBUM is integration-managed: a journal is a PHOTO_ALBUM when it has a
 # sync_metadata row with integration_source='immich_album' (set by Immich album
 # sync), rather than a row in a dedicated type-data table.
 _IMMICH_ALBUM_SOURCE = "immich_album"
+
+
+def _journal_link_sql(integration_source: str, *, by_external_id: bool) -> str | None:
+    """UNION of every store for ``integration_source``, user-scoped.
+
+    Each branch yields ``journal_id``; with ``by_external_id`` it is further
+    restricted to rows whose exposed external id equals ``:external_id``.
+    """
+    source = JOURNAL_LINK_SOURCES.get(integration_source)
+    if source is None:
+        return None
+    branches = []
+    for store in source.stores:
+        conditions = [store.where_sql] if store.where_sql else []
+        conditions.append("j.user_id = :user_id")
+        if by_external_id:
+            conditions.append(f"{store.external_id_sql} = :external_id")
+        branches.append(
+            f"SELECT {store.journal_id_sql} AS journal_id FROM {store.from_sql} "
+            f"WHERE {' AND '.join(conditions)}"
+        )
+    return " UNION ".join(branches)
+
+
 _PHOTO_ALBUM_LEFT_JOIN = (
     "LEFT JOIN sync_metadata sm_pa "
     "ON sm_pa.internal_id = j.id "
@@ -73,6 +97,38 @@ _PHOTO_ALBUM_INNER_JOIN = (
     "ON sm_pa.internal_id = j.id "
     "AND sm_pa.integration_source = 'immich_album'"
 )
+
+# Type-detection projection: ``j.id AS journal_id`` followed by one column per
+# type-data table holding the type name when its row exists (plus the
+# PHOTO_ALBUM sync_metadata marker). Every type-detection query in the app —
+# single journal, batch (logbook export), and search indexing — is built from
+# this so no type can be missing from one of them.
+TYPE_PROJECTION_SQL: str = (
+    "SELECT j.id AS journal_id, "
+    + ", ".join(
+        [
+            f"CASE WHEN {_type_alias(jt)}.journal_id IS NOT NULL "
+            f"THEN '{jt.name}' END AS {_type_alias(jt)}_type"
+            for jt in TYPE_TABLES
+        ]
+        + [
+            "CASE WHEN sm_pa.internal_id IS NOT NULL THEN 'PHOTO_ALBUM' END AS photo_type"
+        ]
+    )
+    + " FROM journals j "
+    + " ".join(
+        f"LEFT JOIN {table} {_type_alias(jt)} ON j.id = {_type_alias(jt)}.journal_id"
+        for jt, table in TYPE_TABLES.items()
+    )
+    + f" {_PHOTO_ALBUM_LEFT_JOIN}"
+)
+GET_TYPES_SQL: str = TYPE_PROJECTION_SQL + " WHERE j.id = :journal_id"
+GET_TYPES_BATCH_SQL: str = TYPE_PROJECTION_SQL + " WHERE j.id = ANY(:journal_ids)"
+
+
+def type_names_from_projection_row(row: Any) -> list[str]:
+    """Type names present in a ``TYPE_PROJECTION_SQL`` row (column 0 is the id)."""
+    return [value for value in tuple(row)[1:] if value]
 
 
 class SqlJournalRepository(JournalRepository):
@@ -117,59 +173,13 @@ class SqlJournalRepository(JournalRepository):
             return joins, where_clauses
 
         # Handle NOTE type - journals with no type-specific data
-        if journal_type.upper() in ("NOTE", "note"):
-            joins.extend(
-                [
-                    "LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id",
-                    "LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id",
-                    "LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id",
-                    "LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id",
-                    _PHOTO_ALBUM_LEFT_JOIN,
-                    "LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id",
-                    "LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id",
-                    "LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id",
-                    "LEFT JOIN journal_jogging_data jjd ON j.id = jjd.journal_id",
-                    "LEFT JOIN journal_abseiling_data jabd ON j.id = jabd.journal_id",
-                    "LEFT JOIN journal_canyoning_data jcyd ON j.id = jcyd.journal_id",
-                    "LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id",
-                    "LEFT JOIN journal_kayaking_data jkyd ON j.id = jkyd.journal_id",
-                    "LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id",
-                    "LEFT JOIN journal_caving_data jcvd ON j.id = jcvd.journal_id",
-                    "LEFT JOIN journal_canoeing_data jcnd ON j.id = jcnd.journal_id",
-                    "LEFT JOIN journal_snorkelling_data jsnkd ON j.id = jsnkd.journal_id",
-                    "LEFT JOIN journal_diving_data jdivd ON j.id = jdivd.journal_id",
-                    "LEFT JOIN journal_downhill_skiing_data jdsd ON j.id = jdsd.journal_id",
-                    "LEFT JOIN journal_outdoor_planning_data jopd ON j.id = jopd.journal_id",
-                    "LEFT JOIN journal_gear_maintenance_data jgmd ON j.id = jgmd.journal_id",
-                    "LEFT JOIN journal_gear_usage_data jgud ON j.id = jgud.journal_id",
-                ]
-            )
-            where_clauses.extend(
-                [
-                    "jci.journal_id IS NULL",
-                    "jmd.journal_id IS NULL",
-                    "jpd.journal_id IS NULL",
-                    "jtd.journal_id IS NULL",
-                    "sm_pa.internal_id IS NULL",
-                    "jfd.journal_id IS NULL",
-                    "joad.journal_id IS NULL",
-                    "jbwd.journal_id IS NULL",
-                    "jjd.journal_id IS NULL",
-                    "jabd.journal_id IS NULL",
-                    "jcyd.journal_id IS NULL",
-                    "jcld.journal_id IS NULL",
-                    "jkyd.journal_id IS NULL",
-                    "jskid.journal_id IS NULL",
-                    "jcvd.journal_id IS NULL",
-                    "jcnd.journal_id IS NULL",
-                    "jsnkd.journal_id IS NULL",
-                    "jdivd.journal_id IS NULL",
-                    "jdsd.journal_id IS NULL",
-                    "jopd.journal_id IS NULL",
-                    "jgmd.journal_id IS NULL",
-                    "jgud.journal_id IS NULL",
-                ]
-            )
+        if journal_type.upper() == "NOTE":
+            for jt, table in TYPE_TABLES.items():
+                alias = _type_alias(jt)
+                joins.append(f"LEFT JOIN {table} {alias} ON j.id = {alias}.journal_id")
+                where_clauses.append(f"{alias}.journal_id IS NULL")
+            joins.append(_PHOTO_ALBUM_LEFT_JOIN)
+            where_clauses.append("sm_pa.internal_id IS NULL")
             return joins, where_clauses
 
         # PHOTO_ALBUM is integration-managed (Immich albums): filter via a
@@ -201,35 +211,11 @@ class SqlJournalRepository(JournalRepository):
         Raises:
             ValueError: If the table name is not supported
         """
-        table_joins = {
-            "journal_mood_data": "INNER JOIN journal_mood_data t ON j.id = t.journal_id",
-            "journal_calendar_info": "INNER JOIN journal_calendar_info t ON j.id = t.journal_id",
-            "journal_plan_data": "INNER JOIN journal_plan_data t ON j.id = t.journal_id",
-            "journal_travel_data": "INNER JOIN journal_travel_data t ON j.id = t.journal_id",
-            "journal_fitness_data": "INNER JOIN journal_fitness_data t ON j.id = t.journal_id",
-            "journal_outdoor_activity_data": "INNER JOIN journal_outdoor_activity_data t ON j.id = t.journal_id",
-            "journal_bushwalking_data": "INNER JOIN journal_bushwalking_data t ON j.id = t.journal_id",
-            "journal_jogging_data": "INNER JOIN journal_jogging_data t ON j.id = t.journal_id",
-            "journal_abseiling_data": "INNER JOIN journal_abseiling_data t ON j.id = t.journal_id",
-            "journal_canyoning_data": "INNER JOIN journal_canyoning_data t ON j.id = t.journal_id",
-            "journal_climbing_data": "INNER JOIN journal_climbing_data t ON j.id = t.journal_id",
-            "journal_kayaking_data": "INNER JOIN journal_kayaking_data t ON j.id = t.journal_id",
-            "journal_skiing_data": "INNER JOIN journal_skiing_data t ON j.id = t.journal_id",
-            "journal_caving_data": "INNER JOIN journal_caving_data t ON j.id = t.journal_id",
-            "journal_canoeing_data": "INNER JOIN journal_canoeing_data t ON j.id = t.journal_id",
-            "journal_snorkelling_data": "INNER JOIN journal_snorkelling_data t ON j.id = t.journal_id",
-            "journal_diving_data": "INNER JOIN journal_diving_data t ON j.id = t.journal_id",
-            "journal_downhill_skiing_data": "INNER JOIN journal_downhill_skiing_data t ON j.id = t.journal_id",
-            "journal_outdoor_planning_data": "INNER JOIN journal_outdoor_planning_data t ON j.id = t.journal_id",
-            "journal_gear_maintenance_data": "INNER JOIN journal_gear_maintenance_data t ON j.id = t.journal_id",
-            "journal_gear_usage_data": "INNER JOIN journal_gear_usage_data t ON j.id = t.journal_id",
-        }
-
-        if type_table not in table_joins:
+        if type_table not in TYPE_TABLES.values():
             msg = f"Unsupported table name: {type_table}"
             raise ValueError(msg)
 
-        return table_joins[type_table]
+        return f"INNER JOIN {type_table} t ON j.id = t.journal_id"
 
     def _add_relationship_filters(
         self,
@@ -399,68 +385,30 @@ class SqlJournalRepository(JournalRepository):
 
     async def get_types(self, journal_id: int) -> list[str]:
         """Get the types of a journal."""
-        query = text("""
-            SELECT
-                CASE WHEN jci.journal_id IS NOT NULL THEN 'EVENT' END as event_type,
-                CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
-                CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
-                CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
-                CASE WHEN sm_pa.internal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type,
-                CASE WHEN jfd.journal_id IS NOT NULL THEN 'FITNESS' END as fitness_type,
-                CASE WHEN joad.journal_id IS NOT NULL THEN 'OUTDOOR_ACTIVITY' END as outdoor_activity_type,
-                CASE WHEN jbwd.journal_id IS NOT NULL THEN 'BUSHWALKING' END as bushwalking_type,
-                CASE WHEN jjd.journal_id IS NOT NULL THEN 'JOGGING' END as jogging_type,
-                CASE WHEN jabd.journal_id IS NOT NULL THEN 'ABSEILING_TRIP' END as abseiling_type,
-                CASE WHEN jcyd.journal_id IS NOT NULL THEN 'CANYONING' END as canyoning_type,
-                CASE WHEN jcld.journal_id IS NOT NULL THEN 'CLIMBING' END as climbing_type,
-                CASE WHEN jkyd.journal_id IS NOT NULL THEN 'KAYAKING' END as kayaking_type,
-                CASE WHEN jskid.journal_id IS NOT NULL THEN 'CROSS_COUNTRY_SKIING' END as skiing_type,
-                CASE WHEN jcvd.journal_id IS NOT NULL THEN 'CAVING' END as caving_type,
-                CASE WHEN jcnd.journal_id IS NOT NULL THEN 'CANOEING' END as canoeing_type,
-                CASE WHEN jsnkd.journal_id IS NOT NULL THEN 'SNORKELLING' END as snorkelling_type,
-                CASE WHEN jdivd.journal_id IS NOT NULL THEN 'DIVING' END as diving_type,
-                CASE WHEN jdsd.journal_id IS NOT NULL THEN 'DOWNHILL_SKIING' END as downhill_skiing_type,
-                CASE WHEN jopd.journal_id IS NOT NULL THEN 'OUTDOOR_PLANNING' END as outdoor_planning_type,
-                CASE WHEN jgmd.journal_id IS NOT NULL THEN 'GEAR_MAINTENANCE' END as gear_maintenance_type,
-                CASE WHEN jgud.journal_id IS NOT NULL THEN 'GEAR_USAGE' END as gear_usage_type
-            FROM journals j
-            LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
-            LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
-            LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
-            LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
-            LEFT JOIN sync_metadata sm_pa ON sm_pa.internal_id = j.id
-                AND sm_pa.integration_source = 'immich_album'
-            LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id
-            LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id
-            LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id
-            LEFT JOIN journal_jogging_data jjd ON j.id = jjd.journal_id
-            LEFT JOIN journal_abseiling_data jabd ON j.id = jabd.journal_id
-            LEFT JOIN journal_canyoning_data jcyd ON j.id = jcyd.journal_id
-            LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id
-            LEFT JOIN journal_kayaking_data jkyd ON j.id = jkyd.journal_id
-            LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id
-            LEFT JOIN journal_caving_data jcvd ON j.id = jcvd.journal_id
-            LEFT JOIN journal_canoeing_data jcnd ON j.id = jcnd.journal_id
-            LEFT JOIN journal_snorkelling_data jsnkd ON j.id = jsnkd.journal_id
-            LEFT JOIN journal_diving_data jdivd ON j.id = jdivd.journal_id
-            LEFT JOIN journal_downhill_skiing_data jdsd ON j.id = jdsd.journal_id
-            LEFT JOIN journal_outdoor_planning_data jopd ON j.id = jopd.journal_id
-            LEFT JOIN journal_gear_maintenance_data jgmd ON j.id = jgmd.journal_id
-            LEFT JOIN journal_gear_usage_data jgud ON j.id = jgud.journal_id
-            WHERE j.id = :journal_id
-        """)
+        query = text(GET_TYPES_SQL)
         result = await self.conn.execute(query, {"journal_id": journal_id})
         row = result.fetchone()
 
         if not row:
             return []
 
-        types = ["NOTE"]
-        for type_value in row:
-            if type_value:
-                types.append(type_value)
+        return ["NOTE", *type_names_from_projection_row(row)]
 
-        return types
+    async def get_concrete_types(self, journal_id: int) -> list[str]:
+        """Types as the read paths report them: NOTE only when nothing else is.
+
+        :meth:`get_types` always leads with NOTE (every journal can act as a
+        note); the MCP/API read paths and the ``types`` search filter instead
+        treat NOTE as the absence of typed rows. The search index uses this
+        form so ``types=NOTE`` means the same thing with or without a query.
+        """
+        result = await self.conn.execute(
+            text(GET_TYPES_SQL), {"journal_id": journal_id}
+        )
+        row = result.fetchone()
+        if not row:
+            return []
+        return type_names_from_projection_row(row) or ["NOTE"]
 
     async def find_by_ids_for_user(
         self, user_id: str, journal_ids: list[int]
@@ -1037,6 +985,38 @@ class SqlJournalRepository(JournalRepository):
                 }
             )
         return links
+
+    async def find_ids_by_integration_source(
+        self, user_id: str, integration_source: str
+    ) -> set[int]:
+        """Ids of the user's journals linked to ``integration_source``.
+
+        Built from :data:`JOURNAL_LINK_SOURCES`; every store is scoped to
+        ``user_id`` so a count of the result never leaks another user's links.
+        """
+        sql = _journal_link_sql(integration_source, by_external_id=False)
+        if sql is None:
+            return set()
+        result = await self.conn.execute(text(sql), {"user_id": user_id})
+        return {int(row[0]) for row in result}
+
+    async def find_id_by_external_id(
+        self, user_id: str, integration_source: str, external_id: str
+    ) -> int | None:
+        """The user's journal linked to ``(integration_source, external_id)``.
+
+        The id is matched as the journal's external links expose it (see the
+        store definitions in :data:`JOURNAL_LINK_SOURCES`).
+        """
+        sql = _journal_link_sql(integration_source, by_external_id=True)
+        if sql is None:
+            return None
+        result = await self.conn.execute(
+            text(f"{sql} ORDER BY journal_id LIMIT 1"),
+            {"user_id": user_id, "external_id": external_id},
+        )
+        row = result.fetchone()
+        return int(row[0]) if row and row[0] is not None else None
 
     async def get_snipeit_links(
         self, journal_id: int, user_id: str

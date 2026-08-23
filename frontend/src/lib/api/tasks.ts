@@ -26,6 +26,7 @@
 
 import {
   useMutation,
+  useMutationState,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -33,6 +34,7 @@ import {
 import { toast } from 'sonner';
 import {
   JournalTasksResponse,
+  LapseReason,
   TaskContactLinkInput,
   TaskCreateInput,
   TaskIntermediateJournalLinkInput,
@@ -40,6 +42,7 @@ import {
   TaskReadResponse,
   TaskResponse,
   TaskRetargetInput,
+  TaskStatus,
   TaskUpdateInput,
 } from '@/types/tasks';
 import type { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
@@ -48,6 +51,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { statusChangeWording } from '@/lib/task-display';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 
 /**
@@ -418,6 +422,172 @@ function reportFailure(error: Error): void {
   toast.error(error.message);
 }
 
+// Optimistic status changes
+//
+// The journal's inline actions (**W24**) must read as done the instant they are
+// pressed and read as they did before if the write fails, so `useUpdateTask`
+// patches every cached copy of the task in `onMutate` and puts each snapshot
+// back in `onError`. The idiom is `useDismissIncompleteOutdoorActivity`'s:
+// cancel, snapshot, patch, restore, and invalidate through the helper once the
+// write settles either way.
+
+/** The attributes an optimistic patch may set on a cached task. */
+interface OptimisticTaskPatch {
+  status?: TaskStatus;
+  text?: string;
+  lapsed?: boolean;
+  lapse_reason?: LapseReason | null;
+}
+
+/** A task resource as it sits in any cached payload, whatever else it carries. */
+interface CachedTaskResource {
+  readonly id: string;
+  readonly attributes: object;
+}
+
+/**
+ * A cached payload embedding task resources.
+ *
+ * Two shapes, because a task's attributes are *embedded* rather than pointed
+ * at: the single-resource detail read, and the array-shaped journal listing and
+ * upcoming window. Patching one and not the other would leave a namespace
+ * showing the status the user just changed.
+ */
+interface CachedTaskPayload {
+  readonly data: CachedTaskResource | readonly CachedTaskResource[];
+}
+
+/** What a status write changes about a task, beyond the status itself. */
+function optimisticPatch({
+  status,
+  text,
+}: {
+  status?: TaskStatus;
+  text?: string;
+}): OptimisticTaskPatch {
+  const patch: OptimisticTaskPatch = {};
+
+  if (text !== undefined) patch.text = text;
+  if (status !== undefined) {
+    patch.status = status;
+    // Lapse is derived from "still not done and the due journal is no longer
+    // ahead of it", so a task that has just left *not done* cannot be lapsed
+    // and its marker goes at once. The reverse is not knowable here — it needs
+    // the day boundary in the user's timezone — so returning a task to not done
+    // leaves the marker to the refetch that follows.
+    if (status !== TaskStatus.NOT_DONE) {
+      patch.lapsed = false;
+      patch.lapse_reason = null;
+    }
+  }
+
+  return patch;
+}
+
+function patchResource(
+  resource: CachedTaskResource,
+  taskId: string,
+  patch: OptimisticTaskPatch
+): CachedTaskResource {
+  return resource.id === taskId
+    ? { ...resource, attributes: { ...resource.attributes, ...patch } }
+    : resource;
+}
+
+/** Applies a patch to whichever of the two cached shapes was handed over. */
+function patchCachedTask(
+  cached: CachedTaskPayload | undefined,
+  taskId: string,
+  patch: OptimisticTaskPatch
+): CachedTaskPayload | undefined {
+  if (!cached) return cached;
+
+  const { data } = cached;
+
+  if (Array.isArray(data)) {
+    return {
+      ...cached,
+      data: data.map(resource => patchResource(resource, taskId, patch)),
+    };
+  }
+
+  return {
+    ...cached,
+    data: patchResource(data as CachedTaskResource, taskId, patch),
+  };
+}
+
+/** Finds one task inside a cached payload, whichever shape it is in. */
+function findCachedTask(
+  cached: CachedTaskPayload | undefined,
+  taskId: string
+): CachedTaskResource | undefined {
+  if (!cached) return undefined;
+
+  const { data } = cached;
+
+  if (Array.isArray(data)) {
+    return data.find(resource => resource.id === taskId);
+  }
+
+  const single = data as CachedTaskResource | undefined;
+  return single?.id === taskId ? single : undefined;
+}
+
+/** The attributes an optimistic patch can overwrite, and so must restore. */
+const PATCHABLE_FIELDS = ['status', 'text', 'lapsed', 'lapse_reason'] as const;
+
+/** One cache entry, and what the patched task read as inside *that* entry. */
+type TaskAttributeSnapshot = readonly [readonly unknown[], OptimisticTaskPatch];
+
+/**
+ * What one task read as, in each cache entry holding it, before the patch.
+ *
+ * Two properties, and the rollback needs both:
+ *
+ * - **Per task, not per entry.** Two rows ticked one after the other share a
+ *   cache entry, so putting back a whole snapshot taken before the first write
+ *   would undo the second — a row the user had just ticked reverting because an
+ *   unrelated one failed, with nothing on screen connecting the two. Restoring
+ *   by id cannot reach a task the failed write never touched.
+ * - **Per entry, not one value for all of them.** The detail read and the
+ *   journal listing are fetched independently and can legitimately disagree —
+ *   one refetched a moment ago, the other still inside the five-minute
+ *   `staleTime`. Capturing one entry's value and writing it into every entry
+ *   would undo that divergence as well as the patch, replacing a fresher cached
+ *   value with a staler one from whichever entry happened to be enumerated
+ *   first.
+ *
+ * Only the fields a patch can set are carried, and only where the cached shape
+ * actually has them: writing `lapsed: undefined` over a real value would be a
+ * different kind of corruption from the one being undone.
+ */
+function snapshotTaskAttributes(
+  queryClient: QueryClient,
+  taskId: string
+): readonly TaskAttributeSnapshot[] {
+  const snapshots: TaskAttributeSnapshot[] = [];
+
+  for (const [
+    queryKey,
+    cached,
+  ] of queryClient.getQueriesData<CachedTaskPayload>({
+    queryKey: taskKeys.all,
+  })) {
+    const resource = findCachedTask(cached, taskId);
+    if (!resource) continue;
+
+    const attributes = resource.attributes as Record<string, unknown>;
+    const previous: Record<string, unknown> = {};
+    for (const field of PATCHABLE_FIELDS) {
+      if (field in attributes) previous[field] = attributes[field];
+    }
+    snapshots.push([queryKey, previous as OptimisticTaskPatch]);
+  }
+
+  return snapshots;
+}
+
 /**
  * Task mutations do not retry.
  *
@@ -437,6 +607,58 @@ function reportFailure(error: Error): void {
  * there is worth riding out.
  */
 const NO_RETRY = { retry: false } as const;
+
+// What is being written to a task right now
+//
+// Read from the mutation cache rather than from a hook instance, because a
+// surface can mount the *same* task more than once. A journal renders a task
+// holding two roles under both of its headings, so two rows carry two
+// independent `useUpdateTask`s for one commitment; a guard that only knows its
+// own instance leaves the twin live, and a second click races the first write
+// with the server's ordering deciding which move survives.
+
+/** The task a pending mutation is acting on, whatever shape its input takes. */
+function mutatingTaskId(variables: unknown): string | undefined {
+  // `useDeleteTask` takes the bare id; every other task mutation takes an
+  // object carrying it.
+  if (typeof variables === 'string') return variables;
+
+  if (variables && typeof variables === 'object' && 'taskId' in variables) {
+    const { taskId } = variables as { taskId?: unknown };
+    return typeof taskId === 'string' ? taskId : undefined;
+  }
+
+  return undefined;
+}
+
+/**
+ * Whether any write against one task is in flight, wherever it was started.
+ *
+ * **A boolean about the task, not about a button.** The obvious richer answer —
+ * which *action* is pending, so its own control can carry `aria-busy` — cannot
+ * work on this surface: the optimistic patch rewrites the cached status before
+ * the request settles, the listing rerenders, and the row comes back offering
+ * the **new** status's actions. The control that was clicked no longer exists,
+ * so a busy flag matched to it is false on everything still on screen. The
+ * action group is what is busy, and the group is what says so.
+ *
+ * Scoped to the task rather than to the caller deliberately: a journal renders
+ * a task holding two roles once per group, so one commitment has two of these
+ * side by side and they must lock together. A retarget opened elsewhere on the
+ * page is just as much a reason not to accept a status click.
+ */
+export function useTaskWriteInFlight(taskId: string): boolean {
+  const pending = useMutationState({
+    filters: {
+      status: 'pending',
+      predicate: mutation =>
+        mutatingTaskId(mutation.state.variables) === taskId,
+    },
+    select: mutation => mutation.state.variables,
+  });
+
+  return pending.length > 0;
+}
 
 // Hooks
 
@@ -496,6 +718,13 @@ export function useCreateTask() {
  * Leaving *cancelled* is refused here — a cancelled task is reopened by
  * retargeting it onto a new future journal — and the refusal arrives as a 409
  * whose message says so.
+ *
+ * **The change is applied optimistically.** The journal's inline actions are a
+ * tick-and-move-on affordance, so the row shows the new status before the
+ * request has been answered, and every cached copy is put back if it fails.
+ * The success toast is worded from what changed rather than from the generic
+ * update message: Sonner's `Toaster` is a polite live region, so this string is
+ * how the action announces its result.
  */
 export function useUpdateTask() {
   const queryClient = useQueryClient();
@@ -503,11 +732,40 @@ export function useUpdateTask() {
   return useMutation({
     ...NO_RETRY,
     mutationFn: updateTask,
-    onSuccess: (_, { taskId }) => {
-      void refreshTask(queryClient, taskId);
-      toast.success(SUCCESS_MESSAGES.TASK_UPDATED);
+    onMutate: async ({ taskId, status, text }) => {
+      // Every namespace under `all`: the same attributes are embedded in the
+      // detail read, the journal listings and the upcoming window alike.
+      await queryClient.cancelQueries({ queryKey: taskKeys.all });
+
+      const previous = snapshotTaskAttributes(queryClient, taskId);
+
+      const patch = optimisticPatch({ status, text });
+      queryClient.setQueriesData<CachedTaskPayload>(
+        { queryKey: taskKeys.all },
+        cached => patchCachedTask(cached, taskId, patch)
+      );
+
+      return { previous };
     },
-    onError: reportFailure,
+    onError: (error: Error, { taskId }, context) => {
+      context?.previous.forEach(([queryKey, attributes]) => {
+        queryClient.setQueryData<CachedTaskPayload>(queryKey, cached =>
+          patchCachedTask(cached, taskId, attributes)
+        );
+      });
+      reportFailure(error);
+    },
+    onSuccess: (_, { status }) => {
+      toast.success(
+        status ? statusChangeWording(status) : SUCCESS_MESSAGES.TASK_UPDATED
+      );
+    },
+    // Settled rather than success: a failed write has just had its rollback
+    // applied from a snapshot that may itself be stale, so the refetch is worth
+    // as much on that path as on the happy one.
+    onSettled: (_data, _error, { taskId }) => {
+      void refreshTask(queryClient, taskId);
+    },
   });
 }
 

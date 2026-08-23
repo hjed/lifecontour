@@ -212,6 +212,52 @@ class TestJournalCRUDEndpoints:
         assert items[parent_id]["attributes"]["depth"] == 1
         assert items[child_id]["attributes"]["depth"] == 2
 
+    async def test_creating_under_another_users_parent_reports_it_missing(
+        self, integration_api_client, async_connection
+    ):
+        """A `parent_id` belonging to somebody else is refused (issue #1312).
+
+        The hierarchy validation resolved the parent without an owner
+        predicate, so this request used to succeed: the caller's journal was
+        written as a child of a stranger's, and because the *read* side is
+        owner-scoped the response came back with ``parent: null`` — no
+        indication the link had been made, to either user.
+
+        The refusal is the one an id that never existed gets, so the response
+        cannot be used to discover which ids are real.
+        """
+        theirs = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+
+        foreign_parent = create_journal_request_data(title="Child Of Theirs")
+        foreign_parent["data"]["attributes"]["parent_id"] = theirs
+        response = await integration_api_client.post(
+            "/api/journals", json=foreign_parent
+        )
+
+        absent_parent = create_journal_request_data(title="Child Of Nothing")
+        absent_parent["data"]["attributes"]["parent_id"] = 999999
+        absent_response = await integration_api_client.post(
+            "/api/journals", json=absent_parent
+        )
+
+        assert response.status_code == 404
+        assert response.status_code == absent_response.status_code
+        assert (
+            response.json()["errors"][0]["code"]
+            == absent_response.json()["errors"][0]["code"]
+            == "JOURNAL_NOT_FOUND"
+        )
+        assert "Somebody Else's Trip" not in response.text
+
+        written = await async_connection.execute(
+            text("SELECT COUNT(*) FROM journals WHERE title = 'Child Of Theirs'")
+        )
+        assert written.scalar_one() == 0
+
     async def test_get_journal_with_contact(self, integration_api_client):
         """Test retrieving a journal with a related contact to ensure name is populated."""
         # 1. Create a contact
@@ -418,6 +464,48 @@ class TestJournalUpdateEndpoints:
         assert data["data"]["attributes"]["title"] == "Patched Title"
         # Content should remain unchanged
         assert data["data"]["attributes"]["content"] == "Original content"
+
+    async def test_repointing_a_journal_at_another_users_parent_is_refused(
+        self, integration_api_client, async_connection
+    ):
+        """Moving an existing journal under a stranger's is refused (#1312).
+
+        Same hole as on create, reached through the update path: the journal is
+        the caller's own, so the endpoint's own ownership check passes and the
+        only thing standing between the request and a cross-account edge is the
+        hierarchy validation.
+        """
+        theirs = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+
+        create_response = await integration_api_client.post(
+            "/api/journals", json=create_journal_request_data(title="Mine")
+        )
+        journal_id = create_response.json()["data"]["id"]
+
+        response = await integration_api_client.patch(
+            f"/api/journals/{journal_id}",
+            json={
+                "data": {
+                    "type": "journals",
+                    "id": str(journal_id),
+                    "attributes": {"parent_id": theirs},
+                }
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.json()["errors"][0]["code"] == "JOURNAL_NOT_FOUND"
+        assert "Somebody Else's Trip" not in response.text
+
+        stored = await async_connection.execute(
+            text("SELECT parent_id FROM journals WHERE id = :id"),
+            {"id": int(journal_id)},
+        )
+        assert stored.scalar_one() is None
 
     async def test_delete_journal(self, integration_api_client):
         """Test deleting a journal."""

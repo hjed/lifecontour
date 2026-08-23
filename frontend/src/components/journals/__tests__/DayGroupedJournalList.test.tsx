@@ -121,6 +121,13 @@ describe('DayGroupedJournalList', () => {
       });
     }
 
+    /** The user reaching for older entries — what unlocks backward paging. */
+    function scrollThePage() {
+      act(() => {
+        window.dispatchEvent(new Event('scroll'));
+      });
+    }
+
     it('fetches the previous page when the top sentinel intersects while idle', () => {
       const fetchPreviousPage = jest.fn();
       render(
@@ -132,9 +139,70 @@ describe('DayGroupedJournalList', () => {
         />
       );
 
+      scrollThePage();
       intersect('journal-top-sentinel', true);
 
       expect(fetchPreviousPage).toHaveBeenCalled();
+    });
+
+    it('does not expand into the past until the user scrolls', () => {
+      // Older days are inserted above everything on screen. A short list leaves
+      // the top sentinel inside the observer's 200px margin on arrival, so
+      // without this gate the list would drop a week of empty days on top of
+      // whatever the reader is already looking at — moving controls out from
+      // under the pointer mid-click.
+      const fetchPreviousPage = jest.fn();
+      render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+      expect(fetchPreviousPage).not.toHaveBeenCalled();
+
+      scrollThePage();
+
+      expect(fetchPreviousPage).toHaveBeenCalled();
+    });
+
+    it('expands into the past without a scroll when the list is empty', () => {
+      // Nothing is rendered yet, so there is no reading position to protect —
+      // and expanding is how the user finds their entries.
+      const fetchPreviousPage = jest.fn();
+      render(
+        <DayGroupedJournalList
+          journals={[]}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          fetchPreviousPage={fetchPreviousPage}
+        />
+      );
+
+      intersect('journal-top-sentinel', true);
+
+      expect(fetchPreviousPage).toHaveBeenCalled();
+    });
+
+    it('still expands into the future without a scroll', () => {
+      // Appending happens below the fold and disturbs nothing on screen, so
+      // forward paging stays eager.
+      const fetchNextPage = jest.fn();
+      render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasNextPage
+          fetchNextPage={fetchNextPage}
+        />
+      );
+
+      intersect('journal-bottom-sentinel', true);
+
+      expect(fetchNextPage).toHaveBeenCalled();
     });
 
     it('fetches the next page when the bottom sentinel intersects while idle', () => {
@@ -173,6 +241,7 @@ describe('DayGroupedJournalList', () => {
         />
       );
 
+      scrollThePage();
       intersect('journal-top-sentinel', true);
 
       expect(fetchPreviousPage).not.toHaveBeenCalled();
@@ -202,6 +271,7 @@ describe('DayGroupedJournalList', () => {
         />
       );
 
+      scrollThePage();
       intersect('journal-top-sentinel', true);
       expect(fetchPreviousPage).not.toHaveBeenCalled();
 
@@ -244,6 +314,7 @@ describe('DayGroupedJournalList', () => {
         />
       );
 
+      scrollThePage();
       intersect('journal-top-sentinel', true);
 
       expect(fetchPreviousPage).not.toHaveBeenCalled();
@@ -301,6 +372,7 @@ describe('DayGroupedJournalList', () => {
         />
       );
 
+      scrollThePage();
       intersect('journal-top-sentinel', true);
       expect(fetchPreviousPage).toHaveBeenCalledTimes(1);
 
@@ -337,6 +409,7 @@ describe('DayGroupedJournalList', () => {
         />
       );
 
+      scrollThePage();
       intersect('journal-top-sentinel', true);
       intersect('journal-top-sentinel', false);
       intersect('journal-top-sentinel', true);
@@ -364,6 +437,7 @@ describe('DayGroupedJournalList', () => {
         />
       );
 
+      scrollThePage();
       intersect('journal-top-sentinel', true);
       intersect('journal-top-sentinel', false);
 
@@ -377,6 +451,199 @@ describe('DayGroupedJournalList', () => {
       );
 
       expect(fetchPreviousPage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scroll anchoring when older days are prepended', () => {
+    // A previous-page fetch inserts older days *above* whatever the user is
+    // looking at. Without compensation the whole list jumps down by the height
+    // of the inserted content, moving buttons out from under the pointer
+    // mid-click and losing the reader's place.
+    const today = [createMockJournal('3', '2026-04-29T10:00:00Z')];
+    const withOlderDays = [
+      createMockJournal('1', '2026-04-20T10:00:00Z'),
+      ...today,
+    ];
+
+    let scrollBy: jest.Mock;
+
+    beforeEach(() => {
+      scrollBy = jest.fn();
+      window.scrollBy = scrollBy as unknown as typeof window.scrollBy;
+    });
+
+    /** Pin an element's viewport offset, as jsdom reports 0 for everything. */
+    function setViewportTop(element: Element, top: number) {
+      element.getBoundingClientRect = () =>
+        ({ top, y: top, bottom: top, height: 0 }) as DOMRect;
+    }
+
+    function anchorElement() {
+      return screen.getByTestId('journal-day-group-2026-04-29');
+    }
+
+    it('restores the anchor element to its original viewport offset', () => {
+      const { rerender } = render(
+        <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
+      );
+
+      const anchor = anchorElement();
+      setViewportTop(anchor, 100);
+
+      // The previous-page fetch starts: the anchor's offset is captured here.
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          isLoadingPrevious
+        />
+      );
+
+      // Older days land above the anchor, pushing it down 120px.
+      setViewportTop(anchor, 220);
+      rerender(
+        <DayGroupedJournalList
+          journals={withOlderDays}
+          collapseEmptyDays={false}
+        />
+      );
+
+      expect(scrollBy).toHaveBeenCalledWith(0, 120);
+    });
+
+    it('does not scroll when the prepend did not move the anchor', () => {
+      // The browser's own scroll anchoring may already have compensated;
+      // measuring a real element rather than a height delta keeps this
+      // self-correcting instead of double-correcting.
+      const { rerender } = render(
+        <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
+      );
+
+      setViewportTop(anchorElement(), 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          isLoadingPrevious
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={withOlderDays}
+          collapseEmptyDays={false}
+        />
+      );
+
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('does not scroll when a next-page fetch appends newer days', () => {
+      // Appending happens below the viewport: nothing the user is looking at
+      // moves, so the scroll position must be left alone.
+      const { rerender } = render(
+        <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
+      );
+
+      const anchor = anchorElement();
+      setViewportTop(anchor, 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          isLoadingNext
+        />
+      );
+
+      setViewportTop(anchor, 220);
+      rerender(
+        <DayGroupedJournalList
+          journals={[...today, createMockJournal('9', '2026-05-08T10:00:00Z')]}
+          collapseEmptyDays={false}
+        />
+      );
+
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('still compensates when the oldest empty days merge into a collapsed group', () => {
+      // The anchor must survive the prepend. `groupJournalsByDay` merges
+      // contiguous empty days into one collapsed group keyed by the run's start
+      // date, so the oldest empty day is re-keyed and its element replaced —
+      // anchoring on it would silently skip compensation exactly when a whole
+      // week arrives. Anchoring on the oldest *populated* day avoids that:
+      // populated days are never merged.
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          dateBounds={{ start: '2026-04-26', end: '2026-04-29' }}
+        />
+      );
+
+      // Three empty days precede the populated one, each its own group.
+      expect(
+        screen.getByTestId('journal-day-group-2026-04-26')
+      ).toBeInTheDocument();
+
+      const anchor = anchorElement();
+      setViewportTop(anchor, 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          dateBounds={{ start: '2026-04-26', end: '2026-04-29' }}
+          isLoadingPrevious
+        />
+      );
+
+      // The older chunk holds no journals, so its days join the existing empty
+      // run: ten contiguous empty days now collapse into a single group and the
+      // previously-oldest day group is gone from the DOM.
+      setViewportTop(anchor, 220);
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          dateBounds={{ start: '2026-04-19', end: '2026-04-29' }}
+        />
+      );
+
+      expect(
+        screen.queryByTestId('journal-day-group-2026-04-26')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId('journal-collapsed-group-2026-04-19')
+      ).toBeInTheDocument();
+      expect(scrollBy).toHaveBeenCalledWith(0, 120);
+    });
+
+    it('falls back to the bottom sentinel when no day holds journals', () => {
+      // Nothing to anchor on, but the sentinel is always last and so is always
+      // below whatever the fetch prepends.
+      const { rerender } = render(
+        <DayGroupedJournalList journals={[]} collapseEmptyDays={false} />
+      );
+
+      const sentinel = screen.getByTestId('journal-bottom-sentinel');
+      setViewportTop(sentinel, 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={[]}
+          collapseEmptyDays={false}
+          isLoadingPrevious
+        />
+      );
+
+      setViewportTop(sentinel, 220);
+      rerender(
+        <DayGroupedJournalList journals={[]} collapseEmptyDays={false} />
+      );
+
+      expect(scrollBy).toHaveBeenCalledWith(0, 120);
     });
   });
 });
