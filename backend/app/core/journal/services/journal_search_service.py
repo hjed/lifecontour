@@ -67,6 +67,7 @@ def search_journals_text(
     query: str,
     user_id: str,
     limit: int,
+    offset: int = 0,
     type_filters: list[str] | None = None,
     journal_ids: set[int] | None = None,
 ) -> tuple[list[JournalSearchHit], int, int]:
@@ -86,7 +87,7 @@ def search_journals_text(
         filters["id"] = sorted(journal_ids)
     try:
         raw = search_service.search_journals(
-            query=query, filters=filters, limit=limit, offset=0
+            query=query, filters=filters, limit=limit, offset=offset
         )
     except MeilisearchError as exc:
         raise SearchServiceUnavailableError("MeiliSearch", str(exc)) from exc

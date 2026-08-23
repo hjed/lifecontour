@@ -329,7 +329,15 @@ Searches journals with filtering options.
 **Parameters:**
 - `query` (string, optional): Search query for full-text search
 - `types` (string, optional): Comma-separated list of journal or activity types to filter by
+- `integration_source` (string, optional): Only journals linked to an external system (`strava`, `google_calendar`, `immich_album`)
+- `start_date` (string, optional): ISO date/datetime lower bound for the journal's event range
+- `end_date` (string, optional): ISO date/datetime upper bound; a bare date includes the whole day
+- `tags` (string, optional): Comma-separated tag names or tag ids; each is expanded to its descendant tags
+- `contact_id` (integer, optional): Only journals linked to this contact
+- `calendar_id` (string, optional): Only journals on this calendar
+- `parent_id` (integer, optional): Only the direct children of this journal
 - `limit` (integer, optional): Maximum number of results (default: 20)
+- `offset` (integer, optional): Results to skip, for paging (default: 0)
 
 **Returns:**
 AI-friendly search results including:
@@ -339,7 +347,10 @@ AI-friendly search results including:
 - Contextual summary for AI understanding
 
 **Notes:**
-- `query` and `types` filters can be combined
+- Every filter combines, and they narrow the full-text query as well as the plain listing — `query` plus `start_date` searches the text of that period only
+- Without a `query` the results come from the database, newest first
+- Dates are matched against the journal's event date range, in UTC
+- An unknown tag name is an error rather than an empty result, so a typo cannot look like "nothing found"
 - Activity searches can use types such as `fitness`, `jogging`, `bushwalking`, `kayaking`, `canyoning`, `climbing`, and `cross_country_skiing`
 
 **Example:**

@@ -1,5 +1,6 @@
 """SQL implementation of JournalRepository."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from typing import Any
 
@@ -129,6 +130,31 @@ GET_TYPES_BATCH_SQL: str = TYPE_PROJECTION_SQL + " WHERE j.id = ANY(:journal_ids
 def type_names_from_projection_row(row: Any) -> list[str]:
     """Type names present in a ``TYPE_PROJECTION_SQL`` row (column 0 is the id)."""
     return [value for value in tuple(row)[1:] if value]
+
+
+@dataclass(frozen=True)
+class _JournalFilterSql:
+    """The JOIN/WHERE fragments and bound parameters for one filtered query.
+
+    Built once by :meth:`SqlJournalRepository._build_journal_filters` and shared
+    by every query over the journal list filters, so the rows, the count and the
+    id set can never drift apart.
+    """
+
+    joins: list[str]
+    where_clauses: list[str]
+    params: dict[str, Any]
+    needs_distinct: bool
+    matches_nothing: bool
+    """The caller asked for an explicitly empty candidate id set, which no SQL
+    can satisfy; each caller returns its own empty value rather than querying."""
+
+    def assemble(self, select_from: str) -> str:
+        """Append this filter's joins and WHERE clause to a SELECT ... FROM."""
+        sql = select_from
+        if self.joins:
+            sql += "\n" + "\n".join(self.joins)
+        return sql + "\nWHERE " + " AND ".join(self.where_clauses)
 
 
 class SqlJournalRepository(JournalRepository):
@@ -278,6 +304,63 @@ class SqlJournalRepository(JournalRepository):
             params["calendar_id"] = calendar_id
 
         return needs_distinct
+
+    def _build_journal_filters(
+        self,
+        *,
+        user_id: str,
+        journal_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        contact_id: str | None = None,
+        tag_ids: list[str] | None = None,
+        calendar_id: str | None = None,
+        parent_id: int | None = None,
+        search: str | None = None,
+        journal_ids: list[int] | None = None,
+    ) -> _JournalFilterSql:
+        """Build the JOIN/WHERE fragments shared by every filtered journal query.
+
+        ``get_all``, ``count_all`` and ``find_ids_by_filters`` differ only in
+        what they project, so the filter logic lives here once.
+        """
+        joins: list[str] = []
+        where_clauses: list[str] = ["j.user_id = :user_id"]
+        params: dict[str, Any] = {"user_id": user_id}
+
+        type_joins, type_where = self._build_type_filter_joins(journal_type)
+        joins.extend(type_joins)
+        where_clauses.extend(type_where)
+
+        needs_distinct = self._add_relationship_filters(
+            joins, where_clauses, params, contact_id, tag_ids, calendar_id, journal_type
+        )
+
+        self._add_date_filters(where_clauses, params, start_date, end_date)
+
+        if parent_id is not None:
+            where_clauses.append("j.parent_id = :parent_id")
+            params["parent_id"] = parent_id
+
+        if search is not None:
+            where_clauses.append("(j.title ILIKE :search OR j.content ILIKE :search)")
+            params["search"] = f"%{search}%"
+
+        matches_nothing = False
+        if journal_ids is not None:
+            if journal_ids:
+                where_clauses.append("j.id = ANY(:journal_ids)")
+                params["journal_ids"] = journal_ids
+            else:
+                matches_nothing = True
+
+        return _JournalFilterSql(
+            joins=joins,
+            where_clauses=where_clauses,
+            params=params,
+            needs_distinct=needs_distinct,
+            matches_nothing=matches_nothing,
+        )
 
     def _add_date_filters(
         self,
@@ -787,61 +870,37 @@ class SqlJournalRepository(JournalRepository):
         Returns:
             List of journals matching the filter criteria
         """
-        # Initialize query building components
-        base_query_select = """
-            SELECT {distinct}j.id, j.user_id, j.title, j.content,
+        filters = self._build_journal_filters(
+            user_id=user_id,
+            journal_type=journal_type,
+            start_date=start_date,
+            end_date=end_date,
+            contact_id=contact_id,
+            tag_ids=tag_ids,
+            calendar_id=calendar_id,
+            parent_id=parent_id,
+            search=search,
+            journal_ids=journal_ids,
+        )
+        if filters.matches_nothing:
+            return []
+
+        distinct_keyword = "DISTINCT " if filters.needs_distinct else ""
+        base_query = filters.assemble(
+            f"""
+            SELECT {distinct_keyword}j.id, j.user_id, j.title, j.content,
                    j.event_date_range_start, j.event_date_range_end,
                    j.parent_id, j."order", j.created_at, j.updated_at
             FROM journals j
         """
-
-        joins = []
-        where_clauses = ["j.user_id = :user_id"]
-        params: dict[str, Any] = {"user_id": user_id, "limit": limit, "offset": offset}
-
-        # Build type filter joins and conditions
-        type_joins, type_where = self._build_type_filter_joins(journal_type)
-        joins.extend(type_joins)
-        where_clauses.extend(type_where)
-
-        # Add relationship filters (contacts, tags, calendars)
-        needs_distinct = self._add_relationship_filters(
-            joins, where_clauses, params, contact_id, tag_ids, calendar_id, journal_type
         )
-
-        # Add date range filters
-        self._add_date_filters(where_clauses, params, start_date, end_date)
-
-        # Add parent filter
-        if parent_id is not None:
-            where_clauses.append("j.parent_id = :parent_id")
-            params["parent_id"] = parent_id
-
-        # Add search filter
-        if search is not None:
-            where_clauses.append("(j.title ILIKE :search OR j.content ILIKE :search)")
-            params["search"] = f"%{search}%"
-
-        # Add journal_ids filter
-        if journal_ids is not None:
-            if not journal_ids:
-                return []
-            where_clauses.append("j.id = ANY(:journal_ids)")
-            params["journal_ids"] = journal_ids
-
-        # Assemble the complete query
-        distinct_keyword = "DISTINCT " if needs_distinct else ""
-        base_query = base_query_select.format(distinct=distinct_keyword)
-
-        if joins:
-            base_query += "\n" + "\n".join(joins)
-
-        base_query += "\nWHERE " + " AND ".join(where_clauses)
         base_query += "\nORDER BY j.event_date_range_start DESC, j.created_at DESC"
         base_query += "\nLIMIT :limit OFFSET :offset"
 
         query = text(base_query)
-        result = await self.conn.execute(query, params)
+        result = await self.conn.execute(
+            query, {**filters.params, "limit": limit, "offset": offset}
+        )
         return [self._row_to_journal(row) for row in result.fetchall()]
 
     async def count_all(
@@ -876,59 +935,94 @@ class SqlJournalRepository(JournalRepository):
         Returns:
             Count of journals matching the filter criteria
         """
-        # Initialize query building components
-        base_query = """
+        filters = self._build_journal_filters(
+            user_id=user_id,
+            journal_type=journal_type,
+            start_date=start_date,
+            end_date=end_date,
+            contact_id=contact_id,
+            tag_ids=tag_ids,
+            calendar_id=calendar_id,
+            parent_id=parent_id,
+            search=search,
+            journal_ids=journal_ids,
+        )
+        if filters.matches_nothing:
+            return 0
+
+        query = text(
+            filters.assemble("""
             SELECT COUNT(DISTINCT j.id)
             FROM journals j
-        """
-
-        joins = []
-        where_clauses = ["j.user_id = :user_id"]
-        params: dict[str, Any] = {"user_id": user_id}
-
-        # Build type filter joins and conditions (reuse helper method)
-        type_joins, type_where = self._build_type_filter_joins(journal_type)
-        joins.extend(type_joins)
-        where_clauses.extend(type_where)
-
-        # Add relationship filters (reuse helper method)
-        self._add_relationship_filters(
-            joins, where_clauses, params, contact_id, tag_ids, calendar_id, journal_type
+        """)
         )
-
-        # Add date range filters (reuse helper method)
-        self._add_date_filters(where_clauses, params, start_date, end_date)
-
-        # Add parent filter
-        if parent_id is not None:
-            where_clauses.append("j.parent_id = :parent_id")
-            params["parent_id"] = parent_id
-
-        # Add search filter
-        if search is not None:
-            where_clauses.append("(j.title ILIKE :search OR j.content ILIKE :search)")
-            params["search"] = f"%{search}%"
-
-        # Add journal_ids filter
-        if journal_ids is not None:
-            if not journal_ids:
-                return 0
-            where_clauses.append("j.id = ANY(:journal_ids)")
-            params["journal_ids"] = journal_ids
-
-        # Assemble the complete query
-        if joins:
-            base_query += "\n" + "\n".join(joins)
-
-        base_query += "\nWHERE " + " AND ".join(where_clauses)
-
-        query = text(base_query)
-        result = await self.conn.execute(query, params)
+        result = await self.conn.execute(query, filters.params)
         row = result.fetchone()
         if row is None:
             return 0
         count_value = row[0]
         return int(count_value) if count_value is not None else 0
+
+    async def find_ids_by_filters(
+        self,
+        user_id: str,
+        journal_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        contact_id: str | None = None,
+        tag_ids: list[str] | None = None,
+        calendar_id: str | None = None,
+        parent_id: int | None = None,
+        search: str | None = None,
+        journal_ids: list[int] | None = None,
+    ) -> set[int]:
+        """Ids of the user's journals matching the same filters as :meth:`get_all`.
+
+        For callers that need the filters as a *set to intersect with* rather
+        than as rows: MCP ``search_journals`` resolves the relational filters
+        here and hands the ids to MeiliSearch as an ``id IN [...]`` filter,
+        because Meili indexes the event dates as ISO strings and its range
+        operators are numeric-only. Unpaginated by design — the whole matching
+        set is the point — so keep the filters narrow.
+
+        Args:
+            user_id: The user ID to filter by
+            journal_type: Optional journal type to filter by
+            start_date: Optional start date filter (ISO format)
+            end_date: Optional end date filter (ISO format)
+            contact_id: Optional contact ID to filter journals by
+            tag_ids: Optional tag IDs to filter journals by (matches any of them)
+            calendar_id: Optional calendar ID to filter journals by
+            parent_id: Optional parent journal ID to filter by
+            search: Optional search query for full-text search
+            journal_ids: Optional candidate ids to intersect with
+
+        Returns:
+            The ids of every journal matching the filter criteria
+        """
+        filters = self._build_journal_filters(
+            user_id=user_id,
+            journal_type=journal_type,
+            start_date=start_date,
+            end_date=end_date,
+            contact_id=contact_id,
+            tag_ids=tag_ids,
+            calendar_id=calendar_id,
+            parent_id=parent_id,
+            search=search,
+            journal_ids=journal_ids,
+        )
+        if filters.matches_nothing:
+            return set()
+
+        query = text(
+            filters.assemble("""
+            SELECT DISTINCT j.id
+            FROM journals j
+        """)
+        )
+        result = await self.conn.execute(query, filters.params)
+        return {int(row[0]) for row in result}
 
     async def get_root_journals(
         self, user_id: str, limit: int = 100, offset: int = 0
