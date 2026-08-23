@@ -14,7 +14,7 @@ from app.core.history.models import (
 
 _SELECT_COLUMNS = (
     "id, entity_type, entity_id, field_name, old_value, new_value, "
-    "changed_by, source, event_id, created_at"
+    "changed_by, source, event_id, created_at, user_id"
 )
 
 
@@ -80,6 +80,7 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             event_id=row.event_id,
             id=row.id,
             created_at=row.created_at.isoformat() if row.created_at else None,
+            user_id=row.user_id,
         )
 
     async def record_change(self, entry: FieldHistoryEntry) -> FieldHistoryEntry:
@@ -98,9 +99,10 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             """
             INSERT INTO field_history
             (entity_type, entity_id, field_name, old_value, new_value,
-             changed_by, source, event_id, created_at)
+             changed_by, source, event_id, created_at, user_id)
             VALUES (:entity_type, :entity_id, :field_name, :old_value, :new_value,
-                    :changed_by, :source, :event_id, COALESCE(:created_at, now()))
+                    :changed_by, :source, :event_id, COALESCE(:created_at, now()),
+                    :user_id)
             ON CONFLICT (event_id, entity_type, entity_id, field_name) DO NOTHING
             RETURNING id, created_at
             """
@@ -121,6 +123,8 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
                 # happened. The synchronous contact dual-write passes None and the
                 # COALESCE falls through to the DB default (now()), unchanged.
                 "created_at": self._coerce_created_at(entry.created_at),
+                # Only task rows carry one; every other producer passes None.
+                "user_id": entry.user_id,
             },
         )
         row = result.fetchone()
@@ -176,9 +180,10 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             WITH moved AS (
                 INSERT INTO field_history
                     (entity_type, entity_id, field_name, old_value, new_value,
-                     changed_by, source, event_id, created_at)
+                     changed_by, source, event_id, created_at, user_id)
                 SELECT entity_type, :new_entity_id, field_name, old_value,
-                       new_value, changed_by, source, event_id, created_at
+                       new_value, changed_by, source, event_id, created_at,
+                       user_id
                 FROM field_history
                 WHERE entity_type = :entity_type AND entity_id = :old_entity_id
                 ON CONFLICT (event_id, entity_type, entity_id, field_name)
@@ -240,6 +245,38 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         result = await self.conn.execute(query, {"root_id": root_id})
         row = result.fetchone()
         return row.total if row else 0
+
+    async def get_history_owner(self, entity_type: str, entity_id: int) -> str | None:
+        """Return the owner recorded on an entity's history rows, if any.
+
+        One row is enough: every row an entity's events project carries the same
+        owner, because the owner comes off the payload of an event the owner's
+        own writes produced. ``LIMIT 1`` over the ``(entity_type, entity_id)``
+        index is therefore the whole question, and it stays answerable after the
+        entity itself has been hard-deleted — which is the only reason the
+        column exists.
+
+        ``None`` means *no row carries an owner*, which is two different
+        situations the caller has to tell apart: rows exist but predate the
+        column (or belong to a domain that does not stamp it), or the projection
+        has not caught up with a change made moments ago. Neither is "not
+        yours", so this must not be treated as a refusal on its own.
+        """
+        query = text(
+            """
+            SELECT user_id
+            FROM field_history
+            WHERE entity_type = :entity_type
+              AND entity_id = :entity_id
+              AND user_id IS NOT NULL
+            LIMIT 1
+            """
+        )
+        result = await self.conn.execute(
+            query, {"entity_type": entity_type, "entity_id": entity_id}
+        )
+        row = result.fetchone()
+        return str(row.user_id) if row else None
 
     async def get_entity_history(
         self, entity_type: str, entity_id: int

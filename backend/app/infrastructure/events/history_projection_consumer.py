@@ -76,7 +76,11 @@ _CONTACT_HISTORY_EVENT_TYPES: list[str] = [
 # nothing in the logs. The tests read the event classes out of
 # ``app.core.tasks.models.events`` rather than this list, so a new type fails
 # here on the day its class lands.
-_TASK_HISTORY_EVENT_TYPES: list[str] = [
+# Public, unlike its journal and contact neighbours, because the task history
+# **backfill** projects exactly the set this consumer subscribes to — that is
+# what "repair what the group skipped" means — and a second copy of the list
+# would let the repair and the live path cover different types.
+TASK_HISTORY_EVENT_TYPES: list[str] = [
     "TaskCreated",
     "TaskUpdated",
     "TaskDueJournalRetargeted",
@@ -123,7 +127,7 @@ class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
             event_type_patterns=(
                 _JOURNAL_HISTORY_EVENT_TYPES
                 + _CONTACT_HISTORY_EVENT_TYPES
-                + _TASK_HISTORY_EVENT_TYPES
+                + TASK_HISTORY_EVENT_TYPES
             ),
             batch_size=batch_size,
             block_ms=block_ms,

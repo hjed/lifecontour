@@ -423,6 +423,7 @@ a capped span of days. Neither can be widened into a task browser.
 | `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
 | `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
+| `GET /api/tasks/{task_id}/history` | The task's field-level change history, paginated and most recent first, each entry carrying its provenance and actor. Query params: `page` (default 1), `limit` (default 20, max 100) | 200 (a task with nothing projected yet answers `data: []`, **including a task created moments ago**); 400 an out-of-range id or a `limit` above 100; 404 task unknown/not-owned |
 | `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown |
 | `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned |
 | `POST /api/tasks/{task_id}/relationships/intermediate-journals` | Attach an intermediate journal. Body: a resource identifier, `{"data": {"type": "journals", "id": "9"}}` | 204; 400 unknown field, a role attribute, another resource type, or a non-integer id; 404 task or journal unknown/not-owned; 409 the journal is already the creating or due journal |
@@ -690,6 +691,28 @@ Conventions this surface pins down:
   produce bodies that differ **only in the id the caller supplied** — the same
   hedge the anchor 404 above carries, and the reason a rejection here cannot be
   used to probe for other users' journals.
+- **The history read answers for a task that no longer exists, and that is what
+  shapes it.** Every other history endpoint authorises by loading the aggregate
+  and comparing `user_id` — `GET /api/journals/{id}/history` does exactly that.
+  A task is **hard-deleted**, so a task-scoped read has nothing to load, and the
+  `__deleted__` marker its deletion projects would otherwise sit on a surface
+  nobody could ever be authorised to read. Ownership is therefore carried on the
+  history rows (`field_history.user_id`, stamped by the projection from the
+  event payload) and resolved by `TaskHistoryService`: **the rows answer first**,
+  and the live `tasks` row is only a fallback for the window before the
+  projection has caught up. Both callers — this endpoint and `get_task_history`
+  — go through that one resolution rather than checking ownership themselves, so
+  they cannot disagree about whose history it is.
+- **"Not projected yet" is not "does not exist".** Projection is asynchronous, so
+  a task created a moment ago has no history rows. That answers `200` with an
+  empty list; answering 404 would tell a user their new task is missing, and go
+  on saying so until a background process they cannot see caught up. The two
+  cases are distinguished by the fallback above, not by a timer.
+- **A history read is task-scoped and has no collection beside it.** The
+  specification's *Where tasks appear* allows exactly two working surfaces, and
+  a record of the past is not a third one: there is no `/api/tasks/history`, no
+  filter, and no way to reach a task through this route that you did not already
+  have the id of.
 - **Detaching does not require the journal to still exist**, the same asymmetry
   the contact link carries and for the same reason:
   `task_intermediate_journals` cascades from the journal side, and the
@@ -697,8 +720,8 @@ Conventions this surface pins down:
 - The matching MCP tools are `create_task`, `set_task_status`, `retarget_task`,
   `update_task_text`, `delete_task`, `link_task_to_contact`,
   `unlink_task_from_contact`, `attach_intermediate_journal_to_task`,
-  `detach_intermediate_journal_from_task`, `get_task`, `list_journal_tasks` and
-  `list_upcoming_tasks`
+  `detach_intermediate_journal_from_task`, `get_task`, `list_journal_tasks`,
+  `list_upcoming_tasks` and `get_task_history`
   (documented in their docstrings and
   parameter schemas, per the MCP documentation convention). `update_task_text`
   offers no `status` parameter and `set_task_status` no `text`: a model gets one
@@ -718,6 +741,15 @@ Conventions this surface pins down:
   agent that reported "you have nothing due" to a user holding three
   cancelled-meeting commitments would be confidently wrong in a way the user
   could not check.
+  `get_task_history` is the one read tool that answers for an id `get_task`
+  reports as **not found** — a deleted task keeps its history — and its
+  description says so, because an agent that does not know it will not think to
+  ask when a user wonders what became of something. The description also carries
+  what the three-integer schema cannot: that the entries are most recent first,
+  that projection lags the change so an agent's own edit may not be there yet
+  (and that this is not a failed write), what the non-literal field names mean
+  (`__created__`, `__deleted__`, `journal:{id}`, `contact:{id}`), and that this
+  is a record rather than a way to browse tasks.
 
 ## Authentication Guidelines
 

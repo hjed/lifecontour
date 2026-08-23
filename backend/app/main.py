@@ -19,8 +19,9 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.core.history.services.task_history_backfill import TaskHistoryBackfill
 from app.infrastructure.config import Settings, get_settings
-from app.infrastructure.database import get_database_engine
+from app.infrastructure.database import get_async_database_engine, get_database_engine
 from app.infrastructure.di.container import create_container
 from app.infrastructure.events.outbox_relay import run_outbox_relay_loop
 from app.infrastructure.logging import setup_logging
@@ -28,6 +29,34 @@ from app.infrastructure.tasks.attendance_transition_task import (
     run_attendance_transition_loop,
 )
 from app.mcp.server import create_mcp_app
+
+
+async def _run_task_history_backfill() -> None:
+    """Repair historic task history once, at start, without ever blocking boot.
+
+    Two gaps this closes are described in ``TaskHistoryBackfill``: task events
+    the ``history-projection`` group acknowledged before its patterns matched
+    them (and which will therefore never be redelivered), and rows projected
+    before ``field_history.user_id`` existed.
+
+    **Failure is logged, not raised.** History is a derived read surface; an
+    application that refused to start because a repair of it failed would trade
+    an incomplete feed for no application at all. The repair is idempotent and
+    runs again on the next start.
+    """
+    logger = structlog.get_logger()
+    try:
+        engine = get_async_database_engine()
+        async with engine.connect() as connection:
+            result = await TaskHistoryBackfill().run(connection)
+        logger.info(
+            "Task history backfill complete",
+            events_examined=result.events_examined,
+            rows_written=result.rows_written,
+            owners_filled=result.owners_filled,
+        )
+    except Exception as exc:  # noqa: BLE001 - see the docstring
+        logger.warning("Task history backfill failed; retrying next start", error=exc)
 
 
 @asynccontextmanager
@@ -172,6 +201,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             group="history-projection",
             stream=settings.stream_name,
         )
+
+        # Repair task history the projection group skipped before its patterns
+        # were widened, and fill in ownership on rows written before the column
+        # existed. Awaited rather than backgrounded: it is bounded by an
+        # anti-join that returns nothing once the repair is done, and a task
+        # history read that races the repair would answer 404 for a task the
+        # user can see. Idempotent, so it is safe beside the consumer above and
+        # safe on every restart.
+        await _run_task_history_backfill()
 
         yield
 

@@ -12,9 +12,10 @@ values, provenance and timestamps. Every type the domain publishes is exercised
 here: the three lifecycle types, the due-anchor move, and the
 intermediate-journal pair.
 
-Rows are read with ``get_entity_history`` rather than ``get_history_for_aggregate``
-because there is no ``"task"`` aggregation strategy yet — Phase 8 registers one
-along with the read surface that needs it.
+Rows are read with ``get_entity_history`` rather than ``get_history_for_aggregate``.
+The ``"task"`` aggregation strategy now exists (Phase 8), and one test below
+reads through it deliberately to pin that the two agree; the rest keep the
+narrower read so a failure points at the projection rather than at the strategy.
 """
 
 from datetime import UTC, datetime
@@ -32,6 +33,7 @@ from app.core.history.adapters.sql.field_history_repository import (
 )
 from app.core.history.models import FieldHistoryEntry
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.models.events import JournalUpdated
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
@@ -841,3 +843,178 @@ class TestTaskRetargetAndJournalLinkProjection:
             f"journal:{journal_a}",
             f"journal:{manual_journal_id}",
         }
+
+
+@pytest.mark.integration
+class TestProjectedRowsCarryTheirOwner:
+    """The live path and the backfill have to agree about ownership.
+
+    ``field_history.user_id`` is what lets a **hard-deleted** task's history
+    stay both readable and owner-scoped, and there are two writers of it: this
+    consumer, and ``TaskHistoryBackfill`` repairing what the consumer never saw.
+    A row that reaches the table by one route and not the other would make a
+    task's history readable or unreadable depending on when it happened to be
+    written, so the live route is asserted here and the repair route in
+    ``test_task_history_backfill_integration.py``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_every_row_a_task_write_projects_names_its_owner(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        contact_id = await create_contact(async_connection, first_name="Sarah")
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            contact_ids=[contact_id],
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert task.id is not None
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task.id,
+            transaction=async_connection,
+            status=TaskStatus.DONE,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-owner"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        assert len(entries) == 3
+        assert {entry.user_id for entry in entries} == {USER_ID}
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_the_task_owner_rather_than_whoever_acted(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """``user_id`` and ``changed_by`` answer different questions.
+
+        An assistant editing your task writes ``changed_by="mcp"`` on a row that
+        is still **yours**. Conflating the two would file an MCP-made change
+        under a user called "mcp" and lose it from your history.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        assert task.id is not None
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-actor"
+        )
+
+        entry = (await _task_history(async_connection, task.id))[0]
+        assert entry.changed_by == "mcp"
+        assert entry.user_id == USER_ID
+
+    @pytest.mark.asyncio
+    async def test_a_journal_row_written_by_the_same_consumer_carries_no_owner(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """The narrowing, asserted where both halves are written by one consumer.
+
+        A journal event travels the identical path and must still land unowned:
+        journal history authorises by loading the journal, so stamping its rows
+        would imply a check nothing performs. Without this, "only task rows are
+        stamped" is a claim about code rather than about the table.
+        """
+        journal_repo = SqlJournalRepository(async_connection)
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        # Only the event matters here — the projection reads the payload, not
+        # the journal row — so the title is not actually changed.
+        assert await journal_repo.find_by_id(creating_journal_id) is not None
+        await OutboxEventPublisher(async_connection).publish(
+            JournalUpdated(
+                journal_id=creating_journal_id,
+                changed_fields={"title": ("Today", "Today, revised")},
+                source=Provenance.UI,
+                changed_by="ui",
+            )
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-owner-narrowing"
+        )
+
+        task_rows = await _task_history(async_connection, task.id)
+        journal_rows = await SqlFieldHistoryRepository(
+            async_connection
+        ).get_entity_history("journal", creating_journal_id)
+
+        assert {row.user_id for row in task_rows} == {USER_ID}
+        assert journal_rows, "the journal control must have been projected"
+        assert {row.user_id for row in journal_rows} == {None}
+
+    @pytest.mark.asyncio
+    async def test_the_task_aggregation_strategy_reads_the_same_rows(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """The read surface and the projection agree about where rows live.
+
+        Everything else in this file reads by ``(entity_type, entity_id)``
+        directly. The endpoint and the MCP tool read through the registered
+        ``"task"`` strategy instead, so this is the one test that closes the loop
+        between what is written and what is served.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-strategy"
+        )
+
+        direct = await _task_history(async_connection, task.id)
+        via_strategy = await SqlFieldHistoryRepository(
+            async_connection
+        ).get_history_for_aggregate("task", task.id)
+
+        assert [row.id for row in via_strategy] == [row.id for row in direct]

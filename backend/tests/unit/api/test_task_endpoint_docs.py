@@ -20,6 +20,7 @@ import pytest
 from app.api.tasks.controllers import (
     delete_task,
     get_task,
+    get_task_history,
     list_journal_tasks,
     list_upcoming_tasks,
     update_task,
@@ -217,3 +218,47 @@ class TestTheUpcomingListingDocumentsItsWindow:
         description = _description(list_upcoming_tasks)
 
         assert "not paginated" in description
+
+
+@pytest.mark.unit
+class TestTheHistoryEndpointDocumentsWhatMakesItDifferent:
+    """Three claims that are only true of *this* endpoint, and only in prose.
+
+    Every other history read in this API answers 404 for an id whose entity is
+    gone, and none of them has to explain why an empty answer is not a refusal.
+    A client generated from the OpenAPI description gets no hint of either from
+    the schema — both are 200s carrying the same shape — so if the description
+    does not say them, nobody reading `/docs` learns them.
+
+    The MCP half of this is asserted in
+    ``tests/unit/mcp/domains/test_task_tools_schema.py``; this is the REST half,
+    for the same reason the delete stance above has both.
+    """
+
+    def test_it_says_a_deleted_tasks_history_is_still_readable(self) -> None:
+        """The one behaviour that contradicts every other route in this file.
+
+        ``GET /api/tasks/{id}`` answers 404 for the same id this route answers
+        200 for. A client author who does not know that will treat a successful
+        history read for a "missing" task as a bug in the API.
+        """
+        description = _description(get_task_history)
+
+        assert "deleted" in description
+        assert "hard-deleted" in description or "hard deleted" in description
+
+    def test_it_says_an_empty_history_is_not_a_missing_task(self) -> None:
+        """Projection is asynchronous, so this is the ordinary case immediately
+        after a task is created — and the answer a client must not retry on."""
+        description = _description(get_task_history)
+
+        assert "404" in description
+        assert "moment" in description or "asynchronous" in description
+
+    def test_it_says_this_is_a_record_rather_than_a_task_browser(self) -> None:
+        """The specification's "no third working surface" rule, said where
+        somebody looking for a task listing would go looking for one."""
+        description = _description(get_task_history)
+
+        assert "record" in description
+        assert "no collection" in description

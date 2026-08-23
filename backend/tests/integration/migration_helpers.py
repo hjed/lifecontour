@@ -50,3 +50,19 @@ async def columns(engine_url: str, table: str) -> set[str]:
             return {str(row.column_name) for row in rows}
     finally:
         await engine.dispose()
+
+
+async def index_exists(engine_url: str, index: str) -> bool:
+    """Return whether ``index`` exists in the database at ``engine_url``."""
+    engine = create_async_engine(engine_url)
+    try:
+        async with engine.connect() as conn:
+            found = (
+                await conn.execute(
+                    text("SELECT 1 FROM pg_indexes WHERE indexname = :index"),
+                    {"index": index},
+                )
+            ).scalar()
+            return found is not None
+    finally:
+        await engine.dispose()

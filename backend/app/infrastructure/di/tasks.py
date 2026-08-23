@@ -4,6 +4,8 @@ from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.repositories import ContactRepository
+from app.core.history.models import FieldHistoryRepository
+from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     JournalRepository,
@@ -89,4 +91,23 @@ class TaskProvider(Provider):
             contact_repo=contact_repo,
             calendar_info_repo=calendar_info_repo,
             date_resolver=date_resolver,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def task_history_service(
+        self,
+        history_repo: FieldHistoryRepository,
+        task_repo: TaskRepository,
+    ) -> TaskHistoryService:
+        """Provide the task history read service.
+
+        ``FieldHistoryRepository`` comes from ``JournalProvider``, which is
+        already in this container for the reasons the class docstring gives.
+        The task repository is here because a task's history read authorises
+        itself, and its fallback — for a task whose events have not been
+        projected yet — is the live row.
+        """
+        return TaskHistoryService(
+            history_repo=history_repo,
+            task_repo=task_repo,
         )
