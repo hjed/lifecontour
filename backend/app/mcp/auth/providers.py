@@ -9,6 +9,8 @@ token issuance, and consent screens.
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from cryptography.fernet import Fernet
 from fastmcp.server.auth.auth import AuthProvider
@@ -18,6 +20,7 @@ from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.debug import DebugTokenVerifier
 from fastmcp.server.auth.providers.discord import DiscordProvider
 from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.utilities.auth import decode_jwt_payload
 from key_value.aio.protocols.key_value import AsyncKeyValue
 from key_value.aio.stores.redis import RedisStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
@@ -56,6 +59,64 @@ class _LoggingFernetEncryptionWrapper(FernetEncryptionWrapper):
                 "is corrupt."
             )
         return result
+
+
+# Identity claims worth carrying from the upstream token. ``sub`` is the one
+# that matters — it becomes the row owner — the rest are for display.
+_UPSTREAM_IDENTITY_CLAIMS = ("sub", "email", "name", "preferred_username")
+
+
+class UpstreamIdentityOAuthProxy(OAuthProxy):
+    """An ``OAuthProxy`` that carries the upstream user's identity forward.
+
+    The generic-OAuth branch pairs the proxy with ``DebugTokenVerifier``, whose
+    ``AccessToken`` carries no identity at all — only the raw upstream token and
+    the verifier's own ``client_id`` default. Without this hook the acting user
+    fell through to that ``client_id``, so every MCP write was attributed to the
+    literal owner ``"debug-client"``: shared by every caller, and invisible to
+    the signed-in user, whose owner-scoped reads then answered 404.
+
+    FastMCP calls :meth:`_extract_upstream_claims` once per upstream exchange
+    (and again on refresh), embeds the result in the FastMCP JWT, and re-attaches
+    it to ``AccessToken.claims["upstream_claims"]`` on every verified request —
+    so the identity survives without a storage lookup per call.
+    """
+
+    async def _extract_upstream_claims(
+        self, idp_tokens: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Return the upstream user's identity claims, or ``None`` if unknowable.
+
+        The ``id_token`` is preferred and the access token is only a fallback:
+        under OIDC the id_token is always a JWT, whereas the access token may be
+        opaque (Hydra issues opaque tokens in dev), in which case it cannot be
+        decoded at all.
+
+        Returning ``None`` is deliberate when no subject can be found — the
+        request then fails to authenticate rather than resolving to something
+        that is not a user.
+        """
+        for token in (idp_tokens.get("id_token"), idp_tokens.get("access_token")):
+            if not token:
+                continue
+            try:
+                payload = decode_jwt_payload(token)
+            except Exception:  # noqa: BLE001 - opaque or malformed: try the next
+                continue
+
+            claims = {
+                key: payload[key]
+                for key in _UPSTREAM_IDENTITY_CLAIMS
+                if payload.get(key) is not None
+            }
+            if "sub" in claims:
+                return claims
+
+        logger.warning(
+            "MCP: upstream token response carried no usable subject; the "
+            "request will not authenticate"
+        )
+        return None
 
 
 def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
@@ -104,12 +165,17 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
         # generic OAuth, tokens are validated via the upstream provider's
         # authorization flow; DebugTokenVerifier handles the local JWT
         # that OAuthProxy issues after a successful upstream exchange.
+        #
+        # It also returns an AccessToken with no identity claims, which is why
+        # the proxy must be the UpstreamIdentityOAuthProxy subclass: it decodes
+        # the upstream id_token so the acting user is the person who logged in
+        # rather than the verifier's client_id default.
         logger.warning(
             "MCP: Generic OAuth uses DebugTokenVerifier for local token "
             "validation. Consider using a named provider (GitHub, Azure, "
             "Discord) for stronger token verification."
         )
-        return OAuthProxy(
+        return UpstreamIdentityOAuthProxy(
             upstream_authorization_endpoint=settings.oauth_authorization_url,
             upstream_token_endpoint=settings.oauth_token_url,
             upstream_client_id=settings.oauth_client_id,
