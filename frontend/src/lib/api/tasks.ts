@@ -26,6 +26,7 @@
 
 import {
   useMutation,
+  useMutationState,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -536,25 +537,41 @@ function findCachedTask(
 /** The attributes an optimistic patch can overwrite, and so must restore. */
 const PATCHABLE_FIELDS = ['status', 'text', 'lapsed', 'lapse_reason'] as const;
 
+/** One cache entry, and what the patched task read as inside *that* entry. */
+type TaskAttributeSnapshot = readonly [readonly unknown[], OptimisticTaskPatch];
+
 /**
- * What a task read as before the patch, taken from the cache itself.
+ * What one task read as, in each cache entry holding it, before the patch.
  *
- * **A rollback restores one task's attributes, not whole cache entries**, and
- * that distinction is the whole point. Two rows ticked one after the other
- * share a cache entry, so putting back a snapshot taken before the first write
- * would undo the second — a row the user had just ticked reverting because an
- * unrelated one failed, with nothing on screen connecting the two. Restoring by
- * id cannot reach a task the failed write never touched.
+ * Two properties, and the rollback needs both:
+ *
+ * - **Per task, not per entry.** Two rows ticked one after the other share a
+ *   cache entry, so putting back a whole snapshot taken before the first write
+ *   would undo the second — a row the user had just ticked reverting because an
+ *   unrelated one failed, with nothing on screen connecting the two. Restoring
+ *   by id cannot reach a task the failed write never touched.
+ * - **Per entry, not one value for all of them.** The detail read and the
+ *   journal listing are fetched independently and can legitimately disagree —
+ *   one refetched a moment ago, the other still inside the five-minute
+ *   `staleTime`. Capturing one entry's value and writing it into every entry
+ *   would undo that divergence as well as the patch, replacing a fresher cached
+ *   value with a staler one from whichever entry happened to be enumerated
+ *   first.
  *
  * Only the fields a patch can set are carried, and only where the cached shape
  * actually has them: writing `lapsed: undefined` over a real value would be a
  * different kind of corruption from the one being undone.
  */
-function previousTaskAttributes(
+function snapshotTaskAttributes(
   queryClient: QueryClient,
   taskId: string
-): OptimisticTaskPatch | undefined {
-  for (const [, cached] of queryClient.getQueriesData<CachedTaskPayload>({
+): readonly TaskAttributeSnapshot[] {
+  const snapshots: TaskAttributeSnapshot[] = [];
+
+  for (const [
+    queryKey,
+    cached,
+  ] of queryClient.getQueriesData<CachedTaskPayload>({
     queryKey: taskKeys.all,
   })) {
     const resource = findCachedTask(cached, taskId);
@@ -565,10 +582,10 @@ function previousTaskAttributes(
     for (const field of PATCHABLE_FIELDS) {
       if (field in attributes) previous[field] = attributes[field];
     }
-    return previous as OptimisticTaskPatch;
+    snapshots.push([queryKey, previous as OptimisticTaskPatch]);
   }
 
-  return undefined;
+  return snapshots;
 }
 
 /**
@@ -590,6 +607,74 @@ function previousTaskAttributes(
  * there is worth riding out.
  */
 const NO_RETRY = { retry: false } as const;
+
+// What is being written to a task right now
+//
+// Read from the mutation cache rather than from a hook instance, because a
+// surface can mount the *same* task more than once. A journal renders a task
+// holding two roles under both of its headings, so two rows carry two
+// independent `useUpdateTask`s for one commitment; a guard that only knows its
+// own instance leaves the twin live, and a second click races the first write
+// with the server's ordering deciding which move survives.
+
+/** The task a pending mutation is acting on, whatever shape its input takes. */
+function mutatingTaskId(variables: unknown): string | undefined {
+  // `useDeleteTask` takes the bare id; every other task mutation takes an
+  // object carrying it.
+  if (typeof variables === 'string') return variables;
+
+  if (variables && typeof variables === 'object' && 'taskId' in variables) {
+    const { taskId } = variables as { taskId?: unknown };
+    return typeof taskId === 'string' ? taskId : undefined;
+  }
+
+  return undefined;
+}
+
+/** The status a pending write is moving a task to, if it moves one at all. */
+function mutatingStatus(variables: unknown): TaskStatus | undefined {
+  if (variables && typeof variables === 'object' && 'status' in variables) {
+    const { status } = variables as { status?: unknown };
+    return typeof status === 'string' ? (status as TaskStatus) : undefined;
+  }
+
+  return undefined;
+}
+
+/** What is currently in flight against one task, from anywhere on the page. */
+export interface PendingTaskWrites {
+  /** Whether any write against this task is in flight. */
+  readonly busy: boolean;
+  /** Whether a pending write is moving the task to this status. */
+  readonly isChangingTo: (status: TaskStatus) => boolean;
+  /** Whether a pending write is deleting the task. */
+  readonly isDeleting: boolean;
+}
+
+/**
+ * Every in-flight write against one task, however many surfaces mounted it.
+ *
+ * Scoped to the task rather than to the caller deliberately: two rows showing
+ * the same commitment must lock together, and a retarget opened elsewhere on
+ * the page is just as much a reason not to accept a status click.
+ */
+export function usePendingTaskWrites(taskId: string): PendingTaskWrites {
+  const pending = useMutationState({
+    filters: {
+      status: 'pending',
+      predicate: mutation =>
+        mutatingTaskId(mutation.state.variables) === taskId,
+    },
+    select: mutation => mutation.state.variables,
+  });
+
+  return {
+    busy: pending.length > 0,
+    isChangingTo: (status: TaskStatus) =>
+      pending.some(variables => mutatingStatus(variables) === status),
+    isDeleting: pending.some(variables => typeof variables === 'string'),
+  };
+}
 
 // Hooks
 
@@ -668,7 +753,7 @@ export function useUpdateTask() {
       // detail read, the journal listings and the upcoming window alike.
       await queryClient.cancelQueries({ queryKey: taskKeys.all });
 
-      const previous = previousTaskAttributes(queryClient, taskId);
+      const previous = snapshotTaskAttributes(queryClient, taskId);
 
       const patch = optimisticPatch({ status, text });
       queryClient.setQueriesData<CachedTaskPayload>(
@@ -679,13 +764,11 @@ export function useUpdateTask() {
       return { previous };
     },
     onError: (error: Error, { taskId }, context) => {
-      const previous = context?.previous;
-      if (previous) {
-        queryClient.setQueriesData<CachedTaskPayload>(
-          { queryKey: taskKeys.all },
-          cached => patchCachedTask(cached, taskId, previous)
+      context?.previous.forEach(([queryKey, attributes]) => {
+        queryClient.setQueryData<CachedTaskPayload>(queryKey, cached =>
+          patchCachedTask(cached, taskId, attributes)
         );
-      }
+      });
       reportFailure(error);
     },
     onSuccess: (_, { status }) => {

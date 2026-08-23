@@ -4124,8 +4124,8 @@ rule 3.
    answers a single resource and the journal listing and upcoming window answer arrays, and the same
    `status`, `lapsed` and `text` sit inside all three. One updater handles both shapes and patches by id;
    patching only the listing would leave `useTask` showing the status the user had just changed.
-2b. **The rollback restores one task's attributes, not whole cache entries — and the first version did
-   the latter, which was a bug.** React Query's canonical optimistic recipe snapshots the matching cache
+2b. **The rollback restores one task's attributes *per cache entry*, and both halves of that were got
+   wrong once each.** React Query's canonical optimistic recipe snapshots the matching cache
    entries with `getQueriesData` and puts them back on failure, and that is what shipped in the first
    draft. It is wrong wherever two rows share an entry, which on this surface is *every* pair of rows in
    the same journal: tick row 1, tick row 2 while the first is still in flight, and row 1's failure
@@ -4141,7 +4141,15 @@ rule 3.
    saying the snapshot approach was safe *for this exact case*, having reasoned that a later mutation's
    patch would be inside the earlier one's snapshot. It is the other way round, and the two-row test is
    what settled it. Kept as a caution: "the standard recipe" is an argument about the common case, and
-   a surface where several rows share one cache entry is not it.
+   a surface where several rows share one cache entry is not it. **The PR review then found the other
+   half**, which the first fix had left: `previousTaskAttributes` returned the first matching entry's
+   values and `onError` wrote them into *every* entry under `taskKeys.all`. The detail read and the
+   journal listing are fetched independently and can legitimately disagree — one refetched a moment ago,
+   the other still inside the five-minute `staleTime` — so a rollback undid the divergence along with the
+   patch, replacing a fresher cached value with a staler one from whichever entry happened to be
+   enumerated first. `snapshotTaskAttributes` now returns one snapshot **per entry** and `onError`
+   restores each entry with its own. Two bugs, both in the same six lines, both the same mistake in
+   different directions: a rollback that is coarser than the thing it is undoing.
 3. **Leaving *not done* clears the lapse marker; returning to it does not set one.** Lapse is *derived* —
    still not done, and the due journal no longer ahead of it — so a task that has just been ticked off
    cannot be lapsed, and without the clear, completing a lapsed task leaves it reading `Done · Lapsed`
@@ -4168,26 +4176,35 @@ rule 3.
    criterion is about, and because there is no other surface from which a mistaken task can be removed —
    `delete_task` shipped in Phase 9 with no UI behind it. It is not offered on the dashboard, where a row
    is a reminder rather than a place a task is worked with; recorded in the wireframe document as gap 8.
-8. **One write at a time from a row.** Every action is disabled while any of them is in flight, with
-   `aria-busy` on the acting one. Two overlapping status calls both decide against the same stale
-   reading and the later write wins whatever the first was for — the lost-*decision* problem Phase 6 took
-   a row lock for on the server. The lock makes the server's answer correct; this keeps a user from
-   queueing the losing call in the first place.
+8. **One write at a time per *task*, and per-instance was not enough.** Every action is disabled while
+   any write against that task is in flight, with `aria-busy` on the acting one. Two overlapping status
+   calls both decide against the same stale reading and the later write wins whatever the first was for
+   — the lost-*decision* problem Phase 6 took a row lock for on the server. The lock makes the server's
+   answer correct; this keeps a user from queueing the losing call at all. **The first version read the
+   hook instance's own `isPending`, which is wrong on precisely the case Phase 16 built:** a task holding
+   two roles in one journal is rendered *once per group*, so one commitment has two `JournalTaskActions`
+   side by side with two independent mutations. Clicking Done on the created copy locked that copy only;
+   the optimistic patch then rerendered the mentioned copy offering *Not done*, one click from racing the
+   write already in flight. `usePendingTaskWrites(taskId)` reads the **mutation cache** through
+   `useMutationState` instead of a hook instance, so every surface showing that task locks together — and
+   a retarget opened elsewhere on the page will lock it too, which is what should happen. Three tests
+   render the two copies and pin it: the twin disables, its `aria-busy` follows the acting move, and a
+   click on the twin mid-write sends no second request.
 9. **Phase 16's read-only guarantee was inverted, not deleted.** That test required the busiest row to
    render zero buttons and zero checkboxes, and existed precisely so this phase would have to come back
    to it. It now asserts the group is present and described by the task text, with a second test that a
    *lapsed* row's actions are enabled rather than presented as settled.
-10. **`JournalTasksSection`'s narrow module mock gained two stubs rather than a provider.** The section
-    suite mocks `@/lib/api/tasks` down to `useJournalTasks`, and the rows now call two mutation hooks
-    through it. Stubbing those two keeps that suite about the grouping contract it exists to assert,
+10. **`JournalTasksSection`'s narrow module mock gained three stubs rather than a provider.** The section
+    suite mocks `@/lib/api/tasks` down to `useJournalTasks`, and the rows now reach two mutation hooks
+    and `usePendingTaskWrites` through it. Stubbing those keeps that suite about the grouping contract,
     rather than making every grouping test carry a `QueryClientProvider` it has no use for.
 
 **Required Test Coverage:** unit (RTL) — each action's happy path and failure rollback, keyboard operation,
 and cancel-before-invalidate ordering. E2E deferred to Phase 22.
 
-**Delivered:** **53** unit tests across four suites.
+**Delivered:** **57** unit tests across four suites.
 
-- **`components/journals/__tests__/JournalTaskActions.test.tsx` (28, new):** what each status offers
+- **`components/journals/__tests__/JournalTaskActions.test.tsx` (31, new):** what each status offers
   including the cancelled row's silence and the lapsed row's full offer; the three happy paths asserted
   on the request body, not just the call; the three failure rollbacks asserted on a **seeded cache**, so
   the rollback has something real to move; the optimistic patch landing before the response, driven
@@ -4195,11 +4212,13 @@ and cancel-before-invalidate ordering. E2E deferred to Phase 22.
   rest; tab order, `Enter` and `Space`; the accessible names and the group's description; delete last,
   not destructive, dialog-gated, confirmed, declined, and failing; and the dialog's focus move and
   `Escape` restore.
-- **`lib/api/__tests__/tasks.test.ts` (14 new, 64 total):** the patch on both cached shapes before the
+- **`lib/api/__tests__/tasks.test.ts` (15 new, 65 total):** the patch on both cached shapes before the
   response, the lapse clear, the restore on failure including the lapse marker, the **two-row test that
   found decision 2b's bug** — two tasks in one listing, both patched, the first failing, and the second
-  required to keep its patch — the per-status toast wording against the generic text-only one, and a
-  cached status left alone by a text-only update.
+  required to keep its patch; the **divergent-entry** test the PR review's second finding produced, where
+  the listing and the detail hold different pre-mutation statuses and each must be restored to its own;
+  the per-status toast wording against the generic text-only one; and a cached status left alone by a
+  text-only update.
 - **`lib/__tests__/task-display.test.ts` (12 new, 22 total):** the offer table per status, the guard that
   no offered transition is one the service refuses, that no action targets the status the task already
   has, label-in-name (WCAG 2.5.3) across the whole table, and the three result wordings asserted pairwise
@@ -4215,13 +4234,15 @@ of nothing is `-Infinity`, and the ordering assertion holds for the wrong reason
 would hand that vacuity straight back, so the expected surplus is stated **per hook** as an
 `optimisticCancels` field instead, and the assertion stays exact.
 
-**Mutation checks.** Five deliberate breakages (the first re-run against the rewritten rollback, where it
+**Mutation checks.** Seven deliberate breakages (the first re-run against the rewritten rollback, where it
 now fails **6**), each reverted after confirming it was caught: dropping the
 `onError` rollback failed **5** tests across both suites; offering `Mark done` on a cancelled row failed
 **3**; making delete a `destructive` sibling rather than a muted dialog trigger failed **1**; collapsing
 the three status wordings into one failed **8**; and removing the `setQueriesData` patch entirely — the
 check that matters most, since a passing suite could otherwise have described a non-optimistic
-implementation — failed **4**.
+implementation — failed **4**. Two more after the PR review, against the fixes it produced: collapsing
+the per-entry snapshots back to one shared value failed **1**, and reverting the per-task guard to the
+hook instance's own `isPending` failed **3**.
 
 **Integration:** none, and not a deferral of convenience — the phase adds no Python. `PATCH /api/tasks/{id}`
 and `DELETE /api/tasks/{id}` carry their own integration coverage from Phases 6 and 9 (34 endpoint tests
@@ -4252,8 +4273,8 @@ cleanup could not delete either journal, both answering **409**, because each an
 **Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
 clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in `tests/e2e/`).
 The **full** Jest suite rather than the changed files alone, because `lib/api/tasks.ts` and
-`JournalTaskRow` are both imported beyond this surface: **171** suites and **1,911** tests, all passing
-(170 and 1,858 before this phase). Re-run in full after decision 2b's fix rather than trusting the pass
+`JournalTaskRow` are both imported beyond this surface: **171** suites and **1,915** tests, all passing
+(170 and 1,858 before this phase). Re-run in full after each round of fixes rather than trusting the pass
 that preceded it. No backend gates — `ruff`, `mypy` and pytest all had nothing to run,
 since no Python file changed.
 

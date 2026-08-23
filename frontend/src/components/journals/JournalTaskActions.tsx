@@ -39,7 +39,11 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { useDeleteTask, useUpdateTask } from '@/lib/api/tasks';
+import {
+  useDeleteTask,
+  usePendingTaskWrites,
+  useUpdateTask,
+} from '@/lib/api/tasks';
 import { statusActions, type TaskStatusAction } from '@/lib/task-display';
 import type { JournalTaskResource } from '@/types/tasks';
 
@@ -70,10 +74,14 @@ export function JournalTaskActions({
   const update = useUpdateTask();
   const remove = useDeleteTask();
 
-  // One write at a time from one row: two overlapping status calls decide
-  // against the same stale reading, and the later one wins whatever the first
-  // was for.
-  const busy = update.isPending || remove.isPending;
+  // One write at a time per *task*, not per component instance. A task holding
+  // two roles in this journal is rendered under both headings, so the same
+  // commitment has two of these side by side; a guard reading only this
+  // instance's `isPending` would leave the twin live, and its second click
+  // would race the first write with the server's ordering deciding which move
+  // survives. Two overlapping status calls decide against the same stale
+  // reading, and the later one wins whatever the first was for.
+  const pending = usePendingTaskWrites(task.id);
   const actions = statusActions(task.attributes.status);
 
   return (
@@ -85,8 +93,7 @@ export function JournalTaskActions({
     >
       {actions.map(action => {
         const Icon = ACTION_ICONS[action.key];
-        const acting =
-          update.isPending && update.variables?.status === action.target;
+        const acting = pending.isChangingTo(action.target);
 
         return (
           <Button
@@ -96,7 +103,7 @@ export function JournalTaskActions({
             size='sm'
             aria-label={action.accessibleName}
             aria-busy={acting}
-            disabled={busy}
+            disabled={pending.busy}
             data-testid={`journal-task-action-${action.key}`}
             onClick={() => {
               update.mutate({ taskId: task.id, status: action.target });
@@ -115,8 +122,8 @@ export function JournalTaskActions({
             variant='ghost'
             size='sm'
             aria-label='Delete task'
-            aria-busy={remove.isPending}
-            disabled={busy}
+            aria-busy={pending.isDeleting}
+            disabled={pending.busy}
             title='Delete task'
             data-testid='journal-task-action-delete'
             className='text-muted-foreground hover:text-destructive'

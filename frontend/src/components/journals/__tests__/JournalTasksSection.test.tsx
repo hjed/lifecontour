@@ -22,6 +22,11 @@ jest.mock('@/lib/api/tasks', () => ({
   useJournalTasks: jest.fn(),
   useUpdateTask: () => ({ mutate: jest.fn(), isPending: false }),
   useDeleteTask: () => ({ mutate: jest.fn(), isPending: false }),
+  usePendingTaskWrites: () => ({
+    busy: false,
+    isChangingTo: () => false,
+    isDeleting: false,
+  }),
 }));
 
 const mockUseJournalTasks = useJournalTasks as jest.MockedFunction<

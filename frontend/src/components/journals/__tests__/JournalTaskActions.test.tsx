@@ -312,6 +312,132 @@ describe('JournalTaskActions', () => {
     });
   });
 
+  /**
+   * A task holding two roles in one journal is rendered **once per group** —
+   * the grouping contract Phase 16 pins with its own test — so the same task
+   * has two independent `JournalTaskActions`, each with its own mutation
+   * state. A guard that only knows about its own instance leaves the twin
+   * live: the optimistic patch rerenders it offering the opposite move, and a
+   * second click races the first write. Which one the server ends up keeping
+   * is then decided by request ordering.
+   */
+  describe('a task rendered under two groups', () => {
+    function renderTwice(task = createMockJournalTask()) {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(
+        taskKeys.journalList(JOURNAL_ID),
+        cachedListing(task)
+      );
+
+      return render(
+        <QueryClientProvider client={queryClient}>
+          <div>
+            <p id={TEXT_ID}>{task.attributes.text}</p>
+            <div data-testid='copy-created'>
+              <JournalTaskActions task={task} describedById={TEXT_ID} />
+            </div>
+            <div data-testid='copy-mentioned'>
+              <JournalTaskActions task={task} describedById={TEXT_ID} />
+            </div>
+          </div>
+        </QueryClientProvider>
+      );
+    }
+
+    it('locks the twin copy while either copy is writing', async () => {
+      let release: () => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise<Response>(resolve => {
+            release = () => {
+              resolve(okResponse(TaskStatus.DONE));
+            };
+          })
+      );
+      renderTwice();
+
+      const created = within(screen.getByTestId('copy-created'));
+      const mentioned = within(screen.getByTestId('copy-mentioned'));
+
+      await userEvent.click(created.getByRole('button', { name: 'Mark done' }));
+
+      await waitFor(() => {
+        expect(
+          mentioned.getByRole('button', { name: 'Mark done' })
+        ).toBeDisabled();
+      });
+      expect(
+        mentioned.getByRole('button', { name: 'Cancel task' })
+      ).toBeDisabled();
+      expect(
+        mentioned.getByRole('button', { name: 'Delete task' })
+      ).toBeDisabled();
+
+      release();
+      await waitFor(() => {
+        expect(
+          mentioned.getByRole('button', { name: 'Mark done' })
+        ).toBeEnabled();
+      });
+    });
+
+    it('marks the acting move busy on both copies, not just the clicked one', async () => {
+      let release: () => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise<Response>(resolve => {
+            release = () => {
+              resolve(okResponse(TaskStatus.DONE));
+            };
+          })
+      );
+      renderTwice();
+
+      const created = within(screen.getByTestId('copy-created'));
+      const mentioned = within(screen.getByTestId('copy-mentioned'));
+
+      await userEvent.click(created.getByRole('button', { name: 'Mark done' }));
+
+      await waitFor(() => {
+        expect(
+          mentioned.getByRole('button', { name: 'Mark done' })
+        ).toHaveAttribute('aria-busy', 'true');
+      });
+
+      release();
+    });
+
+    it('sends only one request when the twin is clicked during a write', async () => {
+      let release: () => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise<Response>(resolve => {
+            release = () => {
+              resolve(okResponse(TaskStatus.DONE));
+            };
+          })
+      );
+      renderTwice();
+
+      const created = within(screen.getByTestId('copy-created'));
+      const mentioned = within(screen.getByTestId('copy-mentioned'));
+
+      await userEvent.click(created.getByRole('button', { name: 'Mark done' }));
+      await waitFor(() => {
+        expect(
+          mentioned.getByRole('button', { name: 'Cancel task' })
+        ).toBeDisabled();
+      });
+      await userEvent.click(
+        mentioned.getByRole('button', { name: 'Cancel task' })
+      );
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      release();
+    });
+  });
+
   describe('keyboard operation', () => {
     it('reaches every action by tabbing, in the order they are shown', async () => {
       renderActions();

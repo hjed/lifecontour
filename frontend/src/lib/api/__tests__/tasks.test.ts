@@ -1044,6 +1044,45 @@ describe('Task API client', () => {
       await second;
     });
 
+    /**
+     * The detail read and the journal listing are fetched independently and can
+     * hold different values for the same task — one refetched a moment ago, the
+     * other still inside the five-minute `staleTime`.
+     *
+     * A rollback that captured one entry's value and wrote it into all of them
+     * would undo the *divergence* as well as the patch, replacing a fresher
+     * cached value with a staler one from whichever entry happened to be
+     * enumerated first. Each entry is restored to what **it** was showing.
+     */
+    it('restores each cached entry to its own previous value', async () => {
+      const listing = journalTasksResponse();
+      listing.data[0].attributes.status = TaskStatus.NOT_DONE;
+      queryClient.setQueryData(listKey, listing);
+      queryClient.setQueryData(
+        taskKeys.detail('1'),
+        taskReadResponse({ status: TaskStatus.DONE })
+      );
+
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await expect(
+        result.current.mutateAsync({
+          taskId: '1',
+          status: TaskStatus.CANCELLED,
+        })
+      ).rejects.toThrow();
+
+      await waitFor(() => {
+        expect(cachedListStatus('1')).toBe(TaskStatus.NOT_DONE);
+      });
+      expect(cachedDetailStatus()).toBe(TaskStatus.DONE);
+    });
+
     it('leaves a cached status alone when only the text changed', async () => {
       seedCache();
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));

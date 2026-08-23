@@ -251,9 +251,25 @@ listing's payload.
   successfully", which a text-only update still uses. Sonner's `Toaster` is
   already a polite live region, so a second `role="status"` node on the row
   would make a screen reader say the same thing twice.
+- **The in-flight guard is scoped to the task, not to the hook instance.**
+  `usePendingTaskWrites(taskId)` reads the mutation cache through
+  `useMutationState`, because a journal renders a task holding two roles **once
+  per group** — one commitment, two `JournalTaskActions`, two independent
+  mutations. A guard reading its own `isPending` locks only the copy that was
+  clicked; the optimistic patch then rerenders the twin offering the opposite
+  move, one click from racing the write already in flight. Any surface showing
+  that task locks with it, which is also what should happen when a retarget is
+  open elsewhere on the page.
+- **The rollback is per task *and* per cache entry.** Per task, because two rows
+  share a cache entry and restoring the whole entry would undo a row the user
+  had just ticked because an unrelated one failed. Per entry, because the detail
+  read and the journal listing are fetched independently and can legitimately
+  disagree — writing one entry's captured value into all of them would replace a
+  fresher cached value with a staler one. Both were got wrong once, in the same
+  six lines, in opposite directions: a rollback coarser than the thing it undoes.
 - Accessibility: real buttons, so keyboard reach is structural; each accessible
   name **contains** its visible label (WCAG 2.5.3 — "Done" inside "Mark done");
-  every action is disabled while any write from that row is in flight, with
+  every action is disabled while any write against that task is in flight, with
   `aria-busy` on the acting one; and the group is `role="group"`
   `aria-describedby` the row's task text, because every row's buttons are named
   the same and the text is what tells them apart.
