@@ -8,9 +8,15 @@ All schemas include contextual summaries to help AI understand the data.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
-from core_shared.models.journals import FitnessMergeMode, JournalType
+from core_shared.models.journals import (
+    AnchorLocation,
+    AnchorType,
+    FitnessMergeMode,
+    JournalType,
+    PitchType,
+)
 from pydantic import BaseModel, Field
 
 # Field description constants
@@ -26,28 +32,6 @@ TOTAL_ELEVATION_GAIN_DESC = "Total elevation gain in metres"
 # Every journal type name, for tool descriptions. Generated so a new type can
 # never be missing from the documented list.
 VALID_JOURNAL_TYPE_NAMES = ", ".join(journal_type.name for journal_type in JournalType)
-
-
-# Closed vocabularies, spelled out as Literal types so FastMCP publishes them as
-# JSON-schema ``enum`` lists (an agent sees the options before calling rather
-# than discovering them through validation failures). Each must match the
-# corresponding VALID_* list in core_shared; tests/unit/mcp/test_journal_enums.py
-# fails if they drift.
-AnchorType = Literal[
-    "chains",
-    "double bolt",
-    "single bolt",
-    "sling on tree",
-    "sling on log",
-    "sling on boulder",
-    "sling on bollard",
-    "artificial removable",
-]
-AnchorLocation = Literal["TR", "TL", "Centre"]
-PitchType = Literal["abseil", "jump", "down_climb"]
-CanyonType = Literal["vertical", "aquatic", "mixed"]
-ClimbingType = Literal["sport", "trad", "bouldering", "top_rope"]
-TemplateType = Literal["abseiling", "canyoning", "caving", "climbing"]
 
 
 class TemplatePitchInput(BaseModel):

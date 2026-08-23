@@ -37,6 +37,10 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.integrations.link_sources import (
+    contact_source_names,
+    resolve_contact_source,
+)
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.schemas import (
     AddContactRelationshipRequest,
@@ -154,12 +158,12 @@ def _convert_field_value(field_name: str, field_value: str) -> str | bool:
     return field_value
 
 
-# Integration sources that link to contacts in the canonical link store.
-VALID_CONTACT_EXTERNAL_SOURCES = frozenset({"google", "immich"})
-
-
 async def _build_contact_response(
-    contact: Contact, contact_service: ContactService, *, include_history: bool
+    contact_id: int,
+    contact: Contact,
+    contact_service: ContactService,
+    *,
+    include_history: bool,
 ) -> str:
     """Full contact payload (links, summary, optional history) for get_contact*."""
     from app.core.integrations.external_link_helpers import (
@@ -167,8 +171,6 @@ async def _build_contact_response(
     )
     from app.mcp.domains.journals.schemas import ExternalLinkSchema
 
-    contact_id = contact.id
-    assert contact_id is not None  # noqa: S101 — persisted contact
     external_references = await contact_service.get_external_references(contact_id)
 
     # Resolve the user's Immich server URL (no API-key decryption) so Immich
@@ -265,7 +267,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise ContactNotFoundError(contact_id)
 
         return await _build_contact_response(
-            contact, contact_service, include_history=include_history
+            contact_id, contact, contact_service, include_history=include_history
         )
 
     @mcp.tool
@@ -275,15 +277,16 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             str,
             Field(
                 description="Integration source the id belongs to. One of: "
-                + ", ".join(sorted(VALID_CONTACT_EXTERNAL_SOURCES))
+                + ", ".join(contact_source_names())
                 + ". Any other value is rejected."
             ),
         ],
         external_id: Annotated[
             str,
             Field(
-                description="The external system's identifier, e.g. a Google "
-                "People resource name ('people/c123') or an Immich person UUID."
+                description="The external system's identifier exactly as a contact's "
+                "external_links report it: a Google People resource name "
+                "('people/c123') or an Immich person UUID."
             ),
         ],
         include_history: Annotated[
@@ -304,10 +307,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Returns a "Not found" error payload when no contact is linked to that id.
         """
-        normalized_source = source.strip().lower()
-        if normalized_source not in VALID_CONTACT_EXTERNAL_SOURCES:
-            allowed = ", ".join(sorted(VALID_CONTACT_EXTERNAL_SOURCES))
-            raise ValueError(f"Invalid source '{source}'. Must be one of: {allowed}")
+        normalized_source = resolve_contact_source(source)
         normalized_id = external_id.strip()
         if not normalized_id:
             raise ValueError("external_id must not be empty")
@@ -324,7 +324,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 context={"source": normalized_source, "external_id": normalized_id},
             )
         return await _build_contact_response(
-            contact, contact_service, include_history=include_history
+            contact.id, contact, contact_service, include_history=include_history
         )
 
     @mcp.tool

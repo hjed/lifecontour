@@ -7,10 +7,9 @@ Each tool is designed to return AI-friendly, contextual information.
 
 import dataclasses
 import json
-from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
@@ -22,7 +21,9 @@ from core_shared.models.journals import (
     Calendar,
     CalendarInfo,
     CanyoningData,
+    CanyonType,
     ClimbingData,
+    ClimbingType,
     CrossCountrySkiingData,
     EventDateRange,
     FitnessData,
@@ -39,21 +40,10 @@ from core_shared.models.journals import (
     OutdoorActivityData,
     PlanData,
     TemplatePitch,
+    TemplateType,
     TravelData,
 )
-from core_shared.models.journals.constants import (
-    VALID_ANCHOR_LOCATIONS,
-    VALID_ANCHOR_TYPES,
-    VALID_CANYON_TYPES,
-    VALID_CLIMBING_TYPES,
-    VALID_MAINTENANCE_TYPES,
-    VALID_PITCH_TYPES,
-    VALID_RAPIDS_GRADES,
-    VALID_TEMPLATE_TYPES,
-    VALID_TRACK_GRADES,
-)
 from fastmcp import FastMCP
-from meilisearch.errors import MeilisearchError
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -67,6 +57,10 @@ from app.core.history.services.journal_history_service import JournalHistoryServ
 from app.core.integrations.external_link_helpers import (
     ExternalLinkInfo,
     build_journal_external_links,
+)
+from app.core.integrations.link_sources import (
+    journal_source_names,
+    resolve_journal_source,
 )
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
@@ -158,8 +152,20 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.journal.services.journal_search_service import (
+    SEARCH_SUGGESTIONS,
+    SEARCH_UNAVAILABLE_HINT,
+    WINDOW_SUGGESTIONS,
+    JournalSearchHit,
+    explain_empty_result,
+    search_journals_text,
+)
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
+from app.core.journal.services.journal_type_data_reader import (
+    read_journal_types_and_data,
+)
+from app.core.journal.services.journal_type_metadata import describe_journal_types
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
@@ -184,9 +190,7 @@ from app.mcp.domains.journals.schemas import (
     ActivityTrendPeriod,
     ActivityTrendsResponse,
     ActivityTypeStats,
-    CanyonType,
     CheckedOutGearMCPEntry,
-    ClimbingType,
     ContactRelationshipSummary,
     DailySummaryMCPResponse,
     EventDateRangeSchema,
@@ -215,7 +219,6 @@ from app.mcp.domains.journals.schemas import (
     SearchDiagnostics,
     TemplateDoneMCPEntry,
     TemplatePitchInput,
-    TemplateType,
     UpcomingOutdoorActivityMCPEntry,
     build_dashboard_summary,
 )
@@ -417,38 +420,9 @@ def _parse_activity_type_filter(activity_type: str | None) -> str | None:
     return normalized
 
 
-# Valid integration sources for journal filtering
-_VALID_INTEGRATION_SOURCES = {
-    "strava",
-    "google_calendar",
-    "snipeit",
-    "snipeit_maintenance",
-    "immich_album",
-}
-
-
 def _parse_integration_source_filter(value: str | None) -> str | None:
-    """Parse and validate an integration source filter.
-
-    Args:
-        value: Integration source string, or None.
-
-    Returns:
-        Normalised integration source string, or None.
-
-    Raises:
-        ValueError: If the value is not a recognised integration source.
-    """
-    if value is None:
-        return None
-
-    normalized = value.strip().lower()
-    if normalized not in _VALID_INTEGRATION_SOURCES:
-        allowed = ", ".join(sorted(_VALID_INTEGRATION_SOURCES))
-        raise ValueError(
-            f"Invalid integration_source '{value}'. Must be one of: {allowed}"
-        )
-    return normalized
+    """Normalise an integration source filter (None passes through)."""
+    return None if value is None else resolve_journal_source(value)
 
 
 def _parse_optional_datetime_filter(
@@ -515,7 +489,7 @@ async def _fetch_types_for_journal(
     journal_id: int, repos: _JournalToolRepositories
 ) -> tuple[list[str], dict[str, Any]]:
     """Fetch the concrete types and type-specific data for a journal."""
-    return await _fetch_journal_types_and_data(journal_id, repos)
+    return await read_journal_types_and_data(journal_id, repos)
 
 
 async def _fetch_parent_journal(
@@ -613,159 +587,6 @@ async def _fetch_journal_external_links(
         immich_album_links=immich_album_links,
         immich_server_url=immich_server_url,
     )
-
-
-async def _find_journal_id_by_external_id(
-    db_connection: AsyncConnection,
-    user_id: str,
-    integration_source: str,
-    external_id: str,
-) -> int | None:
-    """Resolve the user's journal linked to ``(integration_source, external_id)``.
-
-    Mirrors the per-source link stores used by
-    :func:`_fetch_journal_ids_by_integration_source`, keyed on the external id.
-    """
-    if integration_source == "strava":
-        result = await db_connection.execute(
-            text(
-                "SELECT m.internal_id AS journal_id "
-                "FROM sync_metadata m JOIN journals j ON j.id = m.internal_id "
-                "WHERE m.integration_source = 'strava' "
-                "AND m.internal_entity_type = 'journal' "
-                "AND m.external_id = :external_id AND j.user_id = :user_id "
-                "UNION "
-                "SELECT f.journal_id FROM journal_fitness_data f "
-                "JOIN journals j ON f.journal_id = j.id "
-                "WHERE f.strava_activity_id = :external_id AND j.user_id = :user_id "
-                "ORDER BY journal_id LIMIT 1"
-            ),
-            {"external_id": external_id, "user_id": user_id},
-        )
-    elif integration_source == "google_calendar":
-        result = await db_connection.execute(
-            text(
-                "SELECT l.journal_id FROM journal_external_event_links l "
-                "JOIN journals j ON l.journal_id = j.id "
-                "JOIN calendars c ON l.calendar_id = c.id "
-                "WHERE l.external_event_id = :external_id "
-                "AND j.user_id = :user_id AND c.google_calendar_id IS NOT NULL "
-                "ORDER BY l.journal_id LIMIT 1"
-            ),
-            {"external_id": external_id, "user_id": user_id},
-        )
-    elif integration_source in ("snipeit", "snipeit_maintenance", "snipeit_checkout"):
-        mapped_source = (
-            "snipeit_checkout"
-            if integration_source == "snipeit"
-            else integration_source
-        )
-        result = await db_connection.execute(
-            text(
-                "SELECT CAST(m.internal_uuid AS INTEGER) AS journal_id "
-                "FROM sync_metadata m "
-                "JOIN journals j ON j.id = CAST(m.internal_uuid AS INTEGER) "
-                "WHERE m.integration_source = :integration_source "
-                "AND m.external_id = :external_id AND j.user_id = :user_id "
-                "ORDER BY journal_id LIMIT 1"
-            ),
-            {
-                "integration_source": mapped_source,
-                "external_id": external_id,
-                "user_id": user_id,
-            },
-        )
-    elif integration_source == "immich_album":
-        result = await db_connection.execute(
-            text(
-                "SELECT m.internal_id AS journal_id FROM sync_metadata m "
-                "JOIN journals j ON j.id = m.internal_id "
-                "WHERE m.integration_source = 'immich_album' "
-                "AND m.external_id = :external_id AND j.user_id = :user_id "
-                "ORDER BY journal_id LIMIT 1"
-            ),
-            {"external_id": external_id, "user_id": user_id},
-        )
-    else:
-        return None
-    row = result.fetchone()
-    return int(row[0]) if row and row[0] is not None else None
-
-
-async def _fetch_journal_ids_by_integration_source(
-    db_connection: AsyncConnection,
-    user_id: str,
-    integration_source: str,
-) -> set[int]:
-    """Fetch journal IDs linked to a specific integration source.
-
-    Args:
-        db_connection: Database connection
-        user_id: The user ID to filter by
-        integration_source: 'strava', 'google_calendar', 'snipeit', 'snipeit_maintenance', 'snipeit_checkout', or 'immich_album'
-
-    Returns:
-        Set of journal IDs linked to the specified source.
-    """
-    if integration_source == "strava":
-        result = await db_connection.execute(
-            text(
-                "SELECT f.journal_id "
-                "FROM journal_fitness_data f "
-                "JOIN journals j ON f.journal_id = j.id "
-                "WHERE f.strava_activity_id IS NOT NULL "
-                "AND trim(f.strava_activity_id) != '' "
-                "AND j.user_id = :user_id"
-            ),
-            {"user_id": user_id},
-        )
-    elif integration_source == "google_calendar":
-        result = await db_connection.execute(
-            text(
-                "SELECT DISTINCT l.journal_id "
-                "FROM journal_external_event_links l "
-                "JOIN journals j ON l.journal_id = j.id "
-                "JOIN calendars c ON l.calendar_id = c.id "
-                "WHERE j.user_id = :user_id "
-                "AND l.external_event_id IS NOT NULL "
-                "AND trim(l.external_event_id) != '' "
-                "AND c.google_calendar_id IS NOT NULL"
-            ),
-            {"user_id": user_id},
-        )
-    elif integration_source in ("snipeit", "snipeit_maintenance", "snipeit_checkout"):
-        mapped_source = (
-            "snipeit_checkout"
-            if integration_source == "snipeit"
-            else integration_source
-        )
-        result = await db_connection.execute(
-            text(
-                "SELECT CAST(internal_uuid AS INTEGER) AS journal_id "
-                "FROM sync_metadata "
-                "WHERE integration_source = :integration_source "
-                "AND internal_uuid IS NOT NULL"
-            ),
-            {"integration_source": mapped_source},
-        )
-    elif integration_source == "immich_album":
-        # Immich albums track the journal via the integer internal_id (not the
-        # UUID column used by Snipe-IT), so join journals to scope by user.
-        result = await db_connection.execute(
-            text(
-                "SELECT m.internal_id AS journal_id "
-                "FROM sync_metadata m "
-                "JOIN journals j ON j.id = m.internal_id "
-                "WHERE m.integration_source = 'immich_album' "
-                "AND m.internal_id IS NOT NULL "
-                "AND j.user_id = :user_id"
-            ),
-            {"user_id": user_id},
-        )
-    else:
-        return set()
-
-    return {row[0] for row in result}
 
 
 async def _build_search_results(
@@ -1220,211 +1041,6 @@ async def _fetch_contact_relationships_with_names(
     return contacts
 
 
-def _build_calendar_data(calendar_info: Any) -> dict[str, Any]:
-    """Build calendar event data dictionary."""
-    return {
-        "calendar_id": str(calendar_info.calendar_id),
-        "start_time": calendar_info.start_time.isoformat()
-        if calendar_info.start_time
-        else None,
-        "end_time": calendar_info.end_time.isoformat()
-        if calendar_info.end_time
-        else None,
-        "is_all_day": calendar_info.is_all_day,
-        "location": calendar_info.location,
-        "description": calendar_info.description,
-        "timezone": calendar_info.timezone,
-        "sync_invitees": calendar_info.sync_invitees,
-        "private_description": calendar_info.private_description,
-        "event_state": calendar_info.event_state.value
-        if hasattr(calendar_info.event_state, "value")
-        else calendar_info.event_state,
-    }
-
-
-def _build_mood_data(mood_data: Any) -> dict[str, Any]:
-    """Build mood rating data dictionary."""
-    return {
-        "mood_value": mood_data.mood_value,
-        "mood_label": mood_data.mood_label,
-        "energy_level": mood_data.energy_level,
-    }
-
-
-def _build_plan_data(plan_data: Any) -> dict[str, Any]:
-    """Build plan data dictionary."""
-    return {
-        "documents": [
-            {
-                "title": doc.title,
-                "url": doc.url,
-                "description": doc.description,
-            }
-            for doc in plan_data.documents
-        ]
-        if plan_data.documents
-        else [],
-    }
-
-
-def _build_travel_data(travel_data: Any) -> dict[str, Any]:
-    """Build travel data dictionary."""
-    return {
-        "flights": [
-            {
-                "airline": flight.airline,
-                "flight_number": flight.flight_number,
-                "departure_airport": flight.departure_airport,
-                "arrival_airport": flight.arrival_airport,
-                "departure_time": flight.departure_time.isoformat()
-                if flight.departure_time
-                else None,
-                "arrival_time": flight.arrival_time.isoformat()
-                if flight.arrival_time
-                else None,
-                "booking_reference": flight.booking_reference,
-            }
-            for flight in travel_data.flights
-        ]
-        if travel_data.flights
-        else [],
-        "accommodations": [
-            {
-                "name": acc.name,
-                "address": acc.address,
-                "check_in_date": acc.check_in_date.isoformat()
-                if acc.check_in_date
-                else None,
-                "check_out_date": acc.check_out_date.isoformat()
-                if acc.check_out_date
-                else None,
-                "booking_reference": acc.booking_reference,
-            }
-            for acc in travel_data.accommodations
-        ]
-        if travel_data.accommodations
-        else [],
-        "transportation": [
-            {
-                "type": trans.type,
-                "details": trans.details,
-                "booking_reference": trans.booking_reference,
-            }
-            for trans in travel_data.transportation
-        ]
-        if travel_data.transportation
-        else [],
-    }
-
-
-def _build_photo_album_data(photo_album_data: dict[str, Any]) -> dict[str, Any]:
-    """Build photo album data dictionary from Immich album sync data.
-
-    ``photo_album_data`` comes from ``AlbumSyncReadRepository.find_by_journal_id``
-    and contains ``immich_album_id`` plus optional album display fields.
-    """
-    return dict(photo_album_data)
-
-
-def _build_fitness_data(fitness_data: Any) -> dict[str, Any]:
-    """Build fitness data dictionary."""
-    return {
-        "heart_rate_avg": fitness_data.heart_rate_avg,
-        "heart_rate_max": fitness_data.heart_rate_max,
-        "distance": fitness_data.distance,
-        "elevation_gain": fitness_data.elevation_gain,
-        "elevation_loss": fitness_data.elevation_loss,
-        "duration": fitness_data.duration,
-        "calories": fitness_data.calories,
-        "strava_activity_id": fitness_data.strava_activity_id,
-    }
-
-
-def _build_outdoor_activity_data(outdoor_activity_data: Any) -> dict[str, Any]:
-    """Build outdoor activity data dictionary."""
-    return {
-        "weather_conditions": outdoor_activity_data.weather_conditions,
-        "role": outdoor_activity_data.role,
-        "in_leadership_role": outdoor_activity_data.in_leadership_role,
-        "participant_notes": outdoor_activity_data.participant_notes,
-    }
-
-
-def _build_bushwalking_data(bushwalking_data: Any) -> dict[str, Any]:
-    """Build bushwalking data dictionary."""
-    return {
-        "track_grading": bushwalking_data.track_grading,
-    }
-
-
-def _build_jogging_data(jogging_data: Any) -> dict[str, Any]:
-    """Build jogging data dictionary."""
-    return {
-        "pace": jogging_data.pace,
-    }
-
-
-def _build_abseiling_data(abseiling_data: Any) -> dict[str, Any]:
-    """Build abseiling data dictionary."""
-    return {
-        "template_id": str(abseiling_data.template_id)
-        if abseiling_data.template_id
-        else None,
-        "number_of_abseils": abseiling_data.number_of_abseils,
-        "total_length": abseiling_data.total_length,
-        "number_of_setups": abseiling_data.number_of_setups,
-        "number_of_rescues": abseiling_data.number_of_rescues,
-    }
-
-
-def _build_caving_data(caving_data: Any) -> dict[str, Any]:
-    """Build caving data dictionary."""
-    return {
-        "is_vertical": caving_data.is_vertical,
-        "is_horizontal": caving_data.is_horizontal,
-    }
-
-
-def _build_canyoning_data(canyoning_data: Any) -> dict[str, Any]:
-    """Build canyoning data dictionary."""
-    return {
-        "french_grade": canyoning_data.french_grade,
-        "water_guage_name": canyoning_data.water_guage_name,
-        "water_guage_level": canyoning_data.water_guage_level,
-        "is_vertical": canyoning_data.is_vertical,
-        "is_night_canyon": canyoning_data.is_night_canyon,
-        "is_white_water": canyoning_data.is_white_water,
-    }
-
-
-def _build_climbing_data(climbing_data: Any) -> dict[str, Any]:
-    """Build climbing data dictionary."""
-    return {
-        "climbing_type": climbing_data.climbing_type,
-        "grade": climbing_data.grade,
-        "length": climbing_data.length,
-        "indoor": climbing_data.indoor,
-    }
-
-
-def _build_kayaking_data(kayaking_data: Any) -> dict[str, Any]:
-    """Build kayaking data dictionary."""
-    return {
-        "water_type": kayaking_data.water_type,
-        "is_white_water": kayaking_data.is_white_water,
-        "rapids_grade": kayaking_data.rapids_grade,
-    }
-
-
-def _build_cross_country_skiing_data(
-    cross_country_skiing_data: Any,
-) -> dict[str, Any]:
-    """Build cross-country skiing data dictionary."""
-    return {
-        "snow_conditions": cross_country_skiing_data.snow_conditions,
-    }
-
-
 _NOTE_IMPLIED_CONTEXT = (
     "NOTE was requested alongside other types; NOTE is implicit (a journal with "
     "no typed data) so it is not stored separately and will not appear in types."
@@ -1439,142 +1055,6 @@ def _note_implied_context(requested_types: list[str] | None) -> str:
     if JournalType.NOTE.name in names and len(names) > 1:
         return _NOTE_IMPLIED_CONTEXT
     return ""
-
-
-def _build_canoeing_data(canoeing_data: Any) -> dict[str, Any]:
-    """Build canoeing data dictionary."""
-    return {"water_type": canoeing_data.water_type}
-
-
-def _build_presence_only_data(_data: Any) -> dict[str, Any]:
-    """Types whose row records membership only (no editable fields)."""
-    return {}
-
-
-def _build_outdoor_planning_data(outdoor_planning_data: Any) -> dict[str, Any]:
-    """Build outdoor planning data dictionary."""
-    return {
-        "topics": outdoor_planning_data.topics,
-        "activity_types": list(outdoor_planning_data.activity_types or []),
-    }
-
-
-def _build_outdoor_training_data(outdoor_training_data: Any) -> dict[str, Any]:
-    """Build outdoor training data dictionary."""
-    return {"focus_areas": list(outdoor_training_data.focus_areas or [])}
-
-
-def _build_gear_maintenance_data(gear_maint_data: Any) -> dict[str, Any]:
-    """Build gear maintenance data dictionary."""
-    return {
-        "gear_item_id": str(gear_maint_data.gear_item_id)
-        if gear_maint_data.gear_item_id
-        else None,
-        "maintenance_type": gear_maint_data.maintenance_type,
-        "activity_types": gear_maint_data.activity_types,
-        "retirement_reason": gear_maint_data.retirement_reason,
-    }
-
-
-def _build_gear_usage_data(gear_usage_data: Any) -> dict[str, Any]:
-    """Build gear usage data dictionary."""
-    return {
-        "gear_item_id": str(gear_usage_data.gear_item_id)
-        if gear_usage_data.gear_item_id
-        else None,
-        "checkout_date": gear_usage_data.checkout_date.isoformat()
-        if gear_usage_data.checkout_date
-        else None,
-        "checkin_date": gear_usage_data.checkin_date.isoformat()
-        if gear_usage_data.checkin_date
-        else None,
-    }
-
-
-class _TypeDataReader(NamedTuple):
-    """How to detect one journal type and render its type_data for MCP."""
-
-    repo_attr: str
-    build: Callable[[Any], dict[str, Any]]
-
-
-# Every journal type except NOTE (which is the absence of typed rows), in the
-# order types are reported. A type missing here is written but never read back,
-# so tests/unit/journal/test_journal_type_coverage.py enforces completeness.
-TYPE_DATA_READERS: dict[JournalType, _TypeDataReader] = {
-    JournalType.EVENT: _TypeDataReader("calendar_info_repo", _build_calendar_data),
-    JournalType.MOOD_RATING: _TypeDataReader("mood_data_repo", _build_mood_data),
-    JournalType.PLAN: _TypeDataReader("plan_data_repo", _build_plan_data),
-    JournalType.TRAVEL: _TypeDataReader("travel_data_repo", _build_travel_data),
-    JournalType.PHOTO_ALBUM: _TypeDataReader(
-        "photo_album_data_repo", _build_photo_album_data
-    ),
-    JournalType.FITNESS: _TypeDataReader("fitness_data_repo", _build_fitness_data),
-    JournalType.OUTDOOR_ACTIVITY: _TypeDataReader(
-        "outdoor_activity_data_repo", _build_outdoor_activity_data
-    ),
-    JournalType.BUSHWALKING: _TypeDataReader(
-        "bushwalking_data_repo", _build_bushwalking_data
-    ),
-    JournalType.JOGGING: _TypeDataReader("jogging_data_repo", _build_jogging_data),
-    JournalType.ABSEILING_TRIP: _TypeDataReader(
-        "abseiling_data_repo", _build_abseiling_data
-    ),
-    JournalType.CAVING: _TypeDataReader("caving_data_repo", _build_caving_data),
-    JournalType.CANYONING: _TypeDataReader(
-        "canyoning_data_repo", _build_canyoning_data
-    ),
-    JournalType.CLIMBING: _TypeDataReader("climbing_data_repo", _build_climbing_data),
-    JournalType.KAYAKING: _TypeDataReader("kayaking_data_repo", _build_kayaking_data),
-    JournalType.CROSS_COUNTRY_SKIING: _TypeDataReader(
-        "cross_country_skiing_data_repo", _build_cross_country_skiing_data
-    ),
-    JournalType.CANOEING: _TypeDataReader("canoeing_data_repo", _build_canoeing_data),
-    JournalType.SNORKELLING: _TypeDataReader(
-        "snorkelling_data_repo", _build_presence_only_data
-    ),
-    JournalType.DIVING: _TypeDataReader("diving_data_repo", _build_presence_only_data),
-    JournalType.DOWNHILL_SKIING: _TypeDataReader(
-        "downhill_skiing_data_repo", _build_presence_only_data
-    ),
-    JournalType.OUTDOOR_PLANNING: _TypeDataReader(
-        "outdoor_planning_data_repo", _build_outdoor_planning_data
-    ),
-    JournalType.OUTDOOR_TRAINING: _TypeDataReader(
-        "outdoor_training_data_repo", _build_outdoor_training_data
-    ),
-    JournalType.GEAR_MAINTENANCE: _TypeDataReader(
-        "gear_maintenance_data_repo", _build_gear_maintenance_data
-    ),
-    JournalType.GEAR_USAGE: _TypeDataReader(
-        "gear_usage_data_repo", _build_gear_usage_data
-    ),
-}
-
-
-async def _fetch_journal_types_and_data(
-    journal_id: int, repos: _JournalToolRepositories
-) -> tuple[list[str], dict[str, Any]]:
-    """Fetch a journal's types and type-specific data via ``TYPE_DATA_READERS``.
-
-    Returns:
-        Tuple of (types list, type_data dict keyed by type value)
-    """
-    types: list[str] = []
-    type_data: dict[str, Any] = {}
-
-    for journal_type, reader in TYPE_DATA_READERS.items():
-        repo = getattr(repos, reader.repo_attr)
-        data = await repo.find_by_journal_id(journal_id)
-        if data:
-            types.append(journal_type.value)
-            type_data[journal_type.value] = reader.build(data)
-
-    # No typed row at all means the journal is a plain NOTE.
-    if not types:
-        types.append(JournalType.NOTE.value)
-
-    return types, type_data
 
 
 async def _create_type_specific_data(
@@ -2219,7 +1699,7 @@ async def _fetch_enrichment_data(
     list[str], dict[str, Any], list[ContactRelationshipSummary], list[JournalTag]
 ]:
     """Fetch all enrichment data for a journal (types, type_data, contacts, tags)."""
-    types, type_data = await _fetch_journal_types_and_data(journal_id, repos)
+    types, type_data = await read_journal_types_and_data(journal_id, repos)
 
     contacts = await _fetch_contact_relationships_with_names(
         journal_id, repos.contact_relationship_repo, repos.contact_repo
@@ -2256,219 +1736,10 @@ Args:
     mcp: The FastMCP server instance to register tools with
 """
 
+
 # -- Type metadata for the discovery tool --
 # Keyed by JournalType enum name (uppercase), these describe the type_data
 # fields each type accepts.  Keep this in sync with the _update_*_data helpers.
-_JOURNAL_TYPE_DESCRIPTIONS: dict[str, str] = {
-    "NOTE": "Simple text note using only base journal fields (no type_data needed)",
-    "EVENT": "Calendar event with time and location",
-    "MOOD_RATING": "Mood and energy level tracking",
-    "PLAN": "Event planning (no specific type_data fields)",
-    "TRAVEL": "Travel itinerary (no specific type_data fields)",
-    "PHOTO_ALBUM": "Photo album linked to Immich",
-    "FITNESS": "Base fitness activity with optional metrics",
-    "OUTDOOR_ACTIVITY": "Outdoor activity extending FITNESS",
-    "BUSHWALKING": "Bushwalking/hiking activity",
-    "JOGGING": "Jogging/running activity",
-    "ABSEILING_TRIP": "Abseiling/rappelling trip",
-    "CANYONING": "Canyoning trip (combines bushwalking + abseiling)",
-    "CLIMBING": "Climbing activity (includes abseiling pitches via dependency)",
-    "KAYAKING": "Kayaking activity (with optional white water tracking)",
-    "CROSS_COUNTRY_SKIING": "Cross-country skiing activity",
-    "CAVING": "Caving trip (includes abseiling pitches via dependency)",
-    "CANOEING": "Canoeing activity",
-    "SNORKELLING": "Snorkelling activity (no specific type_data fields)",
-    "DIVING": "Diving activity (no specific type_data fields)",
-    "DOWNHILL_SKIING": "Downhill skiing activity (no specific type_data fields)",
-    "OUTDOOR_PLANNING": "Outdoor planning meeting (an EVENT about upcoming activities)",
-    "OUTDOOR_TRAINING": "Outdoor skills training session",
-    "GEAR_MAINTENANCE": "Maintenance or retirement of a gear item",
-    "GEAR_USAGE": "Checkout/checkin of a gear item",
-}
-
-
-class _FieldSpec(NamedTuple):
-    """Discovery metadata for one type_data field (see list_journal_types)."""
-
-    type: str
-    description: str = ""
-    unit: str | None = None
-    required: bool = False
-    allowed_values: Sequence[str] | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        summary = self.type
-        if self.unit:
-            summary += f" in {self.unit}"
-        summary += " (required)" if self.required else " (optional)"
-        spec: dict[str, Any] = {
-            "type": self.type,
-            "unit": self.unit,
-            "required": self.required,
-            "description": self.description,
-            "summary": summary,
-        }
-        if self.allowed_values is not None:
-            spec["allowed_values"] = list(self.allowed_values)
-        return spec
-
-
-_PITCH_FIELDS_DESCRIPTION = (
-    "list of pitch objects. pitch_number (int) is required. Optional: height "
-    "(int, metres), anchor_location (see enums.anchor_locations), anchor_type "
-    "(see enums.anchor_types), did_rescue (bool), did_setup (bool), notes (str)"
-)
-
-# Keyed by JournalType name; every field the type_data for that type accepts.
-# Units are stated explicitly so an agent never has to infer them.
-_JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, _FieldSpec]] = {
-    "EVENT": {
-        "calendar_id": _FieldSpec("uuid", "UUID of the calendar", required=True),
-        "start_time": _FieldSpec("string", "Start time (HH:MM or ISO datetime)"),
-        "end_time": _FieldSpec("string", "End time (HH:MM or ISO datetime)"),
-        "is_all_day": _FieldSpec("bool", "All-day event (default false)"),
-        "location": _FieldSpec("string", "Free-text location"),
-        "timezone": _FieldSpec("string", "IANA timezone name"),
-        "event_state": _FieldSpec("string", "Event state (default 'confirmed')"),
-    },
-    "MOOD_RATING": {
-        "mood_value": _FieldSpec("int", "Mood on a 1-10 scale", unit="1-10 scale"),
-        "mood_label": _FieldSpec("string", "Free-text mood label"),
-        "energy_level": _FieldSpec("int", "Energy on a 1-10 scale", unit="1-10 scale"),
-    },
-    "PHOTO_ALBUM": {
-        "immich_album_id": _FieldSpec("uuid", "Immich album UUID"),
-    },
-    "FITNESS": {
-        "heart_rate_avg": _FieldSpec("int", "Average heart rate", unit="bpm"),
-        "heart_rate_max": _FieldSpec("int", "Maximum heart rate", unit="bpm"),
-        "distance": _FieldSpec(
-            "int",
-            "Distance in whole kilometres (fractions are truncated)",
-            unit="km",
-        ),
-        "elevation_gain": _FieldSpec("int", "Total ascent", unit="m"),
-        "elevation_loss": _FieldSpec("int", "Total descent", unit="m"),
-        "duration": _FieldSpec("int", "Elapsed time", unit="minutes"),
-        "calories": _FieldSpec("int", "Energy expended", unit="kcal"),
-        "strava_activity_id": _FieldSpec(
-            "string", "Linked Strava activity id (creates the Strava external link)"
-        ),
-    },
-    "OUTDOOR_ACTIVITY": {
-        "weather_conditions": _FieldSpec("string", "Weather during the activity"),
-        "role": _FieldSpec("string", "Your role on the trip"),
-        "in_leadership_role": _FieldSpec("bool", "Whether you led the trip"),
-        "participant_notes": _FieldSpec("string", "Notes about participants"),
-    },
-    "BUSHWALKING": {
-        "track_grading": _FieldSpec(
-            "string",
-            "Australian Walking Track Grading System grade",
-            allowed_values=VALID_TRACK_GRADES,
-        ),
-    },
-    "JOGGING": {
-        "pace": _FieldSpec("string", "Pace, e.g. '5:30/km'", unit="min/km"),
-    },
-    "ABSEILING_TRIP": {
-        "template_id": _FieldSpec(
-            "uuid",
-            "Activity template this abseiling-derived journal was created from "
-            "(preserved when pitches are edited)",
-        ),
-        "number_of_abseils": _FieldSpec("int", "Count of abseils"),
-        "total_length": _FieldSpec("int", "Total abseiled length", unit="m"),
-        "number_of_setups": _FieldSpec("int", "Anchors you set up"),
-        "number_of_rescues": _FieldSpec("int", "Rescues performed"),
-        "pitches": _FieldSpec("list", _PITCH_FIELDS_DESCRIPTION),
-    },
-    "CANYONING": {
-        "french_grade": _FieldSpec(
-            "string", "French canyon grade, e.g. 'v3a2IV**' (v1-7, a1-7, I-VI, *-***)"
-        ),
-        "water_guage_name": _FieldSpec("string", "Name of the water gauge used"),
-        "water_guage_level": _FieldSpec(
-            "int", "Gauge reading at the time of the trip", unit="gauge units"
-        ),
-        "is_vertical": _FieldSpec("bool", "Primarily vertical canyon"),
-        "is_night_canyon": _FieldSpec("bool", "Done at night"),
-        "is_white_water": _FieldSpec("bool", "Significant white water"),
-    },
-    "CLIMBING": {
-        "template_id": _FieldSpec("uuid", "Activity template reference"),
-        "climbing_type": _FieldSpec(
-            "string", "Climbing discipline", allowed_values=VALID_CLIMBING_TYPES
-        ),
-        "grade": _FieldSpec("int", "Ewbank (Australian) grade"),
-        "length": _FieldSpec("int", "Route length", unit="m"),
-        "indoor": _FieldSpec(
-            "bool", "Indoor climb (default false) — independent of climbing_type"
-        ),
-    },
-    "KAYAKING": {
-        "water_type": _FieldSpec("string", "Type of water body (river, lake, sea)"),
-        "is_white_water": _FieldSpec("bool", "White-water paddle"),
-        "rapids_grade": _FieldSpec(
-            "string",
-            "International Scale of River Difficulty",
-            allowed_values=VALID_RAPIDS_GRADES,
-        ),
-    },
-    "CROSS_COUNTRY_SKIING": {
-        "snow_conditions": _FieldSpec("string", "Snow conditions"),
-    },
-    "CAVING": {
-        "is_vertical": _FieldSpec("bool", "Vertical cave (SRT)"),
-        "is_horizontal": _FieldSpec("bool", "Horizontal cave"),
-    },
-    "CANOEING": {
-        "water_type": _FieldSpec("string", "Type of water body (river, lake, sea)"),
-    },
-    "OUTDOOR_PLANNING": {
-        "topics": _FieldSpec("string", "Meeting topics"),
-        "activity_types": _FieldSpec(
-            "list[string]", "Outdoor activity types the meeting relates to"
-        ),
-    },
-    "OUTDOOR_TRAINING": {
-        "focus_areas": _FieldSpec(
-            "list[string]", "Activity subtypes trained, or free text"
-        ),
-    },
-    "GEAR_MAINTENANCE": {
-        "gear_item_id": _FieldSpec("uuid", "Gear item", required=True),
-        "maintenance_type": _FieldSpec(
-            "string",
-            "Kind of maintenance",
-            required=True,
-            allowed_values=VALID_MAINTENANCE_TYPES,
-        ),
-        "activity_types": _FieldSpec("list[string]", "Related activity types"),
-        "retirement_reason": _FieldSpec("string", "Why the item was retired"),
-    },
-    "GEAR_USAGE": {
-        "gear_item_id": _FieldSpec("uuid", "Gear item", required=True),
-        "checkout_date": _FieldSpec("datetime", "ISO datetime checked out"),
-        "checkin_date": _FieldSpec("datetime", "ISO datetime checked in"),
-    },
-}
-
-# Closed vocabularies surfaced by list_journal_types so an agent can discover
-# valid values up front instead of through validation failures.
-_JOURNAL_ENUMS: dict[str, Sequence[str]] = {
-    "anchor_types": VALID_ANCHOR_TYPES,
-    "anchor_locations": VALID_ANCHOR_LOCATIONS,
-    "pitch_types": VALID_PITCH_TYPES,
-    "canyon_types": VALID_CANYON_TYPES,
-    "climbing_types": VALID_CLIMBING_TYPES,
-    "template_types": VALID_TEMPLATE_TYPES,
-    "track_grades": VALID_TRACK_GRADES,
-    "rapids_grades": VALID_RAPIDS_GRADES,
-    "maintenance_types": VALID_MAINTENANCE_TYPES,
-}
-
-
 @mcp_unified_error_handler("list_journal_types", "journal")
 async def list_journal_types() -> str:
     """
@@ -2482,62 +1753,7 @@ async def list_journal_types() -> str:
     Returns:
         JSON with all available journal types and their schemas
     """
-    from core_shared.models.journals.attendee_status import AttendeeStatus
-    from core_shared.models.journals.contact_event_role import ContactEventRole
-
-    types_info: list[dict[str, Any]] = []
-
-    for jt in JournalType:
-        type_name = jt.name
-        deps = JournalType.get_dependencies(jt)
-        dep_names = [d.name for d in deps]
-
-        entry: dict[str, Any] = {
-            "name": type_name,
-            "description": _JOURNAL_TYPE_DESCRIPTIONS.get(type_name, ""),
-            "dependencies": dep_names,
-        }
-        fields = _JOURNAL_TYPE_DATA_FIELDS.get(type_name)
-        entry["type_data_fields"] = (
-            {name: spec.as_dict() for name, spec in fields.items()} if fields else None
-        )
-
-        types_info.append(entry)
-
-    # Also include contact_relationship enum info
-    contact_enums = {
-        "relationship_types": [t.name for t in JournalContactRelationshipType],
-        "attendee_statuses": [s.name for s in AttendeeStatus],
-        "contact_event_roles": [r.name for r in ContactEventRole],
-    }
-
-    result = {
-        "journal_types": types_info,
-        "contact_relationship_enums": contact_enums,
-        "enums": {name: list(values) for name, values in _JOURNAL_ENUMS.items()},
-        "units": {
-            "distance": "km (whole kilometres)",
-            "elevation_gain": "m",
-            "elevation_loss": "m",
-            "duration": "minutes",
-            "total_length": "m",
-            "length": "m",
-            "height": "m",
-            "heart_rate_avg": "bpm",
-            "heart_rate_max": "bpm",
-            "calories": "kcal",
-        },
-        "usage_hint": (
-            "Pass type names in the 'types' field of create/update journal_data. "
-            "Dependencies are added automatically; NOTE is implicit and ignored "
-            "when combined with other types. Pass type-specific data in the "
-            "'type_data' field keyed by type name. Each field lists its type, "
-            "unit, whether it is required, and allowed_values where the "
-            "vocabulary is closed; 'enums' repeats every closed vocabulary."
-        ),
-    }
-
-    return json.dumps(result, indent=2)
+    return json.dumps(describe_journal_types(), indent=2)
 
 
 @mcp_unified_error_handler("create_journal_entry", "journal")
@@ -2863,7 +2079,7 @@ async def _build_journal_response(
         children = await journal_repo.get_children(journal_id)
 
     # Fetch types and type-specific data
-    types, type_data = await _fetch_journal_types_and_data(journal_id, repos)
+    types, type_data = await read_journal_types_and_data(journal_id, repos)
 
     # Fetch contact relationships and contact details
     contacts = await _fetch_contact_relationships_with_names(
@@ -2955,16 +2171,18 @@ async def get_journal_by_external_id(
         str,
         Field(
             description="Integration source the id belongs to. One of: "
-            + ", ".join(sorted(_VALID_INTEGRATION_SOURCES))
+            + ", ".join(journal_source_names())
             + ". Any other value is rejected."
         ),
     ],
     external_id: Annotated[
         str,
         Field(
-            description="The external system's identifier, e.g. a Strava activity "
-            "id ('16152597201'), a Google Calendar event id, an Immich album "
-            "UUID, or a Snipe-IT maintenance/checkout id."
+            description="The external system's identifier exactly as a journal's "
+            "external_links report it: a Strava activity id ('16152597201'), a "
+            "Google Calendar event id, an Immich album UUID, a Snipe-IT "
+            "maintenance id, or (source 'snipeit') the Snipe-IT asset id of the "
+            "gear checked out on the journal."
         ),
     ],
     include_children: Annotated[
@@ -2985,15 +2203,14 @@ async def get_journal_by_external_id(
 
     Returns a "Not found" error payload when no journal is linked to that id.
     """
-    source_filter = _parse_integration_source_filter(source)
-    assert source_filter is not None  # noqa: S101 — `source` is required
+    source_filter = resolve_journal_source(source)
     normalized_id = external_id.strip()
     if not normalized_id:
         raise ValueError("external_id must not be empty")
 
     user_id = await get_current_user_id()
-    journal_id = await _find_journal_id_by_external_id(
-        db_connection, user_id, source_filter, normalized_id
+    journal_id = await SqlJournalRepository(db_connection).find_id_by_external_id(
+        user_id, source_filter, normalized_id
     )
     if journal_id is None:
         return MCPResponseBuilder.error_response(
@@ -3120,37 +2337,17 @@ async def get_journal_hierarchy(
     return MCPResponseBuilder.success_response(response)
 
 
-_SEARCH_UNAVAILABLE_HINT = (
-    "The search backend (MeiliSearch) could not be reached, so this is NOT an "
-    "empty result. Retry shortly, or use browse_journals_by_date_window / "
-    "search_activities, which are database-backed."
-)
-
-
-def _search_hit_to_result(hit: dict[str, Any]) -> JournalSearchResult:
-    """Render one MeiliSearch journal hit as an MCP search result."""
-    start = hit.get("event_date_range_start")
-    end = hit.get("event_date_range_end")
-    now = datetime.now(UTC)
-    content = hit.get("content") or ""
-    formatted = hit.get("_formatted") or {}
-    highlighted = {
-        key: value
-        for key in ("title", "content", "location")
-        if isinstance(value := formatted.get(key), str) and "<mark>" in value
-    }
+def _search_hit_to_result(hit: JournalSearchHit) -> JournalSearchResult:
+    """Render a search hit as the MCP search result schema."""
     return JournalSearchResult(
-        id=int(hit["id"]),
-        title=hit.get("title") or "",
-        content_excerpt=content[:200] + "..." if len(content) > 200 else content,
-        event_date_range=EventDateRangeSchema(
-            start=datetime.fromisoformat(start) if start else now,
-            end=datetime.fromisoformat(end) if end else now,
-        ),
-        types=[str(t).lower() for t in hit.get("types", [])],
+        id=hit.id,
+        title=hit.title,
+        content_excerpt=hit.content_excerpt,
+        event_date_range=EventDateRangeSchema(start=hit.start, end=hit.end),
+        types=hit.types,
         tags=[],
-        highlighted=highlighted,
-        summary=f"Journal: {hit.get('title') or ''}",
+        highlighted=hit.highlighted,
+        summary=f"Journal: {hit.title}",
     )
 
 
@@ -3163,29 +2360,16 @@ def _meili_search_journals(
     type_filters: list[str] | None = None,
     journal_ids: set[int] | None = None,
 ) -> tuple[list[JournalSearchResult], int, int]:
-    """Run a journal full-text search through MeiliSearch (REST parity).
-
-    Returns ``(results, total_hits, processing_time_ms)``. A MeiliSearch
-    failure is raised as :class:`SearchServiceUnavailableError` so the caller
-    reports it loudly rather than as an empty result.
-    """
-    filters: dict[str, Any] = {"user_id": user_id}
-    if type_filters:
-        filters["types"] = [t.upper() for t in type_filters]
-    if journal_ids is not None:
-        filters["id"] = sorted(journal_ids)
-    try:
-        raw = search_service.search_journals(
-            query=query, filters=filters, limit=limit, offset=0
-        )
-    except MeilisearchError as exc:
-        raise SearchServiceUnavailableError("MeiliSearch", str(exc)) from exc
-    results = [_search_hit_to_result(hit) for hit in raw.get("hits", [])]
-    return (
-        results,
-        int(raw.get("estimated_total_hits", len(results))),
-        int(raw.get("processing_time_ms", 0)),
+    """Full-text search returning MCP result schemas."""
+    hits, total, ms = search_journals_text(
+        search_service,
+        query=query,
+        user_id=user_id,
+        limit=limit,
+        type_filters=type_filters,
+        journal_ids=journal_ids,
     )
+    return [_search_hit_to_result(hit) for hit in hits], total, ms
 
 
 async def _zero_result_diagnostics(
@@ -3198,37 +2382,17 @@ async def _zero_result_diagnostics(
     journals_linked_to_source: int | None = None,
     suggestions: list[str],
 ) -> SearchDiagnostics:
-    """Explain an empty result so the agent can tell absence from a bad query."""
-    total = await repos.journal_repo.count_all(user_id=user_id)
-    if source_filter is not None and journals_linked_to_source is None:
-        journals_linked_to_source = len(
-            await _fetch_journal_ids_by_integration_source(
-                repos.journal_repo.conn, user_id, source_filter
-            )
-        )
-    return SearchDiagnostics(
+    """MCP schema for :func:`explain_empty_result`."""
+    explained = await explain_empty_result(
+        repos.journal_repo,
+        user_id,
         search_backend=search_backend,
-        filters={k: v for k, v in filters.items() if v not in (None, "", [])},
-        journals_for_user_total=total,
+        filters=filters,
+        source_filter=source_filter,
         journals_linked_to_source=journals_linked_to_source,
         suggestions=suggestions,
     )
-
-
-_SEARCH_SUGGESTIONS = [
-    "Try fewer or different words — every word must match somewhere in the "
-    "title, content or location (typos are tolerated).",
-    "If you know roughly when it happened, use browse_journals_by_date_window.",
-    "For activities, search_activities filters by activity type and date.",
-    "Drop the types / integration_source filter to see whether it excluded "
-    "the journal.",
-]
-
-_WINDOW_SUGGESTIONS = [
-    "Widen the window (days_back / days_forward) or move anchor_date.",
-    "Dates are matched on the journal's event date range, in UTC.",
-    "Use search_journals for a text search without a date restriction.",
-]
+    return SearchDiagnostics(**dataclasses.asdict(explained))
 
 
 @mcp_unified_error_handler("search_journals", "journal")
@@ -3301,8 +2465,8 @@ async def search_journals(
     # the source first, then intersect with other filters.
     source_journal_ids: set[int] | None = None
     if source_filter is not None:
-        source_journal_ids = await _fetch_journal_ids_by_integration_source(
-            db_connection, user_id, source_filter
+        source_journal_ids = await repos.journal_repo.find_ids_by_integration_source(
+            user_id, source_filter
         )
         if not source_journal_ids:
             # No journals match the integration source — return empty, and say
@@ -3323,7 +2487,7 @@ async def search_journals(
                         f"No journal is linked to {source_filter}. Check "
                         "list_integrations, or trigger_sync if the integration "
                         "is connected but has not imported yet.",
-                        *_SEARCH_SUGGESTIONS[:2],
+                        *SEARCH_SUGGESTIONS[:2],
                     ],
                 ),
             )
@@ -3345,7 +2509,7 @@ async def search_journals(
             return MCPResponseBuilder.error_response(
                 error_type="Search unavailable",
                 message=exc.message,
-                context={"query": query, "hint": _SEARCH_UNAVAILABLE_HINT},
+                context={"query": query, "hint": SEARCH_UNAVAILABLE_HINT},
             )
         response = JournalSearchResponse(
             results=results,
@@ -3366,7 +2530,7 @@ async def search_journals(
                 journals_linked_to_source=(
                     len(source_journal_ids) if source_journal_ids else None
                 ),
-                suggestions=_SEARCH_SUGGESTIONS,
+                suggestions=SEARCH_SUGGESTIONS,
             )
             if total_hits == 0
             else None,
@@ -3428,7 +2592,7 @@ async def search_journals(
             journals_linked_to_source=(
                 len(source_journal_ids) if source_journal_ids else None
             ),
-            suggestions=_SEARCH_SUGGESTIONS[1:],
+            suggestions=SEARCH_SUGGESTIONS[1:],
         )
         if total_hits == 0
         else None,
@@ -4347,7 +3511,7 @@ async def merge_journals(
     )
 
     # Fetch enriched target
-    types, type_data = await _fetch_journal_types_and_data(target_journal_id, repos)
+    types, type_data = await read_journal_types_and_data(target_journal_id, repos)
 
     contacts = await _fetch_contact_relationships_with_names(
         target_journal_id,
@@ -4450,7 +3614,7 @@ async def get_merge_candidates(
         candidate_end = row[4]
 
         # Fetch types and tags for each candidate
-        c_types, _ = await _fetch_journal_types_and_data(candidate_id, repos)
+        c_types, _ = await read_journal_types_and_data(candidate_id, repos)
         c_tags = await repos.tag_repo.get_tags_for_journal(candidate_id)
         tag_names = [t.name for t in c_tags]
 
@@ -4635,7 +3799,7 @@ async def browse_journals_by_date_window(
             return MCPResponseBuilder.error_response(
                 error_type="Search unavailable",
                 message=exc.message,
-                context={"search": search, "hint": _SEARCH_UNAVAILABLE_HINT},
+                context={"search": search, "hint": SEARCH_UNAVAILABLE_HINT},
             )
         total_count = len(matched)
         results = matched[offset : offset + limit]
@@ -4675,9 +3839,9 @@ async def browse_journals_by_date_window(
                 "search": search,
             },
             suggestions=(
-                [*_WINDOW_SUGGESTIONS, _SEARCH_SUGGESTIONS[0]]
+                [*WINDOW_SUGGESTIONS, SEARCH_SUGGESTIONS[0]]
                 if search
-                else _WINDOW_SUGGESTIONS
+                else WINDOW_SUGGESTIONS
             ),
         )
         if total_count == 0
@@ -5151,7 +4315,8 @@ async def create_template(
     pitch_entities: list[TemplatePitch] = []
     if pitches:
         pitch_entities.extend(
-            TemplatePitch(template_id=template_id, **p.model_dump()) for p in pitches
+            TemplatePitch(template_id=template_id, **p.model_dump(mode="json"))
+            for p in pitches
         )
 
     template = ActivityTemplate(
@@ -5365,7 +4530,7 @@ async def update_template(
         if pitches is not None:
             pitch_entities: list[TemplatePitch] = []
             pitch_entities.extend(
-                TemplatePitch(template_id=str(template.id), **p.model_dump())
+                TemplatePitch(template_id=str(template.id), **p.model_dump(mode="json"))
                 for p in pitches
             )
             template.pitches = pitch_entities

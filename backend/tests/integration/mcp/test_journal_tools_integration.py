@@ -35,13 +35,15 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_type_data_reader import (
+    read_journal_types_and_data as _fetch_journal_types_and_data,
+)
 from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import (
     _create_journal_tool_repositories,
-    _fetch_journal_types_and_data,
     register_journal_tools,
 )
 from tests.integration.mcp.http_helpers import (

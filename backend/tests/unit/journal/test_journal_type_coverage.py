@@ -20,6 +20,8 @@ from app.core.journal.adapters.sql.logbook_export_repository import (
     SqlLogbookExportRepository,
 )
 from app.core.journal.services import journal_type_data_helpers as helpers
+from app.core.journal.services import journal_type_data_reader as type_reader
+from app.core.journal.services import journal_type_metadata as type_metadata
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.reindex_service import ReindexService
@@ -55,14 +57,14 @@ def test_repository_get_types_sql_names_every_table() -> None:
 
 def test_mcp_read_path_reads_every_type() -> None:
     """Every type except NOTE must be readable by the MCP type_data reader."""
-    assert set(mcp_tools.TYPE_DATA_READERS) == set(JournalType) - {JournalType.NOTE}
+    assert set(type_reader.TYPE_DATA_READERS) == set(JournalType) - {JournalType.NOTE}
 
 
 def test_mcp_repositories_expose_every_reader_repo() -> None:
     repo_fields = {
         f.name for f in mcp_tools._JournalToolRepositories.__dataclass_fields__.values()
     }
-    for journal_type, reader in mcp_tools.TYPE_DATA_READERS.items():
+    for journal_type, reader in type_reader.TYPE_DATA_READERS.items():
         assert reader.repo_attr in repo_fields, (
             f"{journal_type.value}: reader repo '{reader.repo_attr}' is not on "
             "_JournalToolRepositories"
@@ -70,8 +72,8 @@ def test_mcp_repositories_expose_every_reader_repo() -> None:
 
 
 def test_mcp_discovery_describes_every_type() -> None:
-    assert set(mcp_tools._JOURNAL_TYPE_DESCRIPTIONS) == {t.name for t in JournalType}
-    for name, description in mcp_tools._JOURNAL_TYPE_DESCRIPTIONS.items():
+    assert set(type_metadata.JOURNAL_TYPE_DESCRIPTIONS) == {t.name for t in JournalType}
+    for name, description in type_metadata.JOURNAL_TYPE_DESCRIPTIONS.items():
         assert description.strip(), f"{name} has an empty description"
 
 

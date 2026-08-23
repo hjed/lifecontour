@@ -13,6 +13,8 @@ import base64
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.integrations.link_sources import CONTACT_LINK_SOURCES
+
 
 @dataclass(frozen=True)
 class ExternalLinkInfo:
@@ -320,7 +322,7 @@ def build_contact_external_links(
         if system == "google":
             links.append(
                 ExternalLinkInfo(
-                    source="google_contacts",
+                    source=CONTACT_LINK_SOURCES["google"].displayed_as,
                     url=build_google_contacts_url(entity_id),
                     external_id=entity_id,
                     unique_key=entity_id,
@@ -339,7 +341,7 @@ def build_contact_external_links(
         elif system == "immich" and entity_type == "person":
             links.append(
                 ExternalLinkInfo(
-                    source="immich",
+                    source=CONTACT_LINK_SOURCES["immich"].displayed_as,
                     url=build_immich_person_url(immich_server_url, entity_id),
                     external_id=entity_id,
                     unique_key=entity_id,

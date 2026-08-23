@@ -115,6 +115,72 @@ class TestGetJournalByExternalId:
         assert "photo_album" in payload["types"]
 
     @pytest.mark.asyncio
+    async def test_snipeit_asset_id_from_external_links_resolves_gear_usage(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        """`source='snipeit'` takes the asset id the journal's own links expose."""
+        gear_id = str(uuid4())
+        await clean_database.execute(
+            text(
+                "INSERT INTO gear_items (id, user_id, name) VALUES (:id, :user_id, 'Rope')"
+            ),
+            {"id": gear_id, "user_id": USER_ID},
+        )
+        await _link_sync_metadata(
+            clean_database,
+            source="snipeit",
+            external_id="42",
+            internal_uuid=gear_id,
+            entity_type="gear_item",
+        )
+        journal_id = await _insert_journal(clean_database, "Rope checkout")
+        await clean_database.execute(
+            text(
+                "INSERT INTO journal_gear_usage_data (journal_id, gear_item_id) "
+                "VALUES (:journal_id, :gear_item_id)"
+            ),
+            {"journal_id": journal_id, "gear_item_id": gear_id},
+        )
+        await _link_sync_metadata(
+            clean_database,
+            source="snipeit_checkout",
+            external_id=f"snipeit_checkout:42:{journal_id}",
+            internal_uuid=str(journal_id),
+        )
+        other_journal = await _insert_journal(
+            clean_database, "Theirs", user_id="someone"
+        )
+        await _link_sync_metadata(
+            clean_database,
+            source="snipeit_checkout",
+            external_id=f"snipeit_checkout:42:{other_journal}",
+            internal_uuid=str(other_journal),
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client,
+                session_id,
+                "get_journal_by_external_id",
+                {"source": "snipeit", "external_id": "42"},
+            )
+            listing = await call_mcp_tool(
+                client, session_id, "search_journals", {"integration_source": "snipeit"}
+            )
+            empty = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"integration_source": "snipeit", "types": "mood_rating"},
+            )
+
+        assert payload["id"] == journal_id
+        # The other user's checkout is neither listed nor counted.
+        assert [r["id"] for r in listing["results"]] == [journal_id]
+        assert empty["diagnostics"]["journals_linked_to_source"] == 1
+
+    @pytest.mark.asyncio
     async def test_another_users_journal_is_not_found(
         self, authenticated_lifespan_client, clean_database: AsyncConnection
     ) -> None:
@@ -195,6 +261,44 @@ class TestGetContactByExternalId:
         assert payload["external_links"][0]["external_id"] == "people/c123"
 
     @pytest.mark.asyncio
+    async def test_source_name_from_external_links_is_accepted(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        """The `source` a contact's own external_links report resolves too."""
+        result = await clean_database.execute(
+            text(
+                "INSERT INTO contacts (first_name, last_name, is_favourite) "
+                "VALUES ('Jane', 'Doe', false) RETURNING id"
+            )
+        )
+        row = result.fetchone()
+        assert row is not None
+        contact_id = int(row[0])
+        await _link_sync_metadata(
+            clean_database,
+            source="google",
+            external_id="people/c456",
+            internal_id=contact_id,
+            entity_type="contact",
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            shown = await call_mcp_tool(
+                client, session_id, "get_contact", {"contact_id": contact_id}
+            )
+            link = shown["external_links"][0]
+            payload = await call_mcp_tool(
+                client,
+                session_id,
+                "get_contact_by_external_id",
+                {"source": link["source"], "external_id": link["external_id"]},
+            )
+
+        assert link["source"] == "google_contacts"
+        assert payload["id"] == str(contact_id)
+
+    @pytest.mark.asyncio
     async def test_unknown_id_is_not_found(self, authenticated_lifespan_client) -> None:
         async with authenticated_lifespan_client() as client:
             session_id = await initialize_mcp_session(client)
@@ -223,4 +327,4 @@ class TestGetContactByExternalId:
 
         assert payload["error"] == "Validation error"
         assert "Invalid source 'strava'" in payload["message"]
-        assert "google, immich" in payload["message"]
+        assert "google, google_contacts, immich" in payload["message"]

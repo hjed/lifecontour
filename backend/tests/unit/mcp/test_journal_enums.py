@@ -1,9 +1,17 @@
 """Closed vocabularies are published through FastMCP and list_journal_types."""
 
 import json
-from typing import Any, get_args
+from typing import Any
 
 import pytest
+from core_shared.models.journals import (
+    AnchorLocation,
+    AnchorType,
+    CanyonType,
+    ClimbingType,
+    PitchType,
+    TemplateType,
+)
 from core_shared.models.journals.constants import (
     VALID_ANCHOR_LOCATIONS,
     VALID_ANCHOR_TYPES,
@@ -13,24 +21,24 @@ from core_shared.models.journals.constants import (
     VALID_TEMPLATE_TYPES,
 )
 
-from app.mcp.domains.journals import schemas
 from app.mcp.domains.journals.tools import list_journal_types
 from app.mcp.server import create_mcp_server
 
 
 @pytest.mark.parametrize(
-    ("literal", "valid"),
+    ("enum", "valid"),
     [
-        (schemas.AnchorType, VALID_ANCHOR_TYPES),
-        (schemas.AnchorLocation, VALID_ANCHOR_LOCATIONS),
-        (schemas.PitchType, VALID_PITCH_TYPES),
-        (schemas.CanyonType, VALID_CANYON_TYPES),
-        (schemas.ClimbingType, VALID_CLIMBING_TYPES),
-        (schemas.TemplateType, VALID_TEMPLATE_TYPES),
+        (AnchorType, VALID_ANCHOR_TYPES),
+        (AnchorLocation, VALID_ANCHOR_LOCATIONS),
+        (PitchType, VALID_PITCH_TYPES),
+        (CanyonType, VALID_CANYON_TYPES),
+        (ClimbingType, VALID_CLIMBING_TYPES),
+        (TemplateType, VALID_TEMPLATE_TYPES),
     ],
 )
-def test_schema_literals_match_domain_constants(literal, valid) -> None:
-    assert list(get_args(literal)) == list(valid)
+def test_valid_lists_are_derived_from_the_enums(enum, valid) -> None:
+    """One definition: the VALID_* lists are derived from the core_shared enums."""
+    assert [member.value for member in enum] == list(valid)
 
 
 @pytest.mark.asyncio

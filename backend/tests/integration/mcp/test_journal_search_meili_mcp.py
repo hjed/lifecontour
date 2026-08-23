@@ -156,6 +156,24 @@ class TestSearchJournalsViaMeili:
         assert payload["total_count"] == 2
 
     @pytest.mark.asyncio
+    async def test_in_window_search_with_empty_window_is_empty_not_an_error(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client,
+                session_id,
+                "browse_journals_by_date_window",
+                {"anchor_date": "2024-01-01", "search": "Zion"},
+            )
+
+        assert "error" not in payload, payload
+        assert payload["results"] == []
+        assert payload["total_count"] == 0
+        assert payload["diagnostics"]["journals_for_user_total"] == 3
+
+    @pytest.mark.asyncio
     async def test_meilisearch_failure_is_an_explicit_error_not_empty(
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:

@@ -12,6 +12,7 @@ from core_shared.models.journals import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.link_sources import JOURNAL_LINK_SOURCES
 from app.core.journal.models.repositories import JournalRepository
 
 # The type-data table behind every table-backed journal type. NOTE is the
@@ -61,6 +62,30 @@ def _type_alias(journal_type: JournalType) -> str:
 # sync_metadata row with integration_source='immich_album' (set by Immich album
 # sync), rather than a row in a dedicated type-data table.
 _IMMICH_ALBUM_SOURCE = "immich_album"
+
+
+def _journal_link_sql(integration_source: str, *, by_external_id: bool) -> str | None:
+    """UNION of every store for ``integration_source``, user-scoped.
+
+    Each branch yields ``journal_id``; with ``by_external_id`` it is further
+    restricted to rows whose exposed external id equals ``:external_id``.
+    """
+    source = JOURNAL_LINK_SOURCES.get(integration_source)
+    if source is None:
+        return None
+    branches = []
+    for store in source.stores:
+        conditions = [store.where_sql] if store.where_sql else []
+        conditions.append("j.user_id = :user_id")
+        if by_external_id:
+            conditions.append(f"{store.external_id_sql} = :external_id")
+        branches.append(
+            f"SELECT {store.journal_id_sql} AS journal_id FROM {store.from_sql} "
+            f"WHERE {' AND '.join(conditions)}"
+        )
+    return " UNION ".join(branches)
+
+
 _PHOTO_ALBUM_LEFT_JOIN = (
     "LEFT JOIN sync_metadata sm_pa "
     "ON sm_pa.internal_id = j.id "
@@ -936,6 +961,38 @@ class SqlJournalRepository(JournalRepository):
                 }
             )
         return links
+
+    async def find_ids_by_integration_source(
+        self, user_id: str, integration_source: str
+    ) -> set[int]:
+        """Ids of the user's journals linked to ``integration_source``.
+
+        Built from :data:`JOURNAL_LINK_SOURCES`; every store is scoped to
+        ``user_id`` so a count of the result never leaks another user's links.
+        """
+        sql = _journal_link_sql(integration_source, by_external_id=False)
+        if sql is None:
+            return set()
+        result = await self.conn.execute(text(sql), {"user_id": user_id})
+        return {int(row[0]) for row in result}
+
+    async def find_id_by_external_id(
+        self, user_id: str, integration_source: str, external_id: str
+    ) -> int | None:
+        """The user's journal linked to ``(integration_source, external_id)``.
+
+        The id is matched as the journal's external links expose it (see the
+        store definitions in :data:`JOURNAL_LINK_SOURCES`).
+        """
+        sql = _journal_link_sql(integration_source, by_external_id=True)
+        if sql is None:
+            return None
+        result = await self.conn.execute(
+            text(f"{sql} ORDER BY journal_id LIMIT 1"),
+            {"user_id": user_id, "external_id": external_id},
+        )
+        row = result.fetchone()
+        return int(row[0]) if row and row[0] is not None else None
 
     async def get_snipeit_links(
         self, journal_id: int, user_id: str
