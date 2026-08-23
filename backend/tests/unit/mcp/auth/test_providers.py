@@ -5,6 +5,9 @@ Tests that create_mcp_auth_provider() returns the correct provider
 based on configured OAuth settings.
 """
 
+import base64
+import json
+import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -501,3 +504,95 @@ class TestGenericOAuthEndToEndConstruction:
         assert isinstance(verifier, JWTVerifier)
         assert verifier.algorithm == "ES256"
         assert verifier.audience == "generic-id"
+
+
+def _jwt(**claims: Any) -> str:
+    """An unsigned JWT whose payload decodes to ``claims``."""
+
+    def segment(data: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
+
+    return f"{segment({'alg': 'RS256'})}.{segment(claims)}.signature"
+
+
+def _token_set(id_token: str | None, access_token_expires_in: float) -> MagicMock:
+    """An upstream token set as FastMCP stores it after an exchange or refresh."""
+    token_set = MagicMock()
+    token_set.raw_token_data = {} if id_token is None else {"id_token": id_token}
+    token_set.access_token = "opaque-upstream-token"
+    token_set.expires_at = time.time() + access_token_expires_in
+    return token_set
+
+
+class TestStaleIdTokenIsDiagnosable:
+    """A refresh that omits id_token leaves the previous one behind.
+
+    OIDC permits it, and FastMCP merges each refresh response into
+    ``raw_token_data`` — so the access token's expiry is reset while the old
+    id_token stays put. Verification then fails, and the refresh that would
+    replace the id_token is not due again until the fresh access token nears
+    expiry, so the session 401s for that whole window with nothing in the log
+    to explain it.
+    """
+
+    def _verification_token(
+        self, token_set: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> str | None:
+        proxy = _hook_proxy(_document())
+        proxy._verify_id_token = True
+        with caplog.at_level("WARNING"):
+            return proxy._get_verification_token(token_set)
+
+    def test_warns_when_the_id_token_outlives_its_usefulness(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        token_set = _token_set(_jwt(exp=time.time() - 60), access_token_expires_in=3000)
+
+        token = self._verification_token(token_set, caplog)
+
+        # Still returned: this diagnoses, it does not change what is verified.
+        assert token == token_set.raw_token_data["id_token"]
+        assert "omitted id_token from a refresh response" in caplog.text
+
+    def test_silent_when_the_id_token_is_still_valid(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        token_set = _token_set(
+            _jwt(exp=time.time() + 3000), access_token_expires_in=3000
+        )
+
+        assert self._verification_token(token_set, caplog) is not None
+        assert "refresh response" not in caplog.text
+
+    def test_silent_when_both_tokens_have_expired(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Ordinary expiry, not the merge trap — refresh is due and will fix it."""
+        token_set = _token_set(_jwt(exp=time.time() - 60), access_token_expires_in=-60)
+
+        assert self._verification_token(token_set, caplog) is not None
+        assert "refresh response" not in caplog.text
+
+    def test_silent_when_the_id_token_carries_no_expiry(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        token_set = _token_set(_jwt(sub="a-user"), access_token_expires_in=3000)
+
+        assert self._verification_token(token_set, caplog) is not None
+        assert "refresh response" not in caplog.text
+
+    def test_undecodable_id_token_is_passed_through_without_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Let the verifier reject it; there is nothing to diagnose here."""
+        token_set = _token_set("not.a.jwt", access_token_expires_in=3000)
+
+        assert self._verification_token(token_set, caplog) == "not.a.jwt"
+        assert "refresh response" not in caplog.text
+
+    def test_no_id_token_at_all_is_left_to_fastmcp(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        token_set = _token_set(None, access_token_expires_in=3000)
+
+        assert self._verification_token(token_set, caplog) is None

@@ -13,16 +13,19 @@ JWKS. See :class:`McpOidcProxy` for the two things it needs on top of that.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import structlog
 from cryptography.fernet import Fernet
 from fastmcp.server.auth.auth import AuthProvider, TokenVerifier
 from fastmcp.server.auth.jwt_issuer import derive_jwt_key
+from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.discord import DiscordProvider
 from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.utilities.auth import decode_jwt_payload
 from key_value.aio.protocols.key_value import AsyncKeyValue
 from key_value.aio.stores.redis import RedisStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
@@ -83,6 +86,9 @@ class McpOidcProxy(OIDCProxy):
       document is fetched from a container-internal address that is not the
       issuer tokens are minted under, so the issuer it advertises is
       cross-checked against ``OAUTH_ISSUER`` before its keys are trusted.
+
+    It also makes one failure mode diagnosable — see
+    :meth:`_get_verification_token`.
     """
 
     def __init__(self, *, settings: Settings, **kwargs: Any) -> None:
@@ -106,6 +112,39 @@ class McpOidcProxy(OIDCProxy):
         )
         return config
 
+    def _get_verification_token(
+        self, upstream_token_set: UpstreamTokenSet
+    ) -> str | None:
+        """Return the id_token to verify, warning when it has gone stale.
+
+        OIDC lets a refresh response omit ``id_token``, and FastMCP *merges*
+        each response into ``raw_token_data`` — so with such an IdP a refresh
+        succeeds, resets the access token's expiry, and leaves the **old**
+        id_token in place. Verification then fails on an expired id_token while
+        the refresh that would replace it is not due again until the fresh
+        access token nears expiry, so the session 401s for that whole window.
+
+        Neither IdP this project targets behaves that way (Hydra reissues the
+        id_token on refresh; Kanidm is expected to), and the semantics are
+        FastMCP's rather than ours. But the symptom — sudden re-auth despite a
+        healthy refresh — gives no clue as to its cause, so name it in the log.
+        """
+        token = super()._get_verification_token(upstream_token_set)
+        if (
+            token is not None
+            and _is_expired(token)
+            and upstream_token_set.expires_at > time.time()
+        ):
+            logger.warning(
+                "MCP: the stored upstream id_token has expired while its "
+                "access token has not. The IdP most likely omitted id_token "
+                "from a refresh response, which leaves the previous one in "
+                "place. MCP requests will fail to authenticate until the "
+                "access token expires and a full re-auth happens.",
+                access_token_expires_at=upstream_token_set.expires_at,
+            )
+        return token
+
     def get_token_verifier(
         self,
         *,
@@ -125,6 +164,18 @@ class McpOidcProxy(OIDCProxy):
             required_scopes=required_scopes,
             timeout_seconds=timeout_seconds,
         )
+
+
+def _is_expired(token: str, *, now: float | None = None) -> bool:
+    """Whether a JWT's ``exp`` has passed. Undecodable or unbounded => False."""
+    try:
+        payload = decode_jwt_payload(token)
+    except Exception:  # noqa: BLE001 - opaque or malformed: nothing to say
+        return False
+    exp = payload.get("exp")
+    if not isinstance(exp, int | float):
+        return False
+    return exp <= (time.time() if now is None else now)
 
 
 def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
