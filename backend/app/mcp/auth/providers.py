@@ -158,50 +158,7 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
 
     # Priority 1: Generic OAuth provider
     if settings.oauth_client_id and settings.oauth_client_secret:
-        config_url = discovery_url(settings)
-        if not config_url:
-            raise RuntimeError(
-                "Generic OAuth is configured for MCP but OIDC discovery is "
-                "not. Set OAUTH_ISSUER (or OAUTH_DISCOVERY_URL) so upstream "
-                "tokens can be verified against the IdP's JWKS. Without it "
-                "the MCP server cannot tell a revoked or expired upstream "
-                "session from a live one."
-            )
-        logger.info(
-            "MCP: Configuring generic OAuth provider",
-            provider_name=settings.oauth_provider_name or "generic",
-            discovery_url=config_url,
-        )
-        return McpOidcProxy(
-            settings=settings,
-            config_url=config_url,
-            client_id=settings.oauth_client_id,
-            client_secret=settings.oauth_client_secret,
-            # Verify the id_token rather than the access token. Under OIDC the
-            # id_token is always a JWT, whereas the access token may be opaque
-            # — Hydra's are — and so cannot be verified at all. Its `aud` is the
-            # OAuth client_id (OIDC Core 2), which OIDCProxy configures the
-            # verifier with. The verified claims also carry the acting user's
-            # identity, so nothing has to decode an unverified token for it.
-            verify_id_token=True,
-            base_url=base_url,
-            issuer_url=_get_mcp_issuer_url(settings),
-            extra_authorize_params={"scope": settings.oauth_scopes}
-            if settings.oauth_scopes
-            else None,
-            # Refresh the upstream token shortly before it expires so MCP
-            # sessions survive without a full re-auth (relies on the upstream
-            # issuing a refresh token).
-            token_expiry_threshold_seconds=(
-                settings.oauth_token_refresh_threshold_seconds
-            ),
-            # Pin the signing key so issued tokens stay valid across restarts;
-            # None preserves FastMCP's HKDF-from-client-secret default.
-            jwt_signing_key=settings.mcp_jwt_signing_key or None,
-            # Persist client registrations and refresh tokens in Redis so they
-            # survive restarts/redeploys instead of the per-container file store.
-            client_storage=_build_mcp_client_storage(settings),
-        )
+        return _create_generic_oauth_provider(settings, base_url)
 
     # Priority 2: GitHub
     if settings.github_client_id and settings.github_client_secret:
@@ -240,6 +197,58 @@ def create_mcp_auth_provider(settings: Settings) -> AuthProvider | None:
 
     logger.info("MCP: No OAuth providers configured, MCP auth unavailable")
     return None
+
+
+def _create_generic_oauth_provider(settings: Settings, base_url: str) -> McpOidcProxy:
+    """Build the generic-OAuth proxy, or raise if its tokens can't be verified."""
+    config_url = discovery_url(settings)
+    if not config_url:
+        raise RuntimeError(
+            "Generic OAuth is configured for MCP but OIDC discovery is not. "
+            "Set OAUTH_ISSUER (or OAUTH_DISCOVERY_URL) so upstream tokens can "
+            "be verified against the IdP's JWKS. Without it the MCP server has "
+            "no way to check the upstream token at all."
+        )
+    logger.info(
+        "MCP: Configuring generic OAuth provider",
+        provider_name=settings.oauth_provider_name or "generic",
+        discovery_url=config_url,
+    )
+    return McpOidcProxy(
+        settings=settings,
+        config_url=config_url,
+        client_id=settings.oauth_client_id,
+        client_secret=settings.oauth_client_secret,
+        # Verify the id_token rather than the access token. Under OIDC the
+        # id_token is always a JWT, whereas the access token may be opaque
+        # — Hydra's are — and so cannot be verified at all. Its `aud` is the
+        # OAuth client_id (OIDC Core 2), which OIDCProxy configures the
+        # verifier with. The verified claims also carry the acting user's
+        # identity, so nothing has to decode an unverified token for it.
+        #
+        # Note this is signature-and-expiry verification against the IdP's
+        # JWKS, not a liveness check: revoking a session upstream does not
+        # retire the signing key, so an already-issued id_token stays valid
+        # until its `exp`. Revocation surfaces at the next refresh, which the
+        # IdP refuses — bounded by the upstream token lifetime, not immediate.
+        # Detecting it sooner needs introspection or userinfo per request (#1322).
+        verify_id_token=True,
+        base_url=base_url,
+        issuer_url=_get_mcp_issuer_url(settings),
+        extra_authorize_params={"scope": settings.oauth_scopes}
+        if settings.oauth_scopes
+        else None,
+        # Refresh the upstream token shortly before it expires so MCP
+        # sessions survive without a full re-auth (relies on the upstream
+        # issuing a refresh token).
+        token_expiry_threshold_seconds=(settings.oauth_token_refresh_threshold_seconds),
+        # Pin the signing key so issued tokens stay valid across restarts;
+        # None preserves FastMCP's HKDF-from-client-secret default.
+        jwt_signing_key=settings.mcp_jwt_signing_key or None,
+        # Persist client registrations and refresh tokens in Redis so they
+        # survive restarts/redeploys instead of the per-container file store.
+        client_storage=_build_mcp_client_storage(settings),
+    )
 
 
 def _build_mcp_client_storage(settings: Settings) -> AsyncKeyValue | None:

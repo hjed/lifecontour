@@ -118,9 +118,20 @@ that `id_token` against the IdP's JWKS on every request, and its verified
 preference to the access token because OIDC guarantees it is a JWT, whereas
 access tokens may be opaque (Hydra's are, in development).
 
-Because the check is against live JWKS rather than a decode, a revoked or expired
-upstream session stops working: the request either refreshes transparently (when
-the IdP issued a refresh token) or returns 401 and the client re-authenticates.
+### What the JWKS check does and does not cover
+
+Verification is a local, offline check against the IdP's published keys: it enforces
+the token's signature, issuer, audience and expiry. An expired upstream session
+therefore stops working — the request either refreshes transparently (when the IdP
+issued a refresh token) or returns 401 and the client re-authenticates.
+
+It is **not** a liveness check. Revoking a session at the IdP does not retire the
+signing key, so an already-issued `id_token` keeps verifying until its own `exp`.
+Revocation surfaces indirectly at the next refresh, which the IdP refuses, so the
+exposure window after a revocation is roughly the upstream access-token lifetime.
+Shortening that lifetime shortens the window; detecting revocation sooner needs
+introspection or a userinfo probe per request, tracked in
+[#1322](https://github.com/hjed/personal-management-system/issues/1322).
 
 This requires the `openid` scope, which `OAUTH_SCOPES` includes by default. A
 token that reaches the server with no `sub` claim is **refused** — it does not
