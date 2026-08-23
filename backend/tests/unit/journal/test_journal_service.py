@@ -310,16 +310,43 @@ class TestJournalServiceCRUD:
         mock_journal_repo.save.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_update_journal_checks_the_persisted_owner_not_the_incoming_one(
+    async def test_update_journal_refuses_to_change_the_owner(
         self, journal_service, mock_journal_repo, mock_transaction
     ):
-        """The owner the parent is checked against comes off the stored row.
+        """An update may not move a journal to a different user.
 
-        Here the incoming entity claims to be ``other-user``'s and points at
-        ``other-user``'s journal — internally consistent, and accepted if the
-        lookup trusts the object it was handed. It is the *persisted* row that
-        says who owns journal 1, so the parent is looked up as ``user123`` and
-        is not theirs to use.
+        ``_update`` writes ``user_id`` straight from the entity it is handed and
+        ``_calculate_changed_fields`` does not diff it, so without this guard a
+        mismatched owner was persisted silently and left no history row. The
+        calendar sync reaches exactly that: it rebuilds the journal taking
+        parent_id and order from the stored row but user_id from the event
+        payload, so a journal whose calendar belongs to somebody else was
+        re-owned to them on the next sync.
+        """
+        # Arrange
+        existing = create_test_journal(journal_id=1, title="My Journal")
+        journal = create_test_journal(
+            journal_id=1, title="My Journal", user_id="other-user"
+        )
+
+        mock_journal_repo.find_by_id.return_value = existing
+
+        # Act & Assert
+        with pytest.raises(JournalValidationError):
+            await journal_service.update_journal(journal, mock_transaction)
+
+        mock_journal_repo.save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_journal_refuses_an_owner_change_before_reparenting(
+        self, journal_service, mock_journal_repo, mock_transaction
+    ):
+        """The owner guard runs first, so a re-parent cannot ride along with it.
+
+        The entity here is internally consistent — it claims ``other-user``'s
+        ownership *and* points at ``other-user``'s journal — which is what a
+        parent lookup reading the owner off the argument would accept. The
+        guard rejects the whole update before the hierarchy is consulted.
         """
         # Arrange
         existing = create_test_journal(journal_id=1, title="My Journal")
@@ -339,10 +366,10 @@ class TestJournalServiceCRUD:
         )
 
         # Act & Assert
-        with pytest.raises(JournalNotFoundError):
+        with pytest.raises(JournalValidationError):
             await journal_service.update_journal(journal, mock_transaction)
 
-        mock_journal_repo.find_by_id_for_user.assert_called_once_with(2, "user123")
+        mock_journal_repo.find_by_id_for_user.assert_not_called()
         mock_journal_repo.save.assert_not_called()
 
     @pytest.mark.asyncio

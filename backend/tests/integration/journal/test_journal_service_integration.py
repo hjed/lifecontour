@@ -10,6 +10,7 @@ from core_shared.models.journals import (
     JournalMaxDepthExceededError,
     JournalNotFoundError,
     JournalType,
+    JournalValidationError,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -179,15 +180,44 @@ class TestJournalServiceIntegration:
         assert stored.scalar_one() is None
 
     @pytest.mark.asyncio
-    async def test_update_journal_checks_the_persisted_owner_not_the_incoming_one(
+    async def test_update_journal_refuses_to_change_the_owner(
+        self, journal_service, clean_database: AsyncConnection
+    ):
+        """An update may not move a journal to a different user.
+
+        The UPDATE writes ``user_id`` straight from the entity it is handed and
+        the change calculation does not diff it, so without this guard the row
+        was silently re-owned and no history recorded it. The calendar sync
+        reaches exactly that: it rebuilds the journal taking parent_id and
+        order from the stored row but user_id from the event payload.
+        """
+        # Arrange
+        mine = await journal_service.create_journal(
+            create_test_journal(title="My Journal"), clean_database
+        )
+        impostor = create_test_journal(
+            journal_id=mine.id, title="My Journal", user_id=OTHER_USER_ID
+        )
+
+        # Act & Assert
+        with pytest.raises(JournalValidationError):
+            await journal_service.update_journal(impostor, clean_database)
+
+        stored = await clean_database.execute(
+            text("SELECT user_id FROM journals WHERE id = :id"), {"id": mine.id}
+        )
+        assert stored.scalar_one() == "user123"
+
+    @pytest.mark.asyncio
+    async def test_update_journal_refuses_an_owner_change_before_reparenting(
         self, journal_service, journal_repo, clean_database: AsyncConnection
     ):
-        """The owner the parent is checked against comes off the stored row.
+        """The owner guard runs first, so a re-parent cannot ride along with it.
 
-        The entity handed in claims to be the other user's and points at that
-        user's journal — internally consistent, and accepted by a lookup that
-        trusts the object rather than the database. The stored row is what says
-        who owns it, so the parent is resolved as its real owner and refused.
+        The entity is internally consistent — it claims the other user's
+        ownership *and* points at that user's journal — which is what a parent
+        lookup reading the owner off the argument would accept. The guard
+        rejects the whole update before the hierarchy is consulted.
         """
         # Arrange
         theirs = await journal_repo.save(
@@ -197,7 +227,6 @@ class TestJournalServiceIntegration:
             create_test_journal(title="My Journal"), clean_database
         )
 
-        # Same id, but claiming their ownership and their journal as parent.
         impostor = create_test_journal(
             journal_id=mine.id,
             title="My Journal",
@@ -206,7 +235,7 @@ class TestJournalServiceIntegration:
         )
 
         # Act & Assert
-        with pytest.raises(JournalNotFoundError):
+        with pytest.raises(JournalValidationError):
             await journal_service.update_journal(impostor, clean_database)
 
         # Neither the parent nor the ownership moved

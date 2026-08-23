@@ -200,11 +200,25 @@ class JournalService:
         if existing_journal is None:
             raise JournalNotFoundError(journal.id)
 
+        # An update may not move a journal to a different user. ``_update``
+        # writes user_id straight from the entity it is handed and
+        # ``_calculate_changed_fields`` does not diff it, so without this the
+        # row was re-owned silently and no history recorded it. The calendar
+        # sync reaches exactly that: ``_process_journal_updated`` rebuilds the
+        # journal taking parent_id and order from the stored row but user_id
+        # from the event payload, so a journal whose calendar belongs to
+        # somebody else was re-owned to them on the next sync — the
+        # cross-account edge of #1312, arrived at from the other end.
+        if journal.user_id != existing_journal.user_id:
+            raise JournalValidationError(
+                "user_id", "A journal's owner cannot be changed"
+            )
+
         changed_fields = self._calculate_changed_fields(existing_journal, journal)
 
-        # Validate hierarchy if parent_id is being changed. The owner checked
-        # against is the *persisted* one, so an incoming entity carrying a
-        # different user_id cannot widen the lookup.
+        # Validate hierarchy if parent_id is being changed. The owner comes off
+        # the persisted row; the guard above is what makes that the same as the
+        # entity's own, rather than something to be trusted from the caller.
         if "parent_id" in changed_fields and journal.parent_id is not None:
             await self._validate_hierarchy(
                 journal.parent_id,
