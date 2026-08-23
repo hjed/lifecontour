@@ -15,8 +15,9 @@ from typing import Any
 import pytest
 from core_shared.models.history import Provenance
 
-from app.core.history.services.history_service import HistoryService
+from app.core.history.services.history_service import _HANDLERS, HistoryService
 from app.infrastructure.events.outbox_repository import OutboxEvent
+from tests.task_event_inventory import task_event_types, task_event_types_by_class
 
 OCCURRED_AT = datetime(2024, 3, 1, 8, 0, 0, tzinfo=UTC)
 
@@ -1073,7 +1074,7 @@ class TestAffectsHistoryFlag:
 
 
 # --------------------------------------------------------------------------- #
-# Task event projection (ITER18-003 Phase 6) — the lifecycle types.
+# Task event projection — every type the domain publishes.
 #
 # A task is a top-level aggregate keyed by its own integer id, so its rows go
 # under ("task", task_id) and use the *journal* marker convention (__created__ /
@@ -1081,14 +1082,16 @@ class TestAffectsHistoryFlag:
 # shape exists because contact history spreads across a family of sub-entity
 # rows; a task has none.
 #
-# Only three types are projected here. TaskDueJournalRetargeted,
-# TaskJournalLinked and TaskJournalUnlinked are Phase 7.
+# TestEveryTaskEventTypeIsProjected below turns "every published type is
+# projected" from a fact into a failing test for the next one to arrive.
 # --------------------------------------------------------------------------- #
 
 TASK_ID = 42
 TASK_TEXT = "Book the venue"
 CONTACT_ID = 7
 OTHER_CONTACT_ID = 9
+OLD_JOURNAL_ID = 200
+NEW_JOURNAL_ID = 300
 
 
 def _task_event(
@@ -1384,34 +1387,319 @@ class TestTaskDeleted:
         assert [r.entity_id for r in service.project_event(event)] == [999]
 
 
-class TestTaskEventsThisPhaseDoesNotProject:
-    def test_retarget_and_journal_links_project_nothing_yet(
+def _retarget_payload(**overrides: Any) -> dict[str, Any]:
+    """A ``TaskDueJournalRetargeted`` payload as the event builds it.
+
+    ``changed_fields`` values arrive as *lists* rather than tuples, because the
+    projection reads them back after a JSON round trip through Redis.
+    """
+    payload: dict[str, Any] = {
+        "task_id": TASK_ID,
+        "user_id": "u1",
+        "changed_fields": {"due_journal_id": [OLD_JOURNAL_ID, NEW_JOURNAL_ID]},
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestTaskDueJournalRetargeted:
+    """The anchor move, projected by the handler ``TaskUpdated`` already uses.
+
+    The retarget's payload is deliberately ``changed_fields``-shaped, so
+    ``_rows_from_changed_fields`` produces the right rows with no handler of its
+    own. Its retained intermediate link is not in the payload either — that is a
+    ``TaskJournalLinked`` in its own right — so there is nothing left for a
+    second handler to do.
+    """
+
+    def test_an_ordinary_deferral_projects_the_pair_the_right_way_round(
         self, service: HistoryService
     ) -> None:
-        """Phase 7 adds these three handlers, and should delete this test.
+        rows = service.project_event(
+            _task_event("TaskDueJournalRetargeted", _retarget_payload())
+        )
 
-        Asserted positively rather than left unstated: the consumer subscribes
-        only to the three lifecycle types, so these events are filtered out
-        rather than consumed and silently dropped, and the two facts have to stay
-        in step. A handler added without the subscription — or the reverse — is
-        history that is written and never read, or read and never written.
+        assert [_row_tuple(r) for r in rows] == [
+            (
+                "task",
+                TASK_ID,
+                "due_journal_id",
+                str(OLD_JOURNAL_ID),
+                str(NEW_JOURNAL_ID),
+            )
+        ]
+
+    def test_the_row_carries_the_actor_and_the_time_the_move_happened(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event(
+                "TaskDueJournalRetargeted",
+                _retarget_payload(source=Provenance.MCP.value, changed_by="mcp"),
+            )
+        )
+
+        assert rows[0].source == Provenance.MCP
+        assert rows[0].changed_by == "mcp"
+        assert rows[0].event_id == "evt-1"
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_a_reopening_retarget_projects_the_status_move_as_well(
+        self, service: HistoryService
+    ) -> None:
+        """The event adds the status pair only when the task actually reopened.
+
+        A deferral of a *done* task lands it not done, which is a change the
+        specification singles out as rarely what the user meant — so it reaches
+        their history as its own line rather than being folded into the move.
         """
-        payloads: dict[str, dict[str, Any]] = {
-            "TaskDueJournalRetargeted": {
-                "task_id": TASK_ID,
-                "previous_due_journal_id": 200,
-                "due_journal_id": 300,
-            },
-            "TaskJournalLinked": {
-                "task_id": TASK_ID,
-                "journal_id": 200,
-                "origin": "manual",
-            },
-            "TaskJournalUnlinked": {"task_id": TASK_ID, "journal_id": 200},
+        rows = service.project_event(
+            _task_event(
+                "TaskDueJournalRetargeted",
+                _retarget_payload(
+                    changed_fields={
+                        "due_journal_id": [OLD_JOURNAL_ID, NEW_JOURNAL_ID],
+                        "status": ["done", "not_done"],
+                    }
+                ),
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            (
+                "task",
+                TASK_ID,
+                "due_journal_id",
+                str(OLD_JOURNAL_ID),
+                str(NEW_JOURNAL_ID),
+            ),
+            ("task", TASK_ID, "status", "done", "not_done"),
+        ]
+
+    def test_an_ordinary_deferral_writes_no_status_line(
+        self, service: HistoryService
+    ) -> None:
+        """The other half of the reopen rule, asserted rather than implied.
+
+        Every retarget lands the task not done, so a handler that read the status
+        off the task rather than off ``changed_fields`` would write
+        "not done → not done" into the history of every ordinary deferral.
+        """
+        rows = service.project_event(
+            _task_event("TaskDueJournalRetargeted", _retarget_payload())
+        )
+
+        assert "status" not in {r.field_name for r in rows}
+
+    def test_a_payload_carrying_no_changed_fields_projects_nothing(
+        self, service: HistoryService
+    ) -> None:
+        """Silence beats raising: a raising handler dead-letters the whole batch
+        and stalls history for every event queued behind it."""
+        payload = _retarget_payload()
+        del payload["changed_fields"]
+
+        assert (
+            service.project_event(_task_event("TaskDueJournalRetargeted", payload))
+            == []
+        )
+
+
+class TestTaskJournalLinked:
+    def test_projects_one_row_naming_the_journal_gained(
+        self, service: HistoryService
+    ) -> None:
+        """``old=None, new=<the thing linked>`` — the ``JournalTagAssigned`` shape
+        the event's own docstring names as its model."""
+        rows = service.project_event(
+            _task_event(
+                "TaskJournalLinked",
+                {
+                    "task_id": TASK_ID,
+                    "user_id": "u1",
+                    "journal_id": OLD_JOURNAL_ID,
+                    "origin": "manual",
+                    "source": Provenance.UI.value,
+                    "changed_by": "ui",
+                },
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            (
+                "task",
+                TASK_ID,
+                f"journal:{OLD_JOURNAL_ID}",
+                None,
+                str(OLD_JOURNAL_ID),
+            )
+        ]
+        assert rows[0].source == Provenance.UI
+        assert rows[0].changed_by == "ui"
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_two_journals_land_under_distinct_field_names(
+        self, service: HistoryService
+    ) -> None:
+        """Why the key names the journal instead of a shared ``journals`` field.
+
+        Rows dedup on ``(event_id, entity_type, entity_id, field_name)``. These
+        two arrive on different events today, so they would survive a shared name
+        — but the pair a *retarget* publishes does not, and neither would a future
+        write linking two journals in one unit of work. The key is what keeps a
+        task's second journal out of the same slot as its first.
+        """
+        rows = [
+            service.project_event(
+                _task_event(
+                    "TaskJournalLinked",
+                    {
+                        "task_id": TASK_ID,
+                        "user_id": "u1",
+                        "journal_id": journal_id,
+                        "origin": "manual",
+                        "source": Provenance.UI.value,
+                    },
+                    event_id=f"evt-{journal_id}",
+                )
+            )[0]
+            for journal_id in (OLD_JOURNAL_ID, NEW_JOURNAL_ID)
+        ]
+
+        assert len({r.field_name for r in rows}) == 2
+
+    def test_origin_stays_out_of_the_field_name(self, service: HistoryService) -> None:
+        """A manual link and a retarget-derived one project the *same* key.
+
+        ``origin`` says why the link exists, and ``field_history`` has no column
+        for it — so the only place it could go is the field name, and it must not:
+        a link and the unlink that later removes it have to share a name to read
+        as a pair. ``journal:retarget:{id}`` followed by ``journal:{id}`` would
+        show the user a removal with no addition before it, which is the exact
+        asymmetry the create marker fans ``contact_ids`` out to prevent.
+        """
+        field_names = {
+            service.project_event(
+                _task_event(
+                    "TaskJournalLinked",
+                    {
+                        "task_id": TASK_ID,
+                        "user_id": "u1",
+                        "journal_id": OLD_JOURNAL_ID,
+                        "origin": origin,
+                        "source": Provenance.UI.value,
+                    },
+                )
+            )[0].field_name
+            for origin in ("manual", "retarget")
         }
 
-        for event_type, payload in payloads.items():
-            assert service.project_event(_task_event(event_type, payload)) == []
+        assert field_names == {f"journal:{OLD_JOURNAL_ID}"}
+
+    def test_a_payload_naming_no_journal_projects_nothing(
+        self, service: HistoryService
+    ) -> None:
+        """The row would read as "linked journal None", and raising would stall
+        every event queued behind it — the ``_journal_tag_rows`` precedent."""
+        assert (
+            service.project_event(
+                _task_event(
+                    "TaskJournalLinked",
+                    {"task_id": TASK_ID, "user_id": "u1", "origin": "manual"},
+                )
+            )
+            == []
+        )
+
+
+class TestTaskJournalUnlinked:
+    def test_projects_the_pair_the_other_way_round(
+        self, service: HistoryService
+    ) -> None:
+        """Direction is positional and nothing else on the row carries it.
+
+        An unlink projected as ``(None, id)`` would read in the feed as the
+        journal being added, and no other value would contradict it.
+        """
+        rows = service.project_event(
+            _task_event(
+                "TaskJournalUnlinked",
+                {
+                    "task_id": TASK_ID,
+                    "user_id": "u1",
+                    "journal_id": OLD_JOURNAL_ID,
+                    "source": Provenance.MCP.value,
+                    "changed_by": "mcp",
+                },
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            (
+                "task",
+                TASK_ID,
+                f"journal:{OLD_JOURNAL_ID}",
+                str(OLD_JOURNAL_ID),
+                None,
+            )
+        ]
+        assert rows[0].source == Provenance.MCP
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_it_shares_a_field_name_with_the_link_it_removes(
+        self, service: HistoryService
+    ) -> None:
+        """The pair has to read together, which is only true if the keys match."""
+        payload = {"task_id": TASK_ID, "user_id": "u1", "journal_id": OLD_JOURNAL_ID}
+
+        linked = service.project_event(
+            _task_event("TaskJournalLinked", {**payload, "origin": "manual"})
+        )
+        unlinked = service.project_event(_task_event("TaskJournalUnlinked", payload))
+
+        assert linked[0].field_name == unlinked[0].field_name
+
+    def test_a_payload_naming_no_journal_projects_nothing(
+        self, service: HistoryService
+    ) -> None:
+        assert (
+            service.project_event(
+                _task_event(
+                    "TaskJournalUnlinked", {"task_id": TASK_ID, "user_id": "u1"}
+                )
+            )
+            == []
+        )
+
+
+class TestEveryTaskEventTypeIsProjected:
+    """Nothing this domain publishes may be written and then never read.
+
+    The set is not closed — a journal merge re-points a task's anchors and will
+    publish an event of its own — so the invariant has to be one that *fails*
+    when the next type lands, rather than a list somebody remembers to extend.
+    """
+
+    def test_every_task_event_class_has_a_handler(self) -> None:
+        assert task_event_types() <= set(_HANDLERS)
+
+    def test_every_task_handler_belongs_to_a_real_event_class(self) -> None:
+        """The reverse direction: a handler keyed on a type nobody publishes maps
+        an event that can never arrive, and reads as coverage that is not there."""
+        task_keys = {key for key in _HANDLERS if key.startswith("Task")}
+
+        assert task_keys == task_event_types()
+
+    def test_each_event_type_string_is_its_class_name(self) -> None:
+        """What makes the enumeration above legitimate.
+
+        ``event_type`` is a constructor argument rather than a class attribute, so
+        the inventory reads class names and this is the test that says it may.
+        """
+        for name, event_type in task_event_types_by_class().items():
+            assert event_type == name
 
 
 class TestUnknownAndProvenanceDefaults:

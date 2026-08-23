@@ -8,9 +8,9 @@ Exercises the full async chain a real task mutation travels:
         -> HistoryProjectionConsumer  (-> field_history rows)
 
 and asserts the rows are readable under the task, with the right field names,
-values, provenance and timestamps. ITER18-003 Phase 6 covers the three lifecycle
-event types; the retarget and journal-link types are Phase 7 and are asserted
-here to be *filtered out* rather than dead-lettered.
+values, provenance and timestamps. Every type the domain publishes is exercised
+here: the three lifecycle types, the due-anchor move, and the
+intermediate-journal pair.
 
 Rows are read with ``get_entity_history`` rather than ``get_history_for_aggregate``
 because there is no ``"task"`` aggregation strategy yet — Phase 8 registers one
@@ -50,6 +50,7 @@ from tests.integration.tasks.task_seeding import (
     create_journal,
     task_events,
 )
+from tests.task_event_inventory import task_event_types
 
 TASK_TEXT = "Book the venue"
 TASK_ENTITY_TYPE = "task"
@@ -354,10 +355,22 @@ class TestTaskProjectionIsIdempotent:
         already processed. The ``(event_id, entity_type, entity_id, field_name)``
         index is the only thing standing between that and a history that grows a
         duplicate line every time the consumer is bounced.
+
+        The lifecycle is driven through **every** type the domain publishes —
+        create, update, retarget (which publishes two), attach, detach, delete —
+        so a handler added later without a distinct ``event_id`` or field name
+        fails here rather than in production.
         """
         service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
         creating_journal_id, due_journal_id = await _anchors(async_connection)
         contact_id = await create_contact(async_connection, first_name="Sarah")
+        new_due_journal_id = await create_journal(
+            journal_repo, title="The week after", days_offset=14
+        )
+        mentioned_journal_id = await create_journal(
+            journal_repo, title="Mentioned", days_offset=3
+        )
 
         task = await service.create_task(
             user_id=USER_ID,
@@ -386,12 +399,56 @@ class TestTaskProjectionIsIdempotent:
             source=Provenance.UI,
             changed_by="ui",
         )
+        await service.retarget_due_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            due_journal_id=new_due_journal_id,
+            transaction=async_connection,
+            acknowledge_reopen=True,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert await service.attach_intermediate_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            journal_id=mentioned_journal_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert await service.detach_intermediate_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            journal_id=mentioned_journal_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await service.delete_task(
+            user_id=USER_ID,
+            task_id=task.id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        # A subset of the module's types rather than all of them: a task's anchors
+        # are also re-pointed by the *journal* domain, and no TaskService call can
+        # publish that. Requiring equality here would fail this idempotency test,
+        # with a message about idempotency, on the day that type is added.
+        published = {e.event_type for e in await task_events(async_connection)}
+        assert published <= task_event_types()
+        assert len(published) == 6, (
+            f"the lifecycle above should drive six types, drove {sorted(published)}"
+        )
 
         await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-task-idempotent"
         )
         first_pass = await _task_history(async_connection, task.id)
-        assert len(first_pass) == 4
+        # created + the contact it named, the status move, the contact unlink,
+        # the anchor move and its reopen, the retained link, the manual attach
+        # and its detach, and the delete marker.
+        assert len(first_pass) == 10
 
         await replay_stream_through_projection(
             stream_client, test_stream_name, async_connection, redis_client
@@ -403,21 +460,32 @@ class TestTaskProjectionIsIdempotent:
 
 
 @pytest.mark.integration
-class TestTaskEventsDeferredToPhase7:
+class TestTaskRetargetAndJournalLinkProjection:
+    """The anchor move and the intermediate links a task gains and loses.
+
+    These three types were published for several phases before anything read
+    them, and the gap was asserted here rather than assumed — a test written to
+    fail the moment a handler and its subscription arrived. This is that test
+    inverted: the same write paths, now checked for the rows they produce rather
+    than for their silence.
+    """
+
     @pytest.mark.asyncio
-    async def test_a_retarget_is_filtered_out_rather_than_dead_lettered(
+    async def test_a_retarget_projects_the_move_and_the_journal_it_retained(
         self,
         test_stream_name: str,
         async_connection: AsyncConnection,
         stream_client: StreamClient,
         redis_client: Redis,
     ) -> None:
-        """The two events a retarget publishes have no handler until Phase 7.
+        """One user action, two events, two rows that read as one story.
 
-        Unsubscribed types are skip-acknowledged by the consumer, so they neither
-        project a row nor sit pending until they dead-letter. This test should
-        start failing on its first assertion when Phase 7 lands, which is the
-        point: the gap is asserted rather than assumed.
+        A retarget moves the due anchor and keeps the journal it is leaving as an
+        intermediate link — the model's one automatic link — and publishes an
+        event for each. The pair has to survive as *two distinguishable rows*: the
+        move under ``due_journal_id`` naming both journals, and the retained link
+        under a key naming the journal, so the trail says which journal, in which
+        role, and when.
         """
         service = _task_service(async_connection)
         creating_journal_id, due_journal_id = await _anchors(async_connection)
@@ -456,7 +524,320 @@ class TestTaskEventsDeferredToPhase7:
         )
 
         entries = await _task_history(async_connection, task.id)
-        assert _values(entries) == {("__created__", None, TASK_TEXT)}
+        assert _values(entries) == {
+            ("__created__", None, TASK_TEXT),
+            ("due_journal_id", str(due_journal_id), str(new_due_journal_id)),
+            (f"journal:{due_journal_id}", None, str(due_journal_id)),
+        }
+
+        # The two rows agree about who acted. A retarget is something the *user*
+        # did, and the retained link is a consequence of their action rather than
+        # a background job — stamping it `system` would tell a person reading
+        # their own history that half of what they did was not theirs.
+        retarget_rows = [e for e in entries if e.field_name != "__created__"]
+        assert len(retarget_rows) == 2
+        for entry in retarget_rows:
+            assert entry.source == Provenance.UI
+            assert entry.changed_by == "ui"
 
         pending_info = await redis_client.xpending(test_stream_name, GROUP_NAME)
         assert pending_info["pending"] == 0
+
+    @pytest.mark.asyncio
+    async def test_a_reopening_retarget_also_projects_the_status_move(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """Retargeting is the only way a done task reopens, so history says so.
+
+        The event adds the status pair *only* when the task actually moved, which
+        is why an ordinary deferral (the test above) writes no status line and
+        this one does.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        new_due_journal_id = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="The week after",
+            days_offset=14,
+        )
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+        await service.set_status(
+            user_id=USER_ID,
+            task_id=task.id,
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await service.retarget_due_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            due_journal_id=new_due_journal_id,
+            transaction=async_connection,
+            acknowledge_reopen=True,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-reopen"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        assert _values(entries) == {
+            ("__created__", None, TASK_TEXT),
+            ("status", "not_done", "done"),
+            ("status", "done", "not_done"),
+            ("due_journal_id", str(due_journal_id), str(new_due_journal_id)),
+            (f"journal:{due_journal_id}", None, str(due_journal_id)),
+        }
+        # ``_values`` is a set, so it cannot see a row written twice. The count is
+        # what says each of those lines appears once in the user's history.
+        assert len(entries) == 5
+
+    @pytest.mark.asyncio
+    async def test_leaving_an_already_linked_journal_writes_no_second_row(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """The A→B→A→C sequence, against a real database.
+
+        Adding an intermediate link is idempotent and nothing here ever removes
+        one, so a task that leaves A, comes back and leaves it again finds A still
+        linked. The service publishes a link event only when a row was actually
+        written, so the second departure adds no history. Without that, a user's
+        trail would claim they linked the same journal twice.
+        """
+        service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
+        creating_journal_id, journal_a = await _anchors(async_connection)
+        journal_b = await create_journal(journal_repo, title="B", days_offset=14)
+        journal_c = await create_journal(journal_repo, title="C", days_offset=21)
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=journal_a,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        for destination in (journal_b, journal_a, journal_c):
+            await service.retarget_due_journal(
+                user_id=USER_ID,
+                task_id=task.id,
+                due_journal_id=destination,
+                transaction=async_connection,
+                source=Provenance.UI,
+                changed_by="ui",
+            )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-abac"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        link_rows = [e for e in entries if e.field_name == f"journal:{journal_a}"]
+        assert len(link_rows) == 1
+        assert _values(entries) == {
+            ("__created__", None, TASK_TEXT),
+            ("due_journal_id", str(journal_a), str(journal_b)),
+            ("due_journal_id", str(journal_b), str(journal_a)),
+            ("due_journal_id", str(journal_a), str(journal_c)),
+            (f"journal:{journal_a}", None, str(journal_a)),
+            (f"journal:{journal_b}", None, str(journal_b)),
+        }
+
+    @pytest.mark.asyncio
+    async def test_two_deferrals_read_back_as_a_trail(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """Each move's "from" is the previous move's "to".
+
+        The point of projecting the pair rather than the current anchor: the rows
+        chain, so a reader can follow a task's deadline through every journal it
+        passed rather than seeing only where it ended up. Ordered by the time the
+        change happened, which is the event's own timestamp rather than the
+        projection's.
+        """
+        service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
+        creating_journal_id, journal_a = await _anchors(async_connection)
+        journal_b = await create_journal(journal_repo, title="B", days_offset=14)
+        journal_c = await create_journal(journal_repo, title="C", days_offset=21)
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=journal_a,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        for destination in (journal_b, journal_c):
+            await service.retarget_due_journal(
+                user_id=USER_ID,
+                task_id=task.id,
+                due_journal_id=destination,
+                transaction=async_connection,
+                source=Provenance.UI,
+                changed_by="ui",
+            )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-trail"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        # get_entity_history is most-recent-first; read the trail forwards.
+        moves = [e for e in reversed(entries) if e.field_name == "due_journal_id"]
+        assert [(e.old_value, e.new_value) for e in moves] == [
+            (str(journal_a), str(journal_b)),
+            (str(journal_b), str(journal_c)),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_manual_attach_and_detach_project_the_pair_opposite_ways_round(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """Two rows under one field name, distinguished by their event.
+
+        The same shape a task's contacts already produce, and for the same
+        reason: the key names the journal so a second link cannot collide with the
+        first, and the dedup index includes ``event_id`` so the removal is not
+        read as a redelivery of the addition.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        mentioned_journal_id = await create_journal(
+            SqlJournalRepository(async_connection), title="Mentioned", days_offset=3
+        )
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        assert await service.attach_intermediate_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            journal_id=mentioned_journal_id,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        assert await service.detach_intermediate_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            journal_id=mentioned_journal_id,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-attach"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        field = f"journal:{mentioned_journal_id}"
+        assert _values(entries) == {
+            ("__created__", None, TASK_TEXT),
+            (field, None, str(mentioned_journal_id)),
+            (field, str(mentioned_journal_id), None),
+        }
+        assert len(entries) == 3
+        assert len({e.event_id for e in entries if e.field_name == field}) == 2
+
+    @pytest.mark.asyncio
+    async def test_a_derived_link_and_a_manual_one_share_a_field_name(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """``origin`` distinguishes the two events and not their history rows.
+
+        A retarget-derived link carries ``origin="retarget"`` and a manual attach
+        ``origin="manual"``, but ``field_history`` has no column for it and the
+        field name must not carry it: the unlink that later removes either one has
+        no origin to spell, so a key that named it would break the pair. Asserted
+        against the database rather than left to the handler's docstring.
+        """
+        service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
+        creating_journal_id, journal_a = await _anchors(async_connection)
+        journal_b = await create_journal(journal_repo, title="B", days_offset=14)
+        manual_journal_id = await create_journal(
+            journal_repo, title="Mentioned", days_offset=3
+        )
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=journal_a,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        await service.retarget_due_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            due_journal_id=journal_b,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert await service.attach_intermediate_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            journal_id=manual_journal_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-origin"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        link_fields = {
+            e.field_name for e in entries if e.field_name.startswith("journal:")
+        }
+        assert link_fields == {
+            f"journal:{journal_a}",
+            f"journal:{manual_journal_id}",
+        }

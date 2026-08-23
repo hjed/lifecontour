@@ -80,6 +80,31 @@ def contact_field_name(contact_id: int) -> str:
     return f"contact:{contact_id}"
 
 
+def journal_field_name(journal_id: int) -> str:
+    """The ``field_history`` key an intermediate-journal link is recorded under.
+
+    The same shape and the same reason as :func:`contact_field_name`: one key per
+    journal, because a task can gain several and history rows dedup on
+    ``(event_id, entity_type, entity_id, field_name)``. Two journals sharing a
+    ``"journals"`` field would collide on all four columns and the second would be
+    discarded as a redelivery of the first.
+
+    **``origin`` is deliberately not in the key.** :class:`TaskJournalLinked`
+    carries it — a link a person made and one a retarget retained are different
+    facts — but a link and the :class:`TaskJournalUnlinked` that later removes it
+    have to land under the *same* name to read as a pair, and an unlink has no
+    origin to spell. ``journal:retarget:{id}`` followed by ``journal:{id}`` would
+    show the user a removal with nothing added before it.
+
+    Unlike ``contact_field_name`` this is built only by the projection: the
+    journal link is an event type of its own rather than a ``changed_fields``
+    entry, so the service never spells the key. It lives here anyway, next to the
+    events whose payloads it reads, because the two formats have to stay
+    recognisably the same thing.
+    """
+    return f"journal:{journal_id}"
+
+
 @dataclass(frozen=True)
 class DomainEvent:
     """Base domain event with transaction support.

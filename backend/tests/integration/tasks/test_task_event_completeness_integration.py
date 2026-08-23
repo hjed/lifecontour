@@ -45,11 +45,15 @@ import pytest
 from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.history.services.history_service import _HANDLERS
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.models.repositories import TaskAnchorRepository, TaskRepository
 from app.core.tasks.services.task_service import TaskService
+from app.infrastructure.events.history_projection_consumer import (
+    _TASK_HISTORY_EVENT_TYPES,
+)
 from tests.integration.tasks.task_seeding import (
     FIXED_PAST_INSTANT,
     USER_ID,
@@ -491,6 +495,23 @@ async def _run(
     return after[len(before) :]
 
 
+async def _published_types(
+    path: WritePath, fixtures: _Fixtures, connection: AsyncConnection
+) -> set[str]:
+    """The ``event_type`` strings the *action* announced, arrangement subtracted.
+
+    The sibling of :func:`_run`, which returns facts. Facts are the right unit for
+    "did the path announce the right thing"; the projection is keyed on the type,
+    so the projection questions need the type.
+    """
+    seeded = await path.seed(fixtures)
+    before = len(await task_events(connection))
+
+    await path.act(fixtures, seeded)
+
+    return {event.event_type for event in (await task_events(connection))[before:]}
+
+
 @pytest.mark.integration
 class TestEveryWritePathPublishes:
     """Each path, run for real, against the events its action left behind."""
@@ -574,6 +595,66 @@ class TestEveryWritePathPublishes:
             "journal-linked",
             "retargeted",
         ]
+
+
+@pytest.mark.integration
+class TestEveryPublishedEventIsProjected:
+    """Nothing a write path announces is written to the stream and never read.
+
+    The invariant is written in the form that *fails* for an unhandled task type,
+    so the next one to arrive cannot land unprojected. The set is not closed —
+    a journal merge re-points a task's anchors and will publish an event of its
+    own — so a list of names here would be a list to remember to extend.
+
+    This is the strongest of the three places the invariant is asserted, because
+    it is driven by what the write paths **actually publish** against a real
+    outbox. The unit-level versions read the event classes out of the module,
+    which would still pass for a class nobody publishes; the pair of them can
+    disagree only if a class exists that no path reaches, which
+    :class:`TestEveryPortWriteIsAccountedFor` is the test for.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", WRITE_PATHS, ids=lambda path: path.name)
+    async def test_the_types_this_path_publishes_all_have_a_handler(
+        self,
+        fixtures: _Fixtures,
+        async_connection: AsyncConnection,
+        path: WritePath,
+    ) -> None:
+        """A published type with no handler is projected as zero rows.
+
+        ``HistoryService.project_event`` returns an empty list for a type it does
+        not know, so the consumer acknowledges the event and writes nothing —
+        a change missing from the user's history with nothing in the logs.
+        """
+        published = await _published_types(path, fixtures, async_connection)
+
+        assert published <= set(_HANDLERS), (
+            f"{path.name} publishes {sorted(published - set(_HANDLERS))}, which "
+            "HistoryService has no handler for"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", WRITE_PATHS, ids=lambda path: path.name)
+    async def test_the_types_this_path_publishes_are_all_subscribed(
+        self,
+        fixtures: _Fixtures,
+        async_connection: AsyncConnection,
+        path: WritePath,
+    ) -> None:
+        """The other half: a handler the consumer never delivers an event to.
+
+        Both halves are needed and neither implies the other — a handler without
+        a subscription writes history nobody reads, and a subscription without a
+        handler reads an event nobody writes history for.
+        """
+        published = await _published_types(path, fixtures, async_connection)
+
+        assert published <= set(_TASK_HISTORY_EVENT_TYPES), (
+            f"{path.name} publishes {sorted(published - set(_TASK_HISTORY_EVENT_TYPES))}, "
+            "which the history-projection group does not subscribe to"
+        )
 
 
 @pytest.mark.integration
