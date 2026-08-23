@@ -89,12 +89,15 @@ function setTypeDataOverride(
   overrides.type_data[typeKey][fieldKey] = value;
 }
 
-/** Is this the clock-time half of an event's timing, stored on the calendar row? */
-function isEventClockTime(typeKey: string, fieldKey: string): boolean {
-  return (
-    typeKey.toLowerCase() === 'event' &&
-    (fieldKey === 'start_time' || fieldKey === 'end_time')
-  );
+/**
+ * The calendar-row half of an event's timing. The clock times are meaningless
+ * without the zone they were recorded in, so the timezone belongs to the same
+ * answer as the times themselves.
+ */
+const EVENT_TIMING_FIELDS = new Set(['start_time', 'end_time', 'timezone']);
+
+function isEventTimingField(typeKey: string, fieldKey: string): boolean {
+  return typeKey.toLowerCase() === 'event' && EVENT_TIMING_FIELDS.has(fieldKey);
 }
 
 /**
@@ -446,12 +449,13 @@ export function MergeResolutionDialog({
               tVal !== undefined &&
               sVal !== tVal
             ) {
-              // The event's clock times are the same fact as its date range,
-              // which already shows both date and time: asking twice reads as
-              // duplication, and answering the two rows differently would
-              // leave the merged event's range and times contradicting each
-              // other. So they ride along with the range's choice.
-              if (eventTiming && isEventClockTime(typeKey, fieldKey)) {
+              // The event's clock times (and the zone they are read in) are
+              // the same fact as its date range, which already shows both date
+              // and time: asking twice reads as duplication, and answering the
+              // rows differently would leave the merged event's range, times
+              // and zone contradicting each other. So they ride along with the
+              // range's choice.
+              if (eventTiming && isEventTimingField(typeKey, fieldKey)) {
                 eventTiming.companions = [
                   ...(eventTiming.companions ?? []),
                   { typeKey, fieldKey, targetValue: tVal, sourceValue: sVal },

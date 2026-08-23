@@ -91,3 +91,45 @@ class TestCoerceTypeDataOverride:
     def test_an_unparseable_boolean_is_a_validation_error(self):
         with pytest.raises(JournalValidationError):
             coerce_type_data_override("is_all_day", "maybe", "boolean")
+
+    def test_a_number_for_a_time_column_is_a_validation_error(self):
+        """`{"start_time": 1930}` is as wrong as a bad string, and answers the same.
+
+        The REST schema types `type_data` values as ``Any``, so a wrong-typed
+        JSON value reaches the UPDATE just as a string does.
+        """
+        with pytest.raises(JournalValidationError) as exc_info:
+            coerce_type_data_override("start_time", 1930, "time without time zone")
+
+        assert "start_time" in str(exc_info.value)
+
+    def test_a_number_for_a_date_column_is_a_validation_error(self):
+        with pytest.raises(JournalValidationError):
+            coerce_type_data_override("trip_date", 20260823, "date")
+
+    def test_a_boolean_for_an_integer_column_is_a_validation_error(self):
+        """``True`` is an ``int`` to Python, but it is not a distance."""
+        with pytest.raises(JournalValidationError):
+            coerce_type_data_override("distance", True, "integer")
+
+    def test_a_fractional_number_for_an_integer_column_is_a_validation_error(self):
+        with pytest.raises(JournalValidationError):
+            coerce_type_data_override("distance", 8000.5, "integer")
+
+    def test_a_number_for_a_boolean_column_is_a_validation_error(self):
+        with pytest.raises(JournalValidationError):
+            coerce_type_data_override("is_all_day", 1, "boolean")
+
+    def test_a_whole_number_still_serves_a_numeric_column(self):
+        """Postgres takes an int for numeric, so this is not the caller's error."""
+        assert coerce_type_data_override("grade", 5, "numeric") == 5
+
+    def test_an_int_still_serves_a_float_column(self):
+        assert coerce_type_data_override("latitude", -33, "double precision") == -33
+
+    def test_a_wrong_typed_value_for_an_unruled_column_is_left_alone(self):
+        """No rule means no opinion: narrowing text/jsonb here could reject
+        payloads that work today."""
+        assert coerce_type_data_override("documents", [{"url": "x"}], "jsonb") == [
+            {"url": "x"}
+        ]

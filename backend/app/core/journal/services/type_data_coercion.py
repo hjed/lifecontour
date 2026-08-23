@@ -16,7 +16,7 @@ is handled the same as one that is not.
 from collections.abc import Callable
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, NamedTuple
 
 from core_shared.models.journals.exceptions import JournalValidationError
 
@@ -33,48 +33,74 @@ def _parse_bool(raw: str) -> bool:
     raise ValueError(f"{raw!r} is not a boolean")
 
 
-# Postgres ``information_schema.columns.data_type`` → how to read a JSON string
-# into the value that column takes. Types absent here (text, uuid, jsonb, enum
-# labels, arrays) already encode from a string, so they are left alone: a rule
-# that guesses is worse than no rule.
+class _ColumnRule(NamedTuple):
+    """How a column reads a JSON string, and what it accepts already typed."""
+
+    parse: Callable[[str], Any]
+    accepts: tuple[type, ...]
+
+
+# Postgres ``information_schema.columns.data_type`` → its rule. Types absent
+# here (text, uuid, jsonb, enum labels, arrays) are left alone entirely: they
+# take a string as-is, and narrowing them would risk rejecting payloads that
+# work today — a rule that guesses is worse than no rule.
 # ``fromisoformat`` reads the ``Z`` suffix JSON producers emit as of 3.11, so no
 # hand-rolled offset juggling is needed here.
-_PARSERS: dict[str, Callable[[str], Any]] = {
-    "time without time zone": time.fromisoformat,
-    "time with time zone": time.fromisoformat,
-    "date": date.fromisoformat,
-    "timestamp without time zone": datetime.fromisoformat,
-    "timestamp with time zone": datetime.fromisoformat,
-    "numeric": Decimal,
-    "smallint": int,
-    "integer": int,
-    "bigint": int,
-    "real": float,
-    "double precision": float,
-    "boolean": _parse_bool,
+_RULES: dict[str, _ColumnRule] = {
+    "time without time zone": _ColumnRule(time.fromisoformat, (time,)),
+    "time with time zone": _ColumnRule(time.fromisoformat, (time,)),
+    "date": _ColumnRule(date.fromisoformat, (date,)),
+    "timestamp without time zone": _ColumnRule(datetime.fromisoformat, (datetime,)),
+    "timestamp with time zone": _ColumnRule(datetime.fromisoformat, (datetime,)),
+    "numeric": _ColumnRule(Decimal, (Decimal, int, float)),
+    "smallint": _ColumnRule(int, (int,)),
+    "integer": _ColumnRule(int, (int,)),
+    "bigint": _ColumnRule(int, (int,)),
+    "real": _ColumnRule(float, (int, float)),
+    "double precision": _ColumnRule(float, (int, float)),
+    "boolean": _ColumnRule(_parse_bool, (bool,)),
 }
+
+
+def _serves_column(value: Any, accepts: tuple[type, ...]) -> bool:
+    """Can ``value`` be bound to a column that accepts ``accepts`` as-is?
+
+    ``bool`` is an ``int`` subclass to Python but not a number to Postgres, so
+    it only serves a column that asked for a boolean.
+    """
+    if isinstance(value, bool) and bool not in accepts:
+        return False
+    return isinstance(value, accepts)
 
 
 def coerce_type_data_override(column: str, value: Any, data_type: str | None) -> Any:
     """Return ``value`` as the Python type ``column`` takes.
 
-    Only strings are converted: a JSON number, boolean or null already matches
-    its column, and re-parsing one could only lose information.
+    A string is read into that type. A value that already carries a type the
+    column accepts is passed through untouched. Anything else — a number for a
+    time column, say — cannot be bound at all, and saying so here is the
+    difference between a 400 and a driver-level 500.
 
     Raises:
-        JournalValidationError: the string cannot be read as that column's
-            type, which is a bad request rather than a database failure.
+        JournalValidationError: ``value`` cannot serve that column, which is a
+            bad request rather than a database failure.
     """
-    if not isinstance(value, str) or data_type is None:
+    if value is None or data_type is None:
         return value
 
-    parser = _PARSERS.get(data_type.lower())
-    if parser is None:
+    rule = _RULES.get(data_type.lower())
+    if rule is None:
         return value
 
-    try:
-        return parser(value)
-    except (ValueError, TypeError, InvalidOperation) as exc:
-        raise JournalValidationError(
-            column, f"{value!r} is not a valid {data_type} value"
-        ) from exc
+    if isinstance(value, str):
+        try:
+            return rule.parse(value)
+        except (ValueError, TypeError, InvalidOperation) as exc:
+            raise JournalValidationError(
+                column, f"{value!r} is not a valid {data_type} value"
+            ) from exc
+
+    if _serves_column(value, rule.accepts):
+        return value
+
+    raise JournalValidationError(column, f"{value!r} is not a valid {data_type} value")

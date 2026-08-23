@@ -293,7 +293,7 @@ describe('MergeResolutionDialog', () => {
     const makeTimedEvent = (
       id: string,
       range: { start: string; end: string },
-      times: { start_time: string; end_time: string }
+      times: { start_time: string; end_time: string; timezone?: string }
     ) =>
       ({
         id,
@@ -388,6 +388,56 @@ describe('MergeResolutionDialog', () => {
           },
           type_data: {
             event: { start_time: '09:00:00', end_time: '10:00:00' },
+          },
+        },
+        'replace'
+      );
+    });
+
+    it('sends the timezone those clock times belong to', async () => {
+      // A clock time means nothing without its zone: keeping the source's
+      // times under the target's timezone would re-interpret them.
+      const user = userEvent.setup();
+      renderDialog(
+        makeTimedEvent(
+          '1',
+          { start: '2026-08-23T09:00:00Z', end: '2026-08-23T10:00:00Z' },
+          {
+            start_time: '09:00:00',
+            end_time: '10:00:00',
+            timezone: 'Australia/Sydney',
+          }
+        ),
+        makeTimedEvent(
+          '2',
+          { start: '2026-08-23T19:30:00Z', end: '2026-08-23T22:00:00Z' },
+          {
+            start_time: '19:30:00',
+            end_time: '22:00:00',
+            timezone: 'Pacific/Auckland',
+          }
+        )
+      );
+
+      expect(screen.queryByText('Event — Timezone')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('radio-source-event_date_range'));
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T19:30:00Z',
+            end: '2026-08-23T22:00:00Z',
+          },
+          type_data: {
+            event: {
+              start_time: '19:30:00',
+              end_time: '22:00:00',
+              timezone: 'Pacific/Auckland',
+            },
           },
         },
         'replace'

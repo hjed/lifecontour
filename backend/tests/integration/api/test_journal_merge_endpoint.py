@@ -1159,3 +1159,38 @@ async def test_merge_endpoint_rejects_an_unparseable_time_override(
     )
 
     assert res.status_code == 400, res.text
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_rejects_a_wrong_typed_time_override(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """A number is no more bindable to a TIME column than a bad string is.
+
+    The request schema types type-data values as ``Any``, so a payload like
+    ``{"start_time": 1930}`` reaches the UPDATE with the wrong Python type.
+    """
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+    target_id = await _create_event_journal(
+        authenticated_client, "Target event", "01", calendar_id, "09:00:00", "10:00:00"
+    )
+    source_id = await _create_event_journal(
+        authenticated_client, "Source event", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {"type_data": {"event": {"start_time": 1930}}},
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 400, res.text
