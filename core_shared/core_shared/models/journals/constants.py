@@ -1,5 +1,7 @@
 """Constants for the journal domain."""
 
+from enum import StrEnum
+
 # Maximum depth of journal hierarchy (parent-child relationships)
 # Value: 5 levels as per journal-system-specification.md
 MAX_HIERARCHY_DEPTH: int = 5
@@ -50,14 +52,19 @@ MAX_WEATHER_CONDITIONS_LENGTH: int = 200
 MAX_ROLE_LENGTH: int = 100
 MAX_PARTICIPANT_NOTES_LENGTH: int = 2000
 
+
 # BushwalkingData constants (BUSHWALKING type)
-VALID_TRACK_GRADES: list[str] = [
-    "Grade 1",
-    "Grade 2",
-    "Grade 3",
-    "Grade 4",
-    "Grade 5",
-]
+class TrackGrade(StrEnum):
+    """Australian Walking Track Grading System grades (BUSHWALKING)."""
+
+    GRADE_1 = "Grade 1"
+    GRADE_2 = "Grade 2"
+    GRADE_3 = "Grade 3"
+    GRADE_4 = "Grade 4"
+    GRADE_5 = "Grade 5"
+
+
+VALID_TRACK_GRADES: list[str] = [member.value for member in TrackGrade]
 
 # CanyoningData constants (CANYONING type)
 # French canyon grading format: v[vertical]a[aquatic][engagement][stars]
@@ -65,77 +72,124 @@ VALID_TRACK_GRADES: list[str] = [
 # Vertical: 1-7, Aquatic: 1-7, Engagement: I-VI (optional), Stars: *-*** (optional)
 FRENCH_CANYON_GRADE_PATTERN: str = r"^v[1-7]a[1-7](I{1,3}|IV|V|VI)?(\*{1,3})?$"
 
+
 # ClimbingData constants (CLIMBING type)
 # These are mutually-exclusive climbing disciplines/styles. "indoor" is NOT a
 # type — it is a separate boolean flag on ClimbingData, since a climb can be
 # indoor in any of these styles.
-VALID_CLIMBING_TYPES: list[str] = [
-    "sport",
-    "trad",
-    "bouldering",
-    "top_rope",
-]
+class ClimbingType(StrEnum):
+    """Climbing disciplines (CLIMBING); 'indoor' is a separate flag."""
+
+    SPORT = "sport"
+    TRAD = "trad"
+    BOULDERING = "bouldering"
+    TOP_ROPE = "top_rope"
+
+
+VALID_CLIMBING_TYPES: list[str] = [member.value for member in ClimbingType]
+
 
 # AbseilPitch constants (abseil_pitches table)
-VALID_ANCHOR_LOCATIONS: list[str] = [
-    "TR",
-    "TL",
-    "Centre",
-]
+class AnchorLocation(StrEnum):
+    """Where a pitch anchor sits (abseil_pitches)."""
 
-VALID_ANCHOR_TYPES: list[str] = [
-    "chains",
-    "double bolt",
-    "single bolt",
-    "sling on tree",
-    "sling on log",
-    "sling on boulder",
-    "sling on bollard",
-    "artificial removable",
-]
+    TR = "TR"
+    TL = "TL"
+    CENTRE = "Centre"
+
+
+VALID_ANCHOR_LOCATIONS: list[str] = [member.value for member in AnchorLocation]
+
+
+class AnchorType(StrEnum):
+    """Pitch anchor types (abseil_pitches)."""
+
+    CHAINS = "chains"
+    DOUBLE_BOLT = "double bolt"
+    SINGLE_BOLT = "single bolt"
+    SLING_ON_TREE = "sling on tree"
+    SLING_ON_LOG = "sling on log"
+    SLING_ON_BOULDER = "sling on boulder"
+    SLING_ON_BOLLARD = "sling on bollard"
+    ARTIFICIAL_REMOVABLE = "artificial removable"
+
+
+VALID_ANCHOR_TYPES: list[str] = [member.value for member in AnchorType]
 
 # How a pitch is descended. A null pitch_type is treated as "abseil" for
 # backward compatibility with rows created before the column existed.
 PITCH_TYPE_ABSEIL: str = "abseil"
 
-VALID_PITCH_TYPES: list[str] = [
-    PITCH_TYPE_ABSEIL,
-    "jump",
-    "down_climb",
-]
+
+class PitchType(StrEnum):
+    """How a pitch is descended; null is treated as abseil."""
+
+    ABSEIL = PITCH_TYPE_ABSEIL
+    JUMP = "jump"
+    DOWN_CLIMB = "down_climb"
+
+
+VALID_PITCH_TYPES: list[str] = [member.value for member in PitchType]
+
 
 # ActivityTemplate constants (activity_templates table)
-VALID_TEMPLATE_TYPES: list[str] = [
-    "abseiling",
-    "canyoning",
-    "caving",
-    "climbing",
-]
+class TemplateType(StrEnum):
+    """Activity template types (activity_templates)."""
 
-VALID_CANYON_TYPES: list[str] = [
-    "vertical",
-    "aquatic",
-    "mixed",
-]
+    ABSEILING = "abseiling"
+    CANYONING = "canyoning"
+    CAVING = "caving"
+    CLIMBING = "climbing"
+
+
+VALID_TEMPLATE_TYPES: list[str] = [member.value for member in TemplateType]
+
+
+class CanyonType(StrEnum):
+    """Canyon character recorded on a template."""
+
+    VERTICAL = "vertical"
+    AQUATIC = "aquatic"
+    MIXED = "mixed"
+
+
+VALID_CANYON_TYPES: list[str] = [member.value for member in CanyonType]
 
 MAX_TEMPLATE_NAME_LENGTH: int = 200
 MAX_REGION_LENGTH: int = 200
 MAX_WATER_GAUGE_NAME_LENGTH: int = 200
 
+
 # KayakingData constants (KAYAKING type)
 # International Scale of River Difficulty — Grade I (easiest) to VI (hardest)
-VALID_RAPIDS_GRADES: list[str] = ["I", "II", "III", "IV", "V", "VI"]
+class RapidsGrade(StrEnum):
+    """International Scale of River Difficulty (KAYAKING)."""
+
+    GRADE_I = "I"
+    GRADE_II = "II"
+    GRADE_III = "III"
+    GRADE_IV = "IV"
+    GRADE_V = "V"
+    GRADE_VI = "VI"
+
+
+VALID_RAPIDS_GRADES: list[str] = [member.value for member in RapidsGrade]
 
 # GearItem constants (gear_items table)
 MAX_GEAR_ITEM_NAME_LENGTH: int = 200
 MAX_GEAR_ITEM_FIELD_LENGTH: int = 200  # model, serial_number, manufacturer
 
+
 # GearMaintenanceData constants (GEAR_MAINTENANCE type)
-VALID_MAINTENANCE_TYPES: list[str] = [
-    "retiring gear",
-    "repairing gear",
-    "routine inspection",
-    "routine maintenance",
-]
+class MaintenanceType(StrEnum):
+    """Kinds of gear maintenance (GEAR_MAINTENANCE)."""
+
+    RETIRING_GEAR = "retiring gear"
+    REPAIRING_GEAR = "repairing gear"
+    ROUTINE_INSPECTION = "routine inspection"
+    ROUTINE_MAINTENANCE = "routine maintenance"
+
+
+VALID_MAINTENANCE_TYPES: list[str] = [member.value for member in MaintenanceType]
 MAX_MAINTENANCE_TYPE_LENGTH: int = 100
 MAX_RETIREMENT_REASON_LENGTH: int = 500

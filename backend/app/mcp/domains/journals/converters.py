@@ -46,6 +46,9 @@ class JournalConverter:
         additional_context: str = "",
         external_links: list[ExternalLinkInfo] | None = None,
         series: list[dict[str, str]] | None = None,
+        types_removed: list[str] | None = None,
+        type_data_discarded: dict[str, list[str]] | None = None,
+        external_links_preserved: bool | None = None,
     ) -> JournalResponse:
         """
         Convert a Journal entity to an AI-friendly JournalResponse.
@@ -146,6 +149,9 @@ class JournalConverter:
             parent=parent_summary,
             children=children_summaries,
             external_links=external_link_schemas,
+            external_links_preserved=external_links_preserved,
+            types_removed=types_removed or [],
+            type_data_discarded=type_data_discarded or {},
             created_at=journal.created_at or journal.event_date_range.start,
             updated_at=journal.updated_at or journal.event_date_range.start,
         )

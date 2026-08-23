@@ -35,6 +35,10 @@ from app.core.journal.adapters.sql.album_sync_read_repository import (
     INTEGRATION_SOURCE,
     AlbumSyncReadRepository,
 )
+from app.core.journal.adapters.sql.journal_repository import (
+    GET_TYPES_BATCH_SQL,
+    type_names_from_projection_row,
+)
 from app.core.journal.models.repositories import LogbookExportRepository
 
 
@@ -191,64 +195,12 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         final_journal_ids = [row.id for row in final_journal_rows]
 
         # 2. Fetch all journal types for the final journal ids
-        types_sql = """
-            SELECT j.id as journal_id,
-                CASE WHEN jci.journal_id IS NOT NULL THEN 'EVENT' END as event_type,
-                CASE WHEN jmd.journal_id IS NOT NULL THEN 'MOOD_RATING' END as mood_type,
-                CASE WHEN jpd.journal_id IS NOT NULL THEN 'PLAN' END as plan_type,
-                CASE WHEN jtd.journal_id IS NOT NULL THEN 'TRAVEL' END as travel_type,
-                CASE WHEN sm_pa.internal_id IS NOT NULL THEN 'PHOTO_ALBUM' END as photo_type,
-                CASE WHEN jfd.journal_id IS NOT NULL THEN 'FITNESS' END as fitness_type,
-                CASE WHEN joad.journal_id IS NOT NULL THEN 'OUTDOOR_ACTIVITY' END as outdoor_activity_type,
-                CASE WHEN jbwd.journal_id IS NOT NULL THEN 'BUSHWALKING' END as bushwalking_type,
-                CASE WHEN jjd.journal_id IS NOT NULL THEN 'JOGGING' END as jogging_type,
-                CASE WHEN jabd.journal_id IS NOT NULL THEN 'ABSEILING_TRIP' END as abseiling_type,
-                CASE WHEN jcyd.journal_id IS NOT NULL THEN 'CANYONING' END as canyoning_type,
-                CASE WHEN jcld.journal_id IS NOT NULL THEN 'CLIMBING' END as climbing_type,
-                CASE WHEN jkyd.journal_id IS NOT NULL THEN 'KAYAKING' END as kayaking_type,
-                CASE WHEN jskid.journal_id IS NOT NULL THEN 'CROSS_COUNTRY_SKIING' END as skiing_type,
-                CASE WHEN jcvd.journal_id IS NOT NULL THEN 'CAVING' END as caving_type,
-                CASE WHEN jcnd.journal_id IS NOT NULL THEN 'CANOEING' END as canoeing_type,
-                CASE WHEN jsnkd.journal_id IS NOT NULL THEN 'SNORKELLING' END as snorkelling_type,
-                CASE WHEN jdivd.journal_id IS NOT NULL THEN 'DIVING' END as diving_type,
-                CASE WHEN jdsd.journal_id IS NOT NULL THEN 'DOWNHILL_SKIING' END as downhill_skiing_type,
-                CASE WHEN jopd.journal_id IS NOT NULL THEN 'OUTDOOR_PLANNING' END as outdoor_planning_type,
-                CASE WHEN jotd.journal_id IS NOT NULL THEN 'OUTDOOR_TRAINING' END as outdoor_training_type,
-                CASE WHEN jgmd.journal_id IS NOT NULL THEN 'GEAR_MAINTENANCE' END as gear_maintenance_type
-            FROM journals j
-            LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
-            LEFT JOIN journal_mood_data jmd ON j.id = jmd.journal_id
-            LEFT JOIN journal_plan_data jpd ON j.id = jpd.journal_id
-            LEFT JOIN journal_travel_data jtd ON j.id = jtd.journal_id
-            LEFT JOIN sync_metadata sm_pa ON sm_pa.internal_id = j.id
-                AND sm_pa.integration_source = 'immich_album'
-            LEFT JOIN journal_fitness_data jfd ON j.id = jfd.journal_id
-            LEFT JOIN journal_outdoor_activity_data joad ON j.id = joad.journal_id
-            LEFT JOIN journal_bushwalking_data jbwd ON j.id = jbwd.journal_id
-            LEFT JOIN journal_jogging_data jjd ON j.id = jjd.journal_id
-            LEFT JOIN journal_abseiling_data jabd ON j.id = jabd.journal_id
-            LEFT JOIN journal_canyoning_data jcyd ON j.id = jcyd.journal_id
-            LEFT JOIN journal_climbing_data jcld ON j.id = jcld.journal_id
-            LEFT JOIN journal_kayaking_data jkyd ON j.id = jkyd.journal_id
-            LEFT JOIN journal_skiing_data jskid ON j.id = jskid.journal_id
-            LEFT JOIN journal_caving_data jcvd ON j.id = jcvd.journal_id
-            LEFT JOIN journal_canoeing_data jcnd ON j.id = jcnd.journal_id
-            LEFT JOIN journal_snorkelling_data jsnkd ON j.id = jsnkd.journal_id
-            LEFT JOIN journal_diving_data jdivd ON j.id = jdivd.journal_id
-            LEFT JOIN journal_downhill_skiing_data jdsd ON j.id = jdsd.journal_id
-            LEFT JOIN journal_outdoor_planning_data jopd ON j.id = jopd.journal_id
-            LEFT JOIN journal_outdoor_training_data jotd ON j.id = jotd.journal_id
-            LEFT JOIN journal_gear_maintenance_data jgmd ON j.id = jgmd.journal_id
-            WHERE j.id = ANY(:journal_ids)
-        """
         result = await self.connection.execute(
-            text(types_sql), {"journal_ids": final_journal_ids}
+            text(GET_TYPES_BATCH_SQL), {"journal_ids": final_journal_ids}
         )
         types_by_journal = defaultdict(list)
         for row in result.fetchall():
-            for i in range(1, len(row)):
-                if row[i]:
-                    types_by_journal[row.journal_id].append(row[i])
+            types_by_journal[row.journal_id].extend(type_names_from_projection_row(row))
 
         # Determine if 'NOTE' applies to any
         for jid in final_journal_ids:

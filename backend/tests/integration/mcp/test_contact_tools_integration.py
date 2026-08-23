@@ -190,6 +190,7 @@ class TestContactToolsIntegration:
             # Verify all expected tools are registered
             expected_tools = [
                 "get_contact",
+                "get_contact_by_external_id",
                 "search_contacts",
                 "global_search",
                 "create_contact",
