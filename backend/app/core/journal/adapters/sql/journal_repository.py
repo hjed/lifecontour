@@ -7,6 +7,7 @@ from core_shared.models.journals import EventDateRange, Journal, JournalNotFound
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_touch import touch_journal
 from app.core.journal.models.repositories import JournalRepository
 
 # Module-level constant for journal type to table mapping
@@ -372,6 +373,10 @@ class SqlJournalRepository(JournalRepository):
             return None
 
         return self._row_to_journal(row)
+
+    async def touch(self, journal_id: int) -> None:
+        """Record that a journal changed; see the port for why."""
+        await touch_journal(self.conn, journal_id)
 
     async def lock_and_get_updated_at(self, journal_id: int) -> datetime | None:
         """Lock the journal row and return its last-write timestamp.

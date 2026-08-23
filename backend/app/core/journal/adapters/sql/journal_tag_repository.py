@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_touch import touch_journal
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import JournalTagRepository
 
@@ -334,7 +335,13 @@ class SqlJournalTagRepository(JournalTagRepository):
         result = await self.conn.execute(
             query, {"journal_id": journal_id, "tag_id": tag_id}
         )
-        return result.fetchone() is not None
+        if result.fetchone() is None:
+            return False
+
+        # The journal's tags are part of what a read of it returns, so the
+        # aggregate's version has to move with them; see ``touch_journal``.
+        await touch_journal(self.conn, journal_id)
+        return True
 
     async def remove_tag(self, journal_id: int, tag_id: UUID) -> bool:
         """Remove a tag from a journal, reporting whether a row was deleted."""
@@ -347,4 +354,8 @@ class SqlJournalTagRepository(JournalTagRepository):
         result = await self.conn.execute(
             query, {"journal_id": journal_id, "tag_id": tag_id}
         )
-        return result.rowcount > 0
+        if result.rowcount == 0:
+            return False
+
+        await touch_journal(self.conn, journal_id)
+        return True

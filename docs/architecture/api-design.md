@@ -154,10 +154,24 @@ either writes — so the lock is what turns the check into a guarantee. It also
 runs **before anything is written**, including the find-or-create of tag rows,
 so a refusal leaves nothing behind.
 
-Because the tag is derived from the aggregate root's `updated_at`, it moves when
-that row is written. A write that only touches child tables must bump the parent
-row (as the composite journal update does, via its core-field update) or it will
-not shift the tag.
+### The tag covers the whole aggregate
+
+A read of a journal returns more than the `journals` row: its types,
+type-specific data, tags and contact relationships all appear in the
+representation the tag is minted from. A write to any of those child tables
+therefore **touches the parent row** (`touch_journal`,
+`backend/app/core/journal/adapters/sql/journal_touch.py`), so the tag moves with
+anything a client would see.
+
+Without that, a conditional write would be accepted despite a concurrent change
+it was meant to catch — and the MCP composite update *replaces* types, tags and
+relationships under the caller's precondition, so the change would be clobbered
+rather than merely missed.
+
+`now()` is the transaction timestamp, so touching a journal the same transaction
+already wrote costs nothing and lands on the same value. **When adding a new
+write path for journal child data, touch the parent** or that path becomes a
+hole in the guarantee.
 
 ## Error Handling Guidelines
 

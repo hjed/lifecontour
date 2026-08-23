@@ -616,6 +616,10 @@ class JournalWriteService:
 
         await self._apply_type_data_update(journal_id, journal_type, attrs)
 
+        # Type-specific data is part of what a read of the journal returns, so
+        # the aggregate's version has to move with it; see ``touch_journal``.
+        await self.journal_service.journal_repo.touch(journal_id)
+
         after = (
             await repo.find_by_journal_id(journal_id)
             if repo is not None and tracked

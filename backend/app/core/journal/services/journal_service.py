@@ -767,6 +767,11 @@ class JournalService:
                 journal_type=jtype.value,
             )
 
+        # A journal's types are part of what a read of it returns, so the
+        # aggregate's version has to move with them or a conditional write
+        # would be accepted despite this change.
+        await self.journal_repo.touch(journal_id)
+
         return types_to_add
 
     @transactional
@@ -808,6 +813,8 @@ class JournalService:
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
+
+        await self.journal_repo.touch(journal_id)
 
         logger.info(
             "Journal type removed",

@@ -362,3 +362,126 @@ class TestContactConditionalWrites:
         )
 
         assert response.status_code == 200
+
+
+@pytest.mark.integration
+class TestTheTagCoversTheWholeJournal:
+    """A read returns the journal *aggregate*, so its tag must track all of it.
+
+    Types, type-specific data, tags and contact relationships all appear in
+    ``GET /api/journals/{id}``. A write to any of them that left
+    ``journals.updated_at`` alone would leave the tag naming a version that no
+    longer describes what a client would read — and the MCP composite update
+    *replaces* those collections under the caller's precondition, so the
+    concurrent change it was meant to catch would be clobbered instead.
+
+    ``now()`` is the transaction timestamp and this fixture shares one
+    transaction, so "the timestamp went up" cannot be asserted here. Each test
+    instead backdates the row to a fixed instant and asserts the write moved it
+    off that instant — which is exactly the touch, and is deterministic.
+    """
+
+    BACKDATED = datetime(2000, 1, 1, tzinfo=UTC)
+
+    async def _backdate(self, connection: AsyncConnection, journal_id: str) -> None:
+        await connection.execute(
+            text("UPDATE journals SET updated_at = :ts WHERE id = :row_id"),
+            {"ts": self.BACKDATED, "row_id": int(journal_id)},
+        )
+
+    async def _updated_at(
+        self, connection: AsyncConnection, journal_id: str
+    ) -> datetime:
+        result = await connection.execute(
+            text("SELECT updated_at FROM journals WHERE id = :row_id"),
+            {"row_id": int(journal_id)},
+        )
+        stored: datetime = result.scalar_one()
+        return stored
+
+    async def _create_journal(self, client) -> str:
+        created = await client.post("/api/journals", json=journal_payload())
+        return str(created.json()["data"]["id"])
+
+    async def test_adding_a_tag_moves_the_version(
+        self, integration_api_client, async_connection
+    ):
+        journal_id = await self._create_journal(integration_api_client)
+        tag = await integration_api_client.post(
+            "/api/journals/tags",
+            json={"data": {"type": "journal-tags", "attributes": {"name": "outdoors"}}},
+        )
+        tag_id = tag.json()["data"]["id"]
+        await self._backdate(async_connection, journal_id)
+
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/tags",
+            json={"data": {"type": "journal-tag", "attributes": {"tag_id": tag_id}}},
+        )
+
+        assert response.status_code in (200, 201, 204)
+        assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
+
+    async def test_updating_type_data_moves_the_version(
+        self, integration_api_client, async_connection
+    ):
+        payload = journal_payload()
+        payload["data"]["attributes"]["types"] = ["MOOD_RATING"]
+        created = await integration_api_client.post("/api/journals", json=payload)
+        journal_id = str(created.json()["data"]["id"])
+        await self._backdate(async_connection, journal_id)
+
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}/types/MOOD_RATING/data",
+            json={
+                "data": {"type": "journal-type-data", "attributes": {"mood_value": 7}}
+            },
+        )
+
+        assert response.status_code == 200
+        assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
+
+    async def test_adding_a_type_moves_the_version(
+        self, integration_api_client, async_connection
+    ):
+        journal_id = await self._create_journal(integration_api_client)
+        await self._backdate(async_connection, journal_id)
+
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/types",
+            json={
+                "data": {
+                    "type": "journal-type",
+                    "attributes": {"journal_type": "MOOD_RATING"},
+                }
+            },
+        )
+
+        assert response.status_code in (200, 201, 204)
+        assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
+
+    async def test_linking_a_contact_moves_the_version(
+        self, integration_api_client, async_connection
+    ):
+        journal_id = await self._create_journal(integration_api_client)
+        contact = await integration_api_client.post(
+            "/api/contacts", json=contact_payload()
+        )
+        contact_id = contact.json()["data"]["id"]
+        await self._backdate(async_connection, journal_id)
+
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts",
+            json={
+                "data": {
+                    "type": "journal-contact-relationships",
+                    "attributes": {
+                        "contact_id": str(contact_id),
+                        "relationship_type": "PARTICIPANT",
+                    },
+                }
+            },
+        )
+
+        assert response.status_code in (200, 201, 204)
+        assert await self._updated_at(async_connection, journal_id) != self.BACKDATED

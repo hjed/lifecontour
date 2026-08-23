@@ -11,6 +11,7 @@ from core_shared.models.journals.contact_event_role import ContactEventRole
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_touch import touch_journal
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 
 
@@ -69,6 +70,11 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         if row is not None:
             relationship.created_at = row.created_at
 
+        # A journal's contact relationships are part of what a read of it
+        # returns, so the aggregate's version moves with them; see
+        # ``touch_journal``.
+        await touch_journal(self.conn, relationship.journal_id)
+
         return relationship
 
     async def delete(
@@ -94,6 +100,7 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
                 "relationship_type": relationship_type.value,
             },
         )
+        await touch_journal(self.conn, journal_id)
 
     async def repoint_contact(
         self, source_id: int, survivor_id: int, transaction: AsyncConnection
@@ -298,6 +305,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         row = result.fetchone()
         if row is None:
             return None
+
+        await touch_journal(self.conn, journal_id)
         return self._row_to_entity(row)
 
     async def find_attending_for_past_events(
