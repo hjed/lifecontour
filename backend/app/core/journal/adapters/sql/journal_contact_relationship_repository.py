@@ -11,7 +11,7 @@ from core_shared.models.journals.contact_event_role import ContactEventRole
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.adapters.sql.journal_touch import touch_journal
+from app.core.journal.adapters.sql.journal_touch import lock_journal, touch_journal
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 
 
@@ -48,6 +48,10 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         self, relationship: JournalContactRelationship
     ) -> JournalContactRelationship:
         """Create a new journal-contact relationship."""
+        # Parent lock before the child write, so this cannot deadlock against a
+        # conditional update that locks the journal first; see ``lock_journal``.
+        await lock_journal(self.conn, relationship.journal_id)
+
         query = text(
             """
             INSERT INTO journal_contact_relationships
@@ -84,6 +88,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         relationship_type: JournalContactRelationshipType,
     ) -> None:
         """Delete a specific journal-contact relationship."""
+        await lock_journal(self.conn, journal_id)
+
         query = text(
             """
             DELETE FROM journal_contact_relationships
@@ -252,6 +258,8 @@ class SqlJournalContactRelationshipRepository(JournalContactRelationshipReposito
         update_role: bool = False,
     ) -> JournalContactRelationship | None:
         """Update the attributes (status, role) of a journal-contact relationship."""
+        await lock_journal(self.conn, journal_id)
+
         set_clauses = []
         from typing import Any
 

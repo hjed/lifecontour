@@ -171,7 +171,17 @@ rather than merely missed.
 `now()` is the transaction timestamp, so touching a journal the same transaction
 already wrote costs nothing and lands on the same value. **When adding a new
 write path for journal child data, touch the parent** or that path becomes a
-hole in the guarantee.
+hole in the guarantee — including bulk rewrites no caller names journal-by-journal,
+like merging or deleting a tag, which touch every journal holding it *before* the
+assignments stop pointing there.
+
+**Lock ordering matters.** A conditional write takes the journal's lock first
+and then writes child rows. A child write that touched the parent afterwards
+would take the same two locks in the opposite order, and PostgreSQL would break
+the resulting cycle by aborting one transaction with a deadlock — which
+`@transactional` does not retry. So every child-write path takes the parent lock
+**up front** (`lock_journal`, or the touch itself where it is unconditional),
+and all writers queue instead of deadlocking.
 
 ## Error Handling Guidelines
 

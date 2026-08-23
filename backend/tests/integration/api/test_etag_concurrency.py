@@ -485,3 +485,57 @@ class TestTheTagCoversTheWholeJournal:
 
         assert response.status_code in (200, 201, 204)
         assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
+
+    async def _create_tag(self, client, name: str) -> str:
+        created = await client.post(
+            "/api/journals/tags",
+            json={"data": {"type": "journal-tags", "attributes": {"name": name}}},
+        )
+        return str(created.json()["data"]["id"])
+
+    async def _assign_tag(self, client, journal_id: str, tag_id: str) -> None:
+        await client.post(
+            f"/api/journals/{journal_id}/relationships/tags",
+            json={"data": {"type": "journal-tag", "attributes": {"tag_id": tag_id}}},
+        )
+
+    async def test_merging_a_tag_moves_the_version_of_every_journal_holding_it(
+        self, integration_api_client, async_connection
+    ):
+        """A bulk assignment rewrite changes journals the caller never names.
+
+        The journals are found from the assignments themselves, before the
+        rewrite stops those rows pointing at the source tag.
+        """
+        journal_id = await self._create_journal(integration_api_client)
+        source = await self._create_tag(integration_api_client, "source-tag")
+        target = await self._create_tag(integration_api_client, "target-tag")
+        await self._assign_tag(integration_api_client, journal_id, source)
+        await self._backdate(async_connection, journal_id)
+
+        response = await integration_api_client.post(
+            f"/api/journals/tags/{source}/merge",
+            json={
+                "data": {
+                    "type": "journal-tags",
+                    "attributes": {"target_tag_id": target},
+                }
+            },
+        )
+
+        assert response.status_code in (200, 201, 204)
+        assert await self._updated_at(async_connection, journal_id) != self.BACKDATED
+
+    async def test_deleting_a_tag_moves_the_version_of_every_journal_holding_it(
+        self, integration_api_client, async_connection
+    ):
+        """The assignments go by ``ON DELETE CASCADE``, which no code path sees."""
+        journal_id = await self._create_journal(integration_api_client)
+        tag_id = await self._create_tag(integration_api_client, "doomed-tag")
+        await self._assign_tag(integration_api_client, journal_id, tag_id)
+        await self._backdate(async_connection, journal_id)
+
+        response = await integration_api_client.delete(f"/api/journals/tags/{tag_id}")
+
+        assert response.status_code in (200, 204)
+        assert await self._updated_at(async_connection, journal_id) != self.BACKDATED

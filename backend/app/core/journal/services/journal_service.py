@@ -745,6 +745,12 @@ class JournalService:
         if journal is None:
             raise JournalNotFoundError(journal_id)
 
+        # The journal's types are part of what a read of it returns, so the
+        # aggregate's version has to move with them. Done before the type-data
+        # rows are written (by the caller) so every writer takes the journal's
+        # lock first and none can deadlock against a conditional update.
+        await self.journal_repo.touch(journal_id)
+
         # Get all types to add (including dependencies)
         types_to_add = self._resolve_type_dependencies(journal_type)
 
@@ -766,11 +772,6 @@ class JournalService:
                 journal_id=journal_id,
                 journal_type=jtype.value,
             )
-
-        # A journal's types are part of what a read of it returns, so the
-        # aggregate's version has to move with them or a conditional write
-        # would be accepted despite this change.
-        await self.journal_repo.touch(journal_id)
 
         return types_to_add
 
@@ -803,6 +804,8 @@ class JournalService:
         if journal is None:
             raise JournalNotFoundError(journal_id)
 
+        await self.journal_repo.touch(journal_id)
+
         # Publish type removed event
         # Note: Type-specific data deletion is handled by database CASCADE
         event = JournalTypeRemoved(
@@ -813,8 +816,6 @@ class JournalService:
             transaction=transaction,
         )
         await self.event_publisher.publish(event)
-
-        await self.journal_repo.touch(journal_id)
 
         logger.info(
             "Journal type removed",

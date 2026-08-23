@@ -15,8 +15,53 @@ transaction already wrote is a no-op in value — a composite update that bumps
 the row once and touches it again lands on the same timestamp.
 """
 
+from uuid import UUID
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+async def lock_journal(conn: AsyncConnection, journal_id: int) -> None:
+    """Take a journal's row lock before writing any of its child rows.
+
+    Every path that writes journal child data ends by touching the parent, and
+    a conditional write takes the parent's lock *first* (see
+    ``lock_and_get_updated_at``). Without this, the two orders invert: the
+    conditional write holds the parent and wants the child, while a plain child
+    write holds the child and wants the parent, and PostgreSQL breaks the cycle
+    by aborting one of them with a deadlock. Locking the parent up front makes
+    every writer take the locks in the same order, so they queue instead.
+
+    Taking the lock here also means the closing ``touch_journal`` needs no lock
+    of its own — it already holds one.
+    """
+    await conn.execute(
+        text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE"),
+        {"journal_id": journal_id},
+    )
+
+
+async def touch_journals_holding_tag(conn: AsyncConnection, tag_id: UUID) -> None:
+    """Mark every journal carrying a tag as changed, locking them first.
+
+    For the bulk assignment rewrites — merging a tag into another, or deleting
+    one — where the journals affected are not known to the caller and the
+    assignment rows are about to stop pointing at this tag. Runs *before* that
+    rewrite, while the assignments still name the journals to touch, and takes
+    the parent locks ahead of the child writes for the reason
+    :func:`lock_journal` explains.
+    """
+    await conn.execute(
+        text(
+            """
+            UPDATE journals SET updated_at = now()
+            WHERE id IN (
+                SELECT journal_id FROM journal_tag_assignments WHERE tag_id = :tag_id
+            )
+            """
+        ),
+        {"tag_id": tag_id},
+    )
 
 
 async def touch_journal(conn: AsyncConnection, journal_id: int) -> None:

@@ -614,11 +614,13 @@ class JournalWriteService:
             for spec in collections
         }
 
-        await self._apply_type_data_update(journal_id, journal_type, attrs)
-
         # Type-specific data is part of what a read of the journal returns, so
         # the aggregate's version has to move with it; see ``touch_journal``.
+        # Done *before* the child write so every writer takes the journal's lock
+        # first and none of them can deadlock against a conditional update.
         await self.journal_service.journal_repo.touch(journal_id)
+
+        await self._apply_type_data_update(journal_id, journal_type, attrs)
 
         after = (
             await repo.find_by_journal_id(journal_id)
