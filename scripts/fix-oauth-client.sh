@@ -66,7 +66,7 @@ CLIENT_CONFIG='{
     "client_secret": "dev-client-secret",
     "grant_types": ["authorization_code", "refresh_token"],
     "response_types": ["code"],
-    "redirect_uris": ["http://localhost:3000/auth/callback"],
+    "redirect_uris": ["http://localhost:3000/auth/callback", "http://localhost:8000/mcp-server/auth/callback"],
     "scope": "openid profile email",
     "skip_consent": true,
     "skip_logout_consent": true,
@@ -95,8 +95,9 @@ else
     exit 1
 fi
 
-if echo "$CLIENT_INFO" | jq -e '.redirect_uris[] | select(. == "http://localhost:3000/auth/callback")' >/dev/null 2>&1; then
-    print_success "Redirect URI verified"
+if echo "$CLIENT_INFO" | jq -e '.redirect_uris[] | select(. == "http://localhost:3000/auth/callback")' >/dev/null 2>&1 &&
+   echo "$CLIENT_INFO" | jq -e '.redirect_uris[] | select(. == "http://localhost:8000/mcp-server/auth/callback")' >/dev/null 2>&1; then
+    print_success "Redirect URIs verified"
 else
     print_error "Redirect URI verification failed"
     echo "Current redirect URIs:"

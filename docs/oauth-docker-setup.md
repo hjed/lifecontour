@@ -108,7 +108,8 @@ curl http://localhost:4445/admin/clients/dev-client-id | jq
 
 # Expected response should include:
 # - client_id: "dev-client-id"
-# - redirect_uris: ["http://localhost:3000/auth/callback"]
+# - redirect_uris: ["http://localhost:3000/auth/callback",
+#                   "http://localhost:8000/mcp-server/auth/callback"]
 # - grant_types: ["authorization_code", "refresh_token"]
 ```
 
@@ -185,7 +186,7 @@ curl -X POST http://localhost:4445/admin/clients \
     "client_secret": "dev-client-secret",
     "grant_types": ["authorization_code", "refresh_token"],
     "response_types": ["code"],
-    "redirect_uris": ["http://localhost:3000/auth/callback"],
+    "redirect_uris": ["http://localhost:3000/auth/callback", "http://localhost:8000/mcp-server/auth/callback"],
     "scope": "openid profile email"
   }'
 ```

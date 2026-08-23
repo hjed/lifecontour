@@ -76,6 +76,8 @@ dev = [
     "mypy>=2.3.0",
     "pre-commit>=4.6.2",
     "types-authlib>=1.7.2.20260807",  # type stubs for authlib
+    "pyyaml>=6.0.3",  # tests parse docker-compose.yml
+    "types-PyYAML>=6.0.12",  # type stubs for pyyaml
     "respx>=0.23.1",  # for mocking httpx requests in tests
 ]
 
@@ -191,8 +193,10 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "respx>=0.23.1",
+    "pyyaml>=6.0.3",
     "ruff>=0.16.1",
     "types-authlib>=1.7.2.20260807",
+    "types-PyYAML>=6.0.12",
 ]
 
 [tool.alembic]

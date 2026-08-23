@@ -56,6 +56,18 @@ export const FRONTEND_TEST_CALLBACK_URL = new URL(
   FRONTEND_TEST_URL
 ).toString();
 
+export const BACKEND_TEST_URL = `http://localhost:${BACKEND_TEST_PORT}`;
+
+/**
+ * The MCP server's mount path and the OAuth callback FastMCP's proxy serves
+ * under it. The Hydra client has to register this URI or the MCP OAuth flow is
+ * rejected at the authorize step; docker/oauth-provider/init-oauth.sh builds
+ * the same value from WEBHOOK_BASE_URL and MCP_MOUNT_PATH.
+ */
+export const MCP_TEST_MOUNT_PATH = '/mcp-server';
+
+export const MCP_TEST_CALLBACK_URL = `${BACKEND_TEST_URL}${MCP_TEST_MOUNT_PATH}/auth/callback`;
+
 export const SHOULD_REUSE_PLAYWRIGHT_WEB_SERVER =
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === 'true';
 
