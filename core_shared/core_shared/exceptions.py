@@ -70,3 +70,47 @@ class DomainError(Exception):
         applies an encoder that knows about enums or dataclasses.
         """
         return None
+
+
+class PreconditionFailedError(DomainError):
+    """A write's precondition did not match the version it was written against.
+
+    Raised when an ``If-Match`` header (REST) or an ``expected_version``
+    argument (MCP) names a version of a resource that is no longer current —
+    somebody else wrote to the row between the caller's read and its write.
+    Nothing is written; the caller re-reads and re-applies its change.
+
+    ``412 Precondition Failed`` rather than ``409 Conflict``: the request was
+    refused because a precondition it stated was not met, which is what 412
+    names. The current tag travels in ``error_meta`` so a client can recover
+    without a second round trip to find out what it should have sent.
+    """
+
+    def __init__(
+        self,
+        resource_type: str,
+        resource_id: int | str,
+        current_etag: str | None,
+    ):
+        """
+        Args:
+            resource_type: JSON:API resource type, e.g. ``"journals"``.
+            resource_id: The resource whose version moved on.
+            current_etag: The resource's tag now, or ``None`` if unknown.
+        """
+        super().__init__(
+            f"{resource_type} {resource_id} has been modified since it was read. "
+            "Re-read it and re-apply the change.",
+            412,
+        )
+        self.resource_type = resource_type
+        self.resource_id = resource_id
+        self.current_etag = current_etag
+
+    def error_meta(self) -> dict[str, Any] | None:
+        """The identity of the row and the version the caller should have sent."""
+        return {
+            "resource_type": self.resource_type,
+            "resource_id": str(self.resource_id),
+            "current_etag": self.current_etag,
+        }

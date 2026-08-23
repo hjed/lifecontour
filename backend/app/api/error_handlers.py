@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 import structlog
-from core_shared.exceptions import DomainError
+from core_shared.exceptions import DomainError, PreconditionFailedError
 from core_shared.models.contacts.exceptions import (
     ContactDomainError,
     ContactValidationError,
@@ -186,6 +186,8 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         RouteInUseError: "ROUTE_IN_USE",
         # GPX errors
         GPXParsingError: "GPX_PARSING_ERROR",
+        # Conditional writes
+        PreconditionFailedError: "PRECONDITION_FAILED",
     }
 
     error_code = error_code_map.get(type(domain_error), "DOMAIN_ERROR")

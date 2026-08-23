@@ -544,6 +544,12 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         strategy for methods/addresses/notes - all existing ones are replaced with
         the provided ones.
 
+        To edit safely, pass the ``version`` from get_contact as
+        ``expected_version``: the update is then refused, with nothing written,
+        if the contact changed in between. The refusal carries
+        ``current_version`` to retry with after re-reading. This guards both
+        update modes.
+
 
 
         Returns:
@@ -553,6 +559,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             - Contextual summary for AI understanding
         """
         logger.info("MCP: Updating contact", request=request.model_dump())
+
+        # Checked inside the service's unit of work, under the row lock, so a
+        # stale version refuses before anything is written. Applies to both
+        # update modes below.
+        expected_etags = (
+            [request.expected_version] if request.expected_version is not None else None
+        )
 
         # Get existing contact
         existing_contact = await contact_service.get_contact_by_id(request.contact_id)
@@ -583,6 +596,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 connection,
                 changed_by="mcp",
                 source=Provenance.MCP,
+                expected_etags=expected_etags,
             )
             # Fetch updated contact for response
             final_contact = await contact_service.get_contact_by_id(request.contact_id)
@@ -678,6 +692,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 changed_by="mcp",
                 source=Provenance.MCP,
                 tag_names=request.tags,
+                expected_etags=expected_etags,
             )
 
         # Create AI-friendly response using shared converter

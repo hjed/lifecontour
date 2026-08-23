@@ -26,12 +26,14 @@ from meilisearch.errors import MeilisearchError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.api.common.etag import get_if_match, set_etag
 from app.api.common.schemas import (
     ExternalLinkAttributes,
     ExternalLinkResource,
     ExternalLinksResponse,
     JsonApiLinks,
     PaginationParams,
+    PreconditionFailedErrorResponse,
     create_pagination_links,
     create_pagination_meta,
     get_request_base_url,
@@ -1948,6 +1950,7 @@ async def get_journal_external_links(
 async def get_journal(
     journal_id: int,
     request: Request,
+    response: Response,
     journal_service: FromDishka[JournalService],
     calendar_info_repo: FromDishka[CalendarInfoRepository],
     calendar_repo: FromDishka[CalendarRepository],
@@ -1990,6 +1993,7 @@ async def get_journal(
     base_url = get_request_base_url(request)
 
     journal = await _require_owned_journal(journal_service, user.id, journal_id)
+    set_etag(response, "journals", journal_id, journal.updated_at)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
@@ -2248,11 +2252,26 @@ async def create_journal(
     return await _build_journal_response(journal_resource, contact_repo)
 
 
-@router.put("/{journal_id}")
+@router.put(
+    "/{journal_id}",
+    responses={
+        412: {
+            "model": PreconditionFailedErrorResponse,
+            "description": (
+                "The `If-Match` precondition named a version this journal has "
+                "already moved on from — somebody else wrote to it since the "
+                "caller read it. Nothing was written. The JSON:API error "
+                "carries code `PRECONDITION_FAILED` and a `meta.current_etag` "
+                "to retry with after re-reading and re-applying the change."
+            ),
+        },
+    },
+)
 @inject
 async def update_journal(
     journal_id: int,
     request: Request,
+    response: Response,
     journal_request: JournalUpdateRequest,
     journal_service: FromDishka[JournalService],
     journal_write_service: FromDishka[JournalWriteService],
@@ -2299,16 +2318,19 @@ async def update_journal(
         journal_service, user.id, journal_id
     )
 
-    updated_journal = JournalRequestConverter.from_update_request(
-        journal_request.data, existing_journal
-    )
-
+    # The precondition is handed to the service untouched: it is checked inside
+    # the write's unit of work, under the row lock, so a comparison made here
+    # would be one the write could not honour.
     saved_journal = await journal_write_service.update_journal(
-        updated_journal,
+        JournalRequestConverter.from_update_request(
+            journal_request.data, existing_journal
+        ),
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
+    set_etag(response, "journals", journal_id, saved_journal.updated_at)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
@@ -2400,11 +2422,26 @@ async def update_journal(
     return await _build_journal_response(journal_resource, contact_repo)
 
 
-@router.patch("/{journal_id}")
+@router.patch(
+    "/{journal_id}",
+    responses={
+        412: {
+            "model": PreconditionFailedErrorResponse,
+            "description": (
+                "The `If-Match` precondition named a version this journal has "
+                "already moved on from — somebody else wrote to it since the "
+                "caller read it. Nothing was written. The JSON:API error "
+                "carries code `PRECONDITION_FAILED` and a `meta.current_etag` "
+                "to retry with after re-reading and re-applying the change."
+            ),
+        },
+    },
+)
 @inject
 async def partial_update_journal(
     journal_id: int,
     request: Request,
+    response: Response,
     journal_request: JournalUpdateRequest,
     journal_service: FromDishka[JournalService],
     journal_write_service: FromDishka[JournalWriteService],
@@ -2500,12 +2537,17 @@ async def partial_update_journal(
         updated_at=existing_journal.updated_at,
     )
 
+    # The precondition is handed to the service untouched: it is checked inside
+    # the write's unit of work, under the row lock, so a comparison made here
+    # would be one the write could not honour.
     saved_journal = await journal_write_service.update_journal(
         updated_journal,
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
+    set_etag(response, "journals", journal_id, saved_journal.updated_at)
 
     # Fetch all enrichment data
     types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(

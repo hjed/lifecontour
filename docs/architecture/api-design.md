@@ -88,6 +88,69 @@ This document provides comprehensive API design patterns for both REST and MCP i
 - Include in application health checks
 - Use Streamable HTTP transport for web compatibility
 
+## Conditional Writes (`ETag` / `If-Match`)
+
+The critical update paths support optimistic concurrency, so a second writer
+cannot silently overwrite a first writer's edit. It is **opt-in**: a client that
+states no precondition writes exactly as it always has.
+
+### The version token
+
+An entity-tag is a truncated SHA-256 of `"<type>:<id>:<updated_at>"`, computed
+by `resource_etag()` in `core_shared/core_shared/etag.py`. There is no version
+column — every write already bumps `updated_at`. The type and id are folded in
+because `now()` is the *transaction* timestamp: rows written together share an
+`updated_at` to the microsecond, and a tag over the timestamp alone would
+collide across them.
+
+### REST
+
+| Route | Behaviour |
+|---|---|
+| `GET /api/journals/{id}`, `GET /api/contacts/{id}` | Return an `ETag` response header |
+| `PUT`/`PATCH /api/journals/{id}`, `PUT /api/contacts/{id}` | Honour `If-Match`, and stamp the new `ETag` on the 200 |
+
+`If-Match` semantics: absent means write unconditionally; `*` means the resource
+need only exist; a list matches if any tag does. Weak tags (`W/"..."`) compare
+equal to strong ones, because every tag this system mints is strong and a weak
+one can only be a strong tag that a compressing proxy weakened in transit. An
+**empty** `If-Match` matches nothing and is refused — the caller asked for a
+guarded write, and answering 200 to a guarantee that was never checked is worse.
+
+A failed precondition is `412 Precondition Failed` with code
+`PRECONDITION_FAILED` and a `meta.current_etag` to retry with, published in the
+OpenAPI schema as `PreconditionFailedErrorResponse`. Nothing is written.
+
+`If-None-Match` / `304 Not Modified` on reads is deliberately **not** supported:
+this is conflict detection, not caching.
+
+### MCP
+
+Tools have no headers, so the same token travels as data: reads report
+`version`, and `update_journal_entry` / `update_contact` accept
+`expected_version`. A conflict comes back as an error payload with
+`code: PRECONDITION_FAILED` and `current_version` — named to match
+`expected_version` rather than REST's `ETag` — so a model can re-read, re-apply
+and retry rather than treating it as a server fault.
+
+### Where the check lives
+
+In the **service layer**, never the controller, so both surfaces share one
+implementation (`enforce_etag_precondition`, `backend/app/shared/preconditions.py`).
+Controllers pass the caller's precondition through untouched.
+
+The comparison reads the row with `SELECT updated_at ... FOR UPDATE` inside the
+write's unit of work. An unlocked read would leave a lost-update window under
+READ COMMITTED — two callers can both see the version they expected before
+either writes — so the lock is what turns the check into a guarantee. It also
+runs **before anything is written**, including the find-or-create of tag rows,
+so a refusal leaves nothing behind.
+
+Because the tag is derived from the aggregate root's `updated_at`, it moves when
+that row is written. A write that only touches child tables must bump the parent
+row (as the composite journal update does, via its core-field update) or it will
+not shift the tag.
+
 ## Error Handling Guidelines
 
 ### JSON API Error Format

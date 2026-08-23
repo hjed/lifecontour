@@ -17,11 +17,13 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.api.common.etag import get_if_match, set_etag
 from app.api.common.schemas import (
     ExternalLinkAttributes,
     ExternalLinkResource,
     ExternalLinksResponse,
     PaginationParams,
+    PreconditionFailedErrorResponse,
     create_pagination_links,
     create_pagination_meta,
     get_request_base_url,
@@ -268,6 +270,7 @@ async def get_contact_avatar(
 async def get_contact(
     contact_id: int,
     request: Request,
+    response: Response,
     contact_service: FromDishka[ContactService],
     _user: FromDishka[SessionUser],  # Require authentication
 ) -> ContactResponse:
@@ -282,6 +285,7 @@ async def get_contact(
     if not contact:
         raise ContactNotFoundError(contact_id)
 
+    set_etag(response, "contacts", contact_id, contact.updated_at)
     contact_resource = ContactConverter.to_resource(contact, base_url)
 
     return ContactResponse(data=contact_resource)
@@ -364,11 +368,26 @@ async def create_contact(
     return ContactResponse(data=contact_resource)
 
 
-@router.put("/{contact_id}")
+@router.put(
+    "/{contact_id}",
+    responses={
+        412: {
+            "model": PreconditionFailedErrorResponse,
+            "description": (
+                "The `If-Match` precondition named a version this contact has "
+                "already moved on from — somebody else wrote to it since the "
+                "caller read it. Nothing was written. The JSON:API error "
+                "carries code `PRECONDITION_FAILED` and a `meta.current_etag` "
+                "to retry with after re-reading and re-applying the change."
+            ),
+        },
+    },
+)
 @inject
 async def update_contact(
     contact_id: int,
     request: Request,
+    response: Response,
     contact_request: ContactUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -385,13 +404,19 @@ async def update_contact(
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
-    updated_contact = ContactRequestConverter.from_update_request(
-        contact_request.data, existing_contact
-    )
-
+    # The precondition is handed to the service untouched: it is checked inside
+    # the write's unit of work, under the row lock, so a comparison made here
+    # would be one the write could not honour.
     saved_contact = await contact_service.update_contact(
-        updated_contact, connection, changed_by="ui", source=Provenance.UI
+        ContactRequestConverter.from_update_request(
+            contact_request.data, existing_contact
+        ),
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
+    set_etag(response, "contacts", contact_id, saved_contact.updated_at)
 
     contact_resource = ContactConverter.to_resource(saved_contact, base_url)
 

@@ -2557,6 +2557,10 @@ async def update_journal_entry(
     When types, tags, or contact_relationships are provided they REPLACE all
     existing values (not merge).
 
+    To edit safely, pass the ``version`` from get_journal as
+    ``expected_version``: the update is then refused, with nothing written, if
+    the journal changed in between. The refusal carries ``current_version`` to
+    retry with after re-reading.
 
     Returns:
         JSON string containing AI-friendly updated journal information
@@ -2564,6 +2568,7 @@ async def update_journal_entry(
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
         JournalValidationError: If validation fails
+        PreconditionFailedError: If expected_version names a superseded version
         ValueError: If invalid type/relationship values provided
     """
     # No JSON parsing needed, FastMCP handles request model conversion directly
@@ -2641,6 +2646,11 @@ async def update_journal_entry(
         tags=request.tags,
         changed_by="mcp",
         source=Provenance.MCP,
+        # Checked inside the service's unit of work, under the row lock, so a
+        # stale version refuses before any part of the composite is written.
+        expected_etags=(
+            [request.expected_version] if request.expected_version is not None else None
+        ),
     )
 
     # Fetch all enrichment data

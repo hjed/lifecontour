@@ -412,17 +412,23 @@ class JournalWriteService:
         *,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
     ) -> Journal:
         """Update a journal's core fields as a committed unit of work.
 
         ``changed_fields`` are computed inside :class:`JournalService` by diffing
         the persisted journal against ``journal``; callers pass the merged journal.
+
+        ``expected_etags`` carries the caller's optimistic-concurrency
+        precondition and is checked inside this unit of work, so a refusal
+        commits nothing.
         """
         return await self.journal_service.update_journal(
             journal,
             transaction,
             changed_by=changed_by,
             source=source,
+            expected_etags=expected_etags,
         )
 
     @transactional
@@ -437,6 +443,7 @@ class JournalWriteService:
         tags: list[str] | None = None,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
     ) -> Journal:
         """Update a journal's core fields and optionally replace its associations.
 
@@ -444,9 +451,17 @@ class JournalWriteService:
         (including ``[]``) REPLACES the current set. This is the composite behind
         the MCP ``update_journal_entry`` tool; REST uses the thinner
         :meth:`update_journal`. The whole operation is one unit of work.
+
+        ``expected_etags`` guards the whole composite: the core-field update
+        runs first, so a stale precondition refuses before any type, tag or
+        relationship row is touched.
         """
         updated = await self.journal_service.update_journal(
-            journal, transaction, changed_by=changed_by, source=source
+            journal,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            expected_etags=expected_etags,
         )
         if updated.id is None:
             raise JournalValidationError("id", "Journal ID is required after update")

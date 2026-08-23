@@ -373,6 +373,25 @@ class SqlJournalRepository(JournalRepository):
 
         return self._row_to_journal(row)
 
+    async def lock_and_get_updated_at(self, journal_id: int) -> datetime | None:
+        """Lock the journal row and return its last-write timestamp.
+
+        ``FOR UPDATE`` rather than a plain read: see the port for the
+        lost-update window this closes.
+        """
+        query = text(
+            """
+            SELECT updated_at
+            FROM journals
+            WHERE id = :journal_id
+            FOR UPDATE
+            """
+        )
+        result = await self.conn.execute(query, {"journal_id": journal_id})
+        row = result.fetchone()
+
+        return row.updated_at if row else None
+
     async def get_types(self, journal_id: int) -> list[str]:
         """Get the types of a journal."""
         query = text("""

@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Protocol
 
 from core_shared.models.contacts.entities import (
@@ -112,6 +113,21 @@ class ContactRepository(ABC):
     @abstractmethod
     async def touch(self, contact_id: int, transaction: Any = None) -> None:
         """Update the updated_at timestamp of a contact."""
+        pass
+
+    @abstractmethod
+    async def lock_and_get_updated_at(self, contact_id: int) -> datetime | None:
+        """Lock a contact row for update and return its last-write timestamp.
+
+        Backs the optimistic-concurrency check on updates. Comparing an
+        entity-tag against an unlocked read leaves a lost-update window under
+        READ COMMITTED: two callers can both see the version they expected
+        before either of them writes. Taking the row lock here means the second
+        caller waits for the first to commit and then sees the new timestamp.
+
+        Returns:
+            The contact's ``updated_at``, or None if no such contact exists.
+        """
         pass
 
     @abstractmethod

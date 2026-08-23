@@ -11,6 +11,7 @@ from functools import wraps
 from typing import Any
 
 import pydantic
+from core_shared.exceptions import PreconditionFailedError
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.journals import (
     JournalDomainError,
@@ -78,6 +79,27 @@ def mcp_unified_error_handler(
                 MCPLogger.log_operation_success(operation_name)
 
                 return result
+
+            except PreconditionFailedError as e:
+                # First, because it is raised from inside both the journal and
+                # the contact domains and would otherwise be swallowed by
+                # whichever domain branch happened to match. A stale
+                # ``expected_version`` is the one refusal a model can fix on its
+                # own — re-read, re-apply, retry — but only if it is told that
+                # is what happened and which version to retry with. ``code``
+                # matches the REST surface's; ``current_version`` matches the
+                # tools' ``expected_version`` rather than REST's ``ETag`` naming.
+                MCPLogger.log_validation_error(operation_name, e.message)
+                return MCPResponseBuilder.error_response(
+                    error_type="Conflict",
+                    message=e.message,
+                    context={
+                        "code": "PRECONDITION_FAILED",
+                        "resource_type": e.resource_type,
+                        "resource_id": str(e.resource_id),
+                        "current_version": e.current_etag,
+                    },
+                )
 
             except ContactNotFoundError as e:
                 MCPLogger.log_not_found_error(operation_name, "Contact", str(e))
