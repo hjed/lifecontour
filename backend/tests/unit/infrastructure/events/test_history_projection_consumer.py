@@ -15,7 +15,7 @@ from app.core.history.services.history_service import _HANDLERS
 from app.infrastructure.events.history_projection_consumer import (
     _CONTACT_HISTORY_EVENT_TYPES,
     _JOURNAL_HISTORY_EVENT_TYPES,
-    _TASK_HISTORY_EVENT_TYPES,
+    TASK_HISTORY_EVENT_TYPES,
     HistoryProjectionConsumer,
 )
 from tests.task_event_inventory import task_event_types
@@ -133,7 +133,7 @@ def test_event_type_constants_match_handled_sets() -> None:
     """The module constants match the full sets the projection handles."""
     assert set(_JOURNAL_HISTORY_EVENT_TYPES) == _JOURNAL_EVENT_TYPES
     assert set(_CONTACT_HISTORY_EVENT_TYPES) == _CONTACT_EVENT_TYPES
-    assert set(_TASK_HISTORY_EVENT_TYPES) == _TASK_EVENT_TYPES
+    assert set(TASK_HISTORY_EVENT_TYPES) == _TASK_EVENT_TYPES
 
 
 def test_every_subscribed_event_type_has_a_projection_handler() -> None:
@@ -147,7 +147,7 @@ def test_every_subscribed_event_type_has_a_projection_handler() -> None:
     subscribed = (
         set(_JOURNAL_HISTORY_EVENT_TYPES)
         | set(_CONTACT_HISTORY_EVENT_TYPES)
-        | set(_TASK_HISTORY_EVENT_TYPES)
+        | set(TASK_HISTORY_EVENT_TYPES)
     )
 
     assert subscribed <= set(_HANDLERS)

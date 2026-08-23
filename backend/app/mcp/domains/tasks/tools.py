@@ -20,6 +20,7 @@ argument.
 """
 
 import json
+from datetime import datetime
 from typing import Annotated, Any
 
 from core_shared.models.history import Provenance
@@ -39,12 +40,15 @@ from pydantic import Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
+from app.core.history.models import FieldHistoryEntry
+from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_task_history_service,
     get_task_read_service,
     get_task_service,
     mcp_depends,
@@ -881,6 +885,106 @@ async def list_upcoming_tasks(
     return json.dumps(_upcoming_to_dict(upcoming), indent=2)
 
 
+def _history_entry_to_dict(entry: FieldHistoryEntry) -> dict[str, Any]:
+    """One change, as the history tool hands it over.
+
+    ``source`` is the ``Provenance`` value rather than the enum, and
+    ``created_at`` is an ISO instant — the repository already returns one, so
+    this only has to cope with the ``datetime`` a caller constructing an entry
+    by hand would pass. Both are the shape the REST endpoint sends, because a
+    field a browser can render and an agent cannot is exactly the UI-only
+    behaviour this iteration forbids.
+    """
+    created_at = entry.created_at
+    return {
+        "field_name": entry.field_name,
+        "old_value": entry.old_value,
+        "new_value": entry.new_value,
+        "changed_by": entry.changed_by,
+        "source": entry.source.value,
+        "created_at": (
+            created_at.isoformat() if isinstance(created_at, datetime) else created_at
+        ),
+    }
+
+
+@mcp_unified_error_handler("get_task_history", "task")
+async def get_task_history(
+    task_id: Annotated[
+        int,
+        Field(
+            ge=1, le=INT32_MAX, description="The id of the task to read the history of."
+        ),
+    ],
+    page: Annotated[int, Field(description="Page number (1-based)", ge=1)] = 1,
+    limit: Annotated[int, Field(description="Entries per page", ge=1, le=100)] = 20,
+    history_service: TaskHistoryService = mcp_depends(get_task_history_service),
+) -> str:
+    """
+    Read a task's change history: what changed, when, and where it came from.
+
+    Entries are **most recent first** and paginated. Each one names the field
+    that changed, its value on both sides, when it happened, who acted
+    (``changed_by``) and the provenance of the change (``source`` — ``ui`` for
+    the browser, ``mcp`` for an assistant like you, ``system`` for an automatic
+    write). This is the same history the user sees, so your account of what
+    happened to a task and theirs agree.
+
+    **The field names are the vocabulary**, and three of them are not literal
+    task fields: ``__created__`` opens the history and carries the task's
+    original text, ``__deleted__`` closes it and carries nothing, and
+    ``journal:{id}`` and ``contact:{id}`` name a journal link or a person being
+    added (``old_value`` empty) or removed (``new_value`` empty). A retarget
+    reads as ``due_journal_id`` moving from one journal to another, with a
+    ``status`` line beside it when the retarget reopened a completed task.
+
+    **History is written asynchronously**, a moment behind the change itself. If
+    you make an edit and read the history straight back, your own change may not
+    be there yet — that is the projection catching up, not a failed write, and a
+    task whose events have not been projected answers an empty history rather
+    than an error.
+
+    **A deleted task still has a history**, and this is the one tool that will
+    answer for it. ``get_task`` reports a deleted task as not found, because the
+    task is gone; the record of what happened to it is not. Use this when the
+    user asks what became of something they no longer see.
+
+    This is a **record of the past, not a way to browse tasks.** It answers for
+    one task you already have the id of. There is no way to list tasks through
+    it, and no filter for "everything still outstanding" — for tasks to work
+    with, use ``list_journal_tasks`` or ``list_upcoming_tasks``.
+
+    Returns:
+        JSON string with task_id, total_count (every entry, not just this
+        page), page, limit, and entries — each with field_name, old_value,
+        new_value, changed_by, source and created_at.
+    """
+    user_id = await get_current_user_id()
+
+    offset = (page - 1) * limit
+    entries = await history_service.get_task_history(
+        task_id=task_id,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+    )
+    total_count = await history_service.get_task_history_count(
+        task_id=task_id,
+        user_id=user_id,
+    )
+
+    return json.dumps(
+        {
+            "task_id": task_id,
+            "total_count": total_count,
+            "page": page,
+            "limit": limit,
+            "entries": [_history_entry_to_dict(entry) for entry in entries],
+        },
+        indent=2,
+    )
+
+
 def register_task_tools(mcp: FastMCP[None]) -> None:
     """Register task MCP tools with the FastMCP server."""
     mcp.add_tool(create_task)
@@ -895,3 +999,4 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(get_task)
     mcp.add_tool(list_journal_tasks)
     mcp.add_tool(list_upcoming_tasks)
+    mcp.add_tool(get_task_history)

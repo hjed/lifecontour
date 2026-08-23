@@ -5382,6 +5382,8 @@ no change to task behaviour. Nothing else depends on it, but it should not lag I
       stream redelivery produces no duplicates. Row timestamps come from `event.occurred_at`.
 - [ ] A task's change history is **readable**, with MCP parity, and rendered on the journal surface that
       owns the task (tasks have no route of their own — see open decision 1).
+      **Half done in Phase 8:** `GET /api/tasks/{id}/history` and the `get_task_history` MCP tool
+      both read it, owner-scoped and readable for a *deleted* task. The rendering half is Phase 9.
 - [ ] A task appears in a linked contact's activity history as a **read-only record** alongside their
       journals and other activity: not actionable from there, and not filterable down to "everything
       outstanding". This is a record of the past, not a third working surface.
@@ -5404,11 +5406,16 @@ no change to task behaviour. Nothing else depends on it, but it should not lag I
 
 **Open decisions:**
 
-1. **Where task history is read from** — settled in **Phase 4**. Tasks have no route, so either (a) a
-   task-scoped read (`GET /api/tasks/{id}/history` + `get_task_history`, registering a `"task"`
-   aggregation strategy), rendered in an expandable row on the journal, or (b) folding task rows into the
-   due journal's existing feed. (a) keeps the aggregation model honest and matches the journal/contact
-   precedent; (b) adds no new surface.
+1. ~~**Where task history is read from**~~ — ✅ **settled in Phase 8: (a), a task-scoped read.** Tasks
+   have no route, so the choice was between (a) a task-scoped read (`GET /api/tasks/{id}/history` +
+   `get_task_history`, registering a `"task"` aggregation strategy), rendered in an expandable row on
+   the journal, and (b) folding task rows into the due journal's existing feed. **(b) cannot express a
+   deleted task**, which is the case Phase 8's second criterion makes the discriminator: a task is
+   hard-deleted, and folding its rows into the due journal's feed reads them through a journal that may
+   itself have moved on — or, for a task deleted after a retarget, through a journal the task no longer
+   points at. It also cannot say *whose* the rows are once the task row is gone. (a) keeps the
+   aggregation model honest, matches the journal and contact precedent, and gives the ownership carrier
+   somewhere to be checked. See *Decisions taken (Phase 8)*.
 2. ~~**Whether task events need typed payload models** in `core_shared/models/outbox_events.py`~~ — ✅
    **settled in Phase 1: no.** That dispatch map exists so integration *workers* can parse **inbound
    sync** payloads (`contact.`, `sync.completed`, `journal_event.*`, `immich_album.`,
@@ -6502,7 +6509,7 @@ and the `SearchIndexerConsumer` row gains the **permanent** task exclusion and w
   absence-assertion needs a positive control, and "the failure mode is unreachable" is a stronger
   version of the same bug than "the setup happens to avoid it".
 
-#### Phase 8: Task History Read Surface — REST and MCP
+#### Phase 8: Task History Read Surface — REST and MCP ✅ COMPLETE
 
 **Prerequisites:** Phase 7.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — capability triple.
@@ -6511,11 +6518,41 @@ itself is unchanged; what is added is the ownership carrier and the one backfill
 re-projects the historic events at the same time — a migration on a shared table, a query over
 `outbox_events`, and a test that runs against a consumer group which has *already* acknowledged the
 events it is being asked to project.
+**Revised again before work started (delivery rule 3): ~350–400 production → ~1,200–1,500 tracked.**
+Counting the sites rather than the deliverables — migration, table definition, repository, port,
+projection handlers, aggregation strategy, read service, DI, endpoint, MCP tool and schema, backfill
+routine, lifespan wiring — production lands well above ~230, and calibration rules 15 and 16 put the
+tracked figure at roughly ×4 of that because **each of the two entry points needs its own matrix**.
+This is rule 16's stated landing zone for a capability phase in this domain (*"one capability per
+phase, ~1,500 tracked lines"*), recorded in advance rather than discovered mid-implementation.
+
+**Actual: 762 production insertions → 1,933 test lines (2,695 tracked), plus 85 documentation lines
+outside this entry.** Tests came in at **2.5× production**, the *lowest* ratio this sub-iteration has
+recorded — and the reason is that **production overran by 2×** while tests landed inside the revised
+estimate. Both halves are worth recording.
+
+The test figure was predicted well: 1,933 against a 1,200–1,500 band whose components were named in
+advance, and the overrun is one file — the backfill's integration test (446 lines), where the *setup*
+is the deliverable. Building "a consumer group that has already acknowledged these events" costs more
+than any assertion made against it.
+
+Production at 762 against ~350–400 is the miss, and it is a **prose** miss rather than a scope one.
+The count of *sites* was right; what was estimated wrong is what a site costs in this repo. Three
+files carry it: the backfill is 216 lines of which roughly 70 are code, the migration is 75 of which
+about 20 are, and the read service is 89 of which about 25 are. *Calibration addition:* **estimate
+production from the number of decisions that need explaining, not the number of statements.** Phase 6
+recorded the same shape for a phase delivering a convention (*"three handlers came to ~100 lines of
+which the behaviour is about fifteen"*); this phase says it holds for a phase delivering a
+**repair**, where every line has to say what it is repairing and why it cannot be done the obvious
+way. The corollary for the ×4 rule is that it is a rule about *test* volume, and it degrades whenever
+production is itself mostly explanation — reading a low ratio as "under-tested" would be exactly
+backwards here.
 
 **Acceptance Criteria:**
 
-- [ ] Open decision 1 settled and recorded. If (a): a `"task"` aggregation strategy is registered alongside
+- [x] Open decision 1 settled and recorded. If (a): a `"task"` aggregation strategy is registered alongside
       `"journal"` and `"contact"`, with a thin read service mirroring `JournalHistoryService`.
+      **Settled as (a)** — see the open-decision entry above for why (b) cannot express a deleted task.
 - [ ] **The delete case is the decision's discriminator:** tasks are hard-deleted, so a task-scoped read
       must resolve history by id **without requiring the task row to exist**, with ownership carried on the
       history rows — otherwise the `TaskDeleted` projection is written to a surface that can never read it.
@@ -6543,15 +6580,154 @@ events it is being asked to project.
       `(event_id, entity_type, entity_id, field_name)` and therefore safe to run repeatedly and safe to
       overlap with live projection. **Do both in one backfill**, and assert it against a group that has
       already acknowledged the events rather than against a fresh one.
-- [ ] `GET /api/tasks/{id}/history` (paginated, most recent first) using the shared
+      **Delivered as a nullable `user_id` column on `field_history` (migration `0107`), stamped for
+      task rows only**, and a resolution order that is the phase's central decision: the *history
+      rows* answer "whose is this?" first, and the live `tasks` row is consulted only when no row
+      carries an owner. That order is what makes a deleted task readable; the fallback is what stops
+      a task created moments ago — whose events have not been projected yet — from answering 404.
+      Both directions of both checks are pinned at unit and integration level, on both surfaces. The
+      backfill does both halves in one pass at application start; see *Decisions taken* for why it is
+      application code rather than SQL in the migration, and why it runs on every boot.
+- [x] `GET /api/tasks/{id}/history` (paginated, most recent first) using the shared
       `History{Attributes,Resource,ListResponse}` schemas, scoped to the authenticated user so history
       cannot leak across users (the ITER12-002 lesson).
-- [ ] MCP `get_task_history` in the same PR, mirroring `get_journal_history`.
-- [ ] Provenance and actor are visible on every entry.
+      **Delivered**, with the ownership check in the *service* rather than the controller — unlike
+      `get_journal_history`, whose controller performs it — so the endpoint and the MCP tool cannot
+      answer it differently. The cross-user case is asserted three ways (live, deleted, and
+      not-yet-projected), because each reaches a different branch of the resolution.
+- [x] MCP `get_task_history` in the same PR, mirroring `get_journal_history`.
+      **Delivered**, returning plain JSON like every other task tool rather than
+      `MCPResponseBuilder` like the journal one it mirrors: matching the domain it lives in beats
+      matching the tool it copies.
+- [x] Provenance and actor are visible on every entry.
+      **Delivered and asserted per entry on both surfaces**, with `source` and `changed_by` deliberately
+      distinguished in the tests — an assistant editing your task writes `changed_by = "mcp"` on a row
+      that is still yours, and conflating the two would file that change under a user called "mcp".
 
 **Required Test Coverage:** unit — schema conversion and pagination. Integration — a task with a mixed event
 history reads back in order on both surfaces; **a deleted task's history is still readable**; another user's
 task history 404s. E2E in Phase 9.
+
+**Delivered: 35 unit cases and 35 integration cases.** Unit: 12 in the new
+`tests/unit/history/test_task_history_service.py` (the four branches of the resolution, that a
+refusal reads nothing, and the pagination arithmetic), 10 in `test_history_service.py`
+(`TestTaskHistoryCarriesItsOwner`, parametrised over the shared event inventory so a seventh type
+cannot land unstamped), 9 in `test_task_tools_schema.py`, 3 in `test_task_endpoint_docs.py`, 2 in
+`test_field_history_entry.py` and 1 in `test_aggregation_strategy.py`. Integration: 14 in the new
+`tests/integration/api/test_task_history_endpoints.py`, 8 in `test_task_tools_mcp.py`, 7 in the new
+`test_task_history_backfill_integration.py`, 4 added to
+`test_task_history_projection_e2e.py`, and 2 in the new
+`test_field_history_owner_migration.py` — the migration round-trip, following
+`test_tasks_migration.py`'s convention because `0107` touches a **shared** table
+and its downgrade drops a column.
+
+**No e2e**, and as in Phases 6 and 7 the absence is a **re-run check rather than an inherited claim**:
+`frontend/src/lib/api/tasks.ts` still has no history call, `ActivityFeed` is journal-scoped, and a
+search of `frontend/src` for a task-history request returns nothing. Phase 9 builds the surface.
+
+**Documentation.** `docs/architecture/api-design.md` — the endpoint's row in the task table, four
+conventions it pins (the deleted-task resolution order, "not projected yet is not 404", no collection
+beside it, and where the ownership check lives), and `get_task_history` added to the tool list with
+what its description has to carry. `docs/architecture/database-design.md` — `field_history.user_id`
+and `idx_field_history_entity`, why the column is deliberately half-populated, and the backfill.
+`docs/architecture/domain-architecture.md` — the read surface and its discriminator.
+`docs/architecture/integration-architecture.md` — that widening a consumer group's patterns does not
+recover what it already acknowledged, and what repairs it.
+
+**Decisions taken (Phase 8):**
+
+- **A column on `field_history`, not a task-scoped mapping table.** The criterion left both open. The
+  projection already builds `FieldHistoryEntry` objects from a payload carrying `user_id`, so the
+  column costs one field and one derived value; a mapping table would have needed a new table, a new
+  port method to write it, a task-specific branch inside a deliberately generic consumer, and its own
+  test surface. The column is **nullable and stays NULL for journal and contact rows**, which is the
+  honest state rather than an unfinished one: those reads authorise by loading the aggregate, neither
+  entity is hard-deleted, and stamping their rows would advertise a check nothing performs.
+- **The owner is derived in one place, not passed by six handlers.** `HistoryService._owner_for`
+  reads it from the payload when the entity type is `task`. The alternative — an argument at each
+  handler's call site — puts the narrowing in six places and makes Phase 10's merge re-point event
+  the seventh chance to forget it. This is Phase 7's reasoning about the event inventory applied to a
+  value instead of a list: *a rule stated once cannot be half-applied.* Mutation-checked by dropping
+  the stamp, which fails 10 unit tests and 9 integration ones.
+- **The authorisation lives in the service, and that is a departure from the journal precedent.**
+  `get_journal_history`'s controller loads the journal and compares `user_id`, and the MCP tool
+  repeats that check itself. Copying the shape here would have put a *four-branch* resolution in two
+  places — and rule 15 has already recorded what this repo's REST/MCP seam does with duplicated
+  logic. The two callers now differ only in how they render the answer.
+- **"No history rows" is not "not yours", and the fallback exists for one window.** The resolution
+  could have stopped at the rows, which is simpler and wrong: projection is asynchronous, so a task
+  created a second ago has no rows, and a read that refused would tell the user their new task does
+  not exist and keep saying so until a background process they cannot see caught up. The live row
+  settles that case, through the owner-scoped `find_by_id` rather than a comparison written again.
+  Asserted in both directions, including that a *foreign* unprojected task is still refused — the
+  fallback is where an unscoped lookup would leak.
+- **The backfill is application code at startup, not SQL in a migration**, which breaks this repo's
+  convention (migrations here are pure SQL; nothing imports `app.` from one) and is worth the
+  exception. Re-projection has to go through `HistoryService`, and re-spelling that mapping in SQL
+  would be a second definition of what a task event means — the trap Phase 7 recorded when it
+  refused a second retarget handler. Running it at **every** start rather than once is deliberate:
+  it is idempotent (`ON CONFLICT DO NOTHING`, the same guarantee redelivery relies on), bounded by an
+  anti-join against `field_history` that costs one indexed query when there is nothing to repair, and
+  it therefore also self-heals any future gap of the same shape. Failure is logged rather than
+  raised — refusing to start because a repair of a *derived read surface* failed would trade an
+  incomplete feed for no application.
+- **The backfill's test is mostly setup, and that is the deliverable.** Phase 6's tests could not
+  have caught the gap this repairs, and the reason generalises: *a test for a repair has to build the
+  broken state, and a fresh fixture is never broken.* The test runs a **real**
+  `HistoryProjectionConsumer` over the stream with the task patterns removed from its subscription —
+  the deployed configuration — so the group genuinely reads, fails to match, and **acknowledges**
+  each task event before the backfill is asked to recover it. It then asserts nothing is pending,
+  which is what makes "will never be redelivered" a fact about the fixture rather than a claim in a
+  comment. A journal event rides the same batch as a positive control, so "nothing outside task rows
+  was touched" cannot be satisfied by a backfill that did nothing.
+- **Two test bugs found by the tests failing for the wrong reason**, both worth recording because
+  each would have passed forever. Two 404 assertions were green **before the endpoint existed** —
+  FastAPI answers 404 for an unrouted path — and now pin the domain's `TASK_NOT_FOUND` code instead.
+  And the cross-user fixture seeded the *foreign* task's history rows with the **authenticated**
+  user's id, so the endpoint correctly returned them and the test correctly failed; the fix was to
+  the fixture, but the lesson is that a seeding helper defaulting to "the current user" is a hazard
+  in exactly the tests that exist to prove another user cannot get in.
+- **`outbox_events.event_data` is `text`, not `jsonb`.** Migration `0001` created it as `Text`
+  (`outbox_table.py` says `# JSON as text`), while `core_shared`'s ORM model declares `JSONB`. Nothing
+  had noticed because every other reader parses the payload in Python; the owner-fill statement is the
+  first to use a JSON operator on it, and needs an explicit `::jsonb` cast. **Recorded, not repaired**
+  — changing the column type on the busiest table in the system is not this phase's business — and
+  listed as a follow-up below. (A related snag with no bearing on the schema: a literal `?` in a
+  `text()` statement collides with the driver's parameter marker, so the presence test is
+  `->> 'user_id' IS NOT NULL`, which also rejects a JSON `null` that `?` would accept.)
+- **`TASK_HISTORY_EVENT_TYPES` is now public**, so the backfill projects exactly the set the live
+  consumer subscribes to rather than a second copy of the list. The unit test comparing that list to
+  the event classes stays a comparison of two independently-derived things, which is what makes it
+  worth having.
+- **The endpoint's docstring is asserted, like the tool's description already was.**
+  `test_task_endpoint_docs.py` exists because one of ITER18-001 Phase 9's criteria *is* prose, and its
+  own opening argument applies here unchanged: three things are true of this route and no other —
+  a deleted task's history is readable, an empty answer is not a missing task, and there is no
+  collection beside it — and none of them is visible in the schema, because all three are 200s
+  carrying the same shape. If the description does not say them, a generated client and `/docs` do not
+  either. Mutation-checked by reducing the docstring to its summary line: 3 tests fail.
+- **The migration's own test seeds a row *before* upgrading, and that is the test.** A round-trip
+  over an empty throwaway database proves the column is added and dropped; it does **not** prove the
+  migration survives a *deployed* one, and `field_history` is a table every installation has
+  thousands of rows in. Mutation-checked by making the column `NOT NULL`: the populated-table test
+  fails and the round-trip test passes, which is precisely the split it was written to expose. Same
+  lesson as the backfill's fixture, one layer down — *a fresh database is never broken either.*
+- **Mutation-checked, five ways.** Dropping the owner stamp in `_owner_for` fails **7** unit tests
+  across three test files. Replacing the resolution with the obvious wrong design — authorise by the
+  `tasks` row alone, which is what every other history read does — fails **2**, and *which* two is the
+  useful part: the deleted-task read and the test asserting the task row is not consulted when the
+  rows answer. Reducing the endpoint docstring to one line fails **3**. The second probe is the one
+  worth having, because "authorise by the aggregate" is not a typo anybody would make; it is the
+  design a reviewer would suggest, and the suite has to be able to say why it is wrong. Adding
+  `NOT NULL` to migration `0107` fails **1** — the populated-table case above.
+- **What the anti-join assumes, stated rather than left implicit.** The backfill treats any row
+  bearing an event's id as proof the whole event was projected, so an event whose rows landed only
+  *partially* would be skipped and stay incomplete. Unreachable here — the consumer writes an event's
+  rows inside one `engine.begin()`, and nothing deletes `field_history` rows except the contact
+  merge's re-point, which touches contact rows only — but the alternative (comparing per-event row
+  counts) would mean re-deriving each event's row count outside `HistoryService`, which is the
+  duplication this module exists to avoid. Recorded in its docstring so the next person to widen it
+  knows which property they are relying on.
 
 #### Phase 9: Contact Activity Record and Frontend History
 
@@ -7557,3 +7733,18 @@ Appended as the work proceeds, in the style of iterations 16 and 17.
 - **Wireframe divergences** are tracked in
   [the wireframe document](../design/home-dashboard-wireframe.md#known-gaps-and-divergences); gaps 1–4 are
   resolved by ITER18-004's acceptance criteria above.
+- **`outbox_events.event_data` is `text` while `core_shared`'s ORM model declares `JSONB`** (found in
+  ITER18-003 Phase 8). Migration `0001` created the column as `Text`, and
+  `app/infrastructure/events/outbox_table.py` records that faithfully (`# JSON as text`); the ORM model
+  in `core_shared/models/outbox.py` does not. Nothing has been affected because every reader parses the
+  payload in Python — the task history backfill is the first code to use a JSON operator on the column,
+  and it carries an explicit `::jsonb` cast. Repairing it means a type change on the busiest table in the
+  system, so it is recorded rather than attempted mid-phase. *The general point is that a model and a
+  migration disagreeing about a column type is invisible until somebody asks the database to do the
+  parsing.*
+- **The ×4 multiplier is a rule about test volume, and it misreads a phase whose production is mostly
+  prose** (ITER18-003 Phase 8: 762 production → 1,933 tests, a ratio of 2.5×). The tests were estimated
+  well; production was 2× under because the *cost per site* was estimated as statements rather than as
+  decisions needing explanation. A low ratio in such a phase is not evidence of under-testing, and rule
+  1's "estimate production lines, then multiply by 4" should be read alongside Phase 6's observation
+  that a phase delivering a convention budgets from the number of places the convention is explained.

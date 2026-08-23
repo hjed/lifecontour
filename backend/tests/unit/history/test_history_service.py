@@ -1720,3 +1720,136 @@ class TestUnknownAndProvenanceDefaults:
 
         assert rows[0].source == Provenance.SYSTEM
         assert rows[0].changed_by == "system"
+
+
+def _task_payloads_by_type() -> dict[str, dict[str, Any]]:
+    """One payload per task event type, each as its publisher writes it.
+
+    Keyed by ``event_type`` so the completeness test below can compare this set
+    against the event classes themselves rather than a list somebody has to
+    remember to extend.
+    """
+    return {
+        "TaskCreated": _task_created_payload(contact_ids=[CONTACT_ID]),
+        "TaskUpdated": {
+            "task_id": TASK_ID,
+            "user_id": "u1",
+            "changed_fields": {
+                "text": [TASK_TEXT, "Book the hall"],
+                f"contact:{CONTACT_ID}": [None, CONTACT_ID],
+            },
+            "source": Provenance.UI.value,
+            "changed_by": "ui",
+        },
+        "TaskDueJournalRetargeted": {
+            "task_id": TASK_ID,
+            "user_id": "u1",
+            "changed_fields": {
+                "due_journal_id": [OLD_JOURNAL_ID, NEW_JOURNAL_ID],
+                "status": ["done", "not_done"],
+            },
+            "source": Provenance.MCP.value,
+            "changed_by": "mcp",
+        },
+        "TaskJournalLinked": {
+            "task_id": TASK_ID,
+            "user_id": "u1",
+            "journal_id": OLD_JOURNAL_ID,
+            "origin": "retarget",
+            "source": Provenance.UI.value,
+            "changed_by": "ui",
+        },
+        "TaskJournalUnlinked": {
+            "task_id": TASK_ID,
+            "user_id": "u1",
+            "journal_id": OLD_JOURNAL_ID,
+            "source": Provenance.UI.value,
+            "changed_by": "ui",
+        },
+        "TaskDeleted": {
+            "task_id": TASK_ID,
+            "user_id": "u1",
+            "source": Provenance.UI.value,
+            "changed_by": "ui",
+        },
+    }
+
+
+class TestTaskHistoryCarriesItsOwner:
+    """Every task row records who owns it, because the task itself may be gone.
+
+    Journal and contact history reads authorise by loading the aggregate and
+    comparing ``user_id``. A task is **hard-deleted**, so that read has nothing
+    to load — and its ``__deleted__`` marker would be written to a surface that
+    could never authorise anybody to read it. The owner therefore rides on the
+    row, taken from the payload rather than from the ``tasks`` table, because at
+    projection time the row may already be gone.
+    """
+
+    @pytest.mark.parametrize("event_type", sorted(_task_payloads_by_type()))
+    def test_every_row_of_every_task_event_carries_the_owner(
+        self, service: HistoryService, event_type: str
+    ) -> None:
+        rows = service.project_event(
+            _task_event(event_type, _task_payloads_by_type()[event_type])
+        )
+
+        assert rows, f"{event_type} projected nothing to check"
+        assert {row.user_id for row in rows} == {"u1"}
+
+    def test_the_create_stamps_its_contact_markers_too(
+        self, service: HistoryService
+    ) -> None:
+        """The create fans ``contact_ids`` out itself rather than through the
+        shared helper, so it is the one handler that could stamp some of its rows
+        and not others."""
+        rows = service.project_event(
+            _task_event(
+                "TaskCreated",
+                _task_created_payload(contact_ids=[CONTACT_ID, OTHER_CONTACT_ID]),
+            )
+        )
+
+        assert len(rows) == 3
+        assert all(row.user_id == "u1" for row in rows)
+
+    def test_a_payload_without_an_owner_leaves_the_column_empty(
+        self, service: HistoryService
+    ) -> None:
+        """A replay of an event published before the payload carried ``user_id``.
+
+        Skipping the key beats raising, for the same reason every other missing
+        key here does: a raising handler dead-letters the batch and stalls
+        history for everything queued behind it. Such a row is unreadable rather
+        than readable by the wrong person, which is the safe direction.
+        """
+        payload = _task_created_payload()
+        del payload["user_id"]
+
+        rows = service.project_event(_task_event("TaskCreated", payload))
+
+        assert [row.user_id for row in rows] == [None]
+
+    def test_the_owner_set_covers_every_task_event_type(self) -> None:
+        """The guard that makes the parametrisation above a claim about the domain.
+
+        Without it, a seventh event type — the journal merge re-point is already
+        scheduled — could land with no owner on its rows and no test would notice.
+        """
+        assert set(_task_payloads_by_type()) == task_event_types()
+
+    def test_a_journal_event_carries_no_owner(self, service: HistoryService) -> None:
+        """Deliberately narrowed to tasks, and this is where that is stated.
+
+        A half-populated ownership column is the honest state: journal and
+        contact reads load the aggregate, neither is hard-deleted, and stamping
+        rows nothing authorises against would imply a check that does not exist.
+        """
+        rows = service.project_event(
+            _event(
+                "JournalCreated",
+                {"journal_id": 10, "user_id": "u1", "title": "Hike"},
+            )
+        )
+
+        assert [row.user_id for row in rows] == [None]

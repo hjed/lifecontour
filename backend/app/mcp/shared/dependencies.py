@@ -17,6 +17,7 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
@@ -275,6 +276,16 @@ async def get_gear_item_service() -> GearItemService:
 async def get_task_service() -> TaskService:
     """Resolve the task service for the current MCP request."""
     return cast(TaskService, await _resolve_dependency(TaskService))
+
+
+async def get_task_history_service() -> TaskHistoryService:
+    """Resolve the task history read service for the current MCP request.
+
+    Reads only, like ``get_task_read_service`` — and it carries the ownership
+    check itself, so the tool cannot answer "is this yours?" differently from
+    the endpoint.
+    """
+    return cast(TaskHistoryService, await _resolve_dependency(TaskHistoryService))
 
 
 async def get_task_read_service() -> TaskReadService:

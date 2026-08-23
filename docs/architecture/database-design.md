@@ -110,7 +110,7 @@ originating `event_id`.
 ```sql
 CREATE TABLE field_history (
     id SERIAL PRIMARY KEY,
-    entity_type VARCHAR(50) NOT NULL, -- 'contact', 'contact_method', 'journal', 'route', 'gear_item', ...
+    entity_type VARCHAR(50) NOT NULL, -- 'contact', 'contact_method', 'journal', 'route', 'gear_item', 'task', ...
     entity_id INTEGER NOT NULL,
     field_name VARCHAR(100) NOT NULL, -- field that changed; marker fields for create/delete/type changes
     old_value TEXT,
@@ -118,7 +118,8 @@ CREATE TABLE field_history (
     changed_by VARCHAR(100), -- user/agent identifier
     source VARCHAR(50) NOT NULL DEFAULT 'system', -- Provenance: ui, mcp, google_contacts, google_calendar, strava, immich, summary_regeneration, system
     event_id VARCHAR, -- originating domain event id; NULL for the synchronous contact dual-write
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() -- set from event.occurred_at by the projection
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- set from event.occurred_at by the projection
+    user_id VARCHAR(50) -- owner of the entity; TASK ROWS ONLY (migration 0107)
 );
 
 -- Idempotency for the event-driven history projection: re-delivered events never
@@ -126,11 +127,43 @@ CREATE TABLE field_history (
 -- synchronous contact dual-write (event_id = NULL) is never deduplicated.
 CREATE UNIQUE INDEX ux_field_history_event_dedup
     ON field_history (event_id, entity_type, entity_id, field_name);
+
+-- Added with user_id (0107): the owner lookup and the 'task' aggregation
+-- predicate both filter on this pair, as do the journal and contact aggregate
+-- reads, which previously had no index for it.
+CREATE INDEX idx_field_history_entity ON field_history (entity_type, entity_id);
 ```
+
+**`user_id` is deliberately half-populated, and the reason is deletion.** Every
+history read authorises the same way — load the aggregate, compare `user_id` —
+and that works for journals and contacts because neither is ever hard-deleted.
+**A task is.** `TaskService.delete_task` removes the row while the `TaskDeleted`
+event projects a `__deleted__` marker, so a task-scoped read has to answer *"is
+this yours?"* with nothing left to load. The owner therefore rides on the row,
+stamped by the projection from the event payload (every task event carries
+`user_id`) rather than from the `tasks` table, which may already be gone when
+the projection runs. Journal and contact rows carry NULL here and need nothing:
+stamping them would imply a check nothing performs. `HistoryService._owner_for`
+derives it from the entity type in one place, so a future task event type cannot
+land with unowned rows. Not to be confused with `changed_by`, which records who
+*acted* — an assistant editing your task writes `changed_by = 'mcp'` on a row
+that is still yours.
+
+Historic rows are repaired by `TaskHistoryBackfill`, which runs once at
+application start. It fills `user_id` on task rows written before the column
+existed **and** re-projects task events the `history-projection` group
+acknowledged before its patterns matched them (ITER18-003 Phases 6–7 widened
+those patterns, but a consumer group sees each message only once, so events
+published before the deploy are never redelivered). Both halves read
+`outbox_events`, which retains every event forever. It is idempotent and bounded
+by an anti-join, so a repaired database pays one indexed query per start.
 
 Reads are aggregated per root entity via a pluggable aggregation strategy
 (`HistoryAggregationStrategy`): the `contact` strategy resolves the contact plus all
-its related sub-entities; a `journal` strategy is added in ITER12-002.
+its related sub-entities; a `journal` strategy is added in ITER12-002 and a
+`task` strategy in ITER18-003 Phase 8. The `task` predicate deliberately does
+**not** join to `tasks` — that join would silently empty a deleted task's feed,
+which is the one thing this surface exists to serve.
 
 On contact merge (ITER13-004), `FieldHistoryRepository.repoint_entity_history` moves the
 source contact's top-level (`entity_type='contact'`) rows onto the survivor so the unified

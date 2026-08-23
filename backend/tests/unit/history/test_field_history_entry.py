@@ -49,3 +49,31 @@ def test_construction_with_event_id_and_provenance() -> None:
     assert entry.old_value == "Old"
     assert entry.new_value == "New"
     assert entry.changed_by == "ui"
+
+
+def test_user_id_defaults_to_none() -> None:
+    """Ownership is not carried by every row, and the default says so.
+
+    Journal and contact history authorises by loading the aggregate, so their
+    rows need no owner. Task rows carry one because a hard-deleted task has no
+    aggregate left to load.
+    """
+    entry = FieldHistoryEntry(
+        entity_type="journal",
+        entity_id=1,
+        field_name="title",
+    )
+
+    assert entry.user_id is None
+
+
+def test_an_entry_can_carry_its_owner() -> None:
+    entry = FieldHistoryEntry(
+        entity_type="task",
+        entity_id=42,
+        field_name="__created__",
+        new_value="Book the venue",
+        user_id="u1",
+    )
+
+    assert entry.user_id == "u1"

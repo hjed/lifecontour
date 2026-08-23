@@ -1107,3 +1107,84 @@ class TestListUpcomingTasksDocumentsItself:
     ) -> None:
         """No paging, so an agent does not go looking for a second page."""
         assert "not paginated" in list_upcoming_tasks_schema["description"].lower()
+
+
+@pytest.fixture
+async def get_task_history_schema() -> dict[str, Any]:
+    """The ``get_task_history`` tool as an MCP client actually sees it."""
+    return await _tool_schema("get_task_history")
+
+
+class TestGetTaskHistoryToolParameters:
+    """What an AI client may send, and what it must not have to."""
+
+    def test_only_the_task_is_required(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        """Paging is optional, so the first call is one argument."""
+        schema = get_task_history_schema["input_schema"]
+
+        assert set(schema["required"]) == {"task_id"}
+        assert {"task_id", "page", "limit"} <= set(schema["properties"])
+
+    def test_the_page_size_is_capped_in_the_schema(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        """The cap is part of the contract, not a surprise the tool raises.
+
+        A model that reads the bound asks for a legal page; one that discovers
+        it by rejection burns a call and may report the failure to the user.
+        """
+        limit = get_task_history_schema["input_schema"]["properties"]["limit"]
+
+        assert limit["maximum"] == 100
+        assert limit["minimum"] == 1
+
+    def test_pages_start_at_one(self, get_task_history_schema: dict[str, Any]) -> None:
+        page = get_task_history_schema["input_schema"]["properties"]["page"]
+
+        assert page["minimum"] == 1
+
+    def test_injected_collaborators_are_not_part_of_the_contract(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        properties = get_task_history_schema["input_schema"]["properties"]
+
+        assert "history_service" not in properties
+        assert "db_connection" not in properties
+
+
+class TestGetTaskHistoryToolDescription:
+    """What the one-integer schema cannot say, and an agent would get wrong."""
+
+    def test_it_says_the_entries_are_most_recent_first(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        """An agent summarising a history in the wrong order tells the user the
+        opposite story about what happened."""
+        assert "most recent first" in get_task_history_schema["description"].lower()
+
+    def test_it_says_history_lags_the_change(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        """Projection is asynchronous. An agent that made a change and reads the
+        history back immediately may not see its own edit, and must not conclude
+        the edit failed."""
+        description = get_task_history_schema["description"].lower()
+
+        assert "asynchronous" in description or "moment" in description
+
+    def test_it_says_a_deleted_task_still_has_a_history(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        """The one thing about this tool that differs from every other task
+        tool: it answers for an id that ``get_task`` reports as not found. An
+        agent that does not know this will not think to ask."""
+        assert "delete" in get_task_history_schema["description"].lower()
+
+    def test_it_says_this_is_a_record_rather_than_a_task_listing(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        """The specification's "no third working surface" rule, said where an
+        agent might otherwise try to assemble one out of history reads."""
+        assert "record" in get_task_history_schema["description"].lower()

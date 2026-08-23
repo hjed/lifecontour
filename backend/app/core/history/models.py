@@ -29,6 +29,7 @@ class FieldHistoryEntry:
         event_id: str | None = None,
         id: int | None = None,
         created_at: str | datetime | None = None,
+        user_id: str | None = None,
     ):
         self.id = id
         self.entity_type = entity_type
@@ -40,6 +41,12 @@ class FieldHistoryEntry:
         self.source = source
         self.event_id = event_id
         self.created_at = created_at
+        # Who owns the entity this row describes, for the reads that cannot ask
+        # the entity itself. Set for task rows only — see ``_owner_for`` in the
+        # history service for why the column is deliberately half-populated.
+        # Do not confuse it with ``changed_by``, which records who *acted*: a
+        # row can be owned by one person and changed by an integration.
+        self.user_id = user_id
 
 
 class UnknownAggregationRootError(ValueError):
@@ -122,6 +129,29 @@ register_aggregation_strategy(
 )
 
 
+# The task aggregation predicate. Every task event projects with
+# entity_type='task', entity_id=task_id — a task has no sub-entities, unlike a
+# contact — so this keys on the task directly with no joins.
+#
+# **It deliberately does not reach through the ``tasks`` table.** Tasks are
+# hard-deleted, and a task's history has to stay readable afterwards: joining to
+# a row that may be gone would silently empty a deleted task's feed, which is
+# the surface the ``__deleted__`` marker is written to. Ownership is carried on
+# the rows instead (``field_history.user_id``) and checked by
+# ``TaskHistoryService`` before this predicate ever runs.
+_TASK_AGGREGATION_WHERE = """
+    entity_type = 'task' AND entity_id = :root_id
+"""
+
+
+register_aggregation_strategy(
+    HistoryAggregationStrategy(
+        root_type="task",
+        where_clause=_TASK_AGGREGATION_WHERE,
+    )
+)
+
+
 class FieldHistoryRepository(ABC):
     """Repository interface for entity-agnostic field-level change history."""
 
@@ -146,6 +176,18 @@ class FieldHistoryRepository(ABC):
         self, entity_type: str, entity_id: int
     ) -> list[FieldHistoryEntry]:
         """Get field history for a single entity."""
+
+    @abstractmethod
+    async def get_history_owner(self, entity_type: str, entity_id: int) -> str | None:
+        """Return the owner recorded on an entity's history rows, if any.
+
+        The answer to *"whose history is this?"* for a read that cannot ask the
+        entity, because the entity may no longer exist. Only task rows carry an
+        owner today (see ``field_history.user_id``), so this returns ``None``
+        for a journal or a contact — and also for an entity whose events have
+        not been projected yet, which a caller must distinguish from "not
+        yours" rather than treat as a refusal.
+        """
 
     @abstractmethod
     async def repoint_entity_history(

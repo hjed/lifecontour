@@ -20,6 +20,7 @@ import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.journals.event_state import EventState
 from core_shared.models.tasks import TaskStatus
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -3638,6 +3639,322 @@ class TestListUpcomingTasksTool:
             session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client, session_id, "list_upcoming_tasks", {"days_ahead": days_ahead}
+            )
+
+        assert '"isError":true' in response.text
+
+
+async def _get_task_history(
+    client: Any, session_id: str, **arguments: Any
+) -> dict[str, Any]:
+    response = await _raw_call(client, session_id, "get_task_history", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _seed_history(
+    connection: AsyncConnection,
+    task_id: int,
+    field_name: str,
+    *,
+    old_value: str | None = None,
+    new_value: str | None = None,
+    changed_by: str = "ui",
+    source: Provenance = Provenance.UI,
+    minutes: int = 0,
+    user_id: str | None = USER_ID,
+) -> None:
+    """One task history row, exactly as the projection consumer writes it."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.history.adapters.sql.field_history_repository import (
+        SqlFieldHistoryRepository,
+    )
+    from app.core.history.models import FieldHistoryEntry
+
+    await SqlFieldHistoryRepository(connection).record_change(
+        FieldHistoryEntry(
+            entity_type="task",
+            entity_id=task_id,
+            field_name=field_name,
+            old_value=old_value,
+            new_value=new_value,
+            changed_by=changed_by,
+            source=source,
+            event_id=f"evt-{task_id}-{field_name}",
+            created_at=datetime(2024, 3, 1, 8, 0, tzinfo=UTC)
+            + timedelta(minutes=minutes),
+            user_id=user_id,
+        )
+    )
+
+
+async def _seed_a_life(
+    connection: AsyncConnection, task_id: int, *, user_id: str = USER_ID
+) -> None:
+    """A task's whole history — one row of each shape its six event types make.
+
+    ``user_id`` is the task's **owner**, which is what the projection stamps
+    from the event payload; ``changed_by`` is who acted, and the two differ
+    whenever an assistant or a sync touches somebody's task.
+    """
+    for minutes, (field, old, new, source, actor) in enumerate(
+        [
+            ("__created__", None, "print the permit", Provenance.UI, "ui"),
+            ("text", "print the permit", "print two permits", Provenance.MCP, "mcp"),
+            ("status", "not_done", "done", Provenance.UI, "ui"),
+            ("due_journal_id", "200", "300", Provenance.MCP, "mcp"),
+            ("journal:200", None, "200", Provenance.MCP, "mcp"),
+            ("contact:7", None, "7", Provenance.SYSTEM, "system"),
+        ]
+    ):
+        await _seed_history(
+            connection,
+            task_id,
+            field,
+            old_value=old,
+            new_value=new,
+            source=source,
+            changed_by=actor,
+            minutes=minutes,
+            user_id=user_id,
+        )
+
+
+@pytest.mark.integration
+class TestGetTaskHistoryTool:
+    """AI-agent parity for the read surface, asserted at this surface.
+
+    The specification requires that history available in the UI be available
+    through MCP, and this iteration has already found a real defect on exactly
+    this seam — every task rejection reaching AI clients as "internal error",
+    invisible to the service and endpoint tests alike. So the properties are
+    re-asserted here rather than inferred from a shared service.
+    """
+
+    async def test_a_mixed_history_comes_back_most_recent_first(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await _seed_a_life(clean_database, task_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task_history(client, session_id, task_id=task_id)
+
+        assert "error" not in payload
+        assert payload["task_id"] == task_id
+        assert payload["total_count"] == 6
+        assert [entry["field_name"] for entry in payload["entries"]] == [
+            "contact:7",
+            "journal:200",
+            "due_journal_id",
+            "status",
+            "text",
+            "__created__",
+        ]
+
+    async def test_every_entry_names_its_provenance_and_its_actor(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The activity-history specification's *provenance is first-class*, in
+        the form an agent can actually use: a value per entry, not an icon."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await _seed_a_life(clean_database, task_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task_history(client, session_id, task_id=task_id)
+
+        by_field = {entry["field_name"]: entry for entry in payload["entries"]}
+        assert by_field["__created__"]["source"] == "ui"
+        assert by_field["__created__"]["changed_by"] == "ui"
+        assert by_field["text"]["source"] == "mcp"
+        assert by_field["contact:7"]["source"] == "system"
+        assert all(entry["created_at"] is not None for entry in payload["entries"])
+        assert by_field["text"]["old_value"] == "print the permit"
+        assert by_field["text"]["new_value"] == "print two permits"
+
+    async def test_it_pages_the_same_ordering_and_keeps_the_total(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await _seed_a_life(clean_database, task_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            first = await _get_task_history(
+                client, session_id, task_id=task_id, page=1, limit=2
+            )
+            third = await _get_task_history(
+                client, session_id, task_id=task_id, page=3, limit=2
+            )
+
+        assert first["page"] == 1
+        assert first["limit"] == 2
+        assert first["total_count"] == third["total_count"] == 6
+        assert [entry["field_name"] for entry in first["entries"]] == [
+            "contact:7",
+            "journal:200",
+        ]
+        assert [entry["field_name"] for entry in third["entries"]] == [
+            "text",
+            "__created__",
+        ]
+
+    async def test_a_task_whose_events_have_not_projected_yet_answers_empty(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """An empty history is an ordinary answer, not a refusal.
+
+        An agent told "not found" for a task it created a second ago would
+        report to the user that their task does not exist.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task_history(client, session_id, task_id=task_id)
+
+        assert "error" not in payload
+        assert payload["entries"] == []
+        assert payload["total_count"] == 0
+
+    async def test_a_deleted_tasks_history_is_still_readable(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        """The discriminator, through the tool.
+
+        Note what this asserts about the tool's contract: ``get_task`` reports
+        this id as not found while ``get_task_history`` answers, which is a
+        difference an agent has to be told about — and the tool's description is.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await _seed_a_life(clean_database, task_id)
+        await _seed_history(clean_database, task_id, "__deleted__", minutes=10)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            deleted = await _delete_task(client, session_id, task_id=task_id)
+            payload = await _get_task_history(client, session_id, task_id=task_id)
+            gone = await _get_task(client, session_id, task_id=task_id)
+
+        assert deleted["deleted"] is True
+        assert not await task_exists(clean_database, task_id)
+        assert gone["error"] == "Not found"
+        assert "error" not in payload
+        fields = [entry["field_name"] for entry in payload["entries"]]
+        assert fields[0] == "__deleted__"
+        assert "__created__" in fields
+
+    async def test_another_users_task_is_reported_as_not_found(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Indistinguishable from an absent one, so a refusal cannot be used to
+        discover which task ids exist."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+        await _seed_a_life(clean_database, foreign_task, user_id=OTHER_USER_ID)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            foreign = await _get_task_history(client, session_id, task_id=foreign_task)
+            absent = await _get_task_history(client, session_id, task_id=999_999)
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(foreign_task), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+
+    async def test_another_users_deleted_task_is_refused_too(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """The hardest case to get right: no task row exists to scope against,
+        so the only thing standing between the two users is the owner on the
+        history rows themselves."""
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+        await _seed_history(
+            clean_database, foreign_task, "__deleted__", user_id=OTHER_USER_ID
+        )
+        # Hard-deleted as ``delete_task`` would, but by SQL: the tool is
+        # owner-scoped, so this test's user could not perform the deletion it
+        # needs to have already happened.
+        await clean_database.execute(
+            sa_text("DELETE FROM tasks WHERE id = :task_id"), {"task_id": foreign_task}
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await _get_task_history(client, session_id, task_id=foreign_task)
+
+        assert payload["error"] == "Not found"
+
+    async def test_an_over_large_page_is_refused_by_the_tool_schema(
+        self, authenticated_lifespan_client
+    ):
+        """The cap keeps this from becoming a bulk export, and the schema is
+        where an agent finds out rather than by burning a call."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client, session_id, "get_task_history", {"task_id": 1, "limit": 1000}
             )
 
         assert '"isError":true' in response.text

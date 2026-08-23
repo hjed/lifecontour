@@ -45,3 +45,21 @@ def test_unknown_root_type_raises() -> None:
     """Requesting an unregistered root type fails clearly rather than silently."""
     with pytest.raises(UnknownAggregationRootError):
         get_aggregation_strategy("does_not_exist")
+
+
+def test_task_strategy_is_registered() -> None:
+    """The 'task' strategy aggregates rows tagged to the task itself.
+
+    Every task event projects with ``entity_type='task'``, ``entity_id=task_id``
+    — a task has no sub-entities — so the predicate keys on the task directly.
+    Notably it does **not** reach through the ``tasks`` table: a task is
+    hard-deleted and its history has to stay readable afterwards, so a join to a
+    row that may be gone would silently empty a deleted task's feed.
+    """
+    strategy = get_aggregation_strategy("task")
+
+    assert strategy.root_type == "task"
+    assert ":root_id" in strategy.where_clause
+    assert "entity_type = 'task'" in strategy.where_clause
+    assert "entity_id = :root_id" in strategy.where_clause
+    assert "FROM tasks" not in strategy.where_clause

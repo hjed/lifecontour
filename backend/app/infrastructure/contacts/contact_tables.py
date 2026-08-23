@@ -190,7 +190,7 @@ contact_tags_table = Table(
     ),
 )
 
-# Entity-agnostic field history table (shared by contacts and journals).
+# Entity-agnostic field history table (shared by contacts, journals and tasks).
 field_history_table = Table(
     "field_history",
     metadata,
@@ -209,6 +209,13 @@ field_history_table = Table(
         server_default=text("now()"),
         nullable=False,
     ),
+    # Who owns the entity this row describes. Nullable and deliberately
+    # half-populated: journal and contact history reads authorise by loading the
+    # aggregate, so their rows carry nothing here. **Task rows do**, because a
+    # task is hard-deleted and its history has to stay both readable and
+    # owner-scoped once there is no ``tasks`` row left to ask. Not the same as
+    # ``changed_by``, which records who acted.
+    Column("user_id", String(50), nullable=True),
 )
 
 # Contact edit event table

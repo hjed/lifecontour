@@ -63,7 +63,13 @@ from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import DatabaseIdPath
-from app.api.common.schemas import JsonApiLinks, get_request_base_url
+from app.api.common.schemas import (
+    JsonApiLinks,
+    create_pagination_links,
+    create_pagination_meta,
+    get_request_base_url,
+)
+from app.api.history import HistoryConverter, HistoryListResponse
 from app.api.tasks.schemas import (
     JournalTasksResponse,
     TaskAttributes,
@@ -82,6 +88,7 @@ from app.api.tasks.schemas import (
     to_task_read_resource,
     to_upcoming_tasks_response,
 )
+from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.auth.models import SessionUser
@@ -220,6 +227,77 @@ async def get_task(
     model = await task_read_service.read_model(user.id, task_id)
     return TaskReadResponse(
         data=to_task_read_resource(model, get_request_base_url(request))
+    )
+
+
+@router.get("/tasks/{task_id}/history")
+@inject
+async def get_task_history(
+    task_id: DatabaseIdPath,
+    request: Request,
+    history_service: FromDishka[TaskHistoryService],
+    user: FromDishka[SessionUser],  # Require authentication
+    page: Annotated[int, Query(description="Page number", ge=1)] = 1,
+    limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
+) -> HistoryListResponse:
+    """Get field-level change history for a task.
+
+    Returns a paginated JSON:API list of history entries, most recent first,
+    covering everything a task's events announce: its creation, rewords, status
+    moves, retargets, the journals it has been linked to and the people on it.
+    Each entry carries its provenance and its actor, in the same shape the
+    journal and contact feeds use, so one component renders all three.
+
+    History is produced asynchronously by the projection consumer, so a
+    just-made change may take a moment to appear — and a task created moments
+    ago answers an empty list rather than a 404, because "not projected yet" is
+    not "does not exist".
+
+    **A deleted task's history is still readable**, which is what this route
+    exists for. Tasks are hard-deleted, so unlike every other history read this
+    one cannot authorise by loading the aggregate; ownership is carried on the
+    history rows themselves and resolved by ``TaskHistoryService``, with the
+    live task row only as a fallback for the window before projection catches
+    up. Nothing here re-implements that check, so this endpoint and the
+    ``get_task_history`` MCP tool cannot answer it differently.
+
+    This is a **record**, not a working surface. It is scoped to one task by its
+    id and there is no collection beside it, in keeping with the specification's
+    rule that tasks are worked with in exactly two places.
+
+    No transaction is opened on this path.
+
+    Raises:
+        400: A path id that is not an integer, or one outside the range an
+             ``INTEGER`` column can hold.
+        404: The task does not exist, is not yours, or was deleted without ever
+             leaving history behind. As on every other task route the three are
+             one answer, so a rejection cannot be used to probe for other users'
+             tasks.
+    """
+    base_url = get_request_base_url(request)
+    offset = (page - 1) * limit
+
+    history_entries = await history_service.get_task_history(
+        task_id=task_id,
+        user_id=user.id,
+        limit=limit,
+        offset=offset,
+    )
+    total_count = await history_service.get_task_history_count(
+        task_id=task_id,
+        user_id=user.id,
+    )
+
+    return HistoryListResponse(
+        data=[
+            HistoryConverter.to_resource(entry, "task_history")
+            for entry in history_entries
+        ],
+        meta=create_pagination_meta(total_count, page, limit),
+        links=create_pagination_links(
+            f"{base_url}/api/tasks/{task_id}/history", page, limit, total_count
+        ),
     )
 
 

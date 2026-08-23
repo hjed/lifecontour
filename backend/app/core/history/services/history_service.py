@@ -809,7 +809,36 @@ class HistoryService:
             source=_parse_provenance(data.get("source")),
             event_id=event.event_id,
             created_at=event.occurred_at,
+            user_id=_owner_for(entity_type, data),
         )
+
+
+def _owner_for(entity_type: str, data: dict[str, Any]) -> str | None:
+    """The owner to stamp on a row, which today means: the task's, or nothing.
+
+    ``field_history`` has no ownership column for most of its rows and needs
+    none. Journal and contact history reads authorise by loading the aggregate
+    and comparing ``user_id``, which works because neither is hard-deleted.
+
+    **A task is**, and that is the whole reason this exists. Once
+    ``delete_task`` has run there is no row left to load, so a task's
+    ``__deleted__`` marker — and every line above it — would sit on a surface
+    that could never authorise anybody to read it. The owner therefore rides on
+    the row, taken from the payload (every task event carries ``user_id``)
+    rather than from the ``tasks`` table, which may already be gone by the time
+    the projection runs.
+
+    Derived here from the entity type rather than passed by each handler, so the
+    narrowing is stated **once** and the next task event type — the journal
+    merge re-point is already scheduled — cannot land with unowned rows because
+    somebody forgot an argument. A payload missing ``user_id`` (a replay from
+    before the key existed) leaves the column NULL: unreadable rather than
+    readable by the wrong person, which is the safe direction to fail.
+    """
+    if entity_type != _TASK_ENTITY_TYPE:
+        return None
+    owner = data.get("user_id")
+    return None if owner is None else str(owner)
 
 
 def _stringify(value: Any) -> str | None:

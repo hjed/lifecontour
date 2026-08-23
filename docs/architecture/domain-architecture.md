@@ -312,6 +312,20 @@ the *creating* journal where it arose and the *due* journal where it matters.
   immediately, so a task event is discarded rather than left pending, and nothing dead-letters. Both
   halves are pinned by tests, because a guarantee that holds by construction is one a pattern-list
   change can quietly remove.
+  **A task's history is readable, and the deleted case is what shapes the read.** `TaskHistoryService`
+  mirrors `JournalHistoryService` — a paginated read through the registered `"task"` aggregation
+  strategy, served by `GET /api/tasks/{id}/history` and the `get_task_history` MCP tool — with one
+  addition. Every other history read authorises by loading the aggregate and comparing `user_id`,
+  which a **hard-deleted** task has nothing to satisfy: the `__deleted__` marker would be written to
+  a surface nobody could be authorised to read. Ownership therefore rides on the rows
+  (`field_history.user_id`, stamped from the event payload) and **the rows answer first**, with the
+  live `tasks` row only as a fallback for the window before the projection catches up — which is why
+  a task created moments ago answers an empty history rather than a 404. The check lives in the
+  service rather than in its two callers, so the endpoint and the tool cannot disagree about whose
+  history it is. The `"task"` predicate does not join to `tasks` for the same reason the fallback is
+  second: that join would empty a deleted task's feed. Events the projection group acknowledged
+  before its patterns matched them are recovered by `TaskHistoryBackfill` at application start,
+  through the same `HistoryService` the consumer uses rather than a second mapping in SQL.
 
 #### Photos Domain
 - **Entities**: Photo, ImmichPerson, PersonMatch

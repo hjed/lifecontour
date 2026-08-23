@@ -52,7 +52,7 @@ from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.models.repositories import TaskAnchorRepository, TaskRepository
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.history_projection_consumer import (
-    _TASK_HISTORY_EVENT_TYPES,
+    TASK_HISTORY_EVENT_TYPES,
 )
 from tests.integration.tasks.task_seeding import (
     FIXED_PAST_INSTANT,
@@ -651,8 +651,8 @@ class TestEveryPublishedEventIsProjected:
         """
         published = await _published_types(path, fixtures, async_connection)
 
-        assert published <= set(_TASK_HISTORY_EVENT_TYPES), (
-            f"{path.name} publishes {sorted(published - set(_TASK_HISTORY_EVENT_TYPES))}, "
+        assert published <= set(TASK_HISTORY_EVENT_TYPES), (
+            f"{path.name} publishes {sorted(published - set(TASK_HISTORY_EVENT_TYPES))}, "
             "which the history-projection group does not subscribe to"
         )
 
