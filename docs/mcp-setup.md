@@ -189,7 +189,11 @@ configuring — but note that an IdP advertising only algorithms we do not accep
 (or only symmetric `HS*`, which JWKS verification cannot use) fails at startup
 instead of rejecting every token later.
 
-**Hydra (development).** Hydra derives every advertised endpoint from its issuer,
+**Hydra (development).** Note the dev Hydra client does not yet register FastMCP's
+own OAuth callback, so a local MCP flow is rejected at the authorize step
+([#1323](https://github.com/hjed/personal-management-system/issues/1323)).
+
+Hydra derives every advertised endpoint from its issuer,
 which has to stay browser-facing. The backend reaches it over the Docker network
 instead, so `docker-compose.yml` sets `WEBFINGER_OIDC_DISCOVERY_TOKEN_URL` and
 `WEBFINGER_OIDC_DISCOVERY_JWKS_URL` to the container-internal address and points

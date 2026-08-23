@@ -214,11 +214,6 @@ services:
       - CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-dev-client-secret}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
-      # The MCP OAuth proxy has its own callback under the mount path, so its
-      # redirect URI has to be registered too or the MCP flow is rejected by
-      # Hydra before it starts. Defaults mirror the backend's own settings.
-      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-http://localhost:8000}
-      - MCP_MOUNT_PATH=${MCP_MOUNT_PATH:-/mcp-server}
       - PUBLIC_PORT=${OAUTH_PUBLIC_PORT:-4444}
       - ADMIN_PORT_EXTERNAL=${OAUTH_ADMIN_PORT:-4445}
     entrypoint: ["/bin/sh"]
