@@ -538,6 +538,8 @@ class TestUpdateJournalComposite:
         )
         # A defaulted boolean (false) is not "held data" and must not be reported.
         write_service.fitness_data_repo.find_by_journal_id.return_value.calories = False
+        # A real zero is held data (0 == False in Python, so this guards the predicate).
+        write_service.fitness_data_repo.find_by_journal_id.return_value.elevation_gain = 0
 
         result = await write_service.update_journal_composite(
             _journal(journal_id=9), mock_transaction, types=["mood_rating"]
@@ -545,7 +547,7 @@ class TestUpdateJournalComposite:
 
         assert result.types_removed == ["fitness"]
         assert result.type_data_discarded == {
-            "fitness": ["distance", "strava_activity_id"]
+            "fitness": ["distance", "elevation_gain", "strava_activity_id"]
         }
         write_service.fitness_data_repo.delete.assert_awaited_once_with(9)
         write_service.mood_data_repo.delete.assert_not_awaited()

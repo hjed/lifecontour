@@ -306,6 +306,11 @@ class CompositeUpdateResult(NamedTuple):
     type_data_discarded: dict[str, list[str]]
 
 
+def _is_unpopulated(value: object) -> bool:
+    """True for values a type-data column holds when nothing was ever set."""
+    return value is None or value == "" or value is False
+
+
 def expand_type_dependencies(types: set[JournalType]) -> set[JournalType]:
     """Close ``types`` over :meth:`JournalType.get_dependencies` transitively.
 
@@ -1540,10 +1545,9 @@ class JournalWriteService:
             return []
         # None, "" and False are all "never set": boolean columns default to
         # false, so reporting them would bury the fields that actually held data.
+        # Checked by identity for False so a real 0 (0 == False) is still reported.
         return [
-            field
-            for field in tracked
-            if getattr(row, field, None) not in (None, "", False)
+            field for field in tracked if not _is_unpopulated(getattr(row, field, None))
         ]
 
     async def _replace_contact_relationships(
