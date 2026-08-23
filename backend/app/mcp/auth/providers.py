@@ -18,13 +18,14 @@ from typing import Any
 
 import structlog
 from cryptography.fernet import Fernet
-from fastmcp.server.auth.auth import AuthProvider, TokenVerifier
+from fastmcp.server.auth.auth import AccessToken, AuthProvider, TokenVerifier
 from fastmcp.server.auth.jwt_issuer import derive_jwt_key
 from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.discord import DiscordProvider
 from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import decode_jwt_payload
 from key_value.aio.protocols.key_value import AsyncKeyValue
 from key_value.aio.stores.redis import RedisStore
@@ -72,6 +73,71 @@ class _LoggingFernetEncryptionWrapper(FernetEncryptionWrapper):
         return result
 
 
+class _IdTokenVerifier(JWTVerifier):
+    """A ``JWTVerifier`` that also enforces the ID Token rules OIDC requires.
+
+    ``JWTVerifier`` is a general-purpose JWT checker, so two rules from OIDC
+    Core fall outside it. Both matter here because the ID Token is the whole
+    basis on which an MCP request authenticates.
+
+    - ``exp`` is REQUIRED in an ID Token (Core §2), but the verifier only
+      compares it *when present*. An ID Token minted without one would
+      authenticate forever — outliving the upstream grant it stands for, and
+      surviving the refresh failure that is otherwise what ends a dead session.
+    - When ``aud`` holds more than one value the ID Token must carry ``azp``,
+      and when ``azp`` is present it must be this client (Core §3.1.3.7). The
+      verifier only checks that our client id appears *somewhere* in ``aud``,
+      so without this a token minted for a different relying party that happens
+      to list us alongside itself would authenticate here.
+
+    Both are checked against the payload the signature check already validated,
+    never against a raw decode.
+    """
+
+    def __init__(self, *, authorized_party: str, **kwargs: Any) -> None:
+        self._authorized_party = authorized_party
+        super().__init__(**kwargs)
+
+    async def load_access_token(self, token: str) -> AccessToken | None:
+        """Verify the JWT, then apply the ID Token rules on its verified claims."""
+        verified = await super().load_access_token(token)
+        if verified is None:
+            return None
+
+        claims = verified.claims or {}
+
+        if claims.get("exp") is None:
+            logger.warning(
+                "MCP: refusing an upstream id_token with no 'exp' claim. OIDC "
+                "requires one; without it the token would never expire and the "
+                "MCP session could outlive the upstream grant indefinitely.",
+                subject=claims.get("sub"),
+            )
+            return None
+
+        audience = claims.get("aud")
+        authorized_party = claims.get("azp")
+        if authorized_party is None:
+            if isinstance(audience, list) and len(audience) > 1:
+                logger.warning(
+                    "MCP: refusing an upstream id_token with several audiences "
+                    "and no 'azp' claim, so the party it was issued to cannot "
+                    "be established.",
+                    audience=audience,
+                )
+                return None
+        elif authorized_party != self._authorized_party:
+            logger.warning(
+                "MCP: refusing an upstream id_token issued to a different "
+                "relying party.",
+                authorized_party=authorized_party,
+                expected=self._authorized_party,
+            )
+            return None
+
+        return verified
+
+
 class McpOidcProxy(OIDCProxy):
     """An ``OIDCProxy`` that trusts the IdP's own metadata about its keys.
 
@@ -87,7 +153,8 @@ class McpOidcProxy(OIDCProxy):
       issuer tokens are minted under, so the issuer it advertises is
       cross-checked against ``OAUTH_ISSUER`` before its keys are trusted.
 
-    It also makes one failure mode diagnosable — see
+    Its verifier is :class:`_IdTokenVerifier` rather than a bare
+    ``JWTVerifier``, and it makes one failure mode diagnosable — see
     :meth:`_get_verification_token`.
     """
 
@@ -153,8 +220,12 @@ class McpOidcProxy(OIDCProxy):
         required_scopes: list[str] | None = None,
         timeout_seconds: int | None = None,
     ) -> TokenVerifier:
-        """Build the verifier using the signing algorithm the IdP advertises."""
-        return super().get_token_verifier(
+        """Build the verifier: IdP-advertised algorithm, ID Token rules enforced."""
+        del timeout_seconds  # unused by the parent too; JWKS fetches set their own
+        return _IdTokenVerifier(
+            authorized_party=self._settings.oauth_client_id,
+            jwks_uri=str(self.oidc_config.jwks_uri),
+            issuer=str(self.oidc_config.issuer),
             algorithm=algorithm
             or select_algorithm(
                 self.oidc_config.id_token_signing_alg_values_supported,
@@ -162,7 +233,6 @@ class McpOidcProxy(OIDCProxy):
             ),
             audience=audience,
             required_scopes=required_scopes,
-            timeout_seconds=timeout_seconds,
         )
 
 

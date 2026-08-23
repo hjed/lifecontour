@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
+from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration
 from fastmcp.server.auth.providers.azure import AzureProvider
 from fastmcp.server.auth.providers.discord import DiscordProvider
@@ -23,6 +24,7 @@ from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from app.infrastructure.config import Settings
 from app.mcp.auth.providers import (
     McpOidcProxy,
+    _IdTokenVerifier,
     _LoggingFernetEncryptionWrapper,
     create_mcp_auth_provider,
 )
@@ -596,3 +598,102 @@ class TestStaleIdTokenIsDiagnosable:
         token_set = _token_set(None, access_token_expires_in=3000)
 
         assert self._verification_token(token_set, caplog) is None
+
+
+def _verified(**claims: Any) -> AccessToken:
+    """What ``JWTVerifier`` hands back once the signature has checked out."""
+    return AccessToken(
+        token="signed-id-token",
+        client_id=str(claims.get("azp") or claims.get("aud") or "generic-id"),
+        scopes=[],
+        expires_at=None,
+        claims=claims,
+    )
+
+
+async def _verify(**claims: Any) -> AccessToken | None:
+    """Run only the OIDC ID Token rules, with the signature check stubbed out."""
+    verifier = _IdTokenVerifier(
+        authorized_party="generic-id",
+        jwks_uri="https://auth.example.com/jwks",
+        issuer="https://auth.example.com",
+        algorithm="ES256",
+    )
+    with patch.object(
+        JWTVerifier, "load_access_token", return_value=_verified(**claims)
+    ):
+        return await verifier.load_access_token("signed-id-token")
+
+
+class TestIdTokenExpiryIsMandatory:
+    """OIDC Core 2 makes `exp` REQUIRED; JWTVerifier only checks it when present.
+
+    An ID Token without one would authenticate forever, outliving the upstream
+    grant it stands for and surviving the refresh failure that otherwise ends a
+    dead session.
+    """
+
+    async def test_rejects_a_token_with_no_expiry(self) -> None:
+        assert await _verify(sub="a-user", aud="generic-id") is None
+
+    async def test_accepts_a_token_that_carries_one(self) -> None:
+        assert await _verify(sub="a-user", aud="generic-id", exp=1) is not None
+
+    async def test_a_failed_signature_check_still_short_circuits(self) -> None:
+        verifier = _IdTokenVerifier(
+            authorized_party="generic-id",
+            jwks_uri="https://auth.example.com/jwks",
+            issuer="https://auth.example.com",
+        )
+        with patch.object(JWTVerifier, "load_access_token", return_value=None):
+            assert await verifier.load_access_token("nonsense") is None
+
+
+class TestAuthorizedPartyIsEnforced:
+    """OIDC Core 3.1.3.7: `azp` must be this client when it is present.
+
+    JWTVerifier only checks that our client id appears *somewhere* in `aud`, so
+    without this a token minted for another relying party that happens to list
+    us alongside itself would authenticate here.
+    """
+
+    async def test_rejects_a_token_issued_to_another_relying_party(self) -> None:
+        token = await _verify(
+            sub="a-user",
+            aud=["other-rp", "generic-id"],
+            azp="other-rp",
+            exp=1,
+        )
+        assert token is None
+
+    async def test_accepts_a_token_whose_azp_is_this_client(self) -> None:
+        token = await _verify(
+            sub="a-user",
+            aud=["other-rp", "generic-id"],
+            azp="generic-id",
+            exp=1,
+        )
+        assert token is not None
+
+    async def test_rejects_several_audiences_with_no_azp(self) -> None:
+        """Nothing then establishes which party the token was issued to."""
+        token = await _verify(sub="a-user", aud=["other-rp", "generic-id"], exp=1)
+        assert token is None
+
+    async def test_a_single_audience_needs_no_azp(self) -> None:
+        """The common case: `aud` alone identifies the party."""
+        assert await _verify(sub="a-user", aud="generic-id", exp=1) is not None
+
+    async def test_a_single_audience_in_a_list_needs_no_azp(self) -> None:
+        assert await _verify(sub="a-user", aud=["generic-id"], exp=1) is not None
+
+
+class TestProxyBuildsTheStrictVerifier:
+    def test_the_verifier_enforces_the_oidc_id_token_rules(self) -> None:
+        verifier = _hook_proxy(_document()).get_token_verifier(audience="generic-id")
+        assert isinstance(verifier, _IdTokenVerifier)
+
+    def test_the_authorized_party_is_the_configured_client(self) -> None:
+        verifier = _hook_proxy(_document()).get_token_verifier(audience="generic-id")
+        assert isinstance(verifier, _IdTokenVerifier)
+        assert verifier._authorized_party == "generic-id"
