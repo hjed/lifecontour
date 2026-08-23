@@ -83,6 +83,11 @@ class TestSupportedAlgorithms:
     def test_drops_algorithms_we_do_not_accept(self) -> None:
         assert supported_algorithms(["EdDSA", "ES256"], source="s") == ("ES256",)
 
+    def test_accepts_every_asymmetric_algorithm_the_verifier_can_use(self) -> None:
+        """Including RSASSA-PSS, which is as JWKS-verifiable as the rest."""
+        advertised = ["PS256", "PS384", "PS512", "ES384", "ES512", "RS384", "RS512"]
+        assert supported_algorithms(advertised, source="s") == tuple(advertised)
+
     def test_drops_duplicates(self) -> None:
         assert supported_algorithms(["RS256", "RS256"], source="s") == ("RS256",)
 
@@ -112,12 +117,27 @@ class TestAssertIssuerMatches:
             source="https://idp/meta",
         )
 
-    def test_accepts_a_document_that_omits_the_issuer(self) -> None:
-        assert_issuer_matches(
-            None,
-            _settings(oauth_issuer="https://idp.example.com"),
-            source="https://idp/meta",
-        )
+    def test_rejects_a_document_that_omits_the_issuer(self) -> None:
+        """OIDC requires it, and "absent" must not read as "nothing to check".
+
+        Otherwise a mispointed document supplies attacker-controlled keys via
+        ``jwks_uri`` while tokens still carry the configured ``iss`` — the exact
+        substitution this guard exists to stop.
+        """
+        with pytest.raises(RuntimeError, match="missing 'issuer'"):
+            assert_issuer_matches(
+                None,
+                _settings(oauth_issuer="https://idp.example.com"),
+                source="https://idp/meta",
+            )
+
+    def test_rejects_a_document_whose_issuer_is_empty(self) -> None:
+        with pytest.raises(RuntimeError, match="missing 'issuer'"):
+            assert_issuer_matches(
+                "",
+                _settings(oauth_issuer="https://idp.example.com"),
+                source="https://idp/meta",
+            )
 
     def test_accepts_when_no_issuer_is_configured(self) -> None:
         """Nothing to compare against — the discovery URL is the trust anchor."""
