@@ -2555,7 +2555,12 @@ async def update_journal_entry(
 
     Only provided fields are updated; omitted fields remain unchanged.
     When types, tags, or contact_relationships are provided they REPLACE all
-    existing values (not merge).
+    existing values (not merge). Types are expanded through their dependencies
+    first, so re-typing (e.g. BUSHWALKING -> CANYONING) keeps the type_data of
+    every type that remains, including shared dependencies such as FITNESS and
+    its Strava link. Only genuinely dropped types lose data; the response lists
+    them in ``types_removed`` and the populated fields lost in
+    ``type_data_discarded``.
 
 
     Returns:
@@ -2632,7 +2637,7 @@ async def update_journal_entry(
         if request.contact_relationships is not None
         else None
     )
-    updated_journal = await write_service.update_journal_composite(
+    update_result = await write_service.update_journal_composite(
         existing_journal,
         db_connection,
         types=request.types,
@@ -2642,6 +2647,7 @@ async def update_journal_entry(
         changed_by="mcp",
         source=Provenance.MCP,
     )
+    updated_journal = update_result.journal
 
     # Fetch all enrichment data
     types, type_data, contacts, tags = await _fetch_enrichment_data(
@@ -2678,6 +2684,8 @@ async def update_journal_entry(
         contacts=contacts,
         tags=tags,
         parent=parent,
+        types_removed=update_result.types_removed,
+        type_data_discarded=update_result.type_data_discarded,
     )
 
     return MCPResponseBuilder.success_response(response)

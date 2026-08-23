@@ -434,7 +434,9 @@ class TestUpdateJournalComposite:
             _journal(journal_id=9), mock_transaction
         )
 
-        assert result is updated
+        assert result.journal is updated
+        assert result.types_removed == []
+        assert result.type_data_discarded == {}
         mock_journal_service.update_journal.assert_awaited_once()
         mock_journal_service.add_type_to_journal.assert_not_awaited()
         mock_journal_service.remove_type_from_journal.assert_not_awaited()
@@ -469,6 +471,82 @@ class TestUpdateJournalComposite:
             mock_journal_service.add_type_to_journal.await_args.args[1]
             == JournalType.FITNESS
         )
+
+    @pytest.mark.asyncio
+    async def test_retype_to_dependent_type_keeps_shared_ancestor_data(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """BUSHWALKING → CANYONING must not delete and recreate FITNESS etc.
+
+        CANYONING depends on BUSHWALKING, OUTDOOR_ACTIVITY and FITNESS, so the
+        requested list is expanded through its dependencies before diffing.
+        Without that, the shared ancestors were removed (wiping the fitness
+        block and Strava link) and then re-added empty as CANYONING's deps.
+        """
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        write_service._get_current_types = AsyncMock(
+            return_value={
+                JournalType.FITNESS,
+                JournalType.OUTDOOR_ACTIVITY,
+                JournalType.BUSHWALKING,
+            }
+        )
+        mock_journal_service.add_type_to_journal.return_value = [
+            JournalType.CANYONING,
+            JournalType.ABSEILING_TRIP,
+        ]
+        write_service.canyoning_data_repo.find_by_journal_id.return_value = None
+        write_service.abseiling_data_repo.find_by_journal_id.return_value = None
+
+        result = await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, types=["canyoning"]
+        )
+
+        mock_journal_service.remove_type_from_journal.assert_not_awaited()
+        write_service.fitness_data_repo.delete.assert_not_awaited()
+        write_service.outdoor_activity_data_repo.delete.assert_not_awaited()
+        write_service.bushwalking_data_repo.delete.assert_not_awaited()
+        added = [
+            call.args[1]
+            for call in mock_journal_service.add_type_to_journal.await_args_list
+        ]
+        assert set(added) == {JournalType.ABSEILING_TRIP, JournalType.CANYONING}
+        assert result.types_removed == []
+        assert result.type_data_discarded == {}
+
+    @pytest.mark.asyncio
+    async def test_types_replace_reports_removed_types_and_populated_fields(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """A genuinely dropped type is named, with the fields that held values."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        write_service._get_current_types = AsyncMock(
+            return_value={JournalType.FITNESS, JournalType.MOOD_RATING}
+        )
+        write_service.fitness_data_repo.find_by_journal_id.return_value = MagicMock(
+            distance=12.5,
+            strava_activity_id="123",
+            heart_rate_avg=None,
+            heart_rate_max=None,
+            elevation_gain=None,
+            elevation_loss=None,
+            duration=None,
+            calories=None,
+        )
+        write_service.mood_data_repo.find_by_journal_id.return_value = MagicMock(
+            mood_value=None, mood_label=None, energy_level=None
+        )
+
+        result = await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, types=["mood_rating"]
+        )
+
+        assert result.types_removed == ["fitness"]
+        assert result.type_data_discarded == {
+            "fitness": ["distance", "strava_activity_id"]
+        }
+        write_service.fitness_data_repo.delete.assert_awaited_once_with(9)
+        write_service.mood_data_repo.delete.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_tags_replace_all(

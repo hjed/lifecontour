@@ -155,6 +155,23 @@ class JournalResponse(BaseModel):
         description="External system links (e.g. Strava activity, Google Calendar event)",
     )
 
+    types_removed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Types dropped by this update (update responses only). Types that "
+            "remain — including dependencies shared between the old and new "
+            "types — keep their type_data untouched."
+        ),
+    )
+
+    type_data_discarded: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description=(
+            "For each type in types_removed, the type_data fields that held a "
+            "value and were discarded with it (update responses only)."
+        ),
+    )
+
     created_at: datetime = Field(description="Creation timestamp (UTC)")
 
     updated_at: datetime = Field(description="Last update timestamp (UTC)")

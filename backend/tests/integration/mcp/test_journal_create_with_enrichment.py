@@ -928,3 +928,99 @@ class TestUpdateJournalServicifiedParity:
             assert "error" not in update_payload, f"error: {update_payload}"
             assert "fitness" in update_payload["types"]
             assert "mood_rating" not in update_payload["types"]
+
+
+class TestRetypePreservesSharedTypeData:
+    """Changing a journal's types must not wipe data of types that remain."""
+
+    @pytest.mark.asyncio
+    async def test_bushwalking_to_canyoning_keeps_fitness_and_strava_link(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            created = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Imlay",
+                    "content": "Walk in.",
+                    "event_date_range": {
+                        "start": "2025-10-15",
+                        "end": "2025-10-15",
+                    },
+                    "types": ["BUSHWALKING"],
+                    "type_data": {
+                        "FITNESS": {
+                            "distance": 16,
+                            "strava_activity_id": "16152597201",
+                        },
+                        "OUTDOOR_ACTIVITY": {"weather_conditions": "Rain"},
+                    },
+                },
+            )
+            assert "error" not in created, created
+
+            updated = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                created["id"],
+                {"types": ["CANYONING"]},
+            )
+
+            assert "error" not in updated, updated
+            assert "canyoning" in updated["types"]
+            assert updated["type_data"]["fitness"]["strava_activity_id"] == (
+                "16152597201"
+            )
+            assert updated["type_data"]["fitness"]["distance"] == 16
+            assert (
+                updated["type_data"]["outdoor_activity"]["weather_conditions"] == "Rain"
+            )
+            assert updated["types_removed"] == []
+            assert updated["type_data_discarded"] == {}
+
+    @pytest.mark.asyncio
+    async def test_dropping_a_type_reports_what_was_discarded(
+        self,
+        authenticated_lifespan_client,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            created = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Imlay",
+                    "content": "Walk in.",
+                    "event_date_range": {
+                        "start": "2025-10-15",
+                        "end": "2025-10-15",
+                    },
+                    "types": ["BUSHWALKING"],
+                    "type_data": {
+                        "FITNESS": {"strava_activity_id": "16152597201"},
+                    },
+                },
+            )
+            assert "error" not in created, created
+
+            updated = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                created["id"],
+                {"types": ["MOOD_RATING"]},
+            )
+
+            assert "error" not in updated, updated
+            assert set(updated["types_removed"]) == {
+                "bushwalking",
+                "outdoor_activity",
+                "fitness",
+            }
+            assert updated["type_data_discarded"]["fitness"] == ["strava_activity_id"]
