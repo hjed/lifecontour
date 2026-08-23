@@ -181,12 +181,31 @@ relationships — including changes that arrive from an integration worker rathe
 than a user, such as an inbound calendar sync writing only
 `journal_calendar_info`.
 
-It deliberately does **not** track the *referenced* entities a read merely
-embeds: renaming or recolouring a journal tag changes the tag resource, not the
-journals carrying it, and bumping every one of them would turn a single rename
-into a mass update. A client that needs to detect that has the tag's own
-resource to watch. Assignment changes are a different matter and are tracked,
-because they change which tags a journal has.
+It deliberately does **not** track two things.
+
+*Referenced entities a read merely embeds.* Renaming or recolouring a journal
+tag changes the tag resource, not the journals carrying it, and bumping every
+one of them would turn a single rename into a mass update. A client that needs
+to detect that has the tag's own resource to watch. Assignment changes are a
+different matter and are tracked, because they change which tags a journal has.
+
+*Changes applied by an inbound integration sync* — Google Calendar writing
+`journal_calendar_info`, or Immich writing the album link that carries a
+journal's `PHOTO_ALBUM` type. This one is a genuine trade-off rather than a
+definitional line, and it goes this way because **`journals.updated_at` is also
+the merge-protection signal**: both integrations decide whether the user edited
+a journal since the last sync by comparing it against the link's anchor
+(`_has_local_edits`, `_merge_fields_with_protection`), and Immich deliberately
+holds the anchor back while a journal is protected. Writing `updated_at` from
+inside a sync mixes "the user changed this" with "the sync changed this" and
+moves one side of that comparison from within the sync itself — risking silent
+loss of a user's edits, which is a far worse failure than the missed detection
+it would buy.
+
+The cost is stated plainly: a conditional write will **not** notice a
+concurrent inbound sync. Fixing that properly means giving merge protection its
+own column so `updated_at` is free to be purely a version, which is a migration
+and a change to both integrations — worth doing, but not here.
 
 **Lock ordering matters.** A conditional write takes the journal's lock first
 and then writes child rows. A child write that touched the parent afterwards
