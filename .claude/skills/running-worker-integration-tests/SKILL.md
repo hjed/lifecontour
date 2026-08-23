@@ -56,12 +56,22 @@ uv run pytest tests/integration/test_sync_calendar_events_integration.py -v -k "
 If you started the containers specifically for these tests and want to clean up:
 
 ```bash
-# From the project root
+# From the project root — tears down every profile for this worktree
+python3 scripts/teardown_workspace.py
+```
+
+`teardown_workspace.py` resolves this worktree's `pms_test_<N>` compose project,
+brings it down across all profiles and sweeps anything left over. Pass
+`--keep-volumes` to preserve data, or `--dry-run` to preview.
+
+> **Note:** If the `test` or `test-backend` profile containers were started by another test suite (e.g. backend integration tests), they share the same Docker containers. Only stop them when you're finished with all testing.
+
+The equivalent raw command, if you need it:
+
+```bash
 eval "$(python3 scripts/workspace_env.py export)"
 docker compose --profile test-backend --env-file .env.test down -v
 ```
-
-> **Note:** If the `test` or `test-backend` profile containers were started by another test suite (e.g. backend integration tests), they share the same Docker containers. Only stop them when you're finished with all testing.
 
 ## Common Troubleshooting
 
