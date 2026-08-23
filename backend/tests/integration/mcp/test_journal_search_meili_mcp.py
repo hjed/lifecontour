@@ -31,12 +31,14 @@ async def _insert_journal(
     content: str,
     start: datetime,
     strava_activity_id: str | None = None,
+    parent_id: int | None = None,
 ) -> int:
     result = await conn.execute(
         text("""
             INSERT INTO journals
-                (user_id, title, content, event_date_range_start, event_date_range_end)
-            VALUES (:user_id, :title, :content, :start, :end)
+                (user_id, title, content, event_date_range_start,
+                 event_date_range_end, parent_id)
+            VALUES (:user_id, :title, :content, :start, :end, :parent_id)
             RETURNING id
         """),
         {
@@ -45,6 +47,7 @@ async def _insert_journal(
             "content": content,
             "start": start,
             "end": start + timedelta(hours=2),
+            "parent_id": parent_id,
         },
     )
     row = result.fetchone()
@@ -61,38 +64,39 @@ async def _insert_journal(
     return journal_id
 
 
+@pytest_asyncio.fixture
+async def zion_journals(
+    clean_database: AsyncConnection, index_journal
+) -> dict[str, int]:
+    """Two October-2025 journals plus one unrelated; the Zion one is on Strava."""
+    echo_id = await _insert_journal(
+        clean_database,
+        title="Echo Canyon — Zion",
+        content="Nice little canyon, but with a Kanangra-grade walkout. "
+        "A classic Zion canyoning day.",
+        start=datetime(2025, 10, 13, 15, tzinfo=UTC),
+        strava_activity_id="16135",
+    )
+    drive_id = await _insert_journal(
+        clean_database,
+        title="Zion Drive — Moab → Zion",
+        content="Long drive; no canyoning because of the thunderstorm.",
+        start=datetime(2025, 10, 12, 6, tzinfo=UTC),
+    )
+    other_id = await _insert_journal(
+        clean_database,
+        title="Morning run",
+        content="Easy aerobic run along the river.",
+        start=datetime(2025, 3, 2, 6, tzinfo=UTC),
+    )
+    for journal_id in (echo_id, drive_id, other_id):
+        await index_journal(journal_id)
+    return {"echo": echo_id, "drive": drive_id, "other": other_id}
+
+
 @pytest.mark.integration
 @pytest.mark.meilisearch
 class TestSearchJournalsViaMeili:
-    @pytest_asyncio.fixture
-    async def zion_journals(
-        self, clean_database: AsyncConnection, index_journal
-    ) -> dict[str, int]:
-        """Two October-2025 journals plus one unrelated; the Zion one is on Strava."""
-        echo_id = await _insert_journal(
-            clean_database,
-            title="Echo Canyon — Zion",
-            content="Nice little canyon, but with a Kanangra-grade walkout. "
-            "A classic Zion canyoning day.",
-            start=datetime(2025, 10, 13, 15, tzinfo=UTC),
-            strava_activity_id="16135",
-        )
-        drive_id = await _insert_journal(
-            clean_database,
-            title="Zion Drive — Moab → Zion",
-            content="Long drive; no canyoning because of the thunderstorm.",
-            start=datetime(2025, 10, 12, 6, tzinfo=UTC),
-        )
-        other_id = await _insert_journal(
-            clean_database,
-            title="Morning run",
-            content="Easy aerobic run along the river.",
-            start=datetime(2025, 3, 2, 6, tzinfo=UTC),
-        )
-        for journal_id in (echo_id, drive_id, other_id):
-            await index_journal(journal_id)
-        return {"echo": echo_id, "drive": drive_id, "other": other_id}
-
     @pytest.mark.asyncio
     async def test_multi_word_query_matches_words_not_substring(
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
@@ -352,3 +356,342 @@ class TestNoteFilterMeansUntyped:
 
         assert [r["id"] for r in with_query["results"]] == [note_id]
         assert [r["id"] for r in without_query["results"]] == [note_id]
+
+
+async def _insert_tag(conn: AsyncConnection, name: str, parent_id: Any = None) -> Any:
+    result = await conn.execute(
+        text("""
+            INSERT INTO journal_tags (name, color, parent_id)
+            VALUES (:name, '#FF0000', :parent_id)
+            RETURNING id
+        """),
+        {"name": name, "parent_id": parent_id},
+    )
+    row = result.fetchone()
+    assert row is not None
+    return row[0]
+
+
+async def _tag_journal(conn: AsyncConnection, journal_id: int, tag_id: Any) -> None:
+    await conn.execute(
+        text("""
+            INSERT INTO journal_tag_assignments (journal_id, tag_id)
+            VALUES (:journal_id, :tag_id)
+        """),
+        {"journal_id": journal_id, "tag_id": tag_id},
+    )
+
+
+async def _link_contact(
+    conn: AsyncConnection, journal_id: int, contact_id: int
+) -> None:
+    await conn.execute(
+        text("""
+            INSERT INTO contacts (id, first_name, last_name)
+            VALUES (:id, 'Dana', 'Scully')
+            ON CONFLICT (id) DO NOTHING
+        """),
+        {"id": contact_id},
+    )
+    await conn.execute(
+        text("""
+            INSERT INTO journal_contact_relationships (
+                journal_id, contact_id, relationship_type
+            )
+            VALUES (:journal_id, :contact_id, 'PARTICIPANT')
+        """),
+        {"journal_id": journal_id, "contact_id": contact_id},
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.meilisearch
+class TestSearchJournalsRelationalFilters:
+    """The REST list filters — dates, tags, contact, calendar, parent, paging.
+
+    Each has to narrow both backends identically: the database listing when
+    there is no ``query``, and the MeiliSearch query when there is one.
+    """
+
+    @pytest.mark.asyncio
+    async def test_date_window_narrows_the_database_listing(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"start_date": "2025-10-13", "end_date": "2025-10-13"},
+            )
+
+        assert "error" not in payload, payload
+        assert [r["id"] for r in payload["results"]] == [zion_journals["echo"]]
+        assert payload["total_hits"] == 1
+
+    @pytest.mark.asyncio
+    async def test_date_window_narrows_a_meilisearch_query(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        """Both Zion journals match the text; only one is inside the window."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {
+                    "query": "Zion canyoning",
+                    "start_date": "2025-10-13",
+                    "end_date": "2025-10-14",
+                },
+            )
+
+        assert "error" not in payload, payload
+        assert [r["id"] for r in payload["results"]] == [zion_journals["echo"]]
+        assert payload["total_hits"] == 1
+
+    @pytest.mark.asyncio
+    async def test_date_filter_and_integration_source_intersect(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        """Two id sets AND together rather than one overwriting the other."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            inside = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {
+                    "query": "Zion",
+                    "integration_source": "strava",
+                    "start_date": "2025-10-13",
+                },
+            )
+            outside = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {
+                    "query": "Zion",
+                    "integration_source": "strava",
+                    "end_date": "2025-10-12",
+                },
+            )
+
+        assert [r["id"] for r in inside["results"]] == [zion_journals["echo"]]
+        assert outside["total_hits"] == 0
+
+    @pytest.mark.asyncio
+    async def test_tag_name_filter_narrows_both_backends(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        zion_journals: dict[str, int],
+    ) -> None:
+        """A tag can be named rather than looked up as a UUID first."""
+        tag_id = await _insert_tag(clean_database, "canyoning-trips")
+        await _tag_journal(clean_database, zion_journals["echo"], tag_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            with_query = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"query": "Zion", "tags": "canyoning-trips"},
+            )
+            without_query = await call_mcp_tool(
+                client, session_id, "search_journals", {"tags": "Canyoning-Trips"}
+            )
+            by_id = await call_mcp_tool(
+                client, session_id, "search_journals", {"tags": str(tag_id)}
+            )
+
+        assert [r["id"] for r in with_query["results"]] == [zion_journals["echo"]]
+        assert [r["id"] for r in without_query["results"]] == [zion_journals["echo"]]
+        assert [r["id"] for r in by_id["results"]] == [zion_journals["echo"]]
+
+    @pytest.mark.asyncio
+    async def test_parent_tag_filter_includes_descendant_tags(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        zion_journals: dict[str, int],
+    ) -> None:
+        parent_tag = await _insert_tag(clean_database, "outdoors")
+        child_tag = await _insert_tag(clean_database, "canyoning", parent_id=parent_tag)
+        await _tag_journal(clean_database, zion_journals["echo"], child_tag)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client, session_id, "search_journals", {"tags": "outdoors"}
+            )
+
+        assert [r["id"] for r in payload["results"]] == [zion_journals["echo"]]
+
+    @pytest.mark.asyncio
+    async def test_unknown_tag_name_is_an_error_not_an_empty_result(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client, session_id, "search_journals", {"tags": "no-such-tag"}
+            )
+
+        assert "error" in payload, payload
+        assert "no-such-tag" in payload["message"]
+
+    @pytest.mark.asyncio
+    async def test_contact_filter_narrows_both_backends(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        zion_journals: dict[str, int],
+    ) -> None:
+        await _link_contact(clean_database, zion_journals["drive"], 7001)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            with_query = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"query": "Zion", "contact_id": 7001},
+            )
+            without_query = await call_mcp_tool(
+                client, session_id, "search_journals", {"contact_id": 7001}
+            )
+
+        assert [r["id"] for r in with_query["results"]] == [zion_journals["drive"]]
+        assert [r["id"] for r in without_query["results"]] == [zion_journals["drive"]]
+
+    @pytest.mark.asyncio
+    async def test_parent_filter_returns_only_children(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        index_journal,
+    ) -> None:
+        trip_id = await _insert_journal(
+            clean_database,
+            title="Zion trip",
+            content="The whole trip.",
+            start=datetime(2025, 10, 12, 6, tzinfo=UTC),
+        )
+        child_id = await _insert_journal(
+            clean_database,
+            title="Zion day two",
+            content="Echo Canyon.",
+            start=datetime(2025, 10, 13, 15, tzinfo=UTC),
+            parent_id=trip_id,
+        )
+        for journal_id in (trip_id, child_id):
+            await index_journal(journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client, session_id, "search_journals", {"parent_id": trip_id}
+            )
+            with_query = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"query": "Zion", "parent_id": trip_id},
+            )
+
+        assert [r["id"] for r in payload["results"]] == [child_id]
+        assert [r["id"] for r in with_query["results"]] == [child_id]
+
+    @pytest.mark.asyncio
+    async def test_calendar_filter_narrows_the_listing(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        zion_journals: dict[str, int],
+    ) -> None:
+        result = await clean_database.execute(
+            text("""
+                INSERT INTO calendars (user_id, name, color)
+                VALUES (:user_id, 'Trips', '#00FF00')
+                RETURNING id
+            """),
+            {"user_id": USER_ID},
+        )
+        row = result.fetchone()
+        assert row is not None
+        calendar_id = row[0]
+        await clean_database.execute(
+            text("""
+                INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day)
+                VALUES (:journal_id, :calendar_id, true)
+            """),
+            {"journal_id": zion_journals["drive"], "calendar_id": calendar_id},
+        )
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"calendar_id": str(calendar_id)},
+            )
+
+        assert [r["id"] for r in payload["results"]] == [zion_journals["drive"]]
+
+    @pytest.mark.asyncio
+    async def test_offset_pages_the_database_listing(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            first = await call_mcp_tool(
+                client, session_id, "search_journals", {"limit": 1}
+            )
+            second = await call_mcp_tool(
+                client, session_id, "search_journals", {"limit": 1, "offset": 1}
+            )
+
+        assert first["total_hits"] == 3
+        assert second["total_hits"] == 3
+        assert [r["id"] for r in first["results"]] == [zion_journals["echo"]]
+        assert [r["id"] for r in second["results"]] == [zion_journals["drive"]]
+
+    @pytest.mark.asyncio
+    async def test_filters_matching_nothing_report_the_filters_back(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        """An empty result names every filter that produced it."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client,
+                session_id,
+                "search_journals",
+                {"start_date": "2030-01-01", "end_date": "2030-01-02"},
+            )
+
+        assert payload["total_hits"] == 0
+        diagnostics = payload["diagnostics"]
+        assert diagnostics["search_backend"] == "database"
+        assert diagnostics["journals_for_user_total"] == 3
+        assert diagnostics["filters"]["start_date"] == "2030-01-01"
+        assert diagnostics["filters"]["end_date"] == "2030-01-02"
+
+    @pytest.mark.asyncio
+    async def test_invalid_date_filter_is_a_clear_error(
+        self, authenticated_lifespan_client, zion_journals: dict[str, int]
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await call_mcp_tool(
+                client, session_id, "search_journals", {"start_date": "last tuesday"}
+            )
+
+        assert "error" in payload, payload
+        assert "start_date" in payload["message"]

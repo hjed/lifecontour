@@ -141,6 +141,7 @@ from app.core.journal.adapters.sql.snorkelling_data_repository import (
 )
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.models.repositories import JournalTagRepository
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
@@ -162,6 +163,9 @@ from app.core.journal.services.journal_search_service import (
     search_journals_text,
 )
 from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_tag_hierarchy_service import (
+    JournalTagHierarchyService,
+)
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_type_data_reader import (
     read_journal_types_and_data,
@@ -431,6 +435,54 @@ def _parse_activity_type_filter(activity_type: str | None) -> str | None:
 def _parse_integration_source_filter(value: str | None) -> str | None:
     """Normalise an integration source filter (None passes through)."""
     return None if value is None else resolve_journal_source(value)
+
+
+async def _resolve_tag_filters(
+    tags: str | None, tag_repo: JournalTagRepository
+) -> list[str] | None:
+    """Resolve a comma-separated ``tags`` filter to journal tag ids.
+
+    Each entry is either a tag UUID or a tag name, because a name is what an AI
+    client actually has to hand; names match case-insensitively, as the
+    repository does. A name that resolves to nothing raises rather than being
+    dropped, which would silently widen the search instead of narrowing it.
+
+    Every id is then expanded to its whole subtree, so filtering by a parent tag
+    returns journals tagged with a descendant — the behaviour the REST journal
+    list gets from ``JournalService._expand_tag_ids_with_descendants``.
+    """
+    if not tags:
+        return None
+
+    resolved: dict[str, None] = {}
+    for raw_tag in tags.split(","):
+        value = raw_tag.strip()
+        if not value:
+            continue
+        try:
+            resolved[str(UUID(value))] = None
+            continue
+        except ValueError:
+            pass
+        tag = await tag_repo.find_by_name(value)
+        if tag is None or tag.id is None:
+            raise ValueError(
+                f"Unknown journal tag '{value}'. Pass a tag name or id from "
+                "list_journal_tags."
+            )
+        resolved[str(tag.id)] = None
+
+    if not resolved:
+        return None
+
+    descendants = await JournalTagHierarchyService(tag_repo).get_all_descendants_bulk(
+        [UUID(tag_id) for tag_id in resolved]
+    )
+    for descendant in descendants:
+        if descendant.id is not None:
+            resolved[str(descendant.id)] = None
+
+    return list(resolved)
 
 
 def _parse_optional_datetime_filter(
@@ -2381,6 +2433,7 @@ def _meili_search_journals(
     query: str,
     user_id: str,
     limit: int,
+    offset: int = 0,
     type_filters: list[str] | None = None,
     journal_ids: set[int] | None = None,
 ) -> tuple[list[JournalSearchResult], int, int]:
@@ -2390,6 +2443,7 @@ def _meili_search_journals(
         query=query,
         user_id=user_id,
         limit=limit,
+        offset=offset,
         type_filters=type_filters,
         journal_ids=journal_ids,
     )
@@ -2445,6 +2499,49 @@ async def search_journals(
             "Returns only journals linked to the specified external system.",
         ),
     ] = None,
+    start_date: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: ISO date or datetime lower bound. Journals "
+            "whose event range overlaps the window are returned.",
+        ),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: ISO date or datetime upper bound. A bare "
+            "date includes the whole day.",
+        ),
+    ] = None,
+    tags: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional: Comma-separated journal tag names or tag ids "
+            "(see list_journal_tags). A journal matching any of them — or any "
+            "of their descendant tags — is returned.",
+        ),
+    ] = None,
+    contact_id: Annotated[
+        int | None,
+        Field(
+            default=None, description="Optional: Only journals linked to this contact"
+        ),
+    ] = None,
+    calendar_id: Annotated[
+        str | None,
+        Field(default=None, description="Optional: Only journals on this calendar"),
+    ] = None,
+    parent_id: Annotated[
+        int | None,
+        Field(
+            default=None,
+            description="Optional: Only the direct children of this journal "
+            "(e.g. the days of a trip)",
+        ),
+    ] = None,
     limit: Annotated[
         int,
         Field(
@@ -2452,6 +2549,10 @@ async def search_journals(
             description="Maximum number of results to return (default: 20)",
         ),
     ] = 20,
+    offset: Annotated[
+        int,
+        Field(default=0, ge=0, description="Number of results to skip (default: 0)"),
+    ] = 0,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     search_service: SearchService = mcp_depends(get_search_service),
 ) -> str:
@@ -2462,7 +2563,10 @@ async def search_journals(
     UI (word matching, typo tolerance, relevance ranking) — not a literal
     substring match — so "Zion canyoning" finds a canyoning journal whose text
     mentions Zion. Without a query, journals are listed from the database
-    (newest first), optionally narrowed by ``types`` / ``integration_source``.
+    (newest first). Every other argument is a filter, and they combine: they
+    narrow the listing and the full-text query alike, so
+    ``query="canyon", start_date="2025-10-01", tags="trips"`` searches the text
+    of October's trip journals only.
     If MeiliSearch is unreachable the tool returns an explicit
     "Search unavailable" error, never a silent empty result.
 
@@ -2470,7 +2574,14 @@ async def search_journals(
         query: Optional search query for full-text search
         types: Optional comma-separated list of journal types
         integration_source: Optional integration source filter (strava, google_calendar)
+        start_date: Optional ISO date/datetime lower bound for the event range
+        end_date: Optional ISO date/datetime upper bound for the event range
+        tags: Optional comma-separated tag names or tag ids
+        contact_id: Optional contact the journal must be linked to
+        calendar_id: Optional calendar the journal must belong to
+        parent_id: Optional parent journal whose direct children to return
         limit: Maximum number of results to return
+        offset: Number of results to skip, for paging
 
     Returns:
         JSON string containing AI-friendly search results with:
@@ -2485,6 +2596,30 @@ async def search_journals(
     repos = _create_journal_tool_repositories(db_connection)
     type_filters = _parse_type_filters(types)
     source_filter = _parse_integration_source_filter(integration_source)
+    start_filter = _parse_optional_datetime_filter(start_date, "start_date")
+    end_filter = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
+    tag_filters = await _resolve_tag_filters(tags, repos.tag_repo)
+
+    # The filters the database resolves, in the spelling get_all/count_all use.
+    relational_filters: dict[str, Any] = {
+        "start_date": start_filter.isoformat() if start_filter else None,
+        "end_date": end_filter.isoformat() if end_filter else None,
+        "contact_id": str(contact_id) if contact_id is not None else None,
+        "tag_ids": tag_filters,
+        "calendar_id": calendar_id,
+        "parent_id": parent_id,
+    }
+    # ...and the same filters as the agent spelled them, for the diagnostics.
+    reported_filters: dict[str, Any] = {
+        "types": types,
+        "integration_source": source_filter,
+        "start_date": start_date,
+        "end_date": end_date,
+        "tags": tags,
+        "contact_id": contact_id,
+        "calendar_id": calendar_id,
+        "parent_id": parent_id,
+    }
 
     # When integration_source filter is active, fetch journal IDs matching
     # the source first, then intersect with other filters.
@@ -2506,7 +2641,7 @@ async def search_journals(
                     repos,
                     user_id,
                     search_backend="database",
-                    filters={"integration_source": source_filter, "types": types},
+                    filters=reported_filters,
                     journals_linked_to_source=0,
                     suggestions=[
                         f"No journal is linked to {source_filter}. Check "
@@ -2521,14 +2656,30 @@ async def search_journals(
     summary_suffix = f" linked to {source_filter}" if source_filter else ""
 
     if query and query.strip():
+        # MeiliSearch indexes the event dates as ISO strings and its range
+        # operators are numeric-only, so the relational filters are resolved to
+        # candidate ids here and intersected through Meili's `id IN [...]`,
+        # the same way the integration_source filter already is.
+        candidate_ids = source_journal_ids
+        if any(value is not None for value in relational_filters.values()):
+            candidate_ids = await repos.journal_repo.find_ids_by_filters(
+                user_id=user_id,
+                journal_ids=(
+                    sorted(source_journal_ids)
+                    if source_journal_ids is not None
+                    else None
+                ),
+                **relational_filters,
+            )
         try:
             results, total_hits, processing_time_ms = _meili_search_journals(
                 search_service,
                 query=query.strip(),
                 user_id=user_id,
                 limit=limit,
+                offset=offset,
                 type_filters=type_filters,
-                journal_ids=source_journal_ids,
+                journal_ids=candidate_ids,
             )
         except SearchServiceUnavailableError as exc:
             return MCPResponseBuilder.error_response(
@@ -2546,11 +2697,7 @@ async def search_journals(
                 repos,
                 user_id,
                 search_backend="meilisearch",
-                filters={
-                    "query": query,
-                    "types": types,
-                    "integration_source": source_filter,
-                },
+                filters={"query": query, **reported_filters},
                 source_filter=source_filter,
                 journals_linked_to_source=(
                     len(source_journal_ids) if source_journal_ids else None
@@ -2566,19 +2713,25 @@ async def search_journals(
     if len(type_filters) <= 1:
         journal_type = type_filters[0] if type_filters else None
         total_hits = await repos.journal_repo.count_all(
-            user_id=user_id, journal_type=journal_type, journal_ids=journal_ids
+            user_id=user_id,
+            journal_type=journal_type,
+            journal_ids=journal_ids,
+            **relational_filters,
         )
         journals = await repos.journal_repo.get_all(
             user_id=user_id,
             limit=limit,
-            offset=0,
+            offset=offset,
             journal_type=journal_type,
             journal_ids=journal_ids,
+            **relational_filters,
         )
         results = await _build_search_results(journals, repos)
     else:
+        # Several types cannot be expressed as one SQL filter, so every
+        # candidate the other filters allow is fetched and typed in Python.
         candidate_count = await repos.journal_repo.count_all(
-            user_id=user_id, journal_ids=journal_ids
+            user_id=user_id, journal_ids=journal_ids, **relational_filters
         )
         journals = (
             await repos.journal_repo.get_all(
@@ -2586,6 +2739,7 @@ async def search_journals(
                 limit=candidate_count,
                 offset=0,
                 journal_ids=journal_ids,
+                **relational_filters,
             )
             if candidate_count
             else []
@@ -2600,7 +2754,7 @@ async def search_journals(
                 continue
             results.append(_journal_to_search_result(journal, types=journal_types))
         total_hits = len(results)
-        results = results[:limit]
+        results = results[offset : offset + limit]
 
     response = JournalSearchResponse(
         results=results,
@@ -2612,7 +2766,7 @@ async def search_journals(
             repos,
             user_id,
             search_backend="database",
-            filters={"types": types, "integration_source": source_filter},
+            filters=reported_filters,
             source_filter=source_filter,
             journals_linked_to_source=(
                 len(source_journal_ids) if source_journal_ids else None

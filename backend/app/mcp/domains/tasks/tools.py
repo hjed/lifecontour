@@ -927,6 +927,7 @@ def _history_entry_to_dict(entry: FieldHistoryEntry) -> dict[str, Any]:
     }
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_task_history", "task")
 async def get_task_history(
     task_id: Annotated[

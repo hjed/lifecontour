@@ -1055,3 +1055,203 @@ class TestJournalRepositoryFiltering:
             f"Expected 1 journal, got {len(filtered)}: {[j.title for j in filtered]}"
         )
         assert filtered[0].title == "February Note with Charlie"
+
+
+@pytest.mark.integration
+class TestJournalRepositoryFindIdsByFilters:
+    """``find_ids_by_filters`` resolves the list filters down to bare ids.
+
+    MCP ``search_journals`` uses it to intersect the relational filters with a
+    MeiliSearch full-text query, so the ids it returns must agree exactly with
+    the rows ``get_all`` returns for the same filters.
+    """
+
+    async def test_date_window_bounds_the_ids(
+        self, journal_repository: SqlJournalRepository
+    ):
+        """Only journals overlapping the window are returned."""
+        inside = await journal_repository.save(
+            create_test_journal(
+                title="Inside",
+                start=datetime(2026, 3, 10, 9, 0, tzinfo=UTC),
+                end=datetime(2026, 3, 10, 10, 0, tzinfo=UTC),
+            )
+        )
+        before = await journal_repository.save(
+            create_test_journal(
+                title="Before",
+                start=datetime(2026, 2, 1, 9, 0, tzinfo=UTC),
+                end=datetime(2026, 2, 1, 10, 0, tzinfo=UTC),
+            )
+        )
+        after = await journal_repository.save(
+            create_test_journal(
+                title="After",
+                start=datetime(2026, 4, 1, 9, 0, tzinfo=UTC),
+                end=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
+            )
+        )
+
+        ids = await journal_repository.find_ids_by_filters(
+            "test-user-123",
+            start_date="2026-03-01T00:00:00+00:00",
+            end_date="2026-03-31T23:59:59+00:00",
+        )
+
+        assert ids == {inside.id}
+        assert before.id not in ids
+        assert after.id not in ids
+
+    async def test_agrees_with_get_all_for_combined_filters(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """The id set matches the rows ``get_all`` returns for the same filters."""
+        await async_connection.execute(
+            text("""
+            INSERT INTO contacts (id, first_name, last_name)
+            VALUES (:id, :first_name, :last_name)
+            """),
+            {"id": 501, "first_name": "Dana", "last_name": "Scully"},
+        )
+        matching = await journal_repository.save(
+            create_test_journal(
+                title="Project sync with Dana",
+                content="Talked about the project",
+                start=datetime(2026, 3, 10, 9, 0, tzinfo=UTC),
+                end=datetime(2026, 3, 10, 10, 0, tzinfo=UTC),
+            )
+        )
+        unlinked = await journal_repository.save(
+            create_test_journal(
+                title="Project sync alone",
+                content="Talked about the project",
+                start=datetime(2026, 3, 11, 9, 0, tzinfo=UTC),
+                end=datetime(2026, 3, 11, 10, 0, tzinfo=UTC),
+            )
+        )
+        await async_connection.execute(
+            text("""
+            INSERT INTO journal_contact_relationships (
+                journal_id, contact_id, relationship_type
+            )
+            VALUES (:journal_id, :contact_id, 'PARTICIPANT')
+            """),
+            {"journal_id": matching.id, "contact_id": 501},
+        )
+
+        ids = await journal_repository.find_ids_by_filters(
+            "test-user-123",
+            contact_id="501",
+            start_date="2026-03-01T00:00:00+00:00",
+            end_date="2026-03-31T23:59:59+00:00",
+            search="project",
+        )
+        rows = await journal_repository.get_all(
+            "test-user-123",
+            limit=100,
+            contact_id="501",
+            start_date="2026-03-01T00:00:00+00:00",
+            end_date="2026-03-31T23:59:59+00:00",
+            search="project",
+        )
+
+        assert ids == {matching.id}
+        assert ids == {journal.id for journal in rows}
+        assert unlinked.id not in ids
+
+    async def test_tag_filter_selects_tagged_journals(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A tag id narrows the result to journals carrying that tag."""
+        tag_id = await _insert_tag(async_connection, "find-ids-hiking")
+        tagged = await journal_repository.save(create_test_journal(title="Tagged"))
+        untagged = await journal_repository.save(create_test_journal(title="Untagged"))
+        await _assign_tag(async_connection, tagged.id, tag_id)
+
+        ids = await journal_repository.find_ids_by_filters(
+            "test-user-123", tag_ids=[str(tag_id)]
+        )
+
+        assert ids == {tagged.id}
+        assert untagged.id not in ids
+
+    async def test_parent_filter_selects_children(
+        self, journal_repository: SqlJournalRepository
+    ):
+        """``parent_id`` returns only that journal's direct children."""
+        parent = await journal_repository.save(create_test_journal(title="Trip"))
+        child = await journal_repository.save(
+            create_test_journal(title="Day one", parent_id=parent.id)
+        )
+        unrelated = await journal_repository.save(create_test_journal(title="Other"))
+
+        ids = await journal_repository.find_ids_by_filters(
+            "test-user-123", parent_id=parent.id
+        )
+
+        assert ids == {child.id}
+        assert unrelated.id not in ids
+
+    async def test_another_users_journals_are_never_returned(
+        self, journal_repository: SqlJournalRepository
+    ):
+        """The id set is scoped to the acting user."""
+        mine = await journal_repository.save(
+            create_test_journal(user_id="owner-user", title="Mine")
+        )
+        theirs = await journal_repository.save(
+            create_test_journal(user_id="other-user", title="Theirs")
+        )
+
+        ids = await journal_repository.find_ids_by_filters("owner-user")
+
+        assert mine.id in ids
+        assert theirs.id not in ids
+
+    async def test_journal_ids_intersects_rather_than_widens(
+        self, journal_repository: SqlJournalRepository
+    ):
+        """``journal_ids`` is an AND, and an empty candidate list matches nothing."""
+        first = await journal_repository.save(create_test_journal(title="First"))
+        second = await journal_repository.save(create_test_journal(title="Second"))
+
+        assert first.id is not None
+        intersected = await journal_repository.find_ids_by_filters(
+            "test-user-123", journal_ids=[first.id]
+        )
+        assert intersected == {first.id}
+        assert second.id not in intersected
+
+        assert (
+            await journal_repository.find_ids_by_filters(
+                "test-user-123", journal_ids=[]
+            )
+            == set()
+        )
+
+    async def test_type_filter_is_applied(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A journal type narrows the ids the same way it narrows ``get_all``."""
+        typed = await journal_repository.save(create_test_journal(title="Mood day"))
+        untyped = await journal_repository.save(create_test_journal(title="Plain note"))
+        await async_connection.execute(
+            text("""
+            INSERT INTO journal_mood_data (journal_id, mood_value)
+            VALUES (:journal_id, 4)
+            """),
+            {"journal_id": typed.id},
+        )
+
+        ids = await journal_repository.find_ids_by_filters(
+            "test-user-123", journal_type="MOOD_RATING"
+        )
+
+        assert ids == {typed.id}
+        assert untyped.id not in ids
