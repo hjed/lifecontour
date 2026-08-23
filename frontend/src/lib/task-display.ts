@@ -146,3 +146,92 @@ const STATUS_CHANGE_WORDS: Record<TaskStatus, string> = {
 export function statusChangeWording(status: TaskStatus): string {
   return STATUS_CHANGE_WORDS[status] ?? 'Task updated';
 }
+
+/**
+ * The retarget affordance a row offers, worded for the task it acts on.
+ *
+ * A retarget is one call to one endpoint, but it is four different things to
+ * ask for, and the specification treats them as different acts: extending a
+ * deadline, bringing a *lapsed* commitment back, bringing a *cancelled* one
+ * back — its only exit — and reopening one that was already finished. The
+ * button, the dialog's heading and its explanation all have to say which.
+ *
+ * Deliberately **not** part of {@link statusActions}. That table is the status
+ * transitions a row offers, and retargeting is not one: it writes a journal
+ * link, forces the status to *not done* whatever it was, and is refused on
+ * grounds the status matrix knows nothing about.
+ */
+export interface TaskRetargetOffer {
+  /** Stable identity for React keys, test ids and the offer table itself. */
+  readonly key: 'retarget';
+  /** The visible button text. */
+  readonly label: string;
+  /**
+   * The button's accessible name. **Contains** the visible label, so a user
+   * speaking what they can see still addresses it (WCAG 2.5.3).
+   */
+  readonly accessibleName: string;
+  /** The dialog's heading. */
+  readonly dialogTitle: string;
+  /** The dialog's explanation, which is where the reopen warning lives. */
+  readonly dialogDescription: string;
+  /** The dialog's confirm button. */
+  readonly submitLabel: string;
+}
+
+const RESURRECT_LAPSED: TaskRetargetOffer = {
+  key: 'retarget',
+  label: 'Resurrect',
+  accessibleName: 'Resurrect task onto a new due journal',
+  dialogTitle: 'Resurrect this lapsed task',
+  dialogDescription:
+    'This task lapsed: it is still not done and its due journal is no longer ahead of it. Choose a future journal to make it due in, and it returns to the dashboard in due course.',
+  submitLabel: 'Resurrect task',
+};
+
+const RESURRECT_CANCELLED: TaskRetargetOffer = {
+  key: 'retarget',
+  label: 'Resurrect',
+  accessibleName: 'Resurrect task onto a new due journal',
+  dialogTitle: 'Resurrect this cancelled task',
+  dialogDescription:
+    'Giving a cancelled task a new future journal to be due in is the way it comes back, and it returns as not done. Nothing else reopens it.',
+  submitLabel: 'Resurrect task',
+};
+
+const RESCHEDULE: TaskRetargetOffer = {
+  key: 'retarget',
+  label: 'Reschedule',
+  accessibleName: 'Reschedule task onto a new due journal',
+  dialogTitle: 'Move this task to another journal',
+  dialogDescription:
+    'Choose the future journal this task should be due in. It stays not done, and the deadline moves with it.',
+  submitLabel: 'Move task',
+};
+
+const REOPEN: TaskRetargetOffer = {
+  key: 'retarget',
+  label: 'Reopen',
+  accessibleName: 'Reopen task onto a new due journal',
+  dialogTitle: 'Reopen this completed task',
+  dialogDescription:
+    'This task is done. Moving it to another journal reopens it as not done — you will be asked to confirm that before anything is written.',
+  submitLabel: 'Move task',
+};
+
+/**
+ * How this task's retarget is offered and explained.
+ *
+ * A **cancelled** task answers regardless of `lapsed`: the read model never
+ * reports a cancelled task as lapsed — a commitment called off cannot then be
+ * let slide — but the caller passes both values straight through, so the
+ * answer must not depend on that staying true.
+ */
+export function retargetAction(
+  status: TaskStatus,
+  lapsed: boolean
+): TaskRetargetOffer {
+  if (status === TaskStatus.CANCELLED) return RESURRECT_CANCELLED;
+  if (status === TaskStatus.DONE) return REOPEN;
+  return lapsed ? RESURRECT_LAPSED : RESCHEDULE;
+}

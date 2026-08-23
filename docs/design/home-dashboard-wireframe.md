@@ -131,3 +131,12 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
    (one quiet line) and W29 (centred icon plus line). Likewise, no state prop demonstrates a show-more in
    its expanded form (W28, W32); "reveals the remainder in place" is the specification's requirement, not
    a depicted state. Resolved by ITER18-004 Phase 16.
+10. **The retarget affordance is journal-only, like delete.** W24 draws one action because everything on
+    the dashboard is not-done and future-dated, so the only move a row there can make is completion.
+    ITER18-001 Phase 18 adds a fourth control to the *journal* row — a retarget that reads *Resurrect* on
+    a lapsed or cancelled task, *Reschedule* on a live one and *Reopen* on a done one — sitting after the
+    status actions and before the secondary delete, in the same `outline`/`size="sm"`/icon idiom W24
+    establishes. It is journal-only for the same reason delete is (gap 8): the dashboard is where a
+    commitment is *reminded of*, not where it is worked with, and a lapsed task — the one this control
+    exists for — is deliberately absent from the dashboard altogether (gap 5). The dashboard's own row
+    stays exactly as W24 draws it.

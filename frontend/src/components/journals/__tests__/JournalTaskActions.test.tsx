@@ -372,6 +372,12 @@ describe('JournalTaskActions', () => {
       expect(
         mentioned.getByRole('button', { name: 'Delete task' })
       ).toBeDisabled();
+      // The retarget dialog is a write against the same task, so a twin that
+      // could open one mid-write would queue exactly the race the guard exists
+      // to prevent.
+      expect(
+        mentioned.getByTestId('journal-task-action-retarget')
+      ).toBeDisabled();
 
       release();
       await waitFor(() => {
@@ -511,7 +517,12 @@ describe('JournalTaskActions', () => {
     it('reaches every action by tabbing, in the order they are shown', async () => {
       renderActions();
 
-      const expected = ['Mark done', 'Cancel task', 'Delete task'];
+      const expected = [
+        'Mark done',
+        'Cancel task',
+        'Reschedule task onto a new due journal',
+        'Delete task',
+      ];
       for (const name of expected) {
         await userEvent.tab();
         expect(screen.getByRole('button', { name })).toHaveFocus();
@@ -562,7 +573,12 @@ describe('JournalTaskActions', () => {
         .getAllByRole('button')
         .map(button => button.getAttribute('aria-label'));
 
-      expect(names).toEqual(['Mark done', 'Cancel task', 'Delete task']);
+      expect(names).toEqual([
+        'Mark done',
+        'Cancel task',
+        'Reschedule task onto a new due journal',
+        'Delete task',
+      ]);
     });
 
     it('presents delete quietly rather than as a destructive button', () => {
@@ -680,6 +696,118 @@ describe('JournalTaskActions', () => {
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       });
       expect(trigger).toHaveFocus();
+    });
+  });
+  /**
+   * The way out of every status, and the *only* way out of cancelled.
+   *
+   * The dialog itself is tested in `RetargetTaskDialog.test.tsx`; what belongs
+   * here is that the row offers it at all, where it sits among the actions
+   * beside it, and that it locks with them.
+   */
+  describe('the retarget affordance', () => {
+    it.each([
+      [TaskStatus.NOT_DONE, /reschedule/i],
+      [TaskStatus.DONE, /reopen/i],
+      [TaskStatus.CANCELLED, /resurrect/i],
+    ])('offers a %s task a way onto a new due journal', (status, name) => {
+      renderActions(createMockJournalTask({ status }));
+
+      expect(
+        screen.getByTestId('journal-task-action-retarget')
+      ).toHaveAccessibleName(name);
+    });
+
+    /**
+     * The specification's list for a lapsed task is resurrect, cancel and
+     * done. The other two are Phase 17's; this asserts all three together,
+     * because "expose them inline" is a claim about the row rather than about
+     * any one control.
+     */
+    it('gives a lapsed row all three of resurrect, cancel and done', () => {
+      renderActions(
+        createMockJournalTask({ status: TaskStatus.NOT_DONE, lapsed: true })
+      );
+
+      expect(
+        screen.getByTestId('journal-task-action-retarget')
+      ).toHaveAccessibleName(/resurrect/i);
+      expect(
+        screen.getByRole('button', { name: 'Mark done' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Cancel task' })
+      ).toBeInTheDocument();
+    });
+
+    it('sits after the status actions and before the delete', () => {
+      renderActions(createMockJournalTask({ status: TaskStatus.NOT_DONE }));
+
+      const order = within(actionGroup())
+        .getAllByRole('button')
+        .map(button => button.getAttribute('data-testid'));
+
+      expect(order).toEqual([
+        'journal-task-action-done',
+        'journal-task-action-cancel',
+        'journal-task-action-retarget',
+        'journal-task-action-delete',
+      ]);
+    });
+
+    /**
+     * Not `destructive`, and not a link: retargeting is an ordinary move, and
+     * the row never navigates away from the journal being read.
+     */
+    it('is an ordinary action rather than a destructive one', () => {
+      renderActions();
+
+      const trigger = screen.getByTestId('journal-task-action-retarget');
+      expect(trigger.className).not.toMatch(/bg-destructive/);
+      expect(trigger.tagName).toBe('BUTTON');
+      expect(trigger).not.toHaveAttribute('href');
+    });
+
+    it('opens no request of its own until the dialog is submitted', async () => {
+      renderActions();
+
+      await userEvent.click(screen.getByTestId('journal-task-action-retarget'));
+      await screen.findByRole('dialog');
+
+      const wrote = mockFetch.mock.calls.filter(([, init]) =>
+        ['POST', 'PATCH', 'DELETE'].includes(
+          String((init as RequestInit | undefined)?.method ?? 'GET')
+        )
+      );
+      expect(wrote).toEqual([]);
+    });
+
+    it('is locked while a write against the task is in flight', async () => {
+      let release: () => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise<Response>(resolve => {
+            release = () => {
+              resolve(okResponse(TaskStatus.DONE));
+            };
+          })
+      );
+      renderActions();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Mark done' }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId('journal-task-action-retarget')
+        ).toBeDisabled();
+      });
+
+      release();
+      await waitFor(() => {
+        expect(
+          screen.getByTestId('journal-task-action-retarget')
+        ).toBeEnabled();
+      });
     });
   });
 });

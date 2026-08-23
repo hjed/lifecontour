@@ -280,6 +280,180 @@ listing's payload.
   `aria-describedby` the row's task text, because every row's buttons are named
   the same and the text is what tells them apart.
 
+#### Retarget and resurrect
+
+`RetargetTaskDialog` (`components/journals/RetargetTaskDialog.tsx`) is one
+dialog doing four things, because the specification treats them as four
+different acts against one endpoint: extending a deadline, meeting a **lapsed**
+commitment again, bringing a **cancelled** one back — its only exit, since the
+service refuses both status calls out of cancelled — and reopening a **done**
+task, which the UI must warn about before it happens. The trigger's label, the
+heading and the explanation are chosen per case by `retargetAction(status,
+lapsed)` in `lib/task-display.ts`: **Resurrect**, **Reschedule**, **Reopen**.
+
+- **The retarget affordance is not in the status offer table**, and that is a
+  statement rather than an oversight. `statusActions` is the *transitions* a row
+  offers; a retarget writes a journal link, forces the status to *not done*
+  whatever it was, and is refused on grounds the status matrix knows nothing
+  about. It is offered in **every** status, including cancelled, where it is the
+  only thing on the row besides delete.
+- **The reopen confirmation is the server's refusal, not a client-side
+  prediction.** A done task's retarget is sent *without* the acknowledgement,
+  refused with `TASK_REOPEN_NOT_ACKNOWLEDGED` — a 409 that writes nothing, and
+  which `useRetargetTask` deliberately does not toast — and only then confirmed
+  and re-sent with `acknowledge_reopen: true`. Predicting it in the browser
+  would be a second copy of the service's rule, free to drift; worse, it would
+  sit *ahead* of the future-date check, so a done task retargeted onto a past
+  journal would be asked to confirm a request that was never going to succeed.
+  The service checks the acknowledgement **last** for exactly that reason, and
+  Phase 8 pins that ordering at both of its surfaces.
+- **A rejected journal lands on the field, and the toast stays.**
+  `TASK_DUE_JOURNAL_NOT_FUTURE` is mapped through `form.setError` onto the
+  due-journal field and focus returns to it, which is what the criterion asks
+  for. The toast the hook already raises is *not* suppressed: Phase 15 asserts
+  that every retarget failure but the acknowledgement toasts, "so the exception
+  cannot widen by accident", and a user who has scrolled away from the field
+  would otherwise get no report at all. The criterion says "rather than as a
+  toast-**only** failure", which this satisfies by adding rather than replacing.
+- **Focus is moved in an effect, not in the handler that causes the move.** The
+  moments that decide where focus belongs — the reopen gate appearing, the gate
+  being declined — swap which half of the dialog is mounted, so a `focus()` call
+  inside the click handler reaches for an element React has not rendered yet.
+  This was found by a failing test, not by reading. Focus **on open** is
+  `DialogContent`'s `onOpenAutoFocus` rather than the effect: Radix's default
+  lands on the first tabbable node, which happens to be the search box today,
+  and saying so explicitly stops a control added above the picker from moving
+  focus silently — and stops Radix and the effect racing for the same element.
+- **Nothing moves while the write is in flight, and the dialog will not close
+  over it.** The picker is disabled and Cancel and Escape are refused until the
+  request settles. Both matter for the same reason: the request has already
+  left. A selection that changed mid-flight would put the server's rejection
+  against a journal the request never named — and would let the reopen
+  confirmation, which reads the current choice, describe a refusal that was
+  about a different journal. A dialog that vanished on Cancel and then toasted
+  *"Task moved"* a second later would report the opposite of what the user had
+  just asked for. **Aborting the request instead was considered and rejected**:
+  a `POST` that has reached the server may already have committed, so
+  cancelling it client-side would make the UI's claim less true rather than
+  more. The success path closes directly rather than through the guard, since
+  there is nothing left to protect and `isPending` may not have settled in that
+  closure.
+- **The in-flight guard is not read twice.** `JournalTaskActions` already
+  computes it from the mutation cache and passes it as `disabled`; the dialog
+  gates its submit on that plus its own `isPending`, rather than opening a
+  second `useMutationState` subscription per row saying the same thing.
+- The picker is not wrapped in `FormControl`. That clones `id`,
+  `aria-describedby` and `aria-invalid` onto the child's **root** element, which
+  here is the picker's container rather than its input; the three are passed to
+  the input explicitly instead, which is what the picker's props exist for.
+
+#### The future-journal picker
+
+`FutureJournalPicker` (`components/journals/FutureJournalPicker.tsx`) is what
+makes the fifth invariant workable: a due journal must be an **existing**
+journal dated after today, so there is no bare date picker anywhere and nothing
+creates a journal as a side effect of holding a task. It is deliberately narrow
+so the create-a-task form can mount it unchanged when that surface arrives;
+nothing but the retarget dialog uses it today.
+
+- **The ordering is assembled in the browser because the endpoint cannot be
+  asked for it, and the naive way round is worse than no ordering at all.** `GET
+  /api/journals` answers `ORDER BY event_date_range_start DESC` and takes no
+  `sort` parameter, so within any window the *nearest* journals sort **last** —
+  and a first page of 100 is the hundred furthest away, dropping exactly the
+  ones a picker exists for. **Bounding the window does not fix that**: it caps
+  how far the far end reaches while the end that gets cut is still the near one,
+  and an ordinary calendar-synced user fills ninety days with more than a
+  hundred journals. `fetchNearestFutureJournals` therefore reads `page_count`
+  off the response and fetches the **last** page — one extra round trip, only
+  for a listing that overflows one — taking the page before it as well when the
+  last page is short, or a total just past a page boundary would offer two
+  journals where a hundred exist. The window is still bounded, but for a
+  different reason: ninety days is what an unsearched picker should *offer*, and
+  a search drops the far bound because one that could not reach past ninety days
+  would be worse than no search. **A `sort` parameter on the journal list would
+  retire all of this**, and is the change worth making if this grows again.
+- **The far bound is asked for a day wide.** `end_date` is a bare date and the
+  backend reads a bare date as the end of that day in **UTC**, so for a user
+  behind UTC the later hours of their own day-90 fall past the cutoff and would
+  be dropped from a window advertised as ninety days. The largest offset in use
+  is UTC-12, so one day covers every zone, and overshooting the far edge costs
+  nothing — nothing downstream trims by it.
+- **`start_date` is today, not tomorrow.** It drives
+  `event_date_range_end >= :start_date`, so it is generous by construction — a
+  journal already under way still matches — and asking for tomorrow would risk
+  dropping a journal starting at local midnight in a zone ahead of UTC, whose
+  stored instant still reads as today. The strictly-after rule —
+  `option.date > today`, mirroring `is_future_dated` — is applied client-side
+  where the zone is known.
+- **The zone is the user's *configured* one**, read through `useUserSettings`,
+  with the localStorage value the settings UI caches standing in while that read
+  is in flight. The two can still disagree with the backend, which is why the
+  field-level rejection above is the authority and this is only the convenience
+  that keeps a doomed choice off the screen.
+- **Two kinds of journal are shown and cannot be chosen**, both for reasons the
+  server will not supply, and both stated by one `refusalFor` table so the rule
+  is in one place. A **cancelled** journal satisfies the write rule — only the
+  date is checked — yet a task made due in one is lapsed the instant it is read
+  back (`DUE_JOURNAL_CANCELLED`): a resurrection that resurrects nothing. The
+  journal the task is **already due in** is worse: `retarget_due_journal` treats
+  naming it as a *no-op*, validating nothing, writing nothing and asking for no
+  reopen acknowledgement — so a **done** task retargeted onto its own due
+  journal answers 200, stays done, and would be reported as moved with the
+  confirmation never shown. Hiding either would send the user hunting for a
+  journal they can see on every other surface, so both are rendered with a
+  marker, `aria-disabled`, and one line saying why.
+- **The search is by title, not by date, and the wording says so.** The
+  specification asks for "search across future journals by title and date", but
+  the listing endpoint's filter is
+  `(j.title ILIKE :search OR j.content ILIKE :search)` — it does not touch
+  either event-date column, so a date query cannot match. Matching dates against
+  the *loaded* window client-side was considered and rejected: it would leave
+  one control searching everything by title and only ninety days by date, which
+  fails silently at exactly the range a date search is for. Advertising only
+  what works is the honest half; extending the endpoint is a follow-up beside
+  the `sort` parameter it would sit next to.
+- **A failed read offers nothing, rather than the last list that worked.**
+  `keepPreviousData` holds the previous key's `data` across a search, so a
+  failed refetch arrives with `data` populated *and* `isError` set. Without
+  clearing the options the picker would say the journals could not be loaded
+  while still offering a usable list from a search the user had moved on from,
+  with `aria-expanded` claiming a listbox that contradicts the message beside
+  it.
+- **`JournalSearchCombobox` was not extended.** It searches *all* journals,
+  shows nothing until typed into, and has no date filter, and the merge dialog
+  and the parent-journal field depend on all three. Four new branches under two
+  existing consumers is a worse trade than one narrow component.
+- **The previous list stays on screen while a search loads** — every debounced
+  keystroke is a new query key, and without `keepPreviousData` the options are
+  replaced by a loading line on each letter, which is the one thing a
+  search-as-you-type control must not do.
+- The list is **inline rather than a popover**, and populated before the user
+  types. The common case is a journal already planned for next week, and a
+  combobox revealing nothing until searched makes that the hardest case. Being
+  inline also leaves `Escape` to the dialog, where a keyboard user expects it.
+- Accessibility: a WAI-ARIA combobox — `role="combobox"` with `aria-expanded`,
+  `aria-controls` and `aria-activedescendant`, over a `role="listbox"` whose
+  options carry `aria-selected` and, when refused, `aria-disabled`. Arrow keys
+  move the active option (landing on a refused one so it is announced, while
+  `Enter` declines to take it), the result count is announced through a polite
+  live region, and the chosen option carries a check glyph as well as a
+  background so the choice is not made by colour alone (WCAG 1.4.1).
+  **`aria-expanded` follows whether the listbox actually holds anything**: it is
+  hidden while empty, loading or failed, and a combobox claiming to be expanded
+  would be pointing assistive technology at an element that is not displayed.
+- The filter, the ordering and the cancelled flag live in the pure
+  `lib/future-journals.ts`, not in the component, so the boundary cases — a
+  journal dated *today*, a listing arriving newest-first, an `invited` event
+  that is not a cancellation — are asserted without rendering anything.
+- **Known duplication, recorded rather than fixed here.** "Is this a cancelled
+  event journal?" is now read in three places — `lib/future-journals.ts`,
+  `components/journals/JournalListItem.tsx` and `lib/calendarEventHelpers.ts` —
+  each over a different input type (`JournalResource`, and `DisplayJournal`
+  twice). Unifying them means changing signatures across files this phase has no
+  other business in, so it is named here as a follow-up rather than done under
+  cover of an unrelated change.
+
 #### Journal and contact writes invalidate `taskKeys.all`
 
 A task's read shapes **embed** the entities they reference rather than pointing
