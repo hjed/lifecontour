@@ -115,7 +115,30 @@ This is heavier than the `test-backend` profile used by backend integration test
 ## Stopping Docker Services
 
 ```bash
-# From the project root
+# From the project root — tears down every profile for this worktree
+python3 scripts/teardown_workspace.py
+```
+
+`teardown_workspace.py` resolves this worktree's `pms_test_<N>` project itself,
+runs `docker compose down --volumes --remove-orphans` across all profiles, then
+sweeps any container, volume or network still labelled with that project. It
+never touches the shared `personal-management` network or another worktree's
+containers. Add `--keep-volumes` to preserve data between runs, or `--dry-run`
+to see what it would remove.
+
+Use it on **worktree cleanup** too — it takes the worktree path as an argument
+and works after that directory has been deleted:
+
+```bash
+python3 /path/to/any/checkout/scripts/teardown_workspace.py /path/to/removed/worktree
+
+# or sweep every workspace project whose worktree no longer exists
+python3 scripts/teardown_workspace.py --prune-stale
+```
+
+The equivalent raw command, if you need it:
+
+```bash
 eval "$(python3 scripts/workspace_env.py export)"
 docker compose --profile test --env-file .env.test down -v
 ```
