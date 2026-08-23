@@ -121,6 +121,14 @@ A failed precondition is `412 Precondition Failed` with code
 `PRECONDITION_FAILED` and a `meta.current_etag` to retry with, published in the
 OpenAPI schema as `PreconditionFailedErrorResponse`. Nothing is written.
 
+`ETag` is **not** a CORS-safelisted response header, so the CORS middleware
+exposes it explicitly (`expose_headers=["ETag"]` in `backend/app/main.py`).
+Without that, browser JavaScript at an allowed origin could not read the tag and
+so could not send it back in `If-Match`. The `If-Match` *request* header needs
+no entry of its own — `allow_headers=["*"]` already covers it. The deployed
+frontend reaches the API through the same-origin Next.js `/api` proxy and is
+unaffected either way; this is for the origins that call the API directly.
+
 `If-None-Match` / `304 Not Modified` on reads is deliberately **not** supported:
 this is conflict detection, not caching.
 

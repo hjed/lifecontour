@@ -331,6 +331,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         allow_headers=["*"],
+        # ``ETag`` is not one of the CORS-safelisted response headers, so
+        # browser JavaScript at an allowed origin cannot read it unless it is
+        # exposed explicitly — and a client that cannot read the tag cannot
+        # send it back in ``If-Match``. Without this the conditional-write flow
+        # is advertised but unusable from any origin that is not behind the
+        # same-origin Next.js ``/api`` proxy. The ``If-Match`` request header
+        # needs no entry of its own: ``allow_headers=["*"]`` already covers it.
+        expose_headers=["ETag"],
     )
 
     register_error_handlers(app)

@@ -78,6 +78,28 @@ class TestJournalConditionalWrites:
         assert response.status_code == 200
         assert response.headers["ETag"].startswith('"')
 
+    async def test_the_etag_is_readable_from_an_allowed_origin(
+        self, integration_api_client
+    ):
+        """``ETag`` is not CORS-safelisted, so it must be exposed explicitly.
+
+        A browser client at an allowed origin that cannot *read* the tag cannot
+        send it back in ``If-Match`` either, which would leave the whole
+        conditional-write flow advertised but unusable off-origin.
+        """
+        created = await integration_api_client.post(
+            "/api/journals", json=journal_payload()
+        )
+        journal_id = created.json()["data"]["id"]
+
+        response = await integration_api_client.get(
+            f"/api/journals/{journal_id}",
+            headers={"Origin": "https://app.example.com"},
+        )
+
+        exposed = response.headers.get("access-control-expose-headers", "")
+        assert "etag" in exposed.lower()
+
     async def test_update_echoes_the_new_etag(self, integration_api_client):
         """A writer can chain edits without re-reading the resource."""
         created = await integration_api_client.post(
