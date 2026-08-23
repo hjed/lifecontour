@@ -142,6 +142,14 @@ services:
       - SECRETS_SYSTEM=${OAUTH_SYSTEM_SECRET:-this-is-a-dev-secret-change-in-production}
       - OIDC_SUBJECT_IDENTIFIERS_SUPPORTED_TYPES=public,pairwise
       - OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT=${OAUTH_PAIRWISE_SALT:-some-random-salt}
+      # Hydra derives every advertised endpoint from URLS_SELF_ISSUER, which must
+      # stay browser-facing (localhost) because the user's browser is redirected
+      # there. The backend, however, reaches Hydra over the compose network, so
+      # the two endpoints only IT consumes are advertised at the internal address.
+      # Without this the backend would discover a token/JWKS URL on localhost,
+      # which inside its own container is itself.
+      - WEBFINGER_OIDC_DISCOVERY_TOKEN_URL=${OAUTH_TOKEN_URL:-http://${CONTAINER_PREFIX:-pms}-oauth:4444/oauth2/token}
+      - WEBFINGER_OIDC_DISCOVERY_JWKS_URL=${OAUTH_JWKS_URL:-http://${CONTAINER_PREFIX:-pms}-oauth:4444/.well-known/jwks.json}
       - LOG_LEVEL=${OAUTH_LOG_LEVEL:-debug}
       - SERVE_COOKIES_SAME_SITE_MODE=Lax
       - SERVE_COOKIES_SAME_SITE_LEGACY_WORKAROUND=true
@@ -206,6 +214,11 @@ services:
       - CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-dev-client-secret}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      # The MCP OAuth proxy has its own callback under the mount path, so its
+      # redirect URI has to be registered too or the MCP flow is rejected by
+      # Hydra before it starts. Defaults mirror the backend's own settings.
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-http://localhost:8000}
+      - MCP_MOUNT_PATH=${MCP_MOUNT_PATH:-/mcp-server}
       - PUBLIC_PORT=${OAUTH_PUBLIC_PORT:-4444}
       - ADMIN_PORT_EXTERNAL=${OAUTH_ADMIN_PORT:-4445}
     entrypoint: ["/bin/sh"]
@@ -248,6 +261,11 @@ services:
       OAUTH_AUTHORIZATION_URL: ${OAUTH_AUTHORIZATION_URL:-http://localhost:4444/oauth2/auth}
       OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-http://${CONTAINER_PREFIX:-pms}-oauth:4444/oauth2/token}
       OAUTH_USERINFO_URL: ${OAUTH_USERINFO_URL:-http://${CONTAINER_PREFIX:-pms}-oauth:4444/userinfo}
+      # OIDC discovery. MCP auth verifies the upstream id_token against the IdP's
+      # JWKS, so it needs the issuer (the `iss` tokens actually carry, which is
+      # the browser-facing URL) and an address it can fetch the metadata from.
+      OAUTH_ISSUER: ${OAUTH_ISSUER:-http://localhost:4444}
+      OAUTH_DISCOVERY_URL: ${OAUTH_DISCOVERY_URL:-http://${CONTAINER_PREFIX:-pms}-oauth:4444/.well-known/openid-configuration}
       # Dev (Hydra) requests offline_access so a refresh token is issued.
       # Do NOT set this for Kanidm prod (offline_access is unsupported there).
       OAUTH_SCOPES: ${OAUTH_SCOPES:-openid profile email offline_access}

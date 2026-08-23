@@ -1,4 +1,8 @@
-"""Unit tests for bearer-token verifier construction via OIDC discovery."""
+"""Unit tests for bearer-token verifier construction via OIDC discovery.
+
+The discovery rules themselves (URL derivation, algorithm selection, issuer
+agreement) are unit-tested in ``test_oidc_discovery.py``; these tests cover
+how the REST verifier is wired from them."""
 
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
@@ -6,7 +10,7 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 
-from app.infrastructure.auth.bearer_token import create_jwt_verifier, discovery_url
+from app.infrastructure.auth.bearer_token import create_jwt_verifier
 from app.infrastructure.config import Settings
 
 
@@ -14,24 +18,6 @@ def _settings(**overrides: object) -> Settings:
     base: dict[str, object] = {"oauth_issuer": "", "oauth_discovery_url": ""}
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
-
-
-class TestDiscoveryUrl:
-    def test_empty_when_no_issuer(self) -> None:
-        assert discovery_url(_settings()) == ""
-
-    def test_derived_from_issuer(self) -> None:
-        url = discovery_url(_settings(oauth_issuer="https://idp.example.com/"))
-        assert url == "https://idp.example.com/.well-known/openid-configuration"
-
-    def test_explicit_override_wins(self) -> None:
-        url = discovery_url(
-            _settings(
-                oauth_issuer="https://idp.example.com",
-                oauth_discovery_url="https://idp.example.com/custom/.well-known",
-            )
-        )
-        assert url == "https://idp.example.com/custom/.well-known"
 
 
 @asynccontextmanager

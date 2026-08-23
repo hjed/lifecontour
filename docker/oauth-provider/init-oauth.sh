@@ -12,6 +12,10 @@ CLIENT_ID=${CLIENT_ID:-dev-client-id}
 CLIENT_SECRET=${CLIENT_SECRET:-dev-client-secret}
 ENVIRONMENT=${ENVIRONMENT:-development}
 FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+# FastMCP's OAuth proxy runs its own callback under the MCP mount path, so the
+# MCP flow needs its redirect URI registered alongside the web app's.
+BACKEND_URL=${WEBHOOK_BASE_URL:-http://localhost:8000}
+MCP_MOUNT_PATH=${MCP_MOUNT_PATH:-/mcp-server}
 PUBLIC_PORT=${PUBLIC_PORT:-4444}
 ADMIN_PORT_EXTERNAL=${ADMIN_PORT_EXTERNAL:-4445}
 
@@ -136,7 +140,7 @@ CLIENT_CONFIG=$(cat <<EOF
     "client_secret": "${CLIENT_SECRET}",
     "grant_types": ["authorization_code", "refresh_token"],
     "response_types": ["code"],
-    "redirect_uris": ["${FRONTEND_URL}/auth/callback"],
+    "redirect_uris": ["${FRONTEND_URL}/auth/callback", "${BACKEND_URL}${MCP_MOUNT_PATH}/auth/callback"],
     "post_logout_redirect_uris": ["${FRONTEND_URL}/"],
     "scope": "openid profile email offline_access",
     "audience": [],

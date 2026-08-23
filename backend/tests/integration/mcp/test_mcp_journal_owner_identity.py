@@ -1,12 +1,11 @@
 """A journal created over MCP must belong to the person who authenticated.
 
-Under the generic-OAuth proxy the verified ``AccessToken`` comes from
-``DebugTokenVerifier``: ``claims={"token": <raw upstream token>}`` and the
-verifier's hard-coded ``client_id`` default. With no identity claim of its own,
-the acting user fell through to that ``client_id``, so every MCP write was
-attributed to a phantom owner — invisible to the signed-in user, whose
-owner-scoped REST reads then answered 404 (this ticket's symptom, on the
-activity feed).
+Under the generic-OAuth proxy the acting user comes from the verified upstream
+``id_token``: its ``sub`` names the person who logged in. The failure this
+guards against is the token arriving with no identity at all, where the acting
+user fell through to the OAuth ``client_id`` — so every MCP write landed on a
+phantom owner, invisible to the signed-in user, whose owner-scoped REST reads
+then answered 404 (the original symptom, on the activity feed).
 
 These tests drive the real token path rather than the DI fallback the other MCP
 integration tests use, because the DI fallback resolves the same ``SessionUser``
@@ -28,30 +27,32 @@ from tests.integration.mcp.http_helpers import (
     mcp_headers,
 )
 
-# The verifier's default client id. Never a user identity — pinned here so the
-# regression is visible if the fallback is ever reintroduced.
-DEBUG_CLIENT_ID = "debug-client"
+# The OAuth client the request arrived through. It names the application, never
+# the person — pinned here so the regression is visible if the fallback to it is
+# ever reintroduced.
+OAUTH_CLIENT_ID = "generic-id"
 
 
 @pytest.fixture
 def oauth_authenticated_mcp(test_user: Any) -> Callable[..., Any]:
     """Present the MCP server an OAuth token shaped like the prod one.
 
-    Identity lives only in ``upstream_claims`` — the flat claims carry the raw
-    upstream token, exactly as ``DebugTokenVerifier`` returns it.
+    The claims are those of a verified upstream ``id_token``; ``sub=None``
+    models a token that carries no identity, which must not authenticate.
     """
 
     @asynccontextmanager
     async def _acting_as(sub: str | None = None) -> AsyncGenerator[None]:
         token = MagicMock()
-        token.client_id = DEBUG_CLIENT_ID
-        token.claims = {"token": "opaque-upstream-token"}
+        token.client_id = OAUTH_CLIENT_ID
+        claims: dict[str, Any] = {"aud": OAUTH_CLIENT_ID}
         if sub is not None:
-            token.claims["upstream_claims"] = {
+            claims |= {
                 "sub": sub,
                 "email": test_user.email,
                 "name": test_user.name,
             }
+        token.claims = claims
         with patch(
             "fastmcp.server.dependencies.get_access_token",
             return_value=token,
@@ -119,7 +120,7 @@ class TestMCPWritesBelongToTheAuthenticatedUser:
         assert "error" not in payload, f"Unexpected error: {payload}"
         owner = await _owner_of(async_connection, int(payload["id"]))
         assert owner == test_user.id
-        assert owner != DEBUG_CLIENT_ID
+        assert owner != OAUTH_CLIENT_ID
 
     async def test_created_journal_is_readable_over_the_rest_api(
         self,
@@ -165,7 +166,11 @@ class TestMCPWritesBelongToTheAuthenticatedUser:
         )
 
 
-@pytest.mark.parametrize("synthetic_owner", [DEBUG_CLIENT_ID, "dev-user"])
+# "debug-client" was FastMCP's DebugTokenVerifier default and is what the
+# synthetic-owner migration reassigns; "dev-user" is the auth-disabled fallback.
+@pytest.mark.parametrize(
+    "synthetic_owner", ["debug-client", "dev-user", OAUTH_CLIENT_ID]
+)
 async def test_synthetic_owners_are_never_the_acting_user(
     authenticated_lifespan_client: Any,
     async_connection: AsyncConnection,
@@ -173,7 +178,7 @@ async def test_synthetic_owners_are_never_the_acting_user(
     test_user: Any,
     synthetic_owner: str,
 ) -> None:
-    """Neither hard-coded constant may end up owning an MCP-created journal."""
+    """No stand-in identity may end up owning an MCP-created journal."""
     async with oauth_authenticated_mcp(test_user.id):
         async with authenticated_lifespan_client() as client:
             session_id = await initialize_mcp_session(client)
