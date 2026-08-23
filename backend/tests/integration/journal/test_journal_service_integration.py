@@ -179,6 +179,44 @@ class TestJournalServiceIntegration:
         assert stored.scalar_one() is None
 
     @pytest.mark.asyncio
+    async def test_update_journal_checks_the_persisted_owner_not_the_incoming_one(
+        self, journal_service, journal_repo, clean_database: AsyncConnection
+    ):
+        """The owner the parent is checked against comes off the stored row.
+
+        The entity handed in claims to be the other user's and points at that
+        user's journal — internally consistent, and accepted by a lookup that
+        trusts the object rather than the database. The stored row is what says
+        who owns it, so the parent is resolved as its real owner and refused.
+        """
+        # Arrange
+        theirs = await journal_repo.save(
+            create_test_journal(title="Somebody Else's Trip", user_id=OTHER_USER_ID)
+        )
+        mine = await journal_service.create_journal(
+            create_test_journal(title="My Journal"), clean_database
+        )
+
+        # Same id, but claiming their ownership and their journal as parent.
+        impostor = create_test_journal(
+            journal_id=mine.id,
+            title="My Journal",
+            parent_id=theirs.id,
+            user_id=OTHER_USER_ID,
+        )
+
+        # Act & Assert
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.update_journal(impostor, clean_database)
+
+        # Neither the parent nor the ownership moved
+        stored = await clean_database.execute(
+            text("SELECT parent_id, user_id FROM journals WHERE id = :id"),
+            {"id": mine.id},
+        )
+        assert stored.one() == (None, "user123")
+
+    @pytest.mark.asyncio
     async def test_create_journal_max_depth_validation(
         self, journal_service, clean_database: AsyncConnection
     ):

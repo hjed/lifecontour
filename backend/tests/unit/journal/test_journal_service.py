@@ -287,11 +287,7 @@ class TestJournalServiceCRUD:
     async def test_update_journal_rejects_another_users_parent(
         self, journal_service, mock_journal_repo, mock_transaction
     ):
-        """Re-parenting onto somebody else's journal is refused (issue #1312).
-
-        The owner checked against is the *persisted* one, so an incoming entity
-        carrying a different ``user_id`` cannot widen the lookup.
-        """
+        """Re-parenting onto somebody else's journal is refused (issue #1312)."""
         # Arrange
         existing = create_test_journal(journal_id=1, title="My Journal")
         foreign_parent = create_test_journal(
@@ -311,6 +307,42 @@ class TestJournalServiceCRUD:
         with pytest.raises(JournalNotFoundError):
             await journal_service.update_journal(journal, mock_transaction)
 
+        mock_journal_repo.save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_journal_checks_the_persisted_owner_not_the_incoming_one(
+        self, journal_service, mock_journal_repo, mock_transaction
+    ):
+        """The owner the parent is checked against comes off the stored row.
+
+        Here the incoming entity claims to be ``other-user``'s and points at
+        ``other-user``'s journal — internally consistent, and accepted if the
+        lookup trusts the object it was handed. It is the *persisted* row that
+        says who owns journal 1, so the parent is looked up as ``user123`` and
+        is not theirs to use.
+        """
+        # Arrange
+        existing = create_test_journal(journal_id=1, title="My Journal")
+        foreign_parent = create_test_journal(
+            journal_id=2, title="Somebody Else's Journal", user_id="other-user"
+        )
+        journal = create_test_journal(
+            journal_id=1,
+            title="My Journal",
+            parent_id=2,
+            user_id="other-user",
+        )
+
+        mock_journal_repo.find_by_id.return_value = existing
+        mock_journal_repo.find_by_id_for_user.side_effect = owner_scoped_lookup(
+            {1: existing, 2: foreign_parent}
+        )
+
+        # Act & Assert
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.update_journal(journal, mock_transaction)
+
+        mock_journal_repo.find_by_id_for_user.assert_called_once_with(2, "user123")
         mock_journal_repo.save.assert_not_called()
 
     @pytest.mark.asyncio
