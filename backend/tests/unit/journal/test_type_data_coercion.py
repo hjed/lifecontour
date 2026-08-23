@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
+from uuid import UUID
 
 import pytest
 from core_shared.models.journals.exceptions import JournalValidationError
@@ -52,10 +53,17 @@ class TestCoerceTypeDataOverride:
     def test_a_boolean_string_becomes_a_bool(self, raw, expected):
         assert coerce_type_data_override("is_all_day", raw, "boolean") is expected
 
-    def test_a_uuid_string_is_left_for_the_driver(self):
-        """asyncpg encodes a uuid from a string already — do not second-guess it."""
+    def test_a_uuid_string_becomes_a_uuid(self):
         raw = "440b9a8c-a4f5-4f2c-bba3-a60d7de2889c"
-        assert coerce_type_data_override("calendar_id", raw, "uuid") == raw
+        assert coerce_type_data_override("calendar_id", raw, "uuid") == UUID(raw)
+
+    def test_an_unparseable_uuid_is_a_validation_error(self):
+        with pytest.raises(JournalValidationError):
+            coerce_type_data_override("calendar_id", "not-a-calendar", "uuid")
+
+    def test_a_number_for_a_uuid_column_is_a_validation_error(self):
+        with pytest.raises(JournalValidationError):
+            coerce_type_data_override("calendar_id", 440, "uuid")
 
     def test_text_is_untouched(self):
         assert coerce_type_data_override("location", "Office", "text") == "Office"
@@ -133,3 +141,19 @@ class TestCoerceTypeDataOverride:
         assert coerce_type_data_override("documents", [{"url": "x"}], "jsonb") == [
             {"url": "x"}
         ]
+
+    def test_a_number_for_a_text_column_is_a_validation_error(self):
+        """asyncpg's text codec takes a string and nothing else.
+
+        `{"location": 123}` used to slip past unchecked and fail in the driver.
+        """
+        with pytest.raises(JournalValidationError) as exc_info:
+            coerce_type_data_override("location", 123, "character varying")
+
+        assert "location" in str(exc_info.value)
+
+    def test_a_string_still_serves_a_text_column(self):
+        assert (
+            coerce_type_data_override("location", "Office", "character varying")
+            == "Office"
+        )

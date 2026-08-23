@@ -91,10 +91,17 @@ function setTypeDataOverride(
 
 /**
  * The calendar-row half of an event's timing. The clock times are meaningless
- * without the zone they were recorded in, so the timezone belongs to the same
- * answer as the times themselves.
+ * without the zone they were recorded in, and `is_all_day` decides whether they
+ * exist at all — an all-day journal carries no clock times for the fold to pick
+ * up, so left on its own it would keep an event marked all-day while the other
+ * side's timed range wins. All three belong to the same answer as the times.
  */
-const EVENT_TIMING_FIELDS = new Set(['start_time', 'end_time', 'timezone']);
+const EVENT_TIMING_FIELDS = new Set([
+  'start_time',
+  'end_time',
+  'timezone',
+  'is_all_day',
+]);
 
 function isEventTimingField(typeKey: string, fieldKey: string): boolean {
   return typeKey.toLowerCase() === 'event' && EVENT_TIMING_FIELDS.has(fieldKey);

@@ -1194,3 +1194,82 @@ async def test_merge_endpoint_rejects_a_wrong_typed_time_override(
     )
 
     assert res.status_code == 400, res.text
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_turns_an_allday_target_timed_when_asked(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """Keeping a timed source's range must not leave the event marked all-day.
+
+    The merge panel folds ``is_all_day`` in with the range, so the two arrive
+    together; the merged row then takes the source's clock times rather than
+    having them cleared as an all-day event's times are.
+    """
+    from datetime import time
+
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+
+    all_day_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "All day target",
+                    "content": "All day content",
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T23:59:59Z",
+                    },
+                    "types": ["EVENT"],
+                    "type_data": {
+                        "EVENT": {"calendar_id": calendar_id, "is_all_day": True}
+                    },
+                },
+            }
+        },
+    )
+    assert all_day_res.status_code == 201, all_day_res.text
+    target_id = int(all_day_res.json()["data"]["id"])
+
+    source_id = await _create_event_journal(
+        authenticated_client, "Timed source", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {
+                        "event_date_range": {
+                            "start": "2024-01-01T08:00:00Z",
+                            "end": "2024-01-01T12:00:00Z",
+                        },
+                        "type_data": {"event": {"is_all_day": False}},
+                    },
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 200, res.text
+
+    row = (
+        await async_connection.execute(
+            text(
+                "SELECT is_all_day, start_time, end_time FROM journal_calendar_info"
+                " WHERE journal_id = :id"
+            ),
+            {"id": target_id},
+        )
+    ).fetchone()
+    assert row is not None
+    assert row.is_all_day is False
+    assert row.start_time == time(19, 30)
+    assert row.end_time == time(22, 0)

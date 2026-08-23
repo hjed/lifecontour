@@ -444,6 +444,52 @@ describe('MergeResolutionDialog', () => {
       );
     });
 
+    it('carries all-day-ness with the timing, even with no clock times to fold', async () => {
+      // An all-day journal has no clock times at all — the read schema omits
+      // them — so there is nothing for those fields to fold. Left on its own,
+      // `is_all_day` defaults to the target and the merge writes the source's
+      // timed range onto an event still marked all-day.
+      const user = userEvent.setup();
+      const allDayTarget = {
+        id: '1',
+        type: 'journals',
+        attributes: {
+          title: 'Same Title',
+          content: 'Same Content',
+          event_date_range: {
+            start: '2026-08-23T00:00:00Z',
+            end: '2026-08-23T23:59:59Z',
+          },
+          created_at: '',
+          updated_at: '',
+          is_archived: false,
+          journal_date: '',
+          type_data: { event: { calendar_id: CAL_ID, is_all_day: true } },
+        },
+        relationships: {},
+      } as unknown as JournalResource;
+
+      renderDialog(allDayTarget, sourceEvent());
+
+      expect(screen.queryByText('Event — Is All Day')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('radio-source-event_date_range'));
+      await user.click(
+        screen.getByRole('button', { name: /resolve and merge/i })
+      );
+
+      expect(mockOnResolve).toHaveBeenCalledWith(
+        {
+          event_date_range: {
+            start: '2026-08-23T19:30:00Z',
+            end: '2026-08-23T22:00:00Z',
+          },
+          type_data: { event: { is_all_day: false } },
+        },
+        'replace'
+      );
+    });
+
     it('still asks about a clock time that differs on its own', () => {
       const sameRange = {
         start: '2026-08-23T09:00:00Z',

@@ -17,11 +17,17 @@ from collections.abc import Callable
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Any, NamedTuple
+from uuid import UUID
 
 from core_shared.models.journals.exceptions import JournalValidationError
 
 _TRUE_STRINGS = frozenset({"true", "t", "yes", "y", "on", "1"})
 _FALSE_STRINGS = frozenset({"false", "f", "no", "n", "off", "0"})
+
+
+def _keep(raw: str) -> str:
+    """A text column takes the string as it stands — there is nothing to parse."""
+    return raw
 
 
 def _parse_bool(raw: str) -> bool:
@@ -41,9 +47,10 @@ class _ColumnRule(NamedTuple):
 
 
 # Postgres ``information_schema.columns.data_type`` → its rule. Types absent
-# here (text, uuid, jsonb, enum labels, arrays) are left alone entirely: they
-# take a string as-is, and narrowing them would risk rejecting payloads that
-# work today — a rule that guesses is worse than no rule.
+# here — ``jsonb``, arrays, user-defined types — are left alone entirely,
+# because a dict or a list is a legitimate value for those and a rule that
+# guesses would reject payloads that work today. Everything listed takes a
+# closed set of Python types, so anything else is the caller's error.
 # ``fromisoformat`` reads the ``Z`` suffix JSON producers emit as of 3.11, so no
 # hand-rolled offset juggling is needed here.
 _RULES: dict[str, _ColumnRule] = {
@@ -59,6 +66,10 @@ _RULES: dict[str, _ColumnRule] = {
     "real": _ColumnRule(float, (int, float)),
     "double precision": _ColumnRule(float, (int, float)),
     "boolean": _ColumnRule(_parse_bool, (bool,)),
+    "text": _ColumnRule(_keep, (str,)),
+    "character varying": _ColumnRule(_keep, (str,)),
+    "character": _ColumnRule(_keep, (str,)),
+    "uuid": _ColumnRule(UUID, (UUID,)),
 }
 
 
