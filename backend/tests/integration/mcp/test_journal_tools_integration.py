@@ -5,6 +5,7 @@ Tests the full MCP journal tools with real database integration
 using Dishka dependency injection patterns.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -2465,8 +2466,6 @@ class TestMergeMcpToolsMountedIntegration:
             task_id = int(task_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2539,8 +2538,6 @@ class TestMergeMcpToolsMountedIntegration:
             )
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2605,8 +2602,6 @@ class TestMergeMcpToolsMountedIntegration:
 
             # Merge via MCP
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2669,8 +2664,6 @@ class TestMergeMcpToolsMountedIntegration:
             source_id = int(source_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2717,8 +2710,6 @@ class TestMergeMcpToolsMountedIntegration:
             journal_id = int(target_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2763,8 +2754,6 @@ class TestMergeMcpToolsMountedIntegration:
             target_id = int(target_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,

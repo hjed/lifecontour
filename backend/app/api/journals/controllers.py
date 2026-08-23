@@ -2776,7 +2776,7 @@ async def merge_journal(
     # per-type repositories needed to label them; listing them here without
     # their types would report every adopted child as typeless. This carries
     # the count instead, as the list route does.
-    parent, _children, children_count = await _fetch_parent_and_children(
+    parent, _, children_count = await _fetch_parent_and_children(
         target_journal, user.id, journal_service
     )
 
