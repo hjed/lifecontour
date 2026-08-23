@@ -13,6 +13,7 @@ from core_shared.models.journals import (
     JournalValidationError,
 )
 from fastmcp import FastMCP
+from fastmcp.tools import tool
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -20,6 +21,12 @@ from app.core.journal.models.journal_series import JournalSeries
 from app.core.journal.services.journal_series_service import (
     JournalSeriesService,
     parse_series_id,
+)
+from app.mcp.shared.annotations import (
+    ADDITIVE_WRITE,
+    DESTRUCTIVE_WRITE,
+    IDEMPOTENT_WRITE,
+    READ_ONLY,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
@@ -43,6 +50,7 @@ def _series_to_dict(series: JournalSeries) -> dict[str, Any]:
     }
 
 
+@tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_series", "journal")
 async def create_series(
     name: str,
@@ -72,6 +80,7 @@ async def create_series(
     return json.dumps(_series_to_dict(created), indent=2)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_series", "journal")
 async def list_series(
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
@@ -88,6 +97,7 @@ async def list_series(
     return json.dumps({"series": [_series_to_dict(s) for s in all_series]}, indent=2)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_series", "journal")
 async def get_series(
     series_id: str,
@@ -127,6 +137,7 @@ async def get_series(
     return json.dumps(result, indent=2)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_series", "journal")
 async def update_series(
     series_id: str,
@@ -152,6 +163,7 @@ async def update_series(
     return json.dumps(_series_to_dict(updated), indent=2)
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("delete_series", "journal")
 async def delete_series(
     series_id: str,
@@ -172,6 +184,7 @@ async def delete_series(
     return json.dumps({"deleted": True, "series_id": series_id}, indent=2)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("add_journal_to_series", "journal")
 async def add_journal_to_series(
     series_id: str,
@@ -200,6 +213,7 @@ async def add_journal_to_series(
     )
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("remove_journal_from_series", "journal")
 async def remove_journal_from_series(
     series_id: str,

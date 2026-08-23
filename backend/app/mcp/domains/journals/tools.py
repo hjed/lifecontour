@@ -44,6 +44,7 @@ from core_shared.models.journals import (
     TravelData,
 )
 from fastmcp import FastMCP
+from fastmcp.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -221,6 +222,13 @@ from app.mcp.domains.journals.schemas import (
     TemplatePitchInput,
     UpcomingOutdoorActivityMCPEntry,
     build_dashboard_summary,
+)
+from app.mcp.shared.annotations import (
+    ADDITIVE_WRITE,
+    DESTRUCTIVE_WRITE,
+    IDEMPOTENT_WRITE,
+    READ_ONLY,
+    READ_ONLY_EXTERNAL,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
@@ -1740,6 +1748,7 @@ Args:
 # -- Type metadata for the discovery tool --
 # Keyed by JournalType enum name (uppercase), these describe the type_data
 # fields each type accepts.  Keep this in sync with the _update_*_data helpers.
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_journal_types", "journal")
 async def list_journal_types() -> str:
     """
@@ -1756,6 +1765,7 @@ async def list_journal_types() -> str:
     return json.dumps(describe_journal_types(), indent=2)
 
 
+@tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_journal_entry", "journal")
 async def create_journal_entry(
     request: JournalCreateRequest,
@@ -1907,6 +1917,7 @@ async def create_journal_entry(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_journal_entry", "journal")
 async def update_journal_entry(
     journal_id: Annotated[
@@ -2122,6 +2133,7 @@ async def _build_journal_response(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_journal", "journal")
 async def get_journal(
     journal_id: Annotated[
@@ -2165,6 +2177,7 @@ async def get_journal(
     )
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_journal_by_external_id", "journal")
 async def get_journal_by_external_id(
     source: Annotated[
@@ -2223,6 +2236,7 @@ async def get_journal_by_external_id(
     )
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_journal_hierarchy", "journal")
 async def get_journal_hierarchy(
     start_date: Annotated[
@@ -2395,6 +2409,7 @@ async def _zero_result_diagnostics(
     return SearchDiagnostics(**dataclasses.asdict(explained))
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("search_journals", "journal")
 async def search_journals(
     query: Annotated[
@@ -2601,6 +2616,7 @@ async def search_journals(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("search_activities", "journal")
 async def search_activities(
     query: Annotated[
@@ -2672,6 +2688,7 @@ async def search_activities(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_activity_stats", "journal")
 async def get_activity_stats(
     activity_type: Annotated[
@@ -2766,6 +2783,7 @@ async def get_activity_stats(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("analyze_activity_trends", "journal")
 async def analyze_activity_trends(
     interval: Annotated[
@@ -2828,6 +2846,7 @@ async def analyze_activity_trends(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_route_history", "journal")
 async def get_route_history(
     route_id: Annotated[str, Field(description="Route UUID")],
@@ -2921,6 +2940,7 @@ def _journal_history_entry_to_schema(
     )
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_journal_history", "journal")
 async def get_journal_history(
     journal_id: Annotated[
@@ -2977,6 +2997,7 @@ async def get_journal_history(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("delete_journal", "journal")
 async def delete_journal(
     journal_id: Annotated[
@@ -3071,6 +3092,7 @@ async def delete_journal(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_contact_journals", "journal")
 async def get_contact_journals(
     contact_id: Annotated[
@@ -3129,6 +3151,7 @@ async def get_contact_journals(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("link_journal_to_contact", "journal")
 async def link_journal_to_contact(
     journal_id: Annotated[
@@ -3250,6 +3273,7 @@ async def link_journal_to_contact(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_calendars", "journal")
 async def list_calendars(
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -3286,6 +3310,7 @@ async def list_calendars(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_calendar", "journal")
 async def create_calendar(
     name: Annotated[str, Field(description="Calendar name")],
@@ -3330,6 +3355,7 @@ async def create_calendar(
     )
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_calendar", "journal")
 async def update_calendar(
     calendar_id: Annotated[str, Field(description="Calendar UUID")],
@@ -3384,6 +3410,7 @@ async def update_calendar(
     )
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("delete_calendar", "journal")
 async def delete_calendar(
     calendar_id: Annotated[str, Field(description="Calendar UUID")],
@@ -3433,6 +3460,7 @@ async def delete_calendar(
     )
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("merge_journals", "journal")
 async def merge_journals(
     target_journal_id: Annotated[
@@ -3537,6 +3565,7 @@ async def merge_journals(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_merge_candidates", "journal")
 async def get_merge_candidates(
     journal_id: Annotated[
@@ -3656,6 +3685,7 @@ async def get_merge_candidates(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("browse_journals_by_date_window", "journal")
 async def browse_journals_by_date_window(
     anchor_date: Annotated[
@@ -3851,6 +3881,7 @@ async def browse_journals_by_date_window(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_review_items", "journal")
 async def list_review_items(
     limit: Annotated[
@@ -3957,6 +3988,7 @@ async def list_review_items(
     return json.dumps(response_data, indent=2)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("dismiss_review_item", "journal")
 async def dismiss_review_item(
     item_id: int,
@@ -3989,6 +4021,7 @@ async def dismiss_review_item(
     )
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_incomplete_outdoor_activities", "journal")
 async def list_incomplete_outdoor_activities(
     include_dismissed: Annotated[
@@ -4058,6 +4091,7 @@ async def _journal_owned_by_user(
     return journal is not None and journal.user_id == user_id
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("dismiss_incomplete_outdoor_activity", "journal")
 async def dismiss_incomplete_outdoor_activity(
     journal_id: Annotated[int, Field(description="Journal id to dismiss")],
@@ -4091,6 +4125,7 @@ async def dismiss_incomplete_outdoor_activity(
     )
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("undismiss_incomplete_outdoor_activity", "journal")
 async def undismiss_incomplete_outdoor_activity(
     journal_id: Annotated[int, Field(description="Journal id to un-dismiss")],
@@ -4127,6 +4162,7 @@ async def undismiss_incomplete_outdoor_activity(
     )
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_outdoor_dashboard", "journal")
 async def get_outdoor_dashboard(
     user_id: str = mcp_depends(get_current_user_id),
@@ -4219,6 +4255,10 @@ async def get_outdoor_dashboard(
     )
 
 
+# Read-only to the caller, though it may generate and persist. Asking for a
+# summary reads a summary; the caching write behind it is not part of the
+# world an agent calling this tool reasons about.
+@tool(annotations=READ_ONLY_EXTERNAL)
 @mcp_unified_error_handler("get_daily_summary", "journal")
 async def get_daily_summary(
     summary_date: str,
@@ -4266,6 +4306,7 @@ async def get_daily_summary(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_template", "journal")
 async def create_template(
     name: Annotated[str, Field(description="Template name")],
@@ -4345,6 +4386,7 @@ async def create_template(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_template", "journal")
 async def get_template(
     template_id: Annotated[str, Field(description="Template UUID")],
@@ -4372,6 +4414,7 @@ async def get_template(
         )
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_journal_template", "journal")
 async def get_journal_template(
     journal_id: Annotated[int, Field(description="Journal id")],
@@ -4423,6 +4466,7 @@ async def get_journal_template(
     )
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("search_templates", "journal")
 async def search_templates(
     template_type: Annotated[
@@ -4449,6 +4493,7 @@ async def search_templates(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_template", "journal")
 async def update_template(
     template_id: Annotated[str, Field(description="Template UUID")],
@@ -4552,6 +4597,7 @@ async def update_template(
         )
 
 
+@tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_gear_item", "journal")
 async def create_gear_item(
     name: Annotated[str, Field(description="Gear item name")],
@@ -4598,6 +4644,7 @@ async def create_gear_item(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_gear_items", "journal")
 async def list_gear_items(
     user_id: str = mcp_depends(get_current_user_id),
@@ -4614,6 +4661,7 @@ async def list_gear_items(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_gear_item", "journal")
 async def get_gear_item(
     gear_item_id: Annotated[str, Field(description="Gear item UUID")],
@@ -4643,6 +4691,7 @@ async def get_gear_item(
         )
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_gear_item", "journal")
 async def update_gear_item(
     gear_item_id: Annotated[str, Field(description="Gear item UUID")],
@@ -4731,6 +4780,7 @@ async def update_gear_item(
     return MCPResponseBuilder.success_response(response)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_journal_tags", "tag")
 async def list_journal_tags(
     limit: Annotated[
@@ -4784,6 +4834,7 @@ async def list_journal_tags(
     return MCPResponseBuilder.success_response(response_data)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_journal_tag", "tag")
 async def update_journal_tag(
     tag_id: Annotated[str, Field(description="UUID of the journal tag to update")],
@@ -4867,6 +4918,7 @@ async def update_journal_tag(
     return MCPResponseBuilder.success_response(response_data)
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("delete_journal_tag", "tag")
 async def delete_journal_tag(
     tag_id: Annotated[str, Field(description="UUID of the journal tag to delete")],
@@ -4914,6 +4966,7 @@ async def delete_journal_tag(
     )
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("merge_journal_tag", "tag")
 async def merge_journal_tag(
     source_tag_id: Annotated[

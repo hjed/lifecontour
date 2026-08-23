@@ -57,6 +57,60 @@ This document provides comprehensive API design patterns for both REST and MCP i
 - Return JSON strings for structured data
 - Include comprehensive error handling with try/catch blocks
 - Provide AI-friendly responses with context and summaries
+- Declare behaviour annotations — see below; a tool without them fails CI
+
+### Tool Annotations (required)
+
+Every tool must tell a client how it behaves, via the four MCP hints
+`readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`. They
+are what a client uses to decide whether a call needs confirmation, whether a
+retry is safe, and whether it reaches outside this system. All four are
+optional to FastMCP and default to *unset*, which a client has to read as
+"assume the worst" — so declaring them is not optional here.
+
+Rather than repeat four booleans per tool, cite one of the presets in
+`app/mcp/shared/annotations.py`:
+
+| Preset | readOnly | destructive | idempotent | openWorld | Use for |
+|---|---|---|---|---|---|
+| `READ_ONLY` | ✅ | ❌ | ✅ | ❌ | reads of our own data |
+| `READ_ONLY_EXTERNAL` | ✅ | ❌ | ✅ | ✅ | reads answered by a third party |
+| `ADDITIVE_WRITE` | ❌ | ❌ | ❌ | ❌ | creates and toggles — a second call adds again |
+| `IDEMPOTENT_WRITE` | ❌ | ❌ | ✅ | ❌ | updates and links — a second call changes nothing |
+| `DESTRUCTIVE_WRITE` | ❌ | ✅ | ✅ | ❌ | deletes, merges, unlinks |
+| `EXTERNAL_ADDITIVE_WRITE` | ❌ | ❌ | ❌ | ✅ | writes that land in a third-party system |
+
+Pick by what the tool *does*, not what it is called: `toggle_contact_favourite`
+is an `ADDITIVE_WRITE`, despite the innocuous name, because a second call undoes
+the first. If nothing fits, build a fresh set with `mcp_tool_annotations()`,
+whose four arguments are all required.
+
+**AI generation counts as reading.** A tool that produces an AI summary —
+`get_daily_summary` today — calls a model and caches what comes back, but is
+annotated `READ_ONLY_EXTERNAL`, not as a write. The hints describe the world the
+*caller* reasons about, and the cache is not part of it: asking for a summary
+gets a summary, and asking again gets the same one. Annotating it as a write
+would make a client confirm before what the user experiences as a read. It stays
+open-world, because a model is still involved.
+
+Apply the preset with whichever registration pattern the domain uses:
+
+```python
+# Module-level tool registered via mcp.add_tool() — journals, series, tasks
+@tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("update_task_text", "task")
+async def update_task_text(...) -> str: ...
+
+# Closure registered inside register_*_tools() — contacts, integrations
+@mcp.tool(annotations=DESTRUCTIVE_WRITE)
+@mcp_unified_error_handler("delete_contact_tag", "tag")
+async def delete_contact_tag(...) -> str: ...
+```
+
+`tests/unit/mcp/test_tool_annotations.py` enforces this against the assembled
+server, so it covers both patterns. Adding a tool that removes data also means
+adding it to that test's `DESTRUCTIVE_TOOLS` list — deliberately manual, so a
+destructive tool cannot be introduced without someone saying so.
 
 ### Domain-Based Organization
 

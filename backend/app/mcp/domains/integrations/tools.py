@@ -22,6 +22,12 @@ from app.core.integrations.strava.athlete_mapping_service import (
 )
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.infrastructure.unit_of_work import unit_of_work
+from app.mcp.shared.annotations import (
+    EXTERNAL_ADDITIVE_WRITE,
+    IDEMPOTENT_WRITE,
+    READ_ONLY,
+    READ_ONLY_EXTERNAL,
+)
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -45,7 +51,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         mcp: The FastMCP server instance to register tools with
     """
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY_EXTERNAL)
     @mcp_unified_error_handler("list_integrations", "integration")
     async def list_integrations(
         user_id: str = mcp_depends(get_current_user_id),
@@ -129,7 +135,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         return ". ".join(parts) + "."
 
-    @mcp.tool
+    @mcp.tool(annotations=EXTERNAL_ADDITIVE_WRITE)
     @mcp_unified_error_handler("trigger_sync", "integration")
     async def trigger_sync(
         integration_id: str,
@@ -218,7 +224,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         return json.dumps(result, indent=2)
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("get_strava_athlete_mappings", "integration")
     async def get_strava_athlete_mappings(
         contact_id: int | None = None,
@@ -275,7 +281,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         return json.dumps(result, indent=2)
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("list_immich_conflicts", "integration")
     async def list_immich_conflicts(
         user_id: str = mcp_depends(get_current_user_id),
@@ -335,7 +341,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         return json.dumps(result, indent=2)
 
-    @mcp.tool
+    @mcp.tool(annotations=IDEMPOTENT_WRITE)
     @mcp_unified_error_handler("resolve_immich_conflict", "integration")
     async def resolve_immich_conflict(
         conflict_id: int,
@@ -463,7 +469,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         return json.dumps(result, indent=2)
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY_EXTERNAL)
     @mcp_unified_error_handler("search_immich_photos_for_journal", "integration")
     async def search_immich_photos_for_journal(
         journal_id: int,
@@ -509,7 +515,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         }
         return json.dumps(result, indent=2)
 
-    @mcp.tool
+    @mcp.tool(annotations=EXTERNAL_ADDITIVE_WRITE)
     @mcp_unified_error_handler("create_immich_album_for_journal", "integration")
     async def create_immich_album_for_journal(
         journal_id: int,

@@ -35,12 +35,19 @@ from core_shared.models.tasks import (
     UpcomingTasks,
 )
 from fastmcp import FastMCP
+from fastmcp.tools import tool
 from pydantic import Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
+from app.mcp.shared.annotations import (
+    ADDITIVE_WRITE,
+    DESTRUCTIVE_WRITE,
+    IDEMPOTENT_WRITE,
+    READ_ONLY,
+)
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -117,6 +124,7 @@ def _task_to_dict(task: Task, intermediate_journal_ids: list[int]) -> dict[str, 
     }
 
 
+@tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_task", "task")
 async def create_task(
     creating_journal_id: Annotated[
@@ -196,6 +204,7 @@ async def create_task(
     return json.dumps(_task_to_dict(created, trail), indent=2)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("set_task_status", "task")
 async def set_task_status(
     task_id: Annotated[
@@ -244,6 +253,7 @@ async def set_task_status(
     return json.dumps(_task_to_dict(updated, trail), indent=2)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("link_task_to_contact", "task")
 async def link_task_to_contact(
     task_id: Annotated[
@@ -294,6 +304,7 @@ async def link_task_to_contact(
     )
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("unlink_task_from_contact", "task")
 async def unlink_task_from_contact(
     task_id: Annotated[
@@ -339,6 +350,7 @@ async def unlink_task_from_contact(
     )
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("retarget_task", "task")
 async def retarget_task(
     task_id: Annotated[
@@ -412,6 +424,7 @@ async def retarget_task(
     return json.dumps(_task_to_dict(retargeted, trail), indent=2)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_task_text", "task")
 async def update_task_text(
     task_id: Annotated[
@@ -458,6 +471,7 @@ async def update_task_text(
     return json.dumps(_task_to_dict(updated, trail), indent=2)
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("delete_task", "task")
 async def delete_task(
     task_id: Annotated[
@@ -502,6 +516,7 @@ async def delete_task(
     return json.dumps({"deleted": True, "task_id": task_id}, indent=2)
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("attach_intermediate_journal_to_task", "task")
 async def attach_intermediate_journal_to_task(
     task_id: Annotated[
@@ -563,6 +578,7 @@ async def attach_intermediate_journal_to_task(
     )
 
 
+@tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("detach_intermediate_journal_from_task", "task")
 async def detach_intermediate_journal_from_task(
     task_id: Annotated[
@@ -700,6 +716,7 @@ def _groups_to_dict(groups: JournalTaskGroups) -> dict[str, Any]:
     }
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_task", "task")
 async def get_task(
     task_id: Annotated[
@@ -743,6 +760,7 @@ async def get_task(
     return json.dumps(_read_model_to_dict(model), indent=2)
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_journal_tasks", "task")
 async def list_journal_tasks(
     journal_id: Annotated[
@@ -820,6 +838,7 @@ def _upcoming_to_dict(upcoming: UpcomingTasks) -> dict[str, Any]:
     }
 
 
+@tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_upcoming_tasks", "task")
 async def list_upcoming_tasks(
     days_ahead: Annotated[
