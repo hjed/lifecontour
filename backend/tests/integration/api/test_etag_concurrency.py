@@ -134,6 +134,33 @@ class TestJournalConditionalWrites:
         assert response.status_code == 200
         assert response.json()["data"]["attributes"]["title"] == "Updated title"
 
+    async def test_a_tag_on_a_later_header_line_still_matches(
+        self, integration_api_client
+    ):
+        """``If-Match`` is a list field, so HTTP lets it span repeated lines.
+
+        Reading only the first line would 412 a request whose matching tag
+        arrived on a later one — the opposite of any-tag-matches.
+        """
+        created = await integration_api_client.post(
+            "/api/journals", json=journal_payload()
+        )
+        journal_id = created.json()["data"]["id"]
+        etag = (
+            await integration_api_client.get(f"/api/journals/{journal_id}")
+        ).headers["ETag"]
+
+        payload = journal_payload(title="Updated title")
+        payload["data"]["id"] = journal_id
+        response = await integration_api_client.put(
+            f"/api/journals/{journal_id}",
+            json=payload,
+            headers=[("If-Match", STALE_ETAG), ("If-Match", etag)],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["title"] == "Updated title"
+
     async def test_stale_if_match_is_refused(
         self, integration_api_client, async_connection
     ):

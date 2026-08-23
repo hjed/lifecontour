@@ -20,8 +20,18 @@ def get_if_match(request: Request) -> list[str] | None:
     Pass the result to the service's ``expected_etags``: ``None`` means write
     unconditionally, which is what every client did before conditional writes
     existed.
+
+    ``If-Match`` is a list-based field, so HTTP lets a sender split it across
+    repeated header lines; ASGI keeps them separate. ``headers.get`` would
+    return only the first, which would 412 a request whose matching tag was on
+    a later line — the opposite of the any-tag-matches semantics. The lines are
+    therefore rejoined, which is exactly how the field would have been sent as
+    one line.
     """
-    return parse_if_match(request.headers.get("If-Match"))
+    values = request.headers.getlist("If-Match")
+    if not values:
+        return None
+    return parse_if_match(",".join(values))
 
 
 def set_etag(
