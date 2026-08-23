@@ -6680,8 +6680,17 @@ recover what it already acknowledged, and what repairs it.
   which is what makes "will never be redelivered" a fact about the fixture rather than a claim in a
   comment. A journal event rides the same batch as a positive control, so "nothing outside task rows
   was touched" cannot be satisfied by a backfill that did nothing.
-- **Two test bugs found by the tests failing for the wrong reason**, both worth recording because
-  each would have passed forever. Two 404 assertions were green **before the endpoint existed** —
+- **A third test bug, found by the pull request's automated review, and the same shape as the first
+  two.** `test_another_user_is_refused_a_deleted_task_too` seeded a `__deleted__` history row but
+  never removed the `tasks` row, so it reached the *same* branch of the resolution as the live
+  foreign-task test beside it — asserting one thing twice and leaving the deleted state, the one this
+  endpoint exists for, uncovered on the REST side. The MCP counterpart already deleted the row, which
+  is why only one half was weak: **the two surfaces' tests were written from the same list of
+  properties but not from the same fixture.** Fixed by deleting the row and asserting it is gone, and
+  mutation-checked by dropping the owner comparison — the strengthened test now fails in the state
+  where no `tasks` row provides a second guard.
+- **Two other test bugs found by the tests failing for the wrong reason**, both worth recording
+  because each would have passed forever. Two 404 assertions were green **before the endpoint existed** —
   FastAPI answers 404 for an unrouted path — and now pin the domain's `TASK_NOT_FOUND` code instead.
   And the cross-user fixture seeded the *foreign* task's history rows with the **authenticated**
   user's id, so the endpoint correctly returned them and the test correctly failed; the fix was to
@@ -6712,14 +6721,16 @@ recover what it already acknowledged, and what repairs it.
   thousands of rows in. Mutation-checked by making the column `NOT NULL`: the populated-table test
   fails and the round-trip test passes, which is precisely the split it was written to expose. Same
   lesson as the backfill's fixture, one layer down — *a fresh database is never broken either.*
-- **Mutation-checked, five ways.** Dropping the owner stamp in `_owner_for` fails **7** unit tests
+- **Mutation-checked, six ways.** Dropping the owner stamp in `_owner_for` fails **7** unit tests
   across three test files. Replacing the resolution with the obvious wrong design — authorise by the
   `tasks` row alone, which is what every other history read does — fails **2**, and *which* two is the
   useful part: the deleted-task read and the test asserting the task row is not consulted when the
   rows answer. Reducing the endpoint docstring to one line fails **3**. The second probe is the one
   worth having, because "authorise by the aggregate" is not a typo anybody would make; it is the
   design a reviewer would suggest, and the suite has to be able to say why it is wrong. Adding
-  `NOT NULL` to migration `0107` fails **1** — the populated-table case above.
+  `NOT NULL` to migration `0107` fails **1** — the populated-table case above. And returning early
+  once history rows exist, without comparing the owner, fails **3**, one of which is the deleted
+  foreign task — the only one of the three with no `tasks` row standing behind it.
 - **What the anti-join assumes, stated rather than left implicit.** The backfill treats any row
   bearing an event's id as proof the whole event was projected, so an event whose rows landed only
   *partially* would be skipped and stay incomplete. Unreachable here — the consumer writes an event's

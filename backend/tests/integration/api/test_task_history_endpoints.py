@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from core_shared.models.history import Provenance
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.history.adapters.sql.field_history_repository import (
@@ -34,6 +35,7 @@ from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     create_task,
+    task_exists,
 )
 
 BASE = datetime(2024, 3, 1, 8, 0, tzinfo=UTC)
@@ -277,6 +279,14 @@ class TestADeletedTaskStillHasAHistory:
         The task repository's owner scoping cannot answer for a task that no
         longer exists, so if the rows did not carry an owner the honest choices
         would be to leak or to refuse everybody.
+
+        **The task row is genuinely removed**, and that is what separates this
+        test from the live foreign-task one above. Seeding a ``__deleted__``
+        history row while leaving ``tasks`` populated reaches the same branch of
+        the resolution as a live task does, so it would assert the same thing
+        twice and leave the state this endpoint was built for uncovered. Raised
+        by the pull request's automated review; the MCP counterpart already
+        deleted the row, so only the REST half was weaker.
         """
         creating_id, due_id = task_anchors
         other_task_id = await create_task(
@@ -291,6 +301,13 @@ class TestADeletedTaskStillHasAHistory:
             "__deleted__",
             user_id=OTHER_USER_ID,
         )
+        # Hard-deleted as ``delete_task`` would, but by SQL: this endpoint's
+        # user does not own the task, so they could not have performed the
+        # deletion that has to have already happened.
+        await async_connection.execute(
+            text("DELETE FROM tasks WHERE id = :task_id"), {"task_id": other_task_id}
+        )
+        assert not await task_exists(async_connection, other_task_id)
 
         response = await authenticated_client.get(f"/api/tasks/{other_task_id}/history")
 
