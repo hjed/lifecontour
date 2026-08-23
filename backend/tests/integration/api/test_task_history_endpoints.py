@@ -470,6 +470,58 @@ class TestPaginationAndRejections:
 
         assert response.status_code == 400
 
+    async def test_a_page_number_beyond_the_int_range_is_400_not_500(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A page number is bounded, and the bound is in the schema.
+
+        ``page`` reaches SQL as ``(page - 1) * limit``, bound to PostgreSQL's
+        ``OFFSET`` as a bigint. Without an upper bound a client could send a
+        number large enough to overflow it, and the honest-looking request would
+        come back as a database error rather than as anything the client could
+        act on. Raised by the pull request's automated review.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        response = await authenticated_client.get(
+            f"/api/tasks/{task_id}/history?page=99999999999999999999999"
+        )
+
+        assert response.status_code == 400
+        assert "errors" in response.json()
+
+    async def test_a_page_past_the_end_is_an_ordinary_empty_answer(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The bound refuses absurd numbers, not merely large ones.
+
+        A page beyond the last one is a client asking for rows that are not
+        there, which is an empty list — and the total still says how many there
+        are, so a client that overshot can find its way back.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await _seed_a_life(async_connection, task_id)
+
+        response = await authenticated_client.get(
+            f"/api/tasks/{task_id}/history?page=1000000&limit=100"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+        assert response.json()["meta"]["total_count"] == 6
+
     async def test_the_limit_is_capped(
         self,
         authenticated_client: AsyncClient,

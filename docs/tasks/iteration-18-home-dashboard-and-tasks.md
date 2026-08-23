@@ -6696,6 +6696,19 @@ recover what it already acknowledged, and what repairs it.
   user's id, so the endpoint correctly returned them and the test correctly failed; the fix was to
   the fixture, but the lesson is that a seeding helper defaulting to "the current user" is a hazard
   in exactly the tests that exist to prove another user cannot get in.
+- **An unbounded `page` reached PostgreSQL's `OFFSET` and answered 500**, found by the pull request's
+  automated review and reproduced before fixing. `page` was bounded below (`ge=1`) and not above, and
+  it reaches SQL as `(page - 1) * limit` bound as a bigint — so `?page=99999999999999999999999`
+  overflowed asyncpg's int8 encoder and surfaced as `DBAPIError`, on both surfaces. Now bounded by
+  `INT32_MAX`, the value this codebase already names for every integer it accepts, so an absurd page
+  is a 400 (and a tool-schema rejection) while a page merely *past the end* stays an ordinary empty
+  answer — a distinction each has its own test. Mutation-checked by removing the bound: 3 tests fail,
+  one per surface plus the schema. *The lesson is where the bound belongs:* `limit` was capped from
+  the start because a large page **size** is obviously a bulk export, while a large page **number**
+  looks harmless — and the two reach the same statement.
+  **The same gap is pre-existing on `GET /api/journals/{id}/history`, `GET /api/contacts/{id}/history`
+  and `get_journal_history`**, which this phase deliberately does not touch: calibration rule 7 keeps a
+  phase out of a second domain, and the fix there is one argument per site. Listed as a follow-up below.
 - **`outbox_events.event_data` is `text`, not `jsonb`.** Migration `0001` created it as `Text`
   (`outbox_table.py` says `# JSON as text`), while `core_shared`'s ORM model declares `JSONB`. Nothing
   had noticed because every other reader parses the payload in Python; the owner-fill statement is the
@@ -6721,7 +6734,7 @@ recover what it already acknowledged, and what repairs it.
   thousands of rows in. Mutation-checked by making the column `NOT NULL`: the populated-table test
   fails and the round-trip test passes, which is precisely the split it was written to expose. Same
   lesson as the backfill's fixture, one layer down — *a fresh database is never broken either.*
-- **Mutation-checked, six ways.** Dropping the owner stamp in `_owner_for` fails **7** unit tests
+- **Mutation-checked, seven ways.** Dropping the owner stamp in `_owner_for` fails **7** unit tests
   across three test files. Replacing the resolution with the obvious wrong design — authorise by the
   `tasks` row alone, which is what every other history read does — fails **2**, and *which* two is the
   useful part: the deleted-task read and the test asserting the task row is not consulted when the
@@ -6730,7 +6743,8 @@ recover what it already acknowledged, and what repairs it.
   design a reviewer would suggest, and the suite has to be able to say why it is wrong. Adding
   `NOT NULL` to migration `0107` fails **1** — the populated-table case above. And returning early
   once history rows exist, without comparing the owner, fails **3**, one of which is the deleted
-  foreign task — the only one of the three with no `tasks` row standing behind it.
+  foreign task — the only one of the three with no `tasks` row standing behind it. Removing the
+  `page` upper bound fails **3**, one per surface plus the schema.
 - **What the anti-join assumes, stated rather than left implicit.** The backfill treats any row
   bearing an event's id as proof the whole event was projected, so an event whose rows landed only
   *partially* would be skipped and stay incomplete. Unreachable here — the consumer writes an event's
@@ -7759,3 +7773,11 @@ Appended as the work proceeds, in the style of iterations 16 and 17.
   decisions needing explanation. A low ratio in such a phase is not evidence of under-testing, and rule
   1's "estimate production lines, then multiply by 4" should be read alongside Phase 6's observation
   that a phase delivering a convention budgets from the number of places the convention is explained.
+- **`page` is unbounded above on the journal and contact history surfaces** (found while fixing the
+  same defect on the task one in ITER18-003 Phase 8). `GET /api/journals/{id}/history`,
+  `GET /api/contacts/{id}/history` and the `get_journal_history` MCP tool all declare `page` as
+  `ge=1` with no `le`, and it reaches SQL as `(page - 1) * limit` bound to PostgreSQL's `OFFSET` as a
+  bigint — so a large enough page number answers with a database error instead of a client error.
+  Reproduced on the task endpoint before it was bounded; the others are untouched here because a
+  phase does not reach into a second domain (calibration rule 7). The fix is one `le=INT32_MAX` per
+  site plus a test each.

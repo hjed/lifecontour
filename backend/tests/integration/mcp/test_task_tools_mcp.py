@@ -3946,6 +3946,26 @@ class TestGetTaskHistoryTool:
 
         assert payload["error"] == "Not found"
 
+    async def test_a_page_number_beyond_the_int_range_is_refused(
+        self, authenticated_lifespan_client
+    ):
+        """The bound that keeps an absurd page from reaching SQL as an OFFSET.
+
+        Unbounded, ``(page - 1) * limit`` overflows PostgreSQL's bigint and the
+        call comes back as a database error rather than as something an agent
+        can act on. Raised by the pull request's automated review.
+        """
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            response = await _raw_call(
+                client,
+                session_id,
+                "get_task_history",
+                {"task_id": 1, "page": 99999999999999999999999},
+            )
+
+        assert '"isError":true' in response.text
+
     async def test_an_over_large_page_is_refused_by_the_tool_schema(
         self, authenticated_lifespan_client
     ):

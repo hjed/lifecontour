@@ -62,7 +62,7 @@ from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.api.common.identifiers import DatabaseIdPath
+from app.api.common.identifiers import INT32_MAX, DatabaseIdPath
 from app.api.common.schemas import (
     JsonApiLinks,
     create_pagination_links,
@@ -237,7 +237,7 @@ async def get_task_history(
     request: Request,
     history_service: FromDishka[TaskHistoryService],
     user: FromDishka[SessionUser],  # Require authentication
-    page: Annotated[int, Query(description="Page number", ge=1)] = 1,
+    page: Annotated[int, Query(description="Page number", ge=1, le=INT32_MAX)] = 1,
     limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
 ) -> HistoryListResponse:
     """Get field-level change history for a task.
@@ -267,9 +267,18 @@ async def get_task_history(
 
     No transaction is opened on this path.
 
+    A page past the end of the history is an ordinary empty answer, not an
+    error; ``meta`` still carries the total, so a client that overshot can find
+    its way back.
+
     Raises:
         400: A path id that is not an integer, or one outside the range an
-             ``INTEGER`` column can hold.
+             ``INTEGER`` column can hold; a ``limit`` above 100; or a ``page``
+             outside the ``INTEGER`` range. The last is bounded because ``page``
+             reaches SQL as ``(page - 1) * limit``, bound to PostgreSQL's
+             ``OFFSET`` as a bigint — unbounded, a legal-looking request could
+             overflow it and answer with a database error rather than anything
+             the client could act on.
         404: The task does not exist, is not yours, or was deleted without ever
              leaving history behind. As on every other task route the three are
              one answer, so a rejection cannot be used to probe for other users'

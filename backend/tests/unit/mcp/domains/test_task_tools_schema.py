@@ -1188,3 +1188,22 @@ class TestGetTaskHistoryToolDescription:
         """The specification's "no third working surface" rule, said where an
         agent might otherwise try to assemble one out of history reads."""
         assert "record" in get_task_history_schema["description"].lower()
+
+
+class TestGetTaskHistoryPagingCannotOverflowTheQuery:
+    """``page`` is bounded above as well as below, and the schema says so.
+
+    ``page`` reaches SQL as ``(page - 1) * limit``, bound to PostgreSQL's
+    ``OFFSET`` as a bigint. Unbounded, a legal-looking call could overflow it
+    and come back as a database error — which an agent can neither act on nor
+    report usefully. Raised by the pull request's automated review.
+    """
+
+    def test_the_page_number_has_an_upper_bound(
+        self, get_task_history_schema: dict[str, Any]
+    ) -> None:
+        page = get_task_history_schema["input_schema"]["properties"]["page"]
+
+        assert "maximum" in page
+        # Comfortably inside int64 once multiplied by the largest legal limit.
+        assert page["maximum"] * 100 < 2**63

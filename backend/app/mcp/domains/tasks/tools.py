@@ -916,7 +916,9 @@ async def get_task_history(
             ge=1, le=INT32_MAX, description="The id of the task to read the history of."
         ),
     ],
-    page: Annotated[int, Field(description="Page number (1-based)", ge=1)] = 1,
+    page: Annotated[
+        int, Field(description="Page number (1-based)", ge=1, le=INT32_MAX)
+    ] = 1,
     limit: Annotated[int, Field(description="Entries per page", ge=1, le=100)] = 20,
     history_service: TaskHistoryService = mcp_depends(get_task_history_service),
 ) -> str:
@@ -953,6 +955,10 @@ async def get_task_history(
     one task you already have the id of. There is no way to list tasks through
     it, and no filter for "everything still outstanding" — for tasks to work
     with, use ``list_journal_tasks`` or ``list_upcoming_tasks``.
+
+    A page past the end of the history is an ordinary empty answer rather than
+    an error, and ``total_count`` still tells you how many entries there are, so
+    an overshoot is recoverable without guessing.
 
     Returns:
         JSON string with task_id, total_count (every entry, not just this
