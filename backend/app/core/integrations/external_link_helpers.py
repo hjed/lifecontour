@@ -85,8 +85,7 @@ def build_google_contacts_url(external_entity_id: str | None) -> str | None:
         return None
     resource_name = external_entity_id.strip()
     # Strip 'people/' prefix if present (Google People API format)
-    if resource_name.startswith("people/"):
-        resource_name = resource_name[len("people/") :]
+    resource_name = resource_name.removeprefix("people/")
     return f"https://contacts.google.com/person/{resource_name}"
 
 
@@ -106,8 +105,7 @@ def build_snipeit_asset_url(base_url: str | None, asset_id: str | None) -> str |
     # Strip trailing slashes or /api/v1 from base_url to get the frontend URL
     # base_url might be "https://snipeit.example.com" or "https://snipeit.example.com/api/v1/"
     clean_base = base_url.strip().rstrip("/")
-    if clean_base.endswith("/api/v1"):
-        clean_base = clean_base[:-7]
+    clean_base = clean_base.removesuffix("/api/v1")
 
     return f"{clean_base}/hardware/{asset_id.strip()}"
 
@@ -133,12 +131,10 @@ def build_snipeit_maintenance_url(
         return None
 
     clean_base = base_url.strip().rstrip("/")
-    if clean_base.endswith("/api/v1"):
-        clean_base = clean_base[:-7]
+    clean_base = clean_base.removesuffix("/api/v1")
 
     clean_maintenance_id = maintenance_id.strip()
-    if clean_maintenance_id.startswith("snipeit_maint:"):
-        clean_maintenance_id = clean_maintenance_id[len("snipeit_maint:") :]
+    clean_maintenance_id = clean_maintenance_id.removeprefix("snipeit_maint:")
 
     return f"{clean_base}/hardware/maintenances/{clean_maintenance_id}"
 
@@ -237,8 +233,8 @@ def build_journal_external_links(
             ExternalLinkInfo(
                 source="google_calendar",
                 url=build_google_calendar_event_url(event_id, cal_id),
-                external_id=event_id if event_id else "",
-                unique_key=event_id if event_id else (internal_cal_id or ""),
+                external_id=event_id or "",
+                unique_key=event_id or internal_cal_id or "",
             )
         )
 

@@ -36,7 +36,7 @@ class LogbookExportRequest(BaseModel):
     @classmethod
     def validate_date(cls, v: str | None) -> str | None:
         if v is not None:
-            datetime.fromisoformat(v.replace("Z", "+00:00"))
+            datetime.fromisoformat(v)
         return v
 
 

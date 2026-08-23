@@ -137,11 +137,11 @@ class SqlLogbookExportRepository(LogbookExportRepository):
         date_filters = ""
         if start_date:
             date_filters += " AND j.event_date_range_end >= :start_date"
-            dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(start_date)
             query_params["start_date"] = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
         if end_date:
             date_filters += " AND j.event_date_range_start <= :end_date"
-            dt_end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            dt_end = datetime.fromisoformat(end_date)
             query_params["end_date"] = (
                 dt_end if dt_end.tzinfo else dt_end.replace(tzinfo=UTC)
             )

@@ -294,7 +294,7 @@ class SearchService:
         try:
             # Determine which entity types to search
             available_types = ["contact", "journal"]
-            search_types = entity_types if entity_types else available_types
+            search_types = entity_types or available_types
 
             # Collect results from all entity types
             all_hits = []

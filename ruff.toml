@@ -21,6 +21,7 @@ select = [
     "FAST",  # fastapi best-practices
     "DTZ",   # flake8-datetimez — enforce timezone-aware datetime usage
     "BLE",   # flake8-blind-except — disallow blind `except Exception`
+    "FURB",  # refurb — modern Python idioms (removeprefix, `or`, native ISO "Z" parsing)
     "RUF006",    # asyncio dangling task — store references to tasks
     "ASYNC210",  # async — no blocking HTTP calls (e.g. urllib/requests)
     "ASYNC212",  # async — no blocking httpx calls in async functions
@@ -34,6 +35,9 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults (used by FastAPI Depends)
     "C901",  # too complex
     "G201",  # .error(exc_info=True) is intentional with structlog (equivalent to .exception())
+    "UP006", # keep typing.List/Dict etc. where used — not worth churn across modules
+    "UP045", # keep Optional[X] — not rewritten to `X | None` wholesale
+    "TC003", # do not force stdlib imports into TYPE_CHECKING blocks
 ]
 
 [lint.per-file-ignores]

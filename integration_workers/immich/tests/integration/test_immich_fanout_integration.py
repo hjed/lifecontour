@@ -203,9 +203,7 @@ async def _run_child(
 ) -> None:
     """Run one batch child under stubbed Immich (raises if ``error`` is set)."""
     cfg = _KINDS[kind]
-    async with _stubbed_immich(
-        list_batches=None, sync_side=error if error else cfg["result"]
-    ):
+    async with _stubbed_immich(list_batches=None, sync_side=error or cfg["result"]):
         ctx = _ctx(session_factory, redis_pool, child_job_id, job_try=job_try)
         await _worker_fn(cfg["batch"])(ctx, "user-1", cfg["payload"], parent_id)
 

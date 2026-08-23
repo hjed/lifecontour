@@ -180,7 +180,7 @@ class StravaDataTransformer:
             ``TransformedActivity`` with all journal fields populated.
         """
         # Parse start time
-        start_dt = datetime.fromisoformat(activity.start_date.replace("Z", "+00:00"))
+        start_dt = datetime.fromisoformat(activity.start_date)
         end_dt = start_dt + timedelta(seconds=activity.elapsed_time)
 
         # Type mapping
