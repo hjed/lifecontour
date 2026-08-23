@@ -52,6 +52,12 @@ from app.mcp.domains.contacts.schemas import (
     ContactUpdateRequest,
     UpdateContactRelationshipRequest,
 )
+from app.mcp.shared.annotations import (
+    ADDITIVE_WRITE,
+    DESTRUCTIVE_WRITE,
+    IDEMPOTENT_WRITE,
+    READ_ONLY,
+)
 from app.mcp.shared.converters import (
     ContactConverter,
     ContactRelationshipConverter,
@@ -220,7 +226,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         mcp: The FastMCP server instance to register tools with
     """
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("get_contact", "contact")
     async def get_contact(
         contact_id: Annotated[
@@ -270,7 +276,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             contact_id, contact, contact_service, include_history=include_history
         )
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("get_contact_by_external_id", "contact")
     async def get_contact_by_external_id(
         source: Annotated[
@@ -327,7 +333,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             contact.id, contact, contact_service, include_history=include_history
         )
 
-    @mcp.tool
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @mcp_unified_error_handler("merge_contacts", "contact")
     async def merge_contacts(
         survivor_contact_id: Annotated[
@@ -387,7 +393,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         response = ContactConverter.to_contact_response(merged)
         return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("search_contacts", "search")
     async def search_contacts(
         query: Annotated[str, Field(description="Search query for contacts")],
@@ -464,7 +470,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
+    @mcp.tool(annotations=ADDITIVE_WRITE)
     @mcp_unified_error_handler("create_contact", "management")
     async def create_contact(
         request: ContactCreateRequest,
@@ -584,7 +590,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
+    @mcp.tool(annotations=IDEMPOTENT_WRITE)
     @mcp_unified_error_handler("update_contact", "management")
     async def update_contact(
         request: ContactUpdateRequest,
@@ -766,7 +772,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("list_contacts", "contact")
     async def list_contacts(
         page: Annotated[int, Field(description="Page number", ge=1)] = 1,
@@ -841,7 +847,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("global_search", "search")
     async def global_search(
         query: Annotated[
@@ -903,7 +909,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         return MCPResponseBuilder.success_response(response)
 
-    @mcp.tool
+    @mcp.tool(annotations=ADDITIVE_WRITE)
     @mcp_unified_error_handler("toggle_contact_favourite", "management")
     async def toggle_contact_favourite(
         contact_id: Annotated[
@@ -964,7 +970,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 "contact_id", f"Contact with ID {contact_id} not found"
             ) from e
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("get_contact_relationships", "relationship")
     async def get_contact_relationships(
         contact_id: Annotated[
@@ -1030,7 +1036,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             raise
 
-    @mcp.tool
+    @mcp.tool(annotations=IDEMPOTENT_WRITE)
     @mcp_unified_error_handler("add_contact_relationship", "relationship")
     async def add_contact_relationship(
         request: AddContactRelationshipRequest,
@@ -1098,7 +1104,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             raise
 
-    @mcp.tool
+    @mcp.tool(annotations=IDEMPOTENT_WRITE)
     @mcp_unified_error_handler("update_contact_relationship", "relationship")
     async def update_contact_relationship(
         request: UpdateContactRelationshipRequest,
@@ -1182,7 +1188,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             raise
 
-    @mcp.tool
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @mcp_unified_error_handler("remove_contact_relationship", "relationship")
     async def remove_contact_relationship(
         contact_id: Annotated[int, Field(description="ID of the current contact")],
@@ -1254,7 +1260,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             raise
 
-    @mcp.tool
+    @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("list_contact_tags", "tag")
     async def list_contact_tags(
         limit: Annotated[
@@ -1331,7 +1337,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             raise
 
-    @mcp.tool
+    @mcp.tool(annotations=IDEMPOTENT_WRITE)
     @mcp_unified_error_handler("update_contact_tag", "tag")
     async def update_contact_tag(
         tag_id: Annotated[str, Field(description="ID of the contact tag to update")],
@@ -1413,7 +1419,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             raise
 
-    @mcp.tool
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @mcp_unified_error_handler("delete_contact_tag", "tag")
     async def delete_contact_tag(
         tag_id: Annotated[str, Field(description="ID of the contact tag to delete")],
@@ -1455,7 +1461,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
             raise
 
-    @mcp.tool
+    @mcp.tool(annotations=DESTRUCTIVE_WRITE)
     @mcp_unified_error_handler("merge_contact_tags", "tag")
     async def merge_contact_tags(
         source_id: Annotated[
