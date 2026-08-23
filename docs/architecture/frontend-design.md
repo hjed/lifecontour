@@ -251,8 +251,14 @@ listing's payload.
   successfully", which a text-only update still uses. Sonner's `Toaster` is
   already a polite live region, so a second `role="status"` node on the row
   would make a screen reader say the same thing twice.
+- **`aria-busy` sits on the group, not on the button that was pressed.** The
+  optimistic patch rewrites the cached status before the request settles, so the
+  listing rerenders and the row comes back offering the *new* status's actions —
+  press *Done* and a moment later the screen shows *Not done* and *Cancel*. A
+  busy flag matched to the pending action is then false on everything visible.
+  The group is what is mid-write, and the group is what says so.
 - **The in-flight guard is scoped to the task, not to the hook instance.**
-  `usePendingTaskWrites(taskId)` reads the mutation cache through
+  `useTaskWriteInFlight(taskId)` reads the mutation cache through
   `useMutationState`, because a journal renders a task holding two roles **once
   per group** — one commitment, two `JournalTaskActions`, two independent
   mutations. A guard reading its own `isPending` locks only the copy that was
@@ -269,8 +275,8 @@ listing's payload.
   six lines, in opposite directions: a rollback coarser than the thing it undoes.
 - Accessibility: real buttons, so keyboard reach is structural; each accessible
   name **contains** its visible label (WCAG 2.5.3 — "Done" inside "Mark done");
-  every action is disabled while any write against that task is in flight, with
-  `aria-busy` on the acting one; and the group is `role="group"`
+  every action is disabled while any write against that task is in flight; and
+  the group is `role="group"`
   `aria-describedby` the row's task text, because every row's buttons are named
   the same and the text is what tells them apart.
 

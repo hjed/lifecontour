@@ -23,6 +23,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { JournalTaskActions } from '../JournalTaskActions';
+import { JournalTasksSection } from '../JournalTasksSection';
 import { createMockJournalTask, createTestQueryClient } from '../test-helpers';
 import { taskKeys } from '@/lib/api/tasks';
 import { TaskStatus, type JournalTasksResponse } from '@/types/tasks';
@@ -269,7 +270,7 @@ describe('JournalTaskActions', () => {
   });
 
   describe('while a write is in flight', () => {
-    it('disables every action and marks the acting one busy', async () => {
+    it('disables every action and marks the group busy', async () => {
       let release: () => void = () => undefined;
       mockFetch.mockImplementationOnce(
         () =>
@@ -287,7 +288,7 @@ describe('JournalTaskActions', () => {
       await waitFor(() => {
         expect(done).toBeDisabled();
       });
-      expect(done).toHaveAttribute('aria-busy', 'true');
+      expect(actionGroup()).toHaveAttribute('aria-busy', 'true');
       expect(
         screen.getByRole('button', { name: 'Cancel task' })
       ).toBeDisabled();
@@ -303,12 +304,11 @@ describe('JournalTaskActions', () => {
       });
     });
 
-    it('leaves every action enabled and unbusy at rest', () => {
+    it('leaves every action enabled and the group unbusy at rest', () => {
       renderActions();
 
-      const done = screen.getByRole('button', { name: 'Mark done' });
-      expect(done).toBeEnabled();
-      expect(done).toHaveAttribute('aria-busy', 'false');
+      expect(screen.getByRole('button', { name: 'Mark done' })).toBeEnabled();
+      expect(actionGroup()).toHaveAttribute('aria-busy', 'false');
     });
   });
 
@@ -381,7 +381,7 @@ describe('JournalTaskActions', () => {
       });
     });
 
-    it('marks the acting move busy on both copies, not just the clicked one', async () => {
+    it('marks both copies busy, not just the clicked one', async () => {
       let release: () => void = () => undefined;
       mockFetch.mockImplementationOnce(
         () =>
@@ -400,7 +400,7 @@ describe('JournalTaskActions', () => {
 
       await waitFor(() => {
         expect(
-          mentioned.getByRole('button', { name: 'Mark done' })
+          mentioned.getByRole('group', { name: 'Task actions' })
         ).toHaveAttribute('aria-busy', 'true');
       });
 
@@ -435,6 +435,75 @@ describe('JournalTaskActions', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
       release();
+    });
+  });
+
+  /**
+   * Mounted the way the app mounts it, against live query data.
+   *
+   * Every other test here passes a **static** `task` prop, which cannot see
+   * what the optimistic patch does to the row: in the real section the patch
+   * rewrites the cached status, the listing's observer rerenders, and the row
+   * comes back offering the *new* status's actions — so the button that was
+   * clicked no longer exists by the time the request settles. A busy signal
+   * pinned to "the action whose target matches the pending write" is therefore
+   * false on everything the user can still see.
+   */
+  describe('mounted against the listing it really reads', () => {
+    function renderSection(task = createMockJournalTask()) {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(
+        taskKeys.journalList(JOURNAL_ID),
+        cachedListing(task)
+      );
+
+      return render(
+        <QueryClientProvider client={queryClient}>
+          <JournalTasksSection journalId={JOURNAL_ID} />
+        </QueryClientProvider>
+      );
+    }
+
+    it('reports the group busy while the write is in flight', async () => {
+      let release: () => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise<Response>(resolve => {
+            release = () => {
+              resolve(okResponse(TaskStatus.DONE));
+            };
+          })
+      );
+      renderSection();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Mark done' }));
+
+      // The optimistic patch has already flipped the row, so the control that
+      // was clicked is gone and the way back is what is on screen.
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: 'Return to not done' })
+        ).toBeInTheDocument();
+      });
+
+      const group = screen.getByRole('group', { name: 'Task actions' });
+      expect(group).toHaveAttribute('aria-busy', 'true');
+      expect(
+        screen.getByRole('button', { name: 'Return to not done' })
+      ).toBeDisabled();
+
+      release();
+      await waitFor(() => {
+        expect(group).toHaveAttribute('aria-busy', 'false');
+      });
+    });
+
+    it('leaves the group unbusy at rest', () => {
+      renderSection();
+
+      expect(
+        screen.getByRole('group', { name: 'Task actions' })
+      ).toHaveAttribute('aria-busy', 'false');
     });
   });
 

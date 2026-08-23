@@ -41,7 +41,7 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   useDeleteTask,
-  usePendingTaskWrites,
+  useTaskWriteInFlight,
   useUpdateTask,
 } from '@/lib/api/tasks';
 import { statusActions, type TaskStatusAction } from '@/lib/task-display';
@@ -81,19 +81,22 @@ export function JournalTaskActions({
   // would race the first write with the server's ordering deciding which move
   // survives. Two overlapping status calls decide against the same stale
   // reading, and the later one wins whatever the first was for.
-  const pending = usePendingTaskWrites(task.id);
+  const writing = useTaskWriteInFlight(task.id);
   const actions = statusActions(task.attributes.status);
 
+  // The *group* carries the busy state, not the control that was pressed: the
+  // optimistic patch flips the row to its new status before the request
+  // settles, so the button that was clicked is gone by the time it does.
   return (
     <div
       role='group'
       aria-label='Task actions'
       aria-describedby={describedById}
+      aria-busy={writing}
       className='flex flex-wrap items-center gap-1.5'
     >
       {actions.map(action => {
         const Icon = ACTION_ICONS[action.key];
-        const acting = pending.isChangingTo(action.target);
 
         return (
           <Button
@@ -102,8 +105,7 @@ export function JournalTaskActions({
             variant='outline'
             size='sm'
             aria-label={action.accessibleName}
-            aria-busy={acting}
-            disabled={pending.busy}
+            disabled={writing}
             data-testid={`journal-task-action-${action.key}`}
             onClick={() => {
               update.mutate({ taskId: task.id, status: action.target });
@@ -122,8 +124,7 @@ export function JournalTaskActions({
             variant='ghost'
             size='sm'
             aria-label='Delete task'
-            aria-busy={pending.isDeleting}
-            disabled={pending.busy}
+            disabled={writing}
             title='Delete task'
             data-testid='journal-task-action-delete'
             className='text-muted-foreground hover:text-destructive'

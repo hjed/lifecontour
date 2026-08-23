@@ -631,34 +631,23 @@ function mutatingTaskId(variables: unknown): string | undefined {
   return undefined;
 }
 
-/** The status a pending write is moving a task to, if it moves one at all. */
-function mutatingStatus(variables: unknown): TaskStatus | undefined {
-  if (variables && typeof variables === 'object' && 'status' in variables) {
-    const { status } = variables as { status?: unknown };
-    return typeof status === 'string' ? (status as TaskStatus) : undefined;
-  }
-
-  return undefined;
-}
-
-/** What is currently in flight against one task, from anywhere on the page. */
-export interface PendingTaskWrites {
-  /** Whether any write against this task is in flight. */
-  readonly busy: boolean;
-  /** Whether a pending write is moving the task to this status. */
-  readonly isChangingTo: (status: TaskStatus) => boolean;
-  /** Whether a pending write is deleting the task. */
-  readonly isDeleting: boolean;
-}
-
 /**
- * Every in-flight write against one task, however many surfaces mounted it.
+ * Whether any write against one task is in flight, wherever it was started.
  *
- * Scoped to the task rather than to the caller deliberately: two rows showing
- * the same commitment must lock together, and a retarget opened elsewhere on
- * the page is just as much a reason not to accept a status click.
+ * **A boolean about the task, not about a button.** The obvious richer answer —
+ * which *action* is pending, so its own control can carry `aria-busy` — cannot
+ * work on this surface: the optimistic patch rewrites the cached status before
+ * the request settles, the listing rerenders, and the row comes back offering
+ * the **new** status's actions. The control that was clicked no longer exists,
+ * so a busy flag matched to it is false on everything still on screen. The
+ * action group is what is busy, and the group is what says so.
+ *
+ * Scoped to the task rather than to the caller deliberately: a journal renders
+ * a task holding two roles once per group, so one commitment has two of these
+ * side by side and they must lock together. A retarget opened elsewhere on the
+ * page is just as much a reason not to accept a status click.
  */
-export function usePendingTaskWrites(taskId: string): PendingTaskWrites {
+export function useTaskWriteInFlight(taskId: string): boolean {
   const pending = useMutationState({
     filters: {
       status: 'pending',
@@ -668,12 +657,7 @@ export function usePendingTaskWrites(taskId: string): PendingTaskWrites {
     select: mutation => mutation.state.variables,
   });
 
-  return {
-    busy: pending.length > 0,
-    isChangingTo: (status: TaskStatus) =>
-      pending.some(variables => mutatingStatus(variables) === status),
-    isDeleting: pending.some(variables => typeof variables === 'string'),
-  };
+  return pending.length > 0;
 }
 
 // Hooks

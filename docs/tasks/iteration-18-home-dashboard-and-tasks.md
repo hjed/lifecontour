@@ -4177,7 +4177,8 @@ rule 3.
    `delete_task` shipped in Phase 9 with no UI behind it. It is not offered on the dashboard, where a row
    is a reminder rather than a place a task is worked with; recorded in the wireframe document as gap 8.
 8. **One write at a time per *task*, and per-instance was not enough.** Every action is disabled while
-   any write against that task is in flight, with `aria-busy` on the acting one. Two overlapping status
+   any write against that task is in flight, and **the group** carries `aria-busy` — see 8b for why not
+   the control that was pressed. Two overlapping status
    calls both decide against the same stale reading and the later write wins whatever the first was for
    — the lost-*decision* problem Phase 6 took a row lock for on the server. The lock makes the server's
    answer correct; this keeps a user from queueing the losing call at all. **The first version read the
@@ -4188,8 +4189,27 @@ rule 3.
    write already in flight. `usePendingTaskWrites(taskId)` reads the **mutation cache** through
    `useMutationState` instead of a hook instance, so every surface showing that task locks together — and
    a retarget opened elsewhere on the page will lock it too, which is what should happen. Three tests
-   render the two copies and pin it: the twin disables, its `aria-busy` follows the acting move, and a
-   click on the twin mid-write sends no second request.
+   render the two copies and pin it: the twin disables, the twin's group reports busy, and a click on
+   the twin mid-write sends no second request.
+8b. **`aria-busy` belongs to the group, because the control that was pressed does not survive the
+   click.** The first two versions both put it on the acting button — "disabled, with `aria-busy` on the
+   one doing the work" — and a third review round showed that is unobservable in the real component. The
+   optimistic patch rewrites the cached status *before* the request settles, the listing's observer
+   rerenders, and the row comes back offering the **new** status's actions: press *Done* and what is on
+   screen a moment later is *Not done* and *Cancel*. A busy flag matched to "the action whose target is
+   the pending write" is then false on every control the user can see. Moving it to the `role="group"`
+   container states the true thing — this group is mid-write — and survives the flip. The richer
+   `PendingTaskWrites` shape collapsed to a plain `useTaskWriteInFlight(taskId): boolean` with it, since
+   knowing *which* action is pending had no remaining consumer.
+   **The test fixture was why this went unseen through two rounds**, and that is the lesson worth
+   keeping: every component test here passed a **static** `task` prop, so the row never flipped and the
+   acting button was always still there to be found busy. The suite now also mounts the real
+   `JournalTasksSection` against a seeded `QueryClient` and drives the button, which is the only
+   arrangement in which the optimistic rerender happens at all. **Third time in this iteration that a
+   fixture, not the code, was the reason a defect was invisible** — Phase 15 recorded the same shape
+   twice (`retry: false` hiding the app's mutation retry, and hand-written fixtures that could not fail).
+   A component test that supplies its own props is testing the component; it is not testing the surface.
+
 9. **Phase 16's read-only guarantee was inverted, not deleted.** That test required the busiest row to
    render zero buttons and zero checkboxes, and existed precisely so this phase would have to come back
    to it. It now asserts the group is present and described by the task text, with a second test that a
@@ -4202,9 +4222,9 @@ rule 3.
 **Required Test Coverage:** unit (RTL) — each action's happy path and failure rollback, keyboard operation,
 and cancel-before-invalidate ordering. E2E deferred to Phase 22.
 
-**Delivered:** **57** unit tests across four suites.
+**Delivered:** **59** unit tests across four suites.
 
-- **`components/journals/__tests__/JournalTaskActions.test.tsx` (31, new):** what each status offers
+- **`components/journals/__tests__/JournalTaskActions.test.tsx` (33, new):** what each status offers
   including the cancelled row's silence and the lapsed row's full offer; the three happy paths asserted
   on the request body, not just the call; the three failure rollbacks asserted on a **seeded cache**, so
   the rollback has something real to move; the optimistic patch landing before the response, driven
@@ -4234,7 +4254,7 @@ of nothing is `-Infinity`, and the ordering assertion holds for the wrong reason
 would hand that vacuity straight back, so the expected surplus is stated **per hook** as an
 `optimisticCancels` field instead, and the assertion stays exact.
 
-**Mutation checks.** Seven deliberate breakages (the first re-run against the rewritten rollback, where it
+**Mutation checks.** Eight deliberate breakages (the first re-run against the rewritten rollback, where it
 now fails **6**), each reverted after confirming it was caught: dropping the
 `onError` rollback failed **5** tests across both suites; offering `Mark done` on a cancelled row failed
 **3**; making delete a `destructive` sibling rather than a muted dialog trigger failed **1**; collapsing
@@ -4242,7 +4262,8 @@ the three status wordings into one failed **8**; and removing the `setQueriesDat
 check that matters most, since a passing suite could otherwise have described a non-optimistic
 implementation — failed **4**. Two more after the PR review, against the fixes it produced: collapsing
 the per-entry snapshots back to one shared value failed **1**, and reverting the per-task guard to the
-hook instance's own `isPending` failed **3**.
+hook instance's own `isPending` failed **3**. One more after the third round: putting `aria-busy` back on
+the pressed control instead of the group failed **5**.
 
 **Integration:** none, and not a deferral of convenience — the phase adds no Python. `PATCH /api/tasks/{id}`
 and `DELETE /api/tasks/{id}` carry their own integration coverage from Phases 6 and 9 (34 endpoint tests
@@ -4273,7 +4294,7 @@ cleanup could not delete either journal, both answering **409**, because each an
 **Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
 clean, **0 errors** (the 112 remaining warnings are pre-existing Playwright-plugin ones in `tests/e2e/`).
 The **full** Jest suite rather than the changed files alone, because `lib/api/tasks.ts` and
-`JournalTaskRow` are both imported beyond this surface: **171** suites and **1,915** tests, all passing
+`JournalTaskRow` are both imported beyond this surface: **171** suites and **1,917** tests, all passing
 (170 and 1,858 before this phase). Re-run in full after each round of fixes rather than trusting the pass
 that preceded it. No backend gates — `ruff`, `mypy` and pytest all had nothing to run,
 since no Python file changed.
