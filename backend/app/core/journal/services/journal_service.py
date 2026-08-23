@@ -120,7 +120,9 @@ class JournalService:
         """
         # Validate hierarchy if journal has a parent
         if journal.parent_id is not None:
-            await self._validate_hierarchy(journal.parent_id, transaction)
+            await self._validate_hierarchy(
+                journal.parent_id, transaction, journal.user_id
+            )
 
         # Save the journal
         try:
@@ -200,9 +202,16 @@ class JournalService:
 
         changed_fields = self._calculate_changed_fields(existing_journal, journal)
 
-        # Validate hierarchy if parent_id is being changed
+        # Validate hierarchy if parent_id is being changed. The owner checked
+        # against is the *persisted* one, so an incoming entity carrying a
+        # different user_id cannot widen the lookup.
         if "parent_id" in changed_fields and journal.parent_id is not None:
-            await self._validate_hierarchy(journal.parent_id, transaction, journal.id)
+            await self._validate_hierarchy(
+                journal.parent_id,
+                transaction,
+                existing_journal.user_id,
+                journal.id,
+            )
 
         # Save the updated journal
         try:
@@ -622,30 +631,46 @@ class JournalService:
         self,
         parent_id: int,
         transaction: AsyncConnection,
+        user_id: str,
         journal_id: int | None = None,
     ) -> None:
         """
         Validate hierarchy constraints.
 
         Checks:
-        1. Parent exists
+        1. Parent exists **and belongs to** ``user_id``
         2. Maximum depth not exceeded (5 levels)
         3. No cycles (parent cannot be a descendant of the journal)
 
         Args:
             parent_id: The parent journal ID
             transaction: Database transaction
+            user_id: The owner the parent must belong to — the owner of the
+                journal being written, which is where ``parent_id`` came from
             journal_id: The journal ID (for cycle detection, None for new journals)
 
         Raises:
-            JournalNotFoundError: If parent doesn't exist
+            JournalNotFoundError: If the parent doesn't exist, or belongs to
+                somebody else
             JournalMaxDepthExceededError: If depth exceeds maximum
             JournalCycleError: If parent relationship would create a cycle
         """
-        # Validate parent exists
-        parent = await self.journal_repo.find_by_id(parent_id)
+        # Validate the parent exists *and is the caller's own*. Resolving it
+        # unscoped accepted any id in the table, so a journal could be hung off
+        # a stranger's: a child its owner can neither see nor delete, with the
+        # hierarchy then spanning two accounts (issue #1312). Somebody else's
+        # journal raises exactly what a non-existent one raises, so the refusal
+        # cannot be used to discover which ids are real.
+        parent = await self.journal_repo.find_by_id_for_user(parent_id, user_id)
         if parent is None:
             raise JournalNotFoundError(parent_id)
+
+        # The two walks below stay unscoped: they only ever go *upward* from a
+        # parent already proven to be this user's, and in a correctly-scoped
+        # tree every ancestor above it is theirs too. Against a legacy
+        # cross-account edge, unscoped is the conservative direction — it can
+        # over-count depth or find extra cycles, i.e. reject more, never accept
+        # more.
 
         # Check maximum depth
         parent_depth = await self.journal_repo.get_depth(parent_id)

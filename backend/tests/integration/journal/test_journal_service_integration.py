@@ -42,6 +42,9 @@ def create_test_journal(
     )
 
 
+OTHER_USER_ID = "other-user-456"
+
+
 @pytest.mark.integration
 class TestJournalServiceIntegration:
     """Integration tests for JournalService with real database."""
@@ -112,6 +115,68 @@ class TestJournalServiceIntegration:
         saved_child = await journal_service.get_journal(result.id)
         assert saved_child is not None
         assert saved_child.parent_id == parent.id
+
+    @pytest.mark.asyncio
+    async def test_create_journal_rejects_another_users_parent(
+        self, journal_service, journal_repo, clean_database: AsyncConnection
+    ):
+        """A parent owned by somebody else is refused, exactly as an absent one.
+
+        Issue #1312: the parent was resolved without an owner predicate, so any
+        id in the table was accepted and the caller's journal was written as a
+        child of a stranger's — a child the owner can neither see nor delete,
+        with nothing in the response to reveal the link had been made.
+        """
+        # Arrange - a journal that belongs to another user entirely
+        theirs = await journal_repo.save(
+            create_test_journal(title="Somebody Else's Trip", user_id=OTHER_USER_ID)
+        )
+        child = create_test_journal(title="Child Journal", parent_id=theirs.id)
+
+        # Act & Assert - refused, and refused the same way a missing id is
+        with pytest.raises(JournalNotFoundError) as foreign:
+            await journal_service.create_journal(child, clean_database)
+
+        absent = create_test_journal(title="Child Journal", parent_id=999_999)
+        with pytest.raises(JournalNotFoundError) as missing:
+            await journal_service.create_journal(absent, clean_database)
+
+        # Both refusals are the same sentence about the id they were handed, so
+        # nothing distinguishes a real journal that is not yours from one that
+        # does not exist.
+        assert foreign.value.message == f"Journal with ID {theirs.id} not found"
+        assert missing.value.message == "Journal with ID 999999 not found"
+
+        # Nothing was written
+        written = await clean_database.execute(
+            text("SELECT COUNT(*) FROM journals WHERE title = 'Child Journal'")
+        )
+        assert written.scalar_one() == 0
+
+    @pytest.mark.asyncio
+    async def test_update_journal_rejects_another_users_parent(
+        self, journal_service, journal_repo, clean_database: AsyncConnection
+    ):
+        """Re-parenting an existing journal onto another user's is refused too."""
+        # Arrange
+        theirs = await journal_repo.save(
+            create_test_journal(title="Somebody Else's Trip", user_id=OTHER_USER_ID)
+        )
+        mine = await journal_service.create_journal(
+            create_test_journal(title="My Journal"), clean_database
+        )
+
+        mine.parent_id = theirs.id
+
+        # Act & Assert
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.update_journal(mine, clean_database)
+
+        # The persisted journal is still a root
+        stored = await clean_database.execute(
+            text("SELECT parent_id FROM journals WHERE id = :id"), {"id": mine.id}
+        )
+        assert stored.scalar_one() is None
 
     @pytest.mark.asyncio
     async def test_create_journal_max_depth_validation(

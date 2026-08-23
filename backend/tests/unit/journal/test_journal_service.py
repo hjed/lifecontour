@@ -80,6 +80,24 @@ def create_test_journal(
     )
 
 
+def owner_scoped_lookup(journals: dict[int, Journal]):
+    """A ``find_by_id_for_user`` stub that honours the owner predicate.
+
+    The real implementation puts ``user_id`` in the WHERE clause, so a journal
+    belonging to somebody else is indistinguishable from one that never
+    existed. A bare ``AsyncMock`` would hand back the journal regardless and
+    the ownership assertion would be vacuous.
+    """
+
+    def _find(journal_id: int, user_id: str) -> Journal | None:
+        journal = journals.get(journal_id)
+        if journal is None or journal.user_id != user_id:
+            return None
+        return journal
+
+    return _find
+
+
 class TestJournalServiceCRUD:
     """Test CRUD operations."""
 
@@ -114,7 +132,7 @@ class TestJournalServiceCRUD:
             journal_id=2, title="Child Journal", parent_id=1
         )
 
-        mock_journal_repo.find_by_id.return_value = parent_journal
+        mock_journal_repo.find_by_id_for_user.return_value = parent_journal
         mock_journal_repo.get_depth.return_value = 1
         mock_journal_repo.save.return_value = saved_journal
 
@@ -123,7 +141,7 @@ class TestJournalServiceCRUD:
 
         # Assert
         assert result == saved_journal
-        mock_journal_repo.find_by_id.assert_called_once_with(1)
+        mock_journal_repo.find_by_id_for_user.assert_called_once_with(1, "user123")
         mock_journal_repo.get_depth.assert_called_once_with(1)
         mock_journal_repo.save.assert_called_once_with(journal)
 
@@ -135,11 +153,41 @@ class TestJournalServiceCRUD:
         # Arrange
         journal = create_test_journal(title="Child Journal", parent_id=999)
 
-        mock_journal_repo.find_by_id.return_value = None
+        mock_journal_repo.find_by_id_for_user.return_value = None
 
         # Act & Assert
         with pytest.raises(JournalNotFoundError):
             await journal_service.create_journal(journal, mock_transaction)
+
+    @pytest.mark.asyncio
+    async def test_create_journal_rejects_another_users_parent(
+        self, journal_service, mock_journal_repo, mock_transaction
+    ):
+        """Another user's journal cannot be used as a parent (issue #1312).
+
+        The parent has to be resolved owner-scoped, so it reads as missing
+        rather than as a usable parent — the same answer an id that never
+        existed gets, which is what keeps the surface from confirming it is
+        real. Resolving it unscoped hung the caller's journal off a stranger's:
+        a child the victim can neither see nor delete.
+        """
+        # Arrange
+        foreign_parent = create_test_journal(
+            journal_id=1, title="Somebody Else's Journal", user_id="other-user"
+        )
+        journal = create_test_journal(title="Child Journal", parent_id=1)
+
+        # The unscoped lookup still finds it — that is precisely the bug.
+        mock_journal_repo.find_by_id.return_value = foreign_parent
+        mock_journal_repo.find_by_id_for_user.side_effect = owner_scoped_lookup(
+            {1: foreign_parent}
+        )
+
+        # Act & Assert
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.create_journal(journal, mock_transaction)
+
+        mock_journal_repo.save.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_journal_max_depth_exceeded(
@@ -150,7 +198,7 @@ class TestJournalServiceCRUD:
         parent_journal = create_test_journal(journal_id=1, title="Parent Journal")
         journal = create_test_journal(title="Child Journal", parent_id=1)
 
-        mock_journal_repo.find_by_id.return_value = parent_journal
+        mock_journal_repo.find_by_id_for_user.return_value = parent_journal
         mock_journal_repo.get_depth.return_value = 5  # Max depth
 
         # Act & Assert
@@ -216,11 +264,12 @@ class TestJournalServiceCRUD:
         parent_journal = create_test_journal(journal_id=2, title="Parent Journal")
         journal = create_test_journal(journal_id=1, title="Child Journal", parent_id=2)
 
-        # find_by_id(1) -> persisted journal (for diff); find_by_id(2) -> parent.
-        mock_journal_repo.find_by_id.side_effect = lambda jid: {
-            1: existing,
-            2: parent_journal,
-        }.get(jid)
+        # find_by_id(1) -> persisted journal (for the diff); the parent is
+        # resolved owner-scoped.
+        mock_journal_repo.find_by_id.return_value = existing
+        mock_journal_repo.find_by_id_for_user.side_effect = owner_scoped_lookup(
+            {1: existing, 2: parent_journal}
+        )
         mock_journal_repo.get_depth.return_value = 1
         mock_journal_repo.get_ancestors.return_value = []
         mock_journal_repo.save.return_value = journal
@@ -230,8 +279,39 @@ class TestJournalServiceCRUD:
 
         # Assert
         assert result == journal
+        mock_journal_repo.find_by_id_for_user.assert_called_once_with(2, "user123")
         mock_journal_repo.get_depth.assert_called_once_with(2)
         mock_journal_repo.get_ancestors.assert_called_once_with(2)
+
+    @pytest.mark.asyncio
+    async def test_update_journal_rejects_another_users_parent(
+        self, journal_service, mock_journal_repo, mock_transaction
+    ):
+        """Re-parenting onto somebody else's journal is refused (issue #1312).
+
+        The owner checked against is the *persisted* one, so an incoming entity
+        carrying a different ``user_id`` cannot widen the lookup.
+        """
+        # Arrange
+        existing = create_test_journal(journal_id=1, title="My Journal")
+        foreign_parent = create_test_journal(
+            journal_id=2, title="Somebody Else's Journal", user_id="other-user"
+        )
+        journal = create_test_journal(journal_id=1, title="My Journal", parent_id=2)
+
+        mock_journal_repo.find_by_id.side_effect = lambda jid: {
+            1: existing,
+            2: foreign_parent,
+        }.get(jid)
+        mock_journal_repo.find_by_id_for_user.side_effect = owner_scoped_lookup(
+            {1: existing, 2: foreign_parent}
+        )
+
+        # Act & Assert
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.update_journal(journal, mock_transaction)
+
+        mock_journal_repo.save.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_update_journal_cycle_detection(
@@ -247,10 +327,10 @@ class TestJournalServiceCRUD:
         # Mock: journal 1 is an ancestor of journal 2
         ancestor_journal = create_test_journal(journal_id=1, title="Child Journal")
 
-        mock_journal_repo.find_by_id.side_effect = lambda jid: {
-            1: existing,
-            2: parent_journal,
-        }.get(jid)
+        mock_journal_repo.find_by_id.return_value = existing
+        mock_journal_repo.find_by_id_for_user.side_effect = owner_scoped_lookup(
+            {1: existing, 2: parent_journal}
+        )
         mock_journal_repo.get_depth.return_value = 1
         mock_journal_repo.get_ancestors.return_value = [ancestor_journal]
 

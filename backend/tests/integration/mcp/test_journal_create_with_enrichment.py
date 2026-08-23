@@ -13,11 +13,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
     initialize_mcp_session,
     mcp_headers,
 )
+from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_journal
 
 
 @pytest.fixture
@@ -465,6 +467,120 @@ class TestCreateJournalWithParent:
             )
             assert "error" not in child_payload, f"Child error: {child_payload}"
             assert child_payload["parent"]["id"] == parent_id
+
+    @pytest.mark.asyncio
+    async def test_another_users_journal_cannot_be_used_as_a_parent(
+        self,
+        authenticated_lifespan_client,
+        async_connection: AsyncConnection,
+        _create_journal_via_mcp,
+    ) -> None:
+        """A ``parent_id`` owned by somebody else reads as an absent one (#1312).
+
+        The hierarchy validation resolved the parent unscoped, so an agent
+        holding any journal id could hang its user's entry off it. Nothing in
+        the response revealed the link — the parent is read back owner-scoped,
+        so it serialised as ``null`` — while the row was written all the same.
+        """
+        theirs = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Day 1 - Under Their Trip",
+                    "content": "Should never be written.",
+                    "event_date_range": {
+                        "start": "2025-04-09",
+                        "end": "2025-04-09",
+                    },
+                    "types": ["NOTE"],
+                    "parent_id": theirs,
+                },
+            )
+            absent_payload = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "Day 1 - Under Nothing",
+                    "content": "Should never be written.",
+                    "event_date_range": {
+                        "start": "2025-04-09",
+                        "end": "2025-04-09",
+                    },
+                    "types": ["NOTE"],
+                    "parent_id": 999999,
+                },
+            )
+
+        # Refused, and refused in the words an id that never existed gets, so
+        # the tool cannot be used to find out which ids are real.
+        assert payload["error"] == absent_payload["error"] == "Journal not found"
+        assert payload["message"] == absent_payload["message"].replace(
+            "999999", str(theirs)
+        )
+        assert "Somebody Else's Trip" not in str(payload)
+
+        written = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM journals WHERE title = 'Day 1 - Under Their Trip'"
+            )
+        )
+        assert written.scalar_one() == 0
+
+    @pytest.mark.asyncio
+    async def test_a_journal_cannot_be_moved_under_another_users_journal(
+        self,
+        authenticated_lifespan_client,
+        async_connection: AsyncConnection,
+        _create_journal_via_mcp,
+        _update_journal_via_mcp,
+    ) -> None:
+        """The same refusal on the update path (#1312)."""
+        theirs = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+            mine = await _create_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                {
+                    "title": "My Own Trip",
+                    "content": "Mine.",
+                    "event_date_range": {
+                        "start": "2025-04-09",
+                        "end": "2025-04-09",
+                    },
+                    "types": ["NOTE"],
+                },
+            )
+            assert "error" not in mine, f"Setup error: {mine}"
+
+            payload = await _update_journal_via_mcp(
+                authenticated_client,
+                session_id,
+                mine["id"],
+                {"parent_id": theirs},
+            )
+
+        assert payload["error"] == "Journal not found"
+        assert str(theirs) in payload["message"]
+        assert "Somebody Else's Trip" not in str(payload)
+
+        stored = await async_connection.execute(
+            text("SELECT parent_id FROM journals WHERE id = :id"), {"id": mine["id"]}
+        )
+        assert stored.scalar_one() is None
 
 
 class TestUpdateJournalWithTypesAndTags:
