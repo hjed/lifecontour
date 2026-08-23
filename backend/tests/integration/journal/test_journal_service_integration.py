@@ -10,6 +10,7 @@ from core_shared.models.journals import (
     JournalMaxDepthExceededError,
     JournalNotFoundError,
     JournalType,
+    JournalValidationError,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -40,6 +41,9 @@ def create_test_journal(
         ),
         parent_id=parent_id,
     )
+
+
+OTHER_USER_ID = "other-user-456"
 
 
 @pytest.mark.integration
@@ -112,6 +116,134 @@ class TestJournalServiceIntegration:
         saved_child = await journal_service.get_journal(result.id)
         assert saved_child is not None
         assert saved_child.parent_id == parent.id
+
+    @pytest.mark.asyncio
+    async def test_create_journal_rejects_another_users_parent(
+        self, journal_service, journal_repo, clean_database: AsyncConnection
+    ):
+        """A parent owned by somebody else is refused, exactly as an absent one.
+
+        Issue #1312: the parent was resolved without an owner predicate, so any
+        id in the table was accepted and the caller's journal was written as a
+        child of a stranger's — a child the owner can neither see nor delete,
+        with nothing in the response to reveal the link had been made.
+        """
+        # Arrange - a journal that belongs to another user entirely
+        theirs = await journal_repo.save(
+            create_test_journal(title="Somebody Else's Trip", user_id=OTHER_USER_ID)
+        )
+        child = create_test_journal(title="Child Journal", parent_id=theirs.id)
+
+        # Act & Assert - refused, and refused the same way a missing id is
+        with pytest.raises(JournalNotFoundError) as foreign:
+            await journal_service.create_journal(child, clean_database)
+
+        absent = create_test_journal(title="Child Journal", parent_id=999_999)
+        with pytest.raises(JournalNotFoundError) as missing:
+            await journal_service.create_journal(absent, clean_database)
+
+        # Both refusals are the same sentence about the id they were handed, so
+        # nothing distinguishes a real journal that is not yours from one that
+        # does not exist.
+        assert foreign.value.message == f"Journal with ID {theirs.id} not found"
+        assert missing.value.message == "Journal with ID 999999 not found"
+
+        # Nothing was written
+        written = await clean_database.execute(
+            text("SELECT COUNT(*) FROM journals WHERE title = 'Child Journal'")
+        )
+        assert written.scalar_one() == 0
+
+    @pytest.mark.asyncio
+    async def test_update_journal_rejects_another_users_parent(
+        self, journal_service, journal_repo, clean_database: AsyncConnection
+    ):
+        """Re-parenting an existing journal onto another user's is refused too."""
+        # Arrange
+        theirs = await journal_repo.save(
+            create_test_journal(title="Somebody Else's Trip", user_id=OTHER_USER_ID)
+        )
+        mine = await journal_service.create_journal(
+            create_test_journal(title="My Journal"), clean_database
+        )
+
+        mine.parent_id = theirs.id
+
+        # Act & Assert
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.update_journal(mine, clean_database)
+
+        # The persisted journal is still a root
+        stored = await clean_database.execute(
+            text("SELECT parent_id FROM journals WHERE id = :id"), {"id": mine.id}
+        )
+        assert stored.scalar_one() is None
+
+    @pytest.mark.asyncio
+    async def test_update_journal_refuses_to_change_the_owner(
+        self, journal_service, clean_database: AsyncConnection
+    ):
+        """An update may not move a journal to a different user.
+
+        The UPDATE writes ``user_id`` straight from the entity it is handed and
+        the change calculation does not diff it, so without this guard the row
+        was silently re-owned and no history recorded it. The calendar sync
+        reaches exactly that: it rebuilds the journal taking parent_id and
+        order from the stored row but user_id from the event payload.
+        """
+        # Arrange
+        mine = await journal_service.create_journal(
+            create_test_journal(title="My Journal"), clean_database
+        )
+        impostor = create_test_journal(
+            journal_id=mine.id, title="My Journal", user_id=OTHER_USER_ID
+        )
+
+        # Act & Assert
+        with pytest.raises(JournalValidationError):
+            await journal_service.update_journal(impostor, clean_database)
+
+        stored = await clean_database.execute(
+            text("SELECT user_id FROM journals WHERE id = :id"), {"id": mine.id}
+        )
+        assert stored.scalar_one() == "user123"
+
+    @pytest.mark.asyncio
+    async def test_update_journal_refuses_an_owner_change_before_reparenting(
+        self, journal_service, journal_repo, clean_database: AsyncConnection
+    ):
+        """The owner guard runs first, so a re-parent cannot ride along with it.
+
+        The entity is internally consistent — it claims the other user's
+        ownership *and* points at that user's journal — which is what a parent
+        lookup reading the owner off the argument would accept. The guard
+        rejects the whole update before the hierarchy is consulted.
+        """
+        # Arrange
+        theirs = await journal_repo.save(
+            create_test_journal(title="Somebody Else's Trip", user_id=OTHER_USER_ID)
+        )
+        mine = await journal_service.create_journal(
+            create_test_journal(title="My Journal"), clean_database
+        )
+
+        impostor = create_test_journal(
+            journal_id=mine.id,
+            title="My Journal",
+            parent_id=theirs.id,
+            user_id=OTHER_USER_ID,
+        )
+
+        # Act & Assert
+        with pytest.raises(JournalValidationError):
+            await journal_service.update_journal(impostor, clean_database)
+
+        # Neither the parent nor the ownership moved
+        stored = await clean_database.execute(
+            text("SELECT parent_id, user_id FROM journals WHERE id = :id"),
+            {"id": mine.id},
+        )
+        assert stored.one() == (None, "user123")
 
     @pytest.mark.asyncio
     async def test_create_journal_max_depth_validation(
