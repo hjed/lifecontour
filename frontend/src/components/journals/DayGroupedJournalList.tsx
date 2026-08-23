@@ -19,10 +19,14 @@ const useIsomorphicLayoutEffect =
   typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 /**
- * Every rendered group carries `data-day-group` so the list can locate its own
- * first group without reaching for test ids.
+ * Days that hold journals carry `data-scroll-anchor` so the list can measure
+ * against one when older days are prepended. Only populated days qualify:
+ * `groupJournalsByDay` merges contiguous runs of *empty* days into a single
+ * collapsed group keyed by the run's start date, so an empty day next to the
+ * incoming chunk is re-keyed and its element replaced — useless as an anchor.
+ * A populated day is never merged, so React keeps its node across the prepend.
  */
-const DAY_GROUP_SELECTOR = '[data-day-group]';
+const SCROLL_ANCHOR_SELECTOR = '[data-scroll-anchor]';
 
 export interface DayGroupedJournalListProps {
   readonly journals: DisplayJournal[];
@@ -117,14 +121,19 @@ export function DayGroupedJournalList({
   // place, and anything they were about to click moves out from under the
   // pointer mid-interaction.
   //
-  // The anchor is the first group that already exists: every prepended day
-  // lands above it, so restoring its viewport offset restores the whole visible
-  // list. Measuring a real element rather than a scrollHeight delta keeps this
-  // self-correcting — where the browser's own scroll anchoring already did the
-  // work the delta is zero and we leave the scroll position alone.
+  // The anchor is the oldest day that already holds journals: everything the
+  // fetch prepends or re-collapses lands above it, so restoring its viewport
+  // offset restores the whole visible list. A list of nothing but empty days
+  // has no such anchor and falls back to the bottom sentinel, which is always
+  // last and so is also below every change. Measuring a real element rather
+  // than a scrollHeight delta keeps this self-correcting — where the browser's
+  // own scroll anchoring already did the work the delta is zero and we leave
+  // the scroll position alone.
   useIsomorphicLayoutEffect(() => {
     if (!isLoadingPrevious) return;
-    const element = listRef.current?.querySelector(DAY_GROUP_SELECTOR);
+    const element =
+      listRef.current?.querySelector(SCROLL_ANCHOR_SELECTOR) ??
+      bottomSentinelRef.current;
     if (!element) return;
     prependAnchorRef.current = {
       element,
@@ -333,7 +342,6 @@ export function DayGroupedJournalList({
                     <div
                       key={dStr}
                       className='space-y-3'
-                      data-day-group=''
                       data-testid={`journal-day-group-${dStr}`}
                     >
                       <h3 className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10 border-b py-2 text-lg font-semibold backdrop-blur'>
@@ -358,7 +366,6 @@ export function DayGroupedJournalList({
             <div
               key={`collapsed-${group.startDate}`}
               className='flex flex-col items-center justify-between gap-4 py-8 opacity-70 transition-opacity hover:opacity-100 sm:flex-row'
-              data-day-group=''
               data-testid={`journal-collapsed-group-${group.startDate}`}
             >
               <div className='text-muted-foreground flex w-full items-center gap-4 text-sm italic sm:w-auto'>
@@ -406,7 +413,7 @@ export function DayGroupedJournalList({
           <div
             key={group.date}
             className='space-y-3'
-            data-day-group=''
+            data-scroll-anchor={group.isEmpty ? undefined : ''}
             data-testid={`journal-day-group-${group.date}`}
           >
             <h3 className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10 border-b py-2 text-lg font-semibold backdrop-blur'>

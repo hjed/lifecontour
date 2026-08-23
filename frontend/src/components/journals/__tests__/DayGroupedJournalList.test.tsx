@@ -566,5 +566,84 @@ describe('DayGroupedJournalList', () => {
 
       expect(scrollBy).not.toHaveBeenCalled();
     });
+
+    it('still compensates when the oldest empty days merge into a collapsed group', () => {
+      // The anchor must survive the prepend. `groupJournalsByDay` merges
+      // contiguous empty days into one collapsed group keyed by the run's start
+      // date, so the oldest empty day is re-keyed and its element replaced —
+      // anchoring on it would silently skip compensation exactly when a whole
+      // week arrives. Anchoring on the oldest *populated* day avoids that:
+      // populated days are never merged.
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          dateBounds={{ start: '2026-04-26', end: '2026-04-29' }}
+        />
+      );
+
+      // Three empty days precede the populated one, each its own group.
+      expect(
+        screen.getByTestId('journal-day-group-2026-04-26')
+      ).toBeInTheDocument();
+
+      const anchor = anchorElement();
+      setViewportTop(anchor, 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          dateBounds={{ start: '2026-04-26', end: '2026-04-29' }}
+          isLoadingPrevious
+        />
+      );
+
+      // The older chunk holds no journals, so its days join the existing empty
+      // run: ten contiguous empty days now collapse into a single group and the
+      // previously-oldest day group is gone from the DOM.
+      setViewportTop(anchor, 220);
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          dateBounds={{ start: '2026-04-19', end: '2026-04-29' }}
+        />
+      );
+
+      expect(
+        screen.queryByTestId('journal-day-group-2026-04-26')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId('journal-collapsed-group-2026-04-19')
+      ).toBeInTheDocument();
+      expect(scrollBy).toHaveBeenCalledWith(0, 120);
+    });
+
+    it('falls back to the bottom sentinel when no day holds journals', () => {
+      // Nothing to anchor on, but the sentinel is always last and so is always
+      // below whatever the fetch prepends.
+      const { rerender } = render(
+        <DayGroupedJournalList journals={[]} collapseEmptyDays={false} />
+      );
+
+      const sentinel = screen.getByTestId('journal-bottom-sentinel');
+      setViewportTop(sentinel, 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={[]}
+          collapseEmptyDays={false}
+          isLoadingPrevious
+        />
+      );
+
+      setViewportTop(sentinel, 220);
+      rerender(
+        <DayGroupedJournalList journals={[]} collapseEmptyDays={false} />
+      );
+
+      expect(scrollBy).toHaveBeenCalledWith(0, 120);
+    });
   });
 });
