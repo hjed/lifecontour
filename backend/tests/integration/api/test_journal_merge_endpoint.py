@@ -80,6 +80,58 @@ async def test_merge_journal_endpoint_repoints_an_anchored_task(
 
 
 @pytest.mark.asyncio
+async def test_merge_journal_endpoint_reports_survivor_hierarchy(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """The merge response describes where the survivor sits in the hierarchy.
+
+    A merge leaves the target's own parent alone and adopts the source's
+    children, so a response carrying neither reads as though the merge
+    orphaned the survivor and dropped the children it just gained.
+    """
+    parent_id = await _create_journal(authenticated_client, "Parent Journal", "01")
+    target_id = await _create_journal(
+        authenticated_client, "Child Target", "01", parent_id=parent_id
+    )
+    source_id = await _create_journal(authenticated_client, "Source Journal", "01")
+    adopted_id = await _create_journal(
+        authenticated_client, "Adopted Child", "01", parent_id=source_id
+    )
+
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": source_id},
+            }
+        },
+    )
+
+    assert merge_res.status_code == 200, merge_res.text
+    attributes = merge_res.json()["data"]["attributes"]
+
+    # Summary ids are strings, as JSON:API resource identifiers are everywhere
+    # else in this API.
+    assert attributes["parent_id"] == parent_id
+    assert attributes["parent"] is not None
+    assert attributes["parent"]["id"] == str(parent_id)
+    assert attributes["parent"]["title"] == "Parent Journal"
+    assert attributes["depth"] == 2
+
+    # The count reports the child adopted from the source; the children
+    # themselves are summarised (with their types) by the detail route.
+    assert attributes["children_count"] == 1
+
+    detail_res = await authenticated_client.get(f"/api/journals/{target_id}")
+    assert detail_res.status_code == 200, detail_res.text
+    detail_attributes = detail_res.json()["data"]["attributes"]
+    assert [child["id"] for child in detail_attributes["children"]] == [str(adopted_id)]
+
+
+@pytest.mark.asyncio
 async def test_merge_journal_endpoint_success(
     authenticated_client: AsyncClient,
     async_connection: AsyncConnection,
@@ -633,23 +685,24 @@ async def test_merge_journals_moves_source_only_external_link(
     assert row[0] == "source-only-event-999"
 
 
-async def _create_journal(client: AsyncClient, title: str, day: str) -> int:
+async def _create_journal(
+    client: AsyncClient, title: str, day: str, parent_id: int | None = None
+) -> int:
     """Create a journal via the API and return its id."""
+    attributes: dict[str, Any] = {
+        "title": title,
+        "content": f"{title} content",
+        "event_date_range": {
+            "start": f"2024-01-{day}T00:00:00Z",
+            "end": f"2024-01-{day}T01:00:00Z",
+        },
+    }
+    if parent_id is not None:
+        attributes["parent_id"] = parent_id
+
     res = await client.post(
         "/api/journals",
-        json={
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": title,
-                    "content": f"{title} content",
-                    "event_date_range": {
-                        "start": f"2024-01-{day}T00:00:00Z",
-                        "end": f"2024-01-{day}T01:00:00Z",
-                    },
-                },
-            }
-        },
+        json={"data": {"type": "journals", "attributes": attributes}},
     )
     assert res.status_code == 201, res.text
     return int(res.json()["data"]["id"])

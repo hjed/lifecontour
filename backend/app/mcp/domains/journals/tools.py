@@ -486,6 +486,24 @@ async def _fetch_types_for_journal(
     )
 
 
+async def _fetch_parent_journal(
+    journal: Journal, journal_repo: SqlJournalRepository, user_id: str
+) -> Journal | None:
+    """Resolve the parent a journal hangs off, for the ``parent`` response field.
+
+    Every tool that returns a journal resolves the parent through here, so a
+    persisted ``parent_id`` cannot show up on one response and be missing from
+    the next — a read that omitted it made ``parent_id`` look ignored on create
+    even though the link was written.
+
+    The lookup is owner-scoped: somebody else's journal is reported as absent
+    rather than having its title read back to the caller (#1267).
+    """
+    if journal.parent_id is None:
+        return None
+    return await journal_repo.find_by_id_for_user(journal.parent_id, str(user_id))
+
+
 async def _fetch_journal_external_links(
     journal_id: int,
     db_connection: AsyncConnection,
@@ -2505,9 +2523,7 @@ async def create_journal_entry(
         repos.tag_repo,
     )
 
-    parent = None
-    if created_journal.parent_id is not None:
-        parent = await repos.journal_repo.find_by_id(created_journal.parent_id)
+    parent = await _fetch_parent_journal(created_journal, repos.journal_repo, user_id)
 
     # Convert to AI-friendly response
     response = JournalConverter.to_response(
@@ -2652,9 +2668,7 @@ async def update_journal_entry(
         repos.tag_repo,
     )
 
-    parent = None
-    if updated_journal.parent_id is not None:
-        parent = await repos.journal_repo.find_by_id(updated_journal.parent_id)
+    parent = await _fetch_parent_journal(updated_journal, repos.journal_repo, user_id)
 
     # Convert to AI-friendly response
     response = JournalConverter.to_response(
@@ -2718,6 +2732,10 @@ async def get_journal(
     if not journal or str(journal.user_id) != str(user_id):
         raise JournalNotFoundError(journal_id)
 
+    # Resolve the parent this journal hangs off, so a child created with a
+    # parent_id reads back as one.
+    parent = await _fetch_parent_journal(journal, journal_repo, user_id)
+
     # Get children if requested
     children = None
     if include_children:
@@ -2777,6 +2795,7 @@ async def get_journal(
         type_data=type_data,
         contacts=contacts,
         tags=journal_tags,
+        parent=parent,
         children=children,
         external_links=external_links,
         series=series,
@@ -3989,12 +4008,17 @@ async def merge_journals(
 
     journal_tags = await repos.tag_repo.get_tags_for_journal(target_journal_id)
 
+    # The merge leaves the survivor's parent_id alone, so the response has to
+    # report it — otherwise the target reads back as orphaned.
+    parent = await _fetch_parent_journal(merged_journal, repos.journal_repo, user_id)
+
     response = JournalConverter.to_response(
         journal=merged_journal,
         types=types,
         type_data=type_data,
         contacts=contacts,
         tags=journal_tags,
+        parent=parent,
     )
 
     return MCPResponseBuilder.success_response(response)

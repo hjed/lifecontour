@@ -5,6 +5,7 @@ Tests the full MCP journal tools with real database integration
 using Dishka dependency injection patterns.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -55,6 +56,7 @@ from app.mcp.domains.journals.tools import (
     register_journal_tools,
 )
 from tests.integration.mcp.http_helpers import (
+    call_mcp_tool,
     extract_mcp_json_payload,
     initialize_mcp_session,
     mcp_headers,
@@ -932,6 +934,71 @@ class TestJournalToolsIntegration:
             assert payload["parent"]["id"] == sample_journal_id
 
     @pytest.mark.asyncio
+    async def test_get_journal_returns_parent_summary_integration(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        """Reading a child back reports the parent it was created under.
+
+        The create response already carried the parent, so a link that is
+        absent here looks to an agent like ``parent_id`` was ignored on create
+        even though it was persisted.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            create_payload = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "create_journal_entry",
+                {
+                    "request": {
+                        "title": "Child Journal Read Back",
+                        "content": "Created under a parent",
+                        "event_date_range": {
+                            "start": "2024-01-15T00:00:00Z",
+                            "end": "2024-01-15T01:00:00Z",
+                        },
+                        "parent_id": sample_journal_id,
+                    }
+                },
+            )
+            assert "error" not in create_payload
+            child_id = create_payload["id"]
+
+            read_payload = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "get_journal",
+                {"journal_id": child_id},
+            )
+
+        assert "error" not in read_payload
+        assert read_payload["id"] == child_id
+        assert read_payload["parent"]["id"] == sample_journal_id
+        assert read_payload["parent"]["title"] == "Test Journal"
+        assert "Child of: Test Journal" in read_payload["summary"]
+
+    @pytest.mark.asyncio
+    async def test_get_journal_root_journal_has_no_parent_integration(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        """A journal with no parent still reports ``parent`` as null."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            payload = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "get_journal",
+                {"journal_id": sample_journal_id},
+            )
+
+        assert "error" not in payload
+        assert payload["id"] == sample_journal_id
+        assert payload["parent"] is None
+        assert "Child of" not in payload["summary"]
+
+    @pytest.mark.asyncio
     async def test_update_journal_parent_id_integration(
         self, authenticated_lifespan_client, sample_journal_id: int
     ) -> None:
@@ -1414,18 +1481,9 @@ class TestActivityMcpToolsMountedIntegration:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": tool_name, "arguments": arguments},
-            },
-            headers=mcp_headers(session_id),
+        return await call_mcp_tool(
+            authenticated_client, session_id, tool_name, arguments
         )
-        assert response.status_code == 200
-        return extract_mcp_json_payload(response.text)
 
     async def _insert_journal(
         self,
@@ -2408,8 +2466,6 @@ class TestMergeMcpToolsMountedIntegration:
             task_id = int(task_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2433,6 +2489,68 @@ class TestMergeMcpToolsMountedIntegration:
         assert row.creating_journal_id == target_id
         assert row.due_journal_id == due_id
         assert row.status == "not_done"
+
+    async def _create_journal_via_rest(
+        self,
+        authenticated_client: Any,
+        title: str,
+        parent_id: int | None = None,
+    ) -> int:
+        """Create a journal over REST and return its id."""
+        attributes: dict[str, Any] = {
+            "title": title,
+            "content": f"{title} content",
+            "event_date_range": {
+                "start": "2024-06-01T00:00:00Z",
+                "end": "2024-06-01T23:59:59Z",
+            },
+        }
+        if parent_id is not None:
+            attributes["parent_id"] = parent_id
+
+        response = await authenticated_client.post(
+            "/api/journals",
+            json={"data": {"type": "journals", "attributes": attributes}},
+        )
+        assert response.status_code == 201, response.text
+        return int(response.json()["data"]["id"])
+
+    @pytest.mark.asyncio
+    async def test_merge_journals_keeps_target_parent(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """The merge response reports the parent the target still hangs off.
+
+        The merge never touches ``parent_id``, so a response without it reads
+        as though the survivor was orphaned by the merge.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            parent_id = await self._create_journal_via_rest(
+                authenticated_client, "Parent Journal"
+            )
+            target_id = await self._create_journal_via_rest(
+                authenticated_client, "Child Target", parent_id=parent_id
+            )
+            source_id = await self._create_journal_via_rest(
+                authenticated_client, "Source Journal"
+            )
+
+            session_id = await initialize_mcp_session(authenticated_client)
+            payload = await self._call_tool(
+                authenticated_client,
+                session_id,
+                "merge_journals",
+                {
+                    "target_journal_id": target_id,
+                    "merge_data": json.dumps({"source_journal_id": source_id}),
+                },
+            )
+
+        assert payload["id"] == target_id
+        assert payload["parent"]["id"] == parent_id
+        assert payload["parent"]["title"] == "Parent Journal"
 
     @pytest.mark.asyncio
     async def test_merge_journals_simple(
@@ -2484,8 +2602,6 @@ class TestMergeMcpToolsMountedIntegration:
 
             # Merge via MCP
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2548,8 +2664,6 @@ class TestMergeMcpToolsMountedIntegration:
             source_id = int(source_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2596,8 +2710,6 @@ class TestMergeMcpToolsMountedIntegration:
             journal_id = int(target_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
@@ -2642,8 +2754,6 @@ class TestMergeMcpToolsMountedIntegration:
             target_id = int(target_response.json()["data"]["id"])
 
             session_id = await initialize_mcp_session(authenticated_client)
-            import json
-
             payload = await self._call_tool(
                 authenticated_client,
                 session_id,
