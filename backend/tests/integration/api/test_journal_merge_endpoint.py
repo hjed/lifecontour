@@ -1010,3 +1010,323 @@ async def test_merge_endpoint_rejects_an_unknown_fitness_merge_mode(
 
     assert res.status_code == 400, res.text
     assert res.json()["errors"][0]["source"]["pointer"].endswith("fitness_merge_mode")
+
+
+async def _create_event_calendar(connection: AsyncConnection, name: str) -> str:
+    """Create a calendar directly and return its id."""
+    from uuid import uuid4
+
+    calendar_id = uuid4()
+    await connection.execute(
+        text("""
+            INSERT INTO calendars (id, user_id, name, color)
+            VALUES (:id, :user_id, :name, :color)
+        """),
+        {
+            "id": calendar_id,
+            "user_id": "test-user-123",
+            "name": name,
+            "color": "#3B82F6",
+        },
+    )
+    return str(calendar_id)
+
+
+async def _create_event_journal(
+    client: AsyncClient,
+    title: str,
+    day: str,
+    calendar_id: str,
+    start_time: str,
+    end_time: str,
+) -> int:
+    """Create an EVENT journal with clock times via the API and return its id."""
+    res = await client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": title,
+                    "content": f"{title} content",
+                    "event_date_range": {
+                        "start": f"2024-01-{day}T08:00:00Z",
+                        "end": f"2024-01-{day}T12:00:00Z",
+                    },
+                    "types": ["EVENT"],
+                    "type_data": {
+                        "EVENT": {
+                            "calendar_id": calendar_id,
+                            "start_time": start_time,
+                            "end_time": end_time,
+                            "is_all_day": False,
+                        }
+                    },
+                },
+            }
+        },
+    )
+    assert res.status_code == 201, res.text
+    return int(res.json()["data"]["id"])
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_accepts_clock_time_type_data_overrides(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """A time override arrives as a JSON string and must reach a TIME column typed.
+
+    The merge panel echoes back what the read API gave it, so ``start_time`` is
+    ``'19:30:00'`` rather than a ``time``. Binding that straight into the UPDATE
+    made asyncpg fail with "'str' object has no attribute 'hour'".
+    """
+    from datetime import time
+
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+    target_id = await _create_event_journal(
+        authenticated_client, "Target event", "01", calendar_id, "09:00:00", "10:00:00"
+    )
+    source_id = await _create_event_journal(
+        authenticated_client, "Source event", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {
+                        "type_data": {
+                            "event": {
+                                "start_time": "19:30:00",
+                                "end_time": "22:00:00",
+                            }
+                        }
+                    },
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 200, res.text
+
+    row = (
+        await async_connection.execute(
+            text(
+                "SELECT start_time, end_time FROM journal_calendar_info"
+                " WHERE journal_id = :id"
+            ),
+            {"id": target_id},
+        )
+    ).fetchone()
+    assert row is not None
+    assert row.start_time == time(19, 30)
+    assert row.end_time == time(22, 0)
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_rejects_an_unparseable_time_override(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """Garbage in a typed column is the caller's error, not a driver crash."""
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+    target_id = await _create_event_journal(
+        authenticated_client, "Target event", "01", calendar_id, "09:00:00", "10:00:00"
+    )
+    source_id = await _create_event_journal(
+        authenticated_client, "Source event", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {
+                        "type_data": {"event": {"start_time": "half past seven"}}
+                    },
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 400, res.text
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_rejects_a_wrong_typed_time_override(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """A number is no more bindable to a TIME column than a bad string is.
+
+    The request schema types type-data values as ``Any``, so a payload like
+    ``{"start_time": 1930}`` reaches the UPDATE with the wrong Python type.
+    """
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+    target_id = await _create_event_journal(
+        authenticated_client, "Target event", "01", calendar_id, "09:00:00", "10:00:00"
+    )
+    source_id = await _create_event_journal(
+        authenticated_client, "Source event", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {"type_data": {"event": {"start_time": 1930}}},
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 400, res.text
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_turns_an_allday_target_timed_when_asked(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """Keeping a timed source's range must not leave the event marked all-day.
+
+    The merge panel folds ``is_all_day`` in with the range, so the two arrive
+    together; the merged row then takes the source's clock times rather than
+    having them cleared as an all-day event's times are.
+    """
+    from datetime import time
+
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+
+    all_day_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "All day target",
+                    "content": "All day content",
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T23:59:59Z",
+                    },
+                    "types": ["EVENT"],
+                    "type_data": {
+                        "EVENT": {"calendar_id": calendar_id, "is_all_day": True}
+                    },
+                },
+            }
+        },
+    )
+    assert all_day_res.status_code == 201, all_day_res.text
+    target_id = int(all_day_res.json()["data"]["id"])
+
+    source_id = await _create_event_journal(
+        authenticated_client, "Timed source", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {
+                        "event_date_range": {
+                            "start": "2024-01-01T08:00:00Z",
+                            "end": "2024-01-01T12:00:00Z",
+                        },
+                        "type_data": {"event": {"is_all_day": False}},
+                    },
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 200, res.text
+
+    row = (
+        await async_connection.execute(
+            text(
+                "SELECT is_all_day, start_time, end_time FROM journal_calendar_info"
+                " WHERE journal_id = :id"
+            ),
+            {"id": target_id},
+        )
+    ).fetchone()
+    assert row is not None
+    assert row.is_all_day is False
+    assert row.start_time == time(19, 30)
+    assert row.end_time == time(22, 0)
+
+
+@pytest.mark.integration
+async def test_merge_endpoint_honours_an_explicit_null_timezone_override(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """ "No zone" is an answer, and must beat the fill-from-source default.
+
+    A synced event carries a timezone where a hand-written one does not. Keeping
+    the zoneless side's clock times has to keep them zoneless too, or the other
+    side's zone survives and re-reads them.
+    """
+    calendar_id = await _create_event_calendar(async_connection, "Shared Calendar")
+    target_id = await _create_event_journal(
+        authenticated_client, "Target event", "01", calendar_id, "09:00:00", "10:00:00"
+    )
+    source_id = await _create_event_journal(
+        authenticated_client, "Source event", "01", calendar_id, "19:30:00", "22:00:00"
+    )
+    await async_connection.execute(
+        text("UPDATE journal_calendar_info SET timezone = :tz WHERE journal_id = :id"),
+        {"tz": "Pacific/Auckland", "id": source_id},
+    )
+
+    res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {
+                        "type_data": {
+                            "event": {
+                                "start_time": "09:00:00",
+                                "end_time": "10:00:00",
+                                "timezone": None,
+                            }
+                        }
+                    },
+                },
+            }
+        },
+    )
+
+    assert res.status_code == 200, res.text
+
+    row = (
+        await async_connection.execute(
+            text("SELECT timezone FROM journal_calendar_info WHERE journal_id = :id"),
+            {"id": target_id},
+        )
+    ).fetchone()
+    assert row is not None
+    assert row.timezone is None
