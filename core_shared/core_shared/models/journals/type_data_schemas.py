@@ -170,9 +170,8 @@ class MoodRatingTypeData(TypeDataModel):
 class PlanDocumentTypeData(TypeDataModel):
     """One linked document on a PLAN journal."""
 
-    url: str = Field(
+    url: NonBlankStr = Field(
         description="Document URL",
-        min_length=1,
         max_length=MAX_PLAN_DOCUMENT_URL_LENGTH,
     )
     title: str | None = Field(
@@ -470,7 +469,7 @@ class OutdoorPlanningTypeData(TypeDataModel):
 class OutdoorTrainingTypeData(TypeDataModel):
     """OUTDOOR_TRAINING."""
 
-    focus_areas: list[str] | None = Field(
+    focus_areas: list[NonBlankStr] | None = Field(
         default=None,
         description=(
             "Skills trained. Prefer a value from enums.activity_subtypes; "

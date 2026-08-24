@@ -278,6 +278,36 @@ class TestBlankTextIsRefused:
         with pytest.raises(ValidationError):
             model.model_validate({field: "   "})
 
+    def test_a_blank_plan_document_url_is_refused(self) -> None:
+        """``_build_plan_document`` rejects it with .strip(); min_length did not."""
+        from core_shared.models.journals.type_data_schemas import PlanTypeData
+
+        with pytest.raises(ValidationError):
+            PlanTypeData.model_validate({"documents": [{"url": "   "}]})
+
+    def test_a_blank_focus_area_is_refused(self) -> None:
+        """OutdoorTrainingData requires every entry to be non-blank."""
+        from core_shared.models.journals.type_data_schemas import (
+            OutdoorTrainingTypeData,
+        )
+
+        with pytest.raises(ValidationError):
+            OutdoorTrainingTypeData.model_validate(
+                {"focus_areas": ["bushwalking", "   "]}
+            )
+
+    def test_free_text_focus_areas_still_pass(self) -> None:
+        """Non-blank free text stays allowed — only blanks are refused."""
+        from core_shared.models.journals.type_data_schemas import (
+            OutdoorTrainingTypeData,
+        )
+
+        parsed = OutdoorTrainingTypeData.model_validate(
+            {"focus_areas": ["bushwalking", "knot tying"]}
+        )
+
+        assert parsed.focus_areas == ["bushwalking", "knot tying"]
+
     def test_null_still_clears_the_field(self) -> None:
         """Clearing is a real intention; blank is not the way to express it."""
         assert OutdoorActivityTypeData.model_validate({"role": None}).role is None
