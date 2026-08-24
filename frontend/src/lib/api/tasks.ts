@@ -89,6 +89,43 @@ export const TASK_DUE_JOURNAL_NOT_FUTURE = 'TASK_DUE_JOURNAL_NOT_FUTURE';
 export const TASK_JOURNAL_IS_ANCHOR = 'TASK_JOURNAL_IS_ANCHOR';
 
 /**
+ * The domain's refusal of a field's *value* — empty text, a missing anchor.
+ *
+ * Unlike the three above, this one code covers several fields, so a surface
+ * cannot decide where to put it from the code alone. `taskValidationField`
+ * below reads the field out of the error's `meta`.
+ */
+export const TASK_VALIDATION_ERROR = 'TASK_VALIDATION_ERROR';
+
+/**
+ * The refusal a contact draws when it does not exist or is not the user's.
+ *
+ * Reachable from a create carrying contacts, where it belongs against the
+ * contact field: a contact deleted in another tab is still in this form's
+ * chosen list until the request comes back saying so.
+ */
+export const CONTACT_NOT_FOUND = 'CONTACT_NOT_FOUND';
+
+/**
+ * Which field a `TASK_VALIDATION_ERROR` is about, or `null` for anything else.
+ *
+ * The name is in the message too — every one of these reads `"{field}: ..."` —
+ * but a form deciding which input to mark from an English prefix breaks
+ * silently the first time the wording changes, so the backend sends it as
+ * `meta.field` and this reads it from there. `null` rather than a guess when
+ * the error is a different one, or carries no meta: a caller that cannot place
+ * a refusal on a field should leave it to the toast rather than pick a field
+ * at random.
+ */
+export function taskValidationField(error: unknown): string | null {
+  if (!(error instanceof TaskApiError)) return null;
+  if (error.code !== TASK_VALIDATION_ERROR) return null;
+
+  const field = error.meta?.field;
+  return typeof field === 'string' ? field : null;
+}
+
+/**
  * Query keys for tasks.
  *
  * `details`, `journalLists` and `upcoming` are **siblings** under `all`, never

@@ -589,4 +589,92 @@ describe('FutureJournalPicker', () => {
       ).toBeNull();
     });
   });
+
+  /**
+   * The specification's *"if the user has no future journals, the product
+   * should say so plainly and offer to create one, rather than presenting an
+   * empty picker"*.
+   *
+   * The offer lives here rather than in the dialogs above it, so that both the
+   * create form and the retarget dialog get it — the retarget dialog's empty
+   * state was a dead end until this landed.
+   *
+   * It appears only where it is the honest answer: with nothing in the window
+   * and no search narrowing it. A search that matched nothing says something
+   * about the search, and a listing that failed or has not arrived says
+   * nothing about what the user has at all.
+   */
+  describe('the offer to create a journal', () => {
+    const offer = () => screen.queryByTestId('future-journal-create-offer');
+
+    it('offers to create a journal when there is nothing to choose from', () => {
+      renderPicker();
+
+      const link = offer();
+      expect(link).toBeInTheDocument();
+      expect(link).toHaveAttribute('href', '/journals/new');
+      expect(link).toHaveAccessibleName(/create a journal/i);
+    });
+
+    /**
+     * This picker lives inside dialogs that are mid-write, so following the
+     * offer in place would throw away the task being composed and land the
+     * user on the new journal with no route back. A new tab leaves the dialog
+     * standing, and the app refetches on window focus, so the journal they
+     * just made is in this list when they come back to it.
+     */
+    it('opens the offer in a new tab, and says that it does', () => {
+      renderPicker();
+
+      const link = offer();
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link?.getAttribute('rel') ?? '').toContain('noopener');
+      // Said out loud rather than left as a surprise.
+      expect(link).toHaveAccessibleName(/new tab/i);
+    });
+
+    it('is not offered while there are journals to choose from', () => {
+      mockUseFutureJournals.mockReturnValue(
+        queryResult({ data: [option('1'), option('2')] })
+      );
+
+      renderPicker();
+
+      expect(offer()).toBeNull();
+    });
+
+    it('is not offered when a search is what came back empty', async () => {
+      const user = userEvent.setup();
+      renderPicker();
+
+      await user.type(screen.getByRole('combobox'), 'nothing');
+
+      await waitFor(() =>
+        expect(screen.getByTestId('future-journal-empty')).toHaveTextContent(
+          /no future journals match/i
+        )
+      );
+      expect(offer()).toBeNull();
+    });
+
+    it('is not offered while the listing is still loading', () => {
+      mockUseFutureJournals.mockReturnValue(
+        queryResult({ isLoading: true, data: undefined })
+      );
+
+      renderPicker();
+
+      expect(offer()).toBeNull();
+    });
+
+    it('is not offered when the listing failed', () => {
+      mockUseFutureJournals.mockReturnValue(
+        queryResult({ isError: true, data: undefined })
+      );
+
+      renderPicker();
+
+      expect(offer()).toBeNull();
+    });
+  });
 });

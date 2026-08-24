@@ -301,10 +301,22 @@ Conventions:
 - **Both an id and a label** for anything the caller is expected to link to, so
   it can render the link and follow it without a second request.
 
-`JournalHasAnchoredTasksError` is the current example: `DELETE
-/api/journals/{id}` answers 409 with code `JOURNAL_HAS_ANCHORED_TASKS` and a
-`meta.blocking_tasks` list giving each blocking task's id, text, status and
-blocking roles, plus the id and title of the journal it can be actioned from.
+Two errors use it today, for the two different reasons a refusal outgrows its
+prose.
+
+`JournalHasAnchoredTasksError` names **other rows the caller must deal with**:
+`DELETE /api/journals/{id}` answers 409 with code `JOURNAL_HAS_ANCHORED_TASKS`
+and a `meta.blocking_tasks` list giving each blocking task's id, text, status
+and blocking roles, plus the id and title of the journal it can be actioned
+from.
+
+`TaskValidationError` names **the field the refusal is about**: every task
+write can answer 400 with code `TASK_VALIDATION_ERROR` and `meta.field`. The
+name is in the message too — these read `"{field}: ..."` — but a form deciding
+which input to mark from an English prefix breaks silently the first time the
+wording changes. One code covering several fields is what makes this necessary:
+a refusal a client can place from the code alone (`TASK_DUE_JOURNAL_NOT_FUTURE`,
+`TASK_JOURNAL_IS_ANCHOR`) needs no meta and has none.
 
 ### FastAPI Exception Handling
 

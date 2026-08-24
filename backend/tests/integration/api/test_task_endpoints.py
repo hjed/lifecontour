@@ -391,6 +391,31 @@ class TestRejectedBodies:
         assert _error(response.json())["code"] == "TASK_VALIDATION_ERROR"
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
+    async def test_the_rejection_names_the_field_as_data(
+        self,
+        authenticated_client: AsyncClient,
+        task_anchors: tuple[int, int],
+    ):
+        """A form has to put this refusal against the field that caused it.
+
+        The field is in the message too — ``"text: ..."`` — but a client
+        deciding which input to mark from an English prefix breaks silently the
+        first time the wording changes, so it travels as ``meta`` beside the
+        prose rather than only inside it.
+        """
+        creating_id, due_id = task_anchors
+
+        response = await authenticated_client.post(
+            f"/api/journals/{creating_id}/tasks",
+            json=_body(text="   ", due_journal_id=due_id),
+        )
+
+        assert response.status_code == 400
+        error = _error(response.json())
+        assert error["meta"] == {"field": "text"}
+        # Beside, not instead of: the prose a person reads is unchanged.
+        assert str(error["detail"]).startswith("text: ")
+
     async def test_a_body_carrying_now_is_rejected(
         self,
         authenticated_client: AsyncClient,

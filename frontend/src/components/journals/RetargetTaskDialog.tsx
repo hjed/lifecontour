@@ -54,9 +54,8 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  useFormField,
 } from '@/components/ui/form';
-import { FutureJournalPicker } from '@/components/journals/FutureJournalPicker';
+import { DueJournalFormField } from '@/components/journals/FutureJournalPicker';
 import {
   TASK_DUE_JOURNAL_NOT_FUTURE,
   TASK_REOPEN_NOT_ACKNOWLEDGED,
@@ -111,42 +110,6 @@ export interface RetargetTaskDialogProps {
    * task" guard, which the actions group owns.
    */
   readonly disabled?: boolean;
-}
-
-/**
- * The picker, wired to the form field it serves.
- *
- * Not wrapped in `FormControl`: that clones its `id`, `aria-describedby` and
- * `aria-invalid` onto the child's root element, which here is the picker's
- * container rather than its input. The three are passed to the input
- * explicitly instead, which is what the picker's props exist for.
- */
-function DueJournalField({
-  inputId,
-  value,
-  onSelect,
-  currentDueJournalId,
-  disabled,
-}: {
-  readonly inputId: string;
-  readonly value: FutureJournalOption | null;
-  readonly onSelect: (journal: FutureJournalOption) => void;
-  readonly currentDueJournalId: string;
-  readonly disabled: boolean;
-}) {
-  const { error, formMessageId } = useFormField();
-
-  return (
-    <FutureJournalPicker
-      inputId={inputId}
-      value={value}
-      onSelect={onSelect}
-      currentDueJournalId={currentDueJournalId}
-      disabled={disabled}
-      invalid={Boolean(error)}
-      describedById={error ? formMessageId : undefined}
-    />
-  );
 }
 
 export function RetargetTaskDialog({
@@ -392,7 +355,7 @@ export function RetargetTaskDialog({
                     <FormLabel htmlFor={dueJournalInputId}>
                       Journal this task is due in
                     </FormLabel>
-                    <DueJournalField
+                    <DueJournalFormField
                       inputId={dueJournalInputId}
                       value={field.value}
                       onSelect={journal => field.onChange(journal)}

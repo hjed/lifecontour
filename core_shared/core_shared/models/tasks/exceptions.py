@@ -1,7 +1,7 @@
 """Exceptions for the tasks domain."""
 
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 
 from core_shared.exceptions import DomainError
 
@@ -28,6 +28,22 @@ class TaskValidationError(TaskDomainError):
         super().__init__(f"{field}: {message}", 400)
         # Store field separately for programmatic access (e.g. in error handlers)
         self.field = field
+
+    def error_meta(self) -> dict[str, Any]:
+        """The field as data, so a surface need not read it out of the prose.
+
+        The name is in the message as well — every refusal here reads
+        ``"{field}: ..."`` — but a form deciding which input to mark from an
+        English prefix breaks silently the first time the wording changes. This
+        puts the same name on both surfaces at once: REST renders it as the
+        JSON:API error object's ``meta`` and MCP as the failure payload's
+        context, so a create form and an agent correcting the same refusal are
+        told which field in the same way.
+
+        Added *beside* the message rather than instead of it, so every caller
+        that reads only the prose sees exactly what it saw before.
+        """
+        return {"field": self.field}
 
 
 class TaskNotFoundError(TaskDomainError):

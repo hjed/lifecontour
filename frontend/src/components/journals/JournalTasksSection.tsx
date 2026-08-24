@@ -3,21 +3,25 @@
  *
  * The specification gives a journal exactly three groups — tasks **due** in it,
  * tasks **created** in it, and tasks it merely **mentions** — and this is one of
- * only two surfaces where tasks are worked with at all. It is read-only in
- * ITER18-001 Phase 16; creating, actioning and retargeting arrive in Phases
- * 17–20.
+ * only two surfaces where tasks are worked with at all. The card's header
+ * carries the two ways a task arrives on a journal: creating one here, and
+ * attaching one that already exists elsewhere as a mention.
  *
  * Every linked task appears here in every status, lapsed ones included. A
  * lapsed task leaves the dashboard silently and its journals are where the user
  * is meant to meet it again, so this listing must never filter one out.
  *
- * **A journal with no tasks still renders the card**, which narrows a decision
- * Phase 16 made. That decision's reason was a skeleton flashing on nearly every
- * journal detail view, and it still holds — the *loading* pass renders nothing.
- * What changed is that Phase 19 gives the card an affordance of its own, and
- * the journal most likely to want "attach an existing task" is exactly the one
- * with nothing on it yet; a card that hid itself would put the control out of
- * reach precisely where it is wanted.
+ * **A journal with no tasks still renders the card.** The original rule was
+ * that nothing renders when there is nothing to show, and its reason — a
+ * skeleton flashing on nearly every journal detail view — still holds for the
+ * *loading* pass, which renders nothing. What changed is that the card gained
+ * affordances of its own, and the journal most likely to want one is exactly
+ * the one with nothing on it yet; a card that hid itself would put them out of
+ * reach precisely where they are wanted.
+ *
+ * **A failed listing carries the create affordance but not the attach one.**
+ * Attaching must exclude the tasks already linked here and reads that set from
+ * this listing; creating needs nothing from it.
  */
 
 'use client';
@@ -26,6 +30,7 @@ import { useId } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useJournalTasks } from '@/lib/api/tasks';
 import { AttachTaskDialog } from './AttachTaskDialog';
+import { CreateTaskDialog } from './CreateTaskDialog';
 import {
   TaskLinkRole,
   type JournalTaskGroupIds,
@@ -99,8 +104,14 @@ export function JournalTasksSection({ journalId }: JournalTasksSectionProps) {
   if (isError && !data) {
     return (
       <Card data-testid='journal-tasks-section'>
-        <CardHeader>
+        <CardHeader className='flex flex-row items-center justify-between gap-3 space-y-0'>
           <CardTitle className='text-lg'>Tasks</CardTitle>
+          {/* Offered here, unlike the attach affordance beside it, because
+              creating needs nothing from this listing: the journal being
+              viewed is the creating journal and the due journal comes from the
+              picker's own read. A journal whose tasks failed to load is not a
+              journal a user should be unable to write a commitment down in. */}
+          <CreateTaskDialog journalId={journalId} />
         </CardHeader>
         <CardContent>
           <p role='status' className='text-muted-foreground text-sm'>
@@ -137,7 +148,13 @@ export function JournalTasksSection({ journalId }: JournalTasksSectionProps) {
     <Card data-testid='journal-tasks-section'>
       <CardHeader className='flex flex-row items-center justify-between gap-3 space-y-0'>
         <CardTitle className='text-lg'>Tasks</CardTitle>
-        <AttachTaskDialog journalId={journalId} linkedTaskIds={linkedTaskIds} />
+        <div className='flex items-center gap-2'>
+          <AttachTaskDialog
+            journalId={journalId}
+            linkedTaskIds={linkedTaskIds}
+          />
+          <CreateTaskDialog journalId={journalId} />
+        </div>
       </CardHeader>
       <CardContent className='space-y-6'>
         {groups.length === 0 && (
