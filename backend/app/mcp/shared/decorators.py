@@ -27,19 +27,8 @@ from app.core.contacts.models.exceptions import (
     DuplicateTagNameError,
     TagNotFoundError,
 )
+from app.infrastructure.database_errors import describe_data_error
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
-
-
-def _database_rejection(error: DataError) -> str:
-    """The driver's own reason, without the SQL and parameters around it.
-
-    A ``DataError`` carries the statement and every bound value; echoing those
-    back would bury the one line that says what was wrong, and would repeat the
-    caller's data into the response.
-    """
-    original = getattr(error, "orig", None)
-    reason = str(original) if original is not None else str(error)
-    return reason.strip().splitlines()[0] if reason.strip() else "Invalid value"
 
 
 def mcp_unified_error_handler(
@@ -244,10 +233,12 @@ def mcp_unified_error_handler(
                 # of range, wrong type — is a bad request, not a server fault,
                 # and the driver's message names the constraint. Reporting it
                 # as an internal error tells an agent nothing it can act on.
+                # describe_data_error redacts the literal Postgres quotes into
+                # that message, so the caller's own data is not read back to it.
                 MCPLogger.log_validation_error(operation_name, str(e))
                 return MCPResponseBuilder.validation_error_response(
                     "type_data" if operation_type == "journal" else "Input",
-                    _database_rejection(e),
+                    describe_data_error(e),
                 )
 
             except Exception as e:  # noqa: BLE001

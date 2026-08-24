@@ -53,11 +53,7 @@ async def test_database_rejection_names_the_constraint() -> None:
 
 @pytest.mark.asyncio
 async def test_database_rejection_does_not_echo_the_statement() -> None:
-    """The SQL and the bound values belong in the log, not the response.
-
-    Echoing them back buries the one useful line and repeats the caller's own
-    data into the answer.
-    """
+    """The SQL and the bound values belong in the log, not the response."""
 
     @mcp_unified_error_handler("update_journal_entry", "journal")
     async def tool() -> str:
@@ -71,6 +67,32 @@ async def test_database_rejection_does_not_echo_the_statement() -> None:
 
     assert "INSERT INTO" not in payload["message"]
     assert "secret-value" not in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_database_rejection_redacts_a_quoted_literal() -> None:
+    """Postgres quotes the rejected value into the message itself.
+
+    Truncation happens to name no value, so a test built only on that one
+    passes without the code guaranteeing anything. These messages carry the
+    caller's own submitted data in their first line, and the handlers they
+    reach are global — so the literal has to be redacted, not merely left
+    un-repeated.
+    """
+
+    @mcp_unified_error_handler("update_journal_entry", "journal")
+    async def tool() -> str:
+        raise DataError(
+            "INSERT INTO journals (id) VALUES ($1)",
+            {"id": "patient-4821-078051120"},
+            Exception('invalid input syntax for type uuid: "patient-4821-078051120"'),
+        )
+
+    payload = json.loads(await tool())
+
+    assert "patient-4821-078051120" not in payload["message"]
+    # The shape of the failure is what makes it actionable, so it survives.
+    assert "invalid input syntax for type uuid" in payload["message"]
 
 
 @pytest.mark.asyncio

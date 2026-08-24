@@ -84,6 +84,7 @@ from app.infrastructure.auth.exceptions import (
     OAuthError,
     UnauthorizedError,
 )
+from app.infrastructure.database_errors import describe_data_error
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -255,12 +256,14 @@ async def database_data_error_handler(request: Request, exc: DataError) -> JSONR
     A ``DataError`` — a value too long for its column, out of range, or of the
     wrong type — is the database refusing the caller's input, not the server
     failing. The catch-all reported it as a 500, which gives a client nothing
-    to act on. The driver's first line names the constraint; the SQL and the
-    bound parameters around it are left in the log rather than echoed back.
+    to act on.
+
+    ``describe_data_error`` keeps the shape of the failure and redacts the
+    literal Postgres quotes into several of these messages, so this global
+    handler cannot read a submitted value back out in an HTTP response. The
+    statement, its bound parameters and the unredacted text stay in the log.
     """
-    original = getattr(exc, "orig", None)
-    reason = str(original) if original is not None else str(exc)
-    detail = reason.strip().splitlines()[0] if reason.strip() else "Invalid value"
+    detail = describe_data_error(exc)
 
     logger.warning(
         "Database rejected a value",
