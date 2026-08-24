@@ -193,7 +193,10 @@ where tasks are worked with; there is no `/tasks` route.
 - **A failed listing is the one case that does render.** One quiet line, because
   hiding the section on error is indistinguishable from "this journal has no
   tasks" — a journal whose lapsed tasks failed to load would read as clean,
-  which is the outcome the lapsed design exists to prevent.
+  which is the outcome the lapsed design exists to prevent. It carries the
+  **create** affordance but not the **attach** one, and the difference is the
+  rule rather than an inconsistency: attach needs the set of tasks already
+  linked here and reads it from this listing, and create needs nothing from it.
 - **Lapse wording lives in `lib/task-display.ts`, not in the components.** The
   backend ships `LapseReason` as structured data so surfaces can word it
   differently, and the specification requires a journal to make clear that a
@@ -356,9 +359,9 @@ lapsed)` in `lib/task-display.ts`: **Resurrect**, **Reschedule**, **Reopen**.
 `FutureJournalPicker` (`components/journals/FutureJournalPicker.tsx`) is what
 makes the fifth invariant workable: a due journal must be an **existing**
 journal dated after today, so there is no bare date picker anywhere and nothing
-creates a journal as a side effect of holding a task. It is deliberately narrow
-so the create-a-task form can mount it unchanged when that surface arrives;
-nothing but the retarget dialog uses it today.
+creates a journal as a side effect of holding a task. It is deliberately narrow,
+which is what lets the retarget dialog and the create-a-task form mount the same
+component unchanged.
 
 - **The ordering is assembled in the browser because the endpoint cannot be
   asked for it, and the naive way round is worse than no ordering at all.** `GET
@@ -446,6 +449,49 @@ nothing but the retarget dialog uses it today.
   **`aria-expanded` follows whether the listbox actually holds anything**: it is
   hidden while empty, loading or failed, and a combobox claiming to be expanded
   would be pointing assistive technology at an element that is not displayed.
+- **An empty window offers to create a journal**, which is the specification's
+  "say so plainly and offer to create one, rather than presenting an empty
+  picker". It lives in the picker so both dialogs have it — the retarget dialog
+  was a dead end here until it landed — and it appears only where it is the
+  honest answer: with nothing in the window and **no search** narrowing it,
+  because an empty search says something about the search rather than about the
+  user's calendar, and never while the listing is loading or has failed. The
+  wording keeps saying the journals are not in the next ninety days and keeps
+  offering search for a later one; the offer is added, not substituted.
+- **"No search" means the live query *and* the debounced one.** The two
+  disagree for the length of the debounce in each direction, and a gate reading
+  either alone is wrong in one of them: keyed to the debounced term, the offer
+  goes on being shown to somebody who has just started searching for the very
+  journal it is offering to create; keyed to the live query, it reappears
+  beside "No future journals match …" the moment the box is cleared, while the
+  results on screen are still the search's. The *message* stays keyed to the
+  debounced term, because its subject is what the last completed read found
+  rather than what the user is doing — keying it to the live query would have
+  it name a result nothing has fetched yet.
+- **The offer opens in a new tab, and the label says so.** This control sits
+  inside dialogs that are mid-write, so navigating away in place would throw
+  away the task being composed and land the user on the journal they had just
+  made rather than back on the one they were writing in — with no route back to
+  finish. In a new tab the dialog survives, and returning re-reads this list.
+  A link that opens a tab without saying so is its own small betrayal, so the
+  label carries it.
+- **`useFutureJournals` asks for `refetchOnWindowFocus: 'always'`, and that is
+  what makes the new tab a recovery rather than a dead end.** The app-wide
+  default is `true`, which refetches only queries React Query considers
+  *stale*, and this one has a five-minute `staleTime`; a journal created in
+  another tab cannot invalidate this tab's cache. Without the opt-out, a user
+  who took the offer, made the journal and came back inside five minutes would
+  find the picker still empty and the submit still disabled, having done
+  exactly what they were asked. It costs one listing request per refocus, and
+  only while a picker is mounted — which is only while one of the two dialogs
+  is open.
+- **`DueJournalFormField`, exported from the same module**, is the picker wired
+  to a react-hook-form field, and it exists because *neither* dialog can wrap
+  the picker in `FormControl`: that clones `id`, `aria-describedby` and
+  `aria-invalid` onto the child's **root**, which here is the picker's
+  container rather than its input. Writing that workaround twice is how the two
+  dialogs would drift — one growing a description id or a focus target without
+  the other.
 - The filter, the ordering and the cancelled flag live in the pure
   `lib/future-journals.ts`, not in the component, so the boundary cases — a
   journal dated *today*, a listing arriving newest-first, an `invited` event
@@ -457,6 +503,66 @@ nothing but the retarget dialog uses it today.
   twice). Unifying them means changing signatures across files this phase has no
   other business in, so it is named here as a follow-up rather than done under
   cover of an unrelated change.
+
+#### Creating a task
+
+`CreateTaskDialog` (`components/journals/CreateTaskDialog.tsx`) is the
+specification's *Creating a task*, which is four sentences and four rules. It is
+triggered from the `Tasks` card header beside *Attach task*, as the primary
+action to that one's outline.
+
+- **The creating journal is not a field, because it is not a field on the wire
+  either.** `POST /api/journals/{id}/tasks` takes it from the path, so the
+  dialog receives `journalId` as a prop and the rule — "the journal the user
+  creates the task from becomes its creating journal; it is never chosen
+  separately" — can only be checked on the **request**. Its tests assert the
+  URL, and that the dialog holds exactly three inputs, so a fourth fails.
+- **Offered even when the tasks listing has failed**, unlike the attach
+  affordance beside it. Attach is withheld there because it must exclude tasks
+  already linked here and reads that set from the listing; creating depends on
+  nothing from it. Withholding it would be a restriction with no reason behind
+  it, and a journal whose tasks could not be loaded is not a journal a user
+  should be unable to write a commitment down in.
+- **"No contacts" is the absence of the field, not an empty list.** The create
+  attributes forbid extras, so `contact_ids: []` would be a second way of saying
+  the same thing. The dialog omits the key and `createTask` drops an empty list
+  again on its way to the wire — the rule is guarded twice, which is worth
+  knowing before trusting either layer's tests alone.
+- **A refusal lands on the field that caused it, and the toast stays.**
+  `TASK_DUE_JOURNAL_NOT_FUTURE` has a code of its own and goes to the
+  due-journal field with focus; everything else the domain refuses arrives as
+  one `TASK_VALIDATION_ERROR` naming its field in `meta.field`, read by
+  `taskValidationField` in `lib/api/tasks.ts`. **A refusal naming a field this
+  form has no input for is left to the toast** rather than pinned somewhere at
+  random, which is the difference between reporting a failure and mislabelling
+  one.
+- **The text is refused by the schema; the journal gates the button.** Two ways
+  of saying "not ready" in one form, deliberately: an empty text has something
+  to *say* — a `FormMessage` naming the field — while a missing due journal has
+  the picker under it saying so already, and a submit button that stayed enabled
+  would offer a request that was never going to be sent.
+- **Neither the picker nor the contact combobox is wrapped in `FormControl`.**
+  It clones `id`, `aria-describedby` and `aria-invalid` onto the child's *root*,
+  which for both is a container rather than an input. Each takes the three as
+  explicit props instead — the picker through the shared `DueJournalFormField`,
+  and the contacts field assembling description **and** message ids itself,
+  because `FormControl` is what would otherwise have paired them.
+  `ContactSearchCombobox` grew `describedById`, `invalid` and an `aria-label` on
+  its results listbox for this — the last because this dialog is the first place
+  it is mounted beside a second listbox.
+- **Every field refusal moves focus, and that is accessibility rather than
+  polish.** `FormMessage` is a plain paragraph, not a live region, so a message
+  nobody is moved to is one a screen-reader user never hears. All three branches
+  go through one `reject` helper that sets the error and moves focus together,
+  so the next branch cannot be written without it.
+- **The field lookup is a `Map`.** `meta.field` is a string the *server* chose,
+  and an object literal answers `['constructor']` through its prototype with
+  something truthy — which `form.setError` would then take as a field name.
+- **Every close resets, and nothing closes over the write.** Both are the
+  retarget dialog's rules, adopted deliberately rather than rediscovered: Radix
+  fires `onOpenChange` for Escape, the overlay and the close button but not for
+  a controlled `open` set false from inside, which is how Cancel and a
+  successful create both work.
 
 #### Attaching a mention
 

@@ -31,6 +31,16 @@
  *   date, which fails silently at exactly the range a date search is for.
  *   Advertising only what works is the honest half; extending the endpoint is
  *   recorded as a follow-up beside the `sort` parameter it would sit next to.
+ * - **An empty window offers to create a journal.** The specification asks
+ *   that a user with no future journals be told so plainly *and offered one to
+ *   create*, rather than shown an empty picker; without the offer this control
+ *   is a dead end for exactly the user who most needs it. It lives here rather
+ *   than in the dialogs above so both of them have it, and it appears only
+ *   where it is the honest answer — with nothing in the window and no search
+ *   narrowing it, because an empty *search* says nothing about the user's
+ *   calendar. It opens a new tab so the dialog it sits in survives, which
+ *   works as a recovery only because `useFutureJournals` opts out of the
+ *   staleness gate on window focus; see the note there.
  * - **`JournalSearchCombobox` was not extended.** It searches *all* journals,
  *   shows nothing until typed into, and has no date filter; the merge dialog
  *   and the parent-journal field depend on all three. Four new branches under
@@ -44,7 +54,10 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { CalendarClock, Check, Search } from 'lucide-react';
+import Link from 'next/link';
+import { CalendarClock, CalendarPlus, Check, Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useFormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useFutureJournals } from '@/lib/api/journals';
@@ -232,14 +245,68 @@ export function FutureJournalPicker({
       )}
 
       {!isLoading && !isError && options.length === 0 && (
-        <p
-          className='text-muted-foreground py-3 text-sm'
-          data-testid='future-journal-empty'
-        >
-          {search
-            ? `No future journals match “${search}”.`
-            : `No journals dated in the next ${FUTURE_WINDOW_DAYS} days. Search by title to find a later one — or, if you have nothing ahead of you at all, create the journal this task belongs to first.`}
-        </p>
+        <div className='py-3'>
+          <p
+            className='text-muted-foreground text-sm'
+            data-testid='future-journal-empty'
+          >
+            {search
+              ? `No future journals match “${search}”.`
+              : `No journals dated in the next ${FUTURE_WINDOW_DAYS} days. Search by title to find a later one — or, if you have nothing ahead of you at all, create the journal this task belongs to first.`}
+          </p>
+          {/* The specification's "say so plainly **and offer to create one**".
+              Offered only where it is the honest answer: with nothing in the
+              window and no search narrowing it. A search that matched nothing
+              says something about the search rather than about the user's
+              calendar, and sending them off to create a journal there would be
+              answering a question they did not ask.
+
+              **"No search" means both the live query and the debounced one**,
+              because the two disagree for 300ms in each direction and the
+              offer would be wrong in both windows. Typing: the debounced term
+              is still empty, so a gate reading only that keeps offering
+              "create a journal" to someone visibly searching for one.
+              Clearing: the live query empties at once while the results on
+              screen are still the search's, so a gate reading only that offers
+              a journal beside "No future journals match ...". The message
+              above stays keyed to the debounced term on purpose — its subject
+              is what the last completed read actually found, and keying it to
+              the live query would have it name a result nothing has fetched
+              yet.
+
+              **It opens in a new tab, and that is the whole point of it.** This
+              control lives inside dialogs that are mid-write: a task being
+              composed, or a lapsed one being resurrected. Navigating away in
+              place would throw that away — the text typed, the contacts chosen
+              — and land the user on the *new* journal rather than back on the
+              one they were writing in, with no route back to finish. In a new
+              tab the dialog survives untouched, and `useFutureJournals` asks
+              for `refetchOnWindowFocus: 'always'` so the journal they just
+              made is in this list when they return. **That `'always'` is
+              load-bearing, not belt-and-braces:** the app-wide default
+              refetches only *stale* queries and this one is fresh for five
+              minutes, so without it a user who did exactly what they were
+              asked would come back to the same empty picker. The label says
+              the tab opens, because a link that opens one without saying so is
+              its own small betrayal. */}
+          {!query.trim() && !search && (
+            <Button
+              asChild
+              variant='outline'
+              size='sm'
+              className='mt-3'
+              data-testid='future-journal-create-offer'
+            >
+              <Link href='/journals/new' target='_blank' rel='noopener'>
+                <CalendarPlus aria-hidden='true' />
+                Create a journal
+                <span className='text-muted-foreground text-xs'>
+                  (opens a new tab)
+                </span>
+              </Link>
+            </Button>
+          )}
+        </div>
       )}
 
       <ul
@@ -318,5 +385,49 @@ export function FutureJournalPicker({
         {countWording(options.length)}
       </p>
     </div>
+  );
+}
+
+/**
+ * The picker wired to the react-hook-form field it serves.
+ *
+ * **Not wrapped in `FormControl`, and that is why this exists.** `FormControl`
+ * clones `id`, `aria-describedby` and `aria-invalid` onto its child's **root**
+ * element, which here is the picker's container rather than its input, so the
+ * three are passed to the input explicitly instead. Both dialogs that hold a
+ * due-journal field need exactly that, and writing it twice is how the two
+ * would drift — one of them growing the description id, or the focus target,
+ * without the other.
+ *
+ * The rest of the form standard is followed as written: the surrounding
+ * `FormItem`/`FormLabel`/`FormMessage` belong to the caller, and `FormLabel`'s
+ * `htmlFor` points at `inputId` so the label still names the input.
+ */
+export function DueJournalFormField({
+  inputId,
+  value,
+  onSelect,
+  disabled,
+  currentDueJournalId,
+}: {
+  readonly inputId: string;
+  readonly value: FutureJournalOption | null;
+  readonly onSelect: (journal: FutureJournalOption) => void;
+  readonly disabled: boolean;
+  /** Only a *retarget* has one; a task being created is not due anywhere yet. */
+  readonly currentDueJournalId?: string;
+}) {
+  const { error, formMessageId } = useFormField();
+
+  return (
+    <FutureJournalPicker
+      inputId={inputId}
+      value={value}
+      onSelect={onSelect}
+      disabled={disabled}
+      invalid={Boolean(error)}
+      describedById={error ? formMessageId : undefined}
+      {...(currentDueJournalId ? { currentDueJournalId } : {})}
+    />
   );
 }

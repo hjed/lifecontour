@@ -174,6 +174,15 @@ def mcp_unified_error_handler(
                 return MCPResponseBuilder.error_response(
                     error_type="Task error",
                     message=e.message,
+                    # Whatever structured detail the error opted into, which for
+                    # ``TaskValidationError`` is the field the refusal is about.
+                    # Forwarded generically rather than per error type, so the
+                    # two surfaces cannot drift: REST renders the same dict as
+                    # ``errors[].meta``. The hook's default is ``None`` and
+                    # ``error_response`` merges nothing for a falsy context, so
+                    # every error that opted into nothing answers byte-for-byte
+                    # what it answered before.
+                    context=e.error_meta(),
                 )
 
             except json.JSONDecodeError as e:

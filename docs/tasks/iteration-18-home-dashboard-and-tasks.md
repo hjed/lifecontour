@@ -5012,26 +5012,275 @@ wireframe surface at all, because a dashboard row is not shown in the context of
 no "this journal" for a mention to attach to. `api-design.md` is deliberately untouched: no backend file
 changed.
 
-#### Phase 20: Frontend — Create a Task from a Journal
+#### Phase 20: Frontend — Create a Task from a Journal ✅ COMPLETE
 
 **Prerequisites:** Phases 5 and 16.
 **Estimated diff:** ~160 production → **~640 tracked** (×4) — the due-journal picker is the bulk and does
 not split usefully from the form it lives in
+**Estimate revised before work started:** **~330 production → ~1,000–1,300 tracked.** The original figure
+predates Phase 18, which *built* the due-journal picker — so the item it called "the bulk" no longer
+exists as work. What is left is one dialog site, and Phase 19's refinement applies to it exactly: a
+frontend site whose *design* is the deliverable costs ~200 lines rather than ~140, and this one carries
+the picker's wiring, the contact list and the error mapping. Add the section header (~20), the picker's
+empty-state offer (~35) and the client's two exports (~40), and the ~4-line backend addition below.
+Recorded **before** the work rather than after it, per delivery rule 3.
 
-**Acceptance Criteria:**
+**Actual:** **668 production → 2,398 tracked** (2,398 insertions, 83 deletions across 17 files: 668
+production, 1,478 tests and 254 docs, the last including this entry). Production came in 2.0× the
+revised estimate and the total 2.1×, which is **the same miss Phase 19 recorded and for the same
+reason** — `CreateTaskDialog` is 458 lines of which roughly a third is docstring and inline reasoning.
+Phase 19's suggested refinement (~200 lines for a design-bearing site) was applied and is still low;
+**the sharper rule this phase suggests is ~300 for a *form* site**, because a form carries a schema, a
+field component per input and an error-mapping table on top of what it renders. Tests came in at 2.2×
+production, back inside the 2.2–3× band Phases 15–18 measured and above Phase 19's 1.7×. **The figures
+above are the post-review ones**, measured after the round below; the pre-review diff was 609 → 2,261,
+and the difference is what fixing five defects and extracting one shared component cost.
 
-- [ ] A create-task affordance on the journal detail view, using `Form`/`FormField`/`FormMessage` with
-      react-hook-form and Zod per the project's form standard.
-- [ ] The creating journal is the journal being viewed and is never presented as a choice.
-- [ ] A due-journal picker listing recent and near-future journals first, with search across future
-      journals by title and date — a picker, not a journal browser. **No bare date picker anywhere.**
-- [ ] Optional contact selection.
-- [ ] With no future journals, the UI says so plainly and offers to create one instead of an empty picker.
-- [ ] Service validation errors (non-future journal, missing text) surface against the right field.
+**Acceptance criteria, ticked:**
 
-**Required Test Coverage:** unit (RTL) — successful create, the empty-future-journals state, picker search
-and ordering, field-level error mapping, and keyboard/ARIA behaviour of the picker. E2E deferred to
-Phase 22.
+- [x] A create-task affordance on the journal detail view, using `Form`/`FormField`/`FormMessage` with
+      react-hook-form and Zod per the project's form standard. —
+      `frontend/src/components/journals/CreateTaskDialog.tsx`, triggered from the `Tasks` card header
+      beside Phase 19's *Attach task*.
+- [x] The creating journal is the journal being viewed and is never presented as a choice. — Asserted
+      on the **request**, which is the only place it can be: the endpoint takes the creating journal
+      from its path, so a dialog that had got this wrong would look identical on screen. The `POST`
+      goes to `/api/journals/{the journal being viewed}/tasks` and explicitly *not* to the due
+      journal, which is the mistake this would be; and the dialog is asserted to hold exactly three
+      inputs, so a fourth — a creating-journal picker — fails. **A date input is caught by a
+      different test and not by that one**, because `<input type="date">` maps to no ARIA role and so
+      is invisible to a count of `textbox` and `combobox`; the explicit selector test below is what
+      covers it.
+- [x] A due-journal picker listing recent and near-future journals first, with search across future
+      journals by title and date — a picker, not a journal browser. **No bare date picker anywhere.** —
+      Phase 18's `FutureJournalPicker`, mounted unchanged. Re-asserted **through this dialog** rather
+      than left to that component's own suite, because the criterion is about this surface: the
+      nearest-first order from a deliberately newest-first fixture, the search request, the keyboard
+      path over `aria-activedescendant`, and no `date`/`datetime-local`/`month` input anywhere in the
+      dialog. **One half of this criterion is inherited unmet and is not quietly ticked over:** the
+      search is by **title only**, because `GET /api/journals`' `search` filter is
+      `(title ILIKE :q OR content ILIKE :q)` and touches neither event-date column, so a date query
+      cannot match. Phase 18 recorded that, made the control's wording advertise only what works, and
+      left extending the endpoint as a follow-up beside the `sort` parameter; this phase mounts the
+      same component and inherits both the gap and the honest wording rather than reopening them.
+- [x] Optional contact selection. — `ContactSearchCombobox` with a badge list, the pattern
+      `JournalContactBadge` already uses. The half worth asserting is the wire: **no `contact_ids` key
+      at all** when none were chosen, the ids when some were, and the key gone again after the last
+      one is removed.
+- [x] With no future journals, the UI says so plainly and offers to create one instead of an empty
+      picker. — In `FutureJournalPicker`, not in this dialog; see decision 2.
+- [x] Service validation errors (non-future journal, missing text) surface against the right field. —
+      `TASK_DUE_JOURNAL_NOT_FUTURE` onto the due-journal field with focus returned to it, and
+      `TASK_VALIDATION_ERROR` onto the field its `meta.field` names; see decision 3.
+
+**Decisions taken (Phase 20):**
+
+1. **`useCreateTask` already existed and had no consumer.** The client layer — `createTask`,
+   `TaskCreateInput`, the omit-empty-contacts rule, the invalidation of both journal listings and the
+   upcoming window — landed with the endpoint and has been covered by `lib/api/__tests__/tasks.test.ts`
+   since. This phase is its first caller and needed no change to it beyond the two exports in decision
+   3. Worth recording because the estimate above assumed otherwise.
+2. **The "create a journal" offer went into the picker, not into this dialog.** Phase 18 recorded the
+   missing offer as a limitation "and it is Phase 20's to close". Putting it in
+   `FutureJournalPicker`'s unsearched-empty branch closes it for the **retarget** dialog at the same
+   time, in one place, instead of leaving one of the two pickers a dead end for exactly the user who
+   most needs it. **The wording stays honest:** the window is ninety days, so the message keeps saying
+   the journals are not in the *next ninety days* and keeps offering search for a later one — the
+   offer is added, not substituted, and is never claimed as proof the user has no future journals at
+   all. It is withheld while a **search** is what came back empty, because an empty search says
+   something about the search rather than about the user's calendar, and while the listing is loading
+   or has failed, because neither state knows anything about what the user has.
+3. **A ~4-line backend addition, and the two alternatives are recorded because both are worse.** The
+   criterion needs the browser to know *which* field a `TASK_VALIDATION_ERROR` names, and until now
+   that name reached a caller only as the `"{field}: ..."` prefix of the prose. *Parsing the prefix*
+   was rejected — mapping a form field off an English string breaks silently the first time the
+   message is reworded — and *assuming it is always `text`* was rejected as nearly true on this
+   endpoint today and silently wrong the moment another field can raise it.
+   `TaskValidationError.error_meta()` now returns `{"field": ...}` through the project's existing
+   opt-in hook, whose one previous user is `JournalHasAnchoredTasksError`. The frontend reads it with
+   `taskValidationField` beside the three codes already exported from `lib/api/tasks.ts`.
+4. **MCP parity was *not* free, which the plan had assumed it would be.** The REST handler renders
+   `error_meta()` generically, but the MCP decorator's `TaskDomainError` branch did not forward it at
+   all — only the journal branch did, for its one error. So the branch now forwards
+   `e.error_meta()`: **generic rather than per error type**, so the two surfaces cannot drift. The
+   forwarding is safe for the errors that opted into nothing because `error_response` merges nothing
+   for a falsy context — the first draft wrote `or {}` and a review round pointed out it was a guard
+   doing nothing, so it is gone rather than left in to look careful. A test asserts both halves, and a
+   fifth asserts REST and MCP name the same field from the same call. Found by reading the decorator
+   rather than by a failing test, which is why it is recorded as a correction to the plan rather than
+   as a deliverable.
+5. **The create affordance is offered when the tasks listing has *failed*; the attach affordance still
+   is not.** Phase 19 withholds attach there for a real reason — its dialog must exclude tasks already
+   linked to this journal and reads that set from the listing. Creating depends on nothing from the
+   listing: the journal being viewed is the creating journal and the due journal comes from the
+   picker's own read. Withholding it would have been a restriction with no reason behind it, and a
+   journal whose tasks could not be loaded is not a journal a user should be unable to write a
+   commitment down in. One test asserts the difference in both directions at once.
+6. **The two dialog-hygiene defects Phase 18 found were designed in rather than rediscovered.** Radix
+   fires `onOpenChange` for Escape, the overlay and the close button but **not** for a controlled
+   `open` set false from inside — which is how both Cancel and a successful create work — so all three
+   go through one `resetAndClose`; and nothing closes over an in-flight write, because a `POST` that
+   has reached the server may already have committed. Four tests and one, and removing either fix
+   fails them.
+7. **The text is refused by the schema; the journal gates the button.** Two ways of saying "not ready"
+   in one form is deliberate rather than inconsistent: the empty text has something to *say* — a
+   `FormMessage` naming the field, which is what the form standard exists for — while a missing due
+   journal has the picker sitting under it saying it already. A submit button that stayed enabled with
+   no journal chosen would offer a request that was never going to be sent.
+8. **`ContactSearchCombobox` gained `describedById`, `invalid` and a named results listbox.** The
+   first two are what let a server refusal about contacts be announced with the input, which is the
+   same wiring `FormControl` does for an ordinary field and which this control could not receive. The
+   `aria-label` on its results list is not decoration: this dialog is the first place that combobox is
+   mounted **beside another listbox**, and an unnamed one leaves a screen-reader user with only its
+   options to tell them apart. All three are additive and optional, so its five other consumers are
+   unchanged.
+
+**Required Test Coverage:** unit (RTL) — successful create, the empty-future-journals state, picker
+search and ordering, field-level error mapping, and keyboard/ARIA behaviour of the picker. E2E deferred
+to Phase 22.
+
+**Delivered: 75 tests added, all passing** — 59 frontend, taking the suite from 176 suites / 2,128 tests
+to **177 / 2,187**, and 16 backend. (Figures are post-review; the phase went green at 70 and 2,182, the
+local review round added one dialog test and one picker test and strengthened four more in place, and
+the PR review added the hook test below.)
+
+- **Dialog (37):** `components/journals/__tests__/CreateTaskDialog.test.tsx` — the whole request pinned
+  body-and-URL on the happy path; the three inputs and no fourth; nearest-first, search and the
+  keyboard path through the picker; the four contact cases including the description announced with
+  the input in both states; the two empty-journal cases; six field-mapping cases including a
+  `meta.field` this form has no input for, a `meta.field` that is a *prototype* key, and an ordinary
+  failure; and seven on opening, closing and reopening.
+- **Picker (8 added; 43 in the file):** `FutureJournalPicker.test.tsx` — the offer present in the
+  unsearched empty state and pointing at `/journals/new`, that it opens in a new tab and says so, that
+  it is absent in each of the four states where it would be dishonest, and one test per **direction**
+  of the debounce window: gone the instant typing starts, and not back until the search has actually
+  cleared.
+- **Section (5 added; 22 in the file):** `JournalTasksSection.test.tsx` — the trigger on a populated
+  journal, an empty one and a **failed** one, absent during the loading pass, and opening nothing by
+  itself.
+- **Hook (1 added; 16 in the file):** `lib/api/__tests__/future-journals.test.ts` — that a **fresh**
+  query still re-reads on window focus, driven through `focusManager`, which is what makes the
+  new-tab offer a recovery.
+- **Client (8 added; 75 in the file):** `lib/api/__tests__/tasks.test.ts` — `taskValidationField` over
+  both fields, both codes, a missing meta, a non-string field, a non-`TaskApiError`, and end to end
+  through a real `useCreateTask` rejection.
+- **Backend (15 unit + 1 integration):** `tests/unit/tasks/test_task_validation_error_surfaces.py` —
+  the payload, the REST mapping, the MCP mapping, the parity of the two, and the no-regression guards
+  that every *other* task error's body is unchanged; and `test_task_endpoints.py` gains the wire
+  assertion that an empty-text create answers 400 carrying `meta.field` **and** the prose it always
+  carried.
+- **Nothing in the data layer is mocked in the dialog suite.** The picker's listing, the contact
+  search, the user's timezone and the create itself all go through `fetch`, so what is asserted is the
+  request the user's clicks produce rather than a hook standing in for them. `sonner` and
+  `@/lib/constants` are mocked, as every suite in this area mocks them — the first to read the toasts,
+  the second because `jest.setup.ts` narrows the endpoints to the ones the auth tests need.
+- **Eleven mutation checks, each confirmed caught and reverted:** dropping the due-journal field
+  mapping (3 tests failed), mapping every validation error to `text` regardless of `meta.field` (2),
+  posting to the due journal instead of the journal being viewed (1), dropping the reset on close (4),
+  letting a close through mid-write (1), withholding the create affordance on a failed listing (1),
+  dropping the picker's create-journal offer (2), dropping the nearest-first sort (2), dropping
+  `error_meta` (9 backend), and dropping the MCP forwarding (2 backend). **Four more after the review
+  round**, one per fix that could be undone: dropping the focus move on a contact refusal (1), taking
+  the field lookup back to an object literal (1), leaving the close X live mid-write (1), and letting
+  the create-journal offer navigate in place (1).
+- **One mutation was *not* caught where it was aimed, and the reason is worth keeping.** Making the
+  dialog send `contact_ids: []` failed nothing — because `createTask` drops an empty list on its way
+  to the wire, which is a guard the client has had since Phase 5. Re-aimed at that guard it fails 3
+  dialog tests and 2 client tests. The rule is protected twice over; the finding is that the dialog's
+  own tests cannot tell you so on their own.
+
+**Integration:** the one endpoint assertion above. **No new e2e**, and not a deferral of convenience:
+Phase 22 owns ITER18-001's e2e along with the `TestDataManager` task helpers and the lapsed-fixture
+recipe, and building them here would fork that work — the same call Phases 15–19 each made. A
+**regression** pass was run instead, because the `Tasks` card that Phase 19 mounts on every journal
+detail view gains a control: `journal-detail.spec.ts` is green on **both** projects — **27 tests each**,
+plus the shared auth setup, which a per-project run counts as a 28th and this figure does not. Run
+twice: once when the phase went green, and again after the review round below, because that round
+refactored the *retarget* dialog's due-journal field as well as this one's.
+
+**What the review round found, and the first one would have shipped as a bug.** An independent review
+against the specification and this document turned up five defects and four overstatements. All nine
+were acted on; the line counts above are the figures after that work.
+
+- **The create-a-journal offer threw the task away, and there was no route back.** It was a plain link
+  in a modal that is mid-write: a user who had typed the commitment and chosen contacts lost all of it
+  on click, and landed on the journal they had just made rather than back on the one they were writing
+  in — which is the *only* user this criterion exists for. It now opens in a **new tab** and says so,
+  so the dialog survives untouched. The two tests asserted only the `href`, so nothing caught it; there
+  is a third now. **The PR review then found that the fix's own recovery did not work** — see below.
+- **A refusal placed on the contacts field was never announced.** `FormMessage` is a plain paragraph
+  rather than a live region, so the text and due-journal branches were being announced only because
+  they move focus into the described input — and the `CONTACT_NOT_FOUND` branch did not. Every field
+  refusal now goes through one `reject` helper that sets the error **and** moves focus, which is the
+  fix and also the reason the fix cannot be forgotten again on the next branch. The existing test
+  asserted `aria-describedby`, which passes whether or not anything is ever announced.
+- **The dialog's close X sat there looking live while the write was in flight.** `handleOpenChange`
+  refuses the close it asks for, and Cancel beside it is visibly disabled, so the X was a control lying
+  about being usable. It is withdrawn for the moment the write takes. **The two sibling dialogs have
+  the same defect** — they were the model for this behaviour — and it is named here rather than fixed
+  under cover of this phase.
+- **A prototype lookup on a server-chosen key.** `FIELD_FOR_VALIDATION_ERROR[meta.field]` over an
+  object literal answers `'constructor'` through the prototype with something truthy, and would have
+  handed `form.setError` a function as a field name. Unreachable from today's domain, and a `Map`
+  closes it for good; a test drives it with `field: "constructor"`.
+- **A rationale that was simply wrong.** The comment on the future-date mapping said the picker judges
+  "future" against the browser's zone while the server uses the configured one. Both use the
+  configured one — `useFutureJournals` reads it from `useUserSettings`. The mapping is still right, for
+  the window *between* the two: settings not yet loaded, a date rolling over mid-form, a clock askew.
+- **A test that could not fail.** The picker-search test asserted only that some URL had contained
+  `search=Trip`; it would have passed with the results never rendered. The harness now filters the way
+  the endpoint does, and the assertion is that the **list narrows** to the searched journal.
+- **`DueJournalFormField` extracted to `FutureJournalPicker.tsx`** and used by both dialogs. It was
+  written twice, near-identically, and it carries the `FormControl` workaround — which is exactly the
+  kind of thing that drifts when one copy grows a description id or a focus target and the other does
+  not. The retarget dialog's 46 tests cover the extraction.
+- Four claims in this entry were overstated and are corrected above: the line counts (understated by
+  278 and two files, and the deletions figure counted only production), what the three-input assertion
+  catches, "nothing below the component is mocked", and the `or {}` in decision 4.
+
+**What the PR review found, and it was a defect in one of the fixes above.** The new-tab offer was
+only half a fix: the dialog survived, but the picker did not refill. `useFutureJournals` carries a
+five-minute `staleTime`, and the app-wide `refetchOnWindowFocus: true` refetches only queries React
+Query considers **stale** — while a journal created in another tab cannot invalidate this tab's cache.
+So a user who took the offer, made the journal and came back inside five minutes met the same empty
+picker and the same disabled submit, having done exactly what they were asked. The query now asks for
+`refetchOnWindowFocus: 'always'`, opting this one read out of the staleness gate; it costs one listing
+request per refocus and only while a picker is mounted, which is only while one of the two dialogs is
+open. A hook test drives it with `focusManager` over a **fresh** query, so it fails without the
+opt-out. **Worth recording as a shape rather than a one-off:** the first review round's fix was
+verified by asserting the link's attributes, and the mechanism the fix depended on was never asserted
+at all — a fix whose correctness rests on behaviour somewhere else needs a test *there*, not only
+where the change was made.
+
+**And a second PR-review round found the offer's condition disagreed with itself for 300ms in each
+direction.** The gate read the **debounced** term, so while someone typed into an empty picker the
+offer went on being shown for the length of the debounce — to a user visibly searching for the journal
+it was offering to create. The naive fix is worse than the bug in the other direction: keyed to the
+*live* query alone, clearing the box would put the offer back beside "No future journals match …",
+because the results on screen are still the search's. So the condition is **both**, and there is a test
+per direction — each one failing under exactly one of the two one-sided gates. The message above it
+stays keyed to the debounced term on purpose: its subject is what the last completed read found, and
+keying it to the live query would have it name a result nothing has fetched yet. **The shape, again:**
+a debounced value and the value it lags are two different facts, and a condition that mixes subjects —
+"what is on screen" with "what the user is doing" — has to say which one it means.
+
+**One follow-up recorded rather than built.** `MCPResponseBuilder.error_response` flattens `context`
+into the payload's top level (`error_data.update(context)`), so now that task errors forward
+`error_meta()` **generically**, a future error whose meta carried an `error` or `message` key would
+silently overwrite the payload's own. Nothing does today and nothing is close to it. Naming it is worth
+more than a guard nobody can point at a caller for: the generic forwarding is what makes it reachable
+at all, and this phase is what made the forwarding generic.
+
+**Documentation:** `docs/architecture/frontend-design.md` gains a *Creating a task* section beside the
+ones for the retarget, attach and detach surfaces; its *future-journal picker* section gains the
+empty-window offer and drops the line saying "nothing but the retarget dialog uses it today"; and *The
+Journal Task Surface* records why a failed listing now carries one affordance and not the other.
+`docs/architecture/api-design.md`'s *Structured Error Detail* section named
+`JournalHasAnchoredTasksError` as "the current example"; there are now two, and they are there for the
+two different reasons a refusal outgrows its prose — naming *other rows* to go and deal with, and
+naming *the field* the refusal is about. Both are described, with the rule that decides when a code
+needs a field at all: one code covering several fields does, and a code a client can place on its own
+does not.
 
 #### Phase 21: Journal List "Tasks Due" Indicator
 

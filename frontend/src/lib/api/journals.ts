@@ -1080,6 +1080,17 @@ export function useFutureJournals(
     // replaced by a loading line every time the user types another letter.
     placeholderData: keepPreviousData,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    // `'always'` rather than the app-wide `true`, and the five-minute
+    // `staleTime` above is exactly why. The empty picker offers to create a
+    // journal **in a new tab**, which is only a recovery if coming back
+    // re-reads this list — and the focus handler refetches only queries it
+    // considers stale, which this one is not for five minutes. A journal made
+    // in another tab cannot invalidate this tab's cache, so the user would
+    // return having done what they were asked and find the picker still
+    // empty. Opting this one query out of the staleness gate costs one
+    // listing request per refocus, and only while a picker is mounted, which
+    // is only while one of the two dialogs is open.
+    refetchOnWindowFocus: 'always',
   });
 }
 

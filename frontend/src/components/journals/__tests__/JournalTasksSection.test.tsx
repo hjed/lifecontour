@@ -32,10 +32,14 @@ jest.mock('@/lib/api/tasks', () => ({
     mutate: jest.fn(),
     isPending: false,
   }),
+  useCreateTask: () => ({ mutate: jest.fn(), isPending: false }),
   TASK_JOURNAL_IS_ANCHOR: 'TASK_JOURNAL_IS_ANCHOR',
   TaskApiError: class TaskApiError extends Error {},
   TASK_REOPEN_NOT_ACKNOWLEDGED: 'TASK_REOPEN_NOT_ACKNOWLEDGED',
   TASK_DUE_JOURNAL_NOT_FUTURE: 'TASK_DUE_JOURNAL_NOT_FUTURE',
+  TASK_VALIDATION_ERROR: 'TASK_VALIDATION_ERROR',
+  CONTACT_NOT_FOUND: 'CONTACT_NOT_FOUND',
+  taskValidationField: () => null,
 }));
 
 const mockUseJournalTasks = useJournalTasks as jest.MockedFunction<
@@ -370,6 +374,72 @@ describe('JournalTasksSection', () => {
         screen.getByRole('button', { name: 'Attach task' })
       ).toBeInTheDocument();
       expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The create affordance answers to a different rule from the attach one.
+   * Attaching needs the set of tasks already linked here — which it reads from
+   * this listing — so it is withheld when the listing failed. Creating depends
+   * on nothing from the listing at all: the journal being viewed is the
+   * creating journal, and the due journal comes from the picker's own read. So
+   * withholding it there would be a restriction with no reason behind it, and
+   * a journal whose tasks could not be loaded is not a journal a user should
+   * be unable to write a commitment down in.
+   */
+  describe('the create affordance', () => {
+    const createButton = () =>
+      screen.queryByRole('button', { name: /new task/i });
+
+    it('sits in the card header on a journal that has tasks', () => {
+      mockListing([createMockJournalTask({ id: '1', text: 'Due task' })], {
+        due: [1],
+      });
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(createButton()).toBeInTheDocument();
+    });
+
+    it('is offered on a journal with no tasks yet', () => {
+      mockListing([], {});
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(createButton()).toBeInTheDocument();
+    });
+
+    it('is offered even when the listing failed', () => {
+      mockState({ isError: true });
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(createButton()).toBeInTheDocument();
+      // The attach affordance still is not, and the difference is the point.
+      expect(
+        screen.queryByRole('button', { name: 'Attach task' })
+      ).not.toBeInTheDocument();
+    });
+
+    /**
+     * The loading pass renders nothing at all — most journals hold no tasks,
+     * so a card that appeared and then rearranged itself would flicker on
+     * nearly every journal detail view.
+     */
+    it('is not offered while the listing loads', () => {
+      mockState({ isLoading: true });
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(createButton()).not.toBeInTheDocument();
+    });
+
+    it('opens nothing until it is asked to', () => {
+      mockListing([], {});
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
 

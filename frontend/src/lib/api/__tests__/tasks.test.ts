@@ -8,9 +8,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import React, { ReactNode } from 'react';
 import {
+  CONTACT_NOT_FOUND,
+  TASK_DUE_JOURNAL_NOT_FUTURE,
   TASK_JOURNAL_IS_ANCHOR,
+  TASK_VALIDATION_ERROR,
   TaskApiError,
   taskKeys,
+  taskValidationField,
   useAttachTaskIntermediateJournal,
   useCreateTask,
   useDeleteTask,
@@ -1477,6 +1481,103 @@ describe('Task API client', () => {
       await expect(
         result.current.mutateAsync({ taskId: '1', journalId: '42' })
       ).rejects.toMatchObject({ code: TASK_JOURNAL_IS_ANCHOR });
+    });
+  });
+
+  /**
+   * `TASK_VALIDATION_ERROR` is one code covering several fields, so unlike the
+   * three refusals above it cannot be placed on a form field from the code
+   * alone. The backend sends the field as `meta.field`; this reads it from
+   * there rather than out of the message's `"{field}: ..."` prefix, which a
+   * rewording would break silently.
+   */
+  describe('the field a validation refusal is about', () => {
+    it('names the validation code and the contact one as exported codes', () => {
+      expect(TASK_VALIDATION_ERROR).toBe('TASK_VALIDATION_ERROR');
+      expect(CONTACT_NOT_FOUND).toBe('CONTACT_NOT_FOUND');
+    });
+
+    it('reads the field out of the error meta', () => {
+      const error = new TaskApiError(
+        'text: Task text is required',
+        400,
+        TASK_VALIDATION_ERROR,
+        { field: 'text' }
+      );
+
+      expect(taskValidationField(error)).toBe('text');
+    });
+
+    it('reads whichever field the refusal named', () => {
+      const error = new TaskApiError(
+        'due_journal_id: A journal anchor is required',
+        400,
+        TASK_VALIDATION_ERROR,
+        { field: 'due_journal_id' }
+      );
+
+      expect(taskValidationField(error)).toBe('due_journal_id');
+    });
+
+    it('answers nothing for a different refusal', () => {
+      const error = new TaskApiError(
+        'The due journal is not dated after today',
+        400,
+        TASK_DUE_JOURNAL_NOT_FUTURE,
+        { field: 'due_journal_id' }
+      );
+
+      expect(taskValidationField(error)).toBeNull();
+    });
+
+    it('answers nothing when the refusal carried no meta', () => {
+      const error = new TaskApiError(
+        'text: Task text is required',
+        400,
+        TASK_VALIDATION_ERROR
+      );
+
+      expect(taskValidationField(error)).toBeNull();
+    });
+
+    it('answers nothing for a meta whose field is not a string', () => {
+      const error = new TaskApiError('nope', 400, TASK_VALIDATION_ERROR, {
+        field: 7,
+      });
+
+      expect(taskValidationField(error)).toBeNull();
+    });
+
+    it('answers nothing for an error that is not the task client’s', () => {
+      expect(taskValidationField(new Error('network down'))).toBeNull();
+      expect(taskValidationField(undefined)).toBeNull();
+    });
+
+    it('carries the meta through from the response body', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: jest.fn().mockResolvedValue({
+          errors: [
+            {
+              status: '400',
+              code: TASK_VALIDATION_ERROR,
+              detail: 'text: Task text is required',
+              meta: { field: 'text' },
+            },
+          ],
+        }),
+      } as unknown as Response);
+
+      const { result } = renderHook(() => useCreateTask(), {
+        wrapper: createWrapper,
+      });
+
+      const rejection = await result.current
+        .mutateAsync({ journalId: '7', text: '   ', due_journal_id: 42 })
+        .catch((error: unknown) => error);
+
+      expect(taskValidationField(rejection)).toBe('text');
     });
   });
 

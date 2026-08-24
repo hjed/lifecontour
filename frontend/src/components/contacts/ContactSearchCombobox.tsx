@@ -27,6 +27,14 @@ interface ContactSearchComboboxProps {
   readonly excludeContactIds?: string[];
   readonly className?: string;
   readonly disabled?: boolean;
+  /**
+   * The id of a message the surrounding form field wants announced with the
+   * input — a `FormMessage`, typically, carrying a refusal the server made
+   * about the contacts that were chosen.
+   */
+  readonly describedById?: string;
+  /** Whether the field this serves is currently in error. */
+  readonly invalid?: boolean;
 }
 
 // Debounce hook
@@ -77,6 +85,8 @@ export function ContactSearchCombobox({
   excludeContactIds,
   className,
   disabled = false,
+  describedById,
+  invalid = false,
 }: ContactSearchComboboxProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
@@ -181,6 +191,8 @@ export function ContactSearchCombobox({
           aria-expanded={showResults}
           aria-haspopup='listbox'
           aria-controls={showResults ? 'contact-search-results' : undefined}
+          aria-invalid={invalid}
+          aria-describedby={describedById}
         />
       </div>
 
@@ -213,6 +225,10 @@ export function ContactSearchCombobox({
               <ul
                 id='contact-search-results'
                 role='listbox'
+                // Named, because a screen reader meeting an unnamed listbox
+                // has only its options to go on — and this control is now
+                // mounted in dialogs that hold a second one.
+                aria-label='Contact search results'
                 className='m-0 list-none p-0'
               >
                 {filteredContacts.map((contact, index) => {
