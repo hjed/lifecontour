@@ -38,9 +38,12 @@ async def get_home_dashboard(
     date in the browser's zone.
 
     **Sections are independent.** Each one reports `ready` — where an empty
-    payload is a real answer — or `unavailable` when it could not be read. One
-    section failing never fails the request or the others, so this endpoint
-    answers 200 with the sections it has.
+    payload is a real answer — or `unavailable`, meaning it has nothing for you,
+    whether because it could not be read or because there is none to report. A
+    day with no summary reports `unavailable` for that reason, so read it as
+    "nothing to show here" rather than as an error. One section failing never
+    fails the request or the others, so this endpoint answers 200 with the
+    sections it has.
 
     There is deliberately no equivalent MCP tool: an agent composes the same view
     from the daily summary, journal browsing, the task listing tools and the

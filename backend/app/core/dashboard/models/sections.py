@@ -32,7 +32,7 @@ from enum import StrEnum
 
 
 class SectionStatus(StrEnum):
-    """Whether a section was read, or could not be."""
+    """Whether a section has a payload, or has nothing for the page."""
 
     READY = "ready"
     UNAVAILABLE = "unavailable"

@@ -7516,6 +7516,14 @@ phase while proving nothing.
   consequence for Phase 1's machinery was one change: `_section` treats a loader returning `None` as
   unavailable rather than requiring it to raise, because a user with no summary yet is the ordinary case
   and logging it as a section failure would bury the failures that matter.
+
+  **Widening a term means widening it everywhere, and the OpenAPI description is the copy that matters
+  most.** Two review passes were needed to find every place still defining *unavailable* as "could not be
+  read": the domain model and its tests first, then `_STATUS_DESC`, the endpoint docstring and the schema
+  module's own preamble — the three that reach a client author, since they are what the generated schema
+  and the API docs render. A client built against the stale wording would have treated the summary
+  section's ordinary state as an error. `TestTheStatusIsDocumentedAsItBehaves` now pins the description,
+  because prose is the part of a schema no other test touches.
 - **`PENDING` folds into `generating` rather than earning a state of its own** — and **nothing currently
   moves a journal daily summary out of `PENDING`.** `SearchIndexerConsumer` invalidates the row whenever
   a journal on that day changes; the only code that generates is `DailySummaryService.get_or_generate`,

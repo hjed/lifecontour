@@ -8,8 +8,8 @@ every later phase inherits them. Both are documented in full in
   ``data`` and ``errors`` together, so "three sections and a failure in the
   fourth" has no representation as an error document. Each section travels in a
   :class:`DashboardSectionSchema` that can say ``unavailable`` on its own, the
-  response stays 200, and the distinction the page depends on — nothing to show
-  versus could not be read — is a field rather than a status code.
+  response stays 200, and the distinction the page depends on — a payload versus
+  none — is a field rather than a status code.
 - **The anchor travels in ``meta``**, because which day was read and in whose
   zone is information about how the answer was computed rather than a field of
   the resource. ``UpcomingTasksMeta`` made the same call for the upcoming-tasks
@@ -44,15 +44,20 @@ HOME_DASHBOARD_RESOURCE_TYPE: Literal["home-dashboards"] = "home-dashboards"
 HOME_DASHBOARD_PATH = "/api/home-dashboard"
 
 _STATUS_DESC = (
-    "Whether this section could be read. `ready` means it was, and an empty "
-    "payload is then a real answer — nothing scheduled, nothing due. "
-    "`unavailable` means it could not be, and `data` is null so the two can "
-    "never be confused."
+    "Whether this section has anything for you. `ready` means it does, and an "
+    "empty payload is then a real answer — nothing scheduled, nothing due. "
+    "`unavailable` means it does not, and `data` is null so the two can never "
+    "be confused. A section reports `unavailable` either because it could not "
+    "be read or because there is nothing to report: the summary uses it for a "
+    "day with no summary, since a summary is not a list and so has no empty "
+    "form. Which of the two it was is deliberately not on the wire — both are "
+    "rendered the same way — so treat it as 'nothing to show here', not as an "
+    "error."
 )
 
 
 class DashboardSectionSchema[T](BaseModel):
-    """One dashboard section: whether it could be read, and what it holds."""
+    """One dashboard section: whether it has a payload, and what is in it."""
 
     status: SectionStatus = Field(..., description=_STATUS_DESC)
     data: T | None = Field(

@@ -22,6 +22,8 @@ import pytest
 
 from app.api.home_dashboard.schemas import (
     HOME_DASHBOARD_RESOURCE_TYPE,
+    DashboardSectionSchema,
+    SummarySectionSchema,
     to_home_dashboard_response,
 )
 from app.core.dashboard.models.sections import (
@@ -288,3 +290,35 @@ class TestTheSummarySection:
             "contact_count",
             "mood_average",
         }
+
+
+class TestTheStatusIsDocumentedAsItBehaves:
+    """The generated schema is the contract a client author actually reads.
+
+    Phase 2 widened *unavailable* from "could not be read" to "has nothing for
+    you", and the domain docstrings were updated with it — but the OpenAPI
+    description was not, so clients generated from this endpoint were told the
+    summary section's ordinary state meant something had gone wrong. Pinned here
+    because prose is exactly the part of a schema no other test touches.
+    """
+
+    def test_does_not_describe_unavailable_as_a_failure(self) -> None:
+        described = (
+            DashboardSectionSchema[SummarySectionSchema]
+            .model_fields["status"]
+            .description
+        )
+
+        assert described is not None
+        assert "could not be read or because there is nothing to report" in described
+
+    def test_says_a_ready_section_may_still_be_empty(self) -> None:
+        """The other half of the pair, and the one W29's empty lines rest on."""
+        described = (
+            DashboardSectionSchema[SummarySectionSchema]
+            .model_fields["status"]
+            .description
+        )
+
+        assert described is not None
+        assert "empty payload is then a real answer" in described
