@@ -971,6 +971,79 @@ class TestJournalToolsIntegration:
         assert "Child of: Test Journal" in read_payload["summary"]
 
     @pytest.mark.asyncio
+    async def test_combined_update_surfaces_the_underlying_validation_error(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        """A multi-field update must name the field that failed.
+
+        Reported against this tool: an update carrying contacts, content, types
+        and type_data together answered a bare ``Internal error``, while the
+        same type_data sent on its own answered ``role: Role cannot exceed 100
+        characters``. Supplying ``types`` routes the write down a branch that
+        assigned the entity's attributes in place, so no domain validation ran
+        and the over-long value reached the VARCHAR(100) column — a driver
+        error the tool could only report as a 500. An agent cannot act on that.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            payload = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "update_journal_entry",
+                {
+                    "journal_id": sample_journal_id,
+                    "request": {
+                        "content": "Updated alongside the type data",
+                        "types": ["OUTDOOR_ACTIVITY"],
+                        "type_data": {
+                            "OUTDOOR_ACTIVITY": {"role": "Guide " * 30},
+                        },
+                    },
+                },
+            )
+
+        assert payload.get("error") != "Internal error", (
+            "the validation failure was swallowed and re-raised as a 500"
+        )
+        message = json.dumps(payload)
+        assert "role" in message
+        assert "100" in message
+
+    @pytest.mark.asyncio
+    async def test_combined_update_leaves_the_journal_unchanged_when_rejected(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        """A refused composite writes nothing — the content must not survive."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "update_journal_entry",
+                {
+                    "journal_id": sample_journal_id,
+                    "request": {
+                        "content": "This content must not be persisted",
+                        "types": ["OUTDOOR_ACTIVITY"],
+                        "type_data": {
+                            "OUTDOOR_ACTIVITY": {"role": "Guide " * 30},
+                        },
+                    },
+                },
+            )
+
+            read_payload = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "get_journal",
+                {"journal_id": sample_journal_id},
+            )
+
+        assert read_payload["content"] == "Test content for integration testing"
+
+    @pytest.mark.asyncio
     async def test_get_journal_root_journal_has_no_parent_integration(
         self, authenticated_lifespan_client, sample_journal_id: int
     ) -> None:

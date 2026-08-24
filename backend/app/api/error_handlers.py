@@ -51,6 +51,7 @@ from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
+from sqlalchemy.exc import DataError
 
 from app.api.common.schemas import (
     JsonApiError,
@@ -248,6 +249,38 @@ async def journal_domain_error_handler(
     return await domain_error_handler(request, exc)
 
 
+async def database_data_error_handler(request: Request, exc: DataError) -> JSONResponse:
+    """Report a column rejecting a value as the bad request it is.
+
+    A ``DataError`` — a value too long for its column, out of range, or of the
+    wrong type — is the database refusing the caller's input, not the server
+    failing. The catch-all reported it as a 500, which gives a client nothing
+    to act on. The driver's first line names the constraint; the SQL and the
+    bound parameters around it are left in the log rather than echoed back.
+    """
+    original = getattr(exc, "orig", None)
+    reason = str(original) if original is not None else str(exc)
+    detail = reason.strip().splitlines()[0] if reason.strip() else "Invalid value"
+
+    logger.warning(
+        "Database rejected a value",
+        error=str(exc),
+        path=request.url.path,
+    )
+
+    error = JsonApiError(
+        status="400",
+        code="INVALID_VALUE",
+        title="Invalid Value",
+        detail=detail,
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=JsonApiErrorResponse(errors=[error]).model_dump(),
+    )
+
+
 async def authentication_error_handler(
     request: Request, exc: AuthenticationError
 ) -> JSONResponse:
@@ -381,6 +414,7 @@ def register_error_handlers(app: FastAPI) -> None:
     validation_handler: ExceptionHandler = validation_error_handler  # type: ignore[assignment]
     http_handler: ExceptionHandler = http_exception_handler  # type: ignore[assignment]
     generic_handler: ExceptionHandler = generic_exception_handler
+    data_error_handler: ExceptionHandler = database_data_error_handler  # type: ignore[assignment]
     auth_handler: ExceptionHandler = authentication_error_handler  # type: ignore[assignment]
     oauth_handler: ExceptionHandler = oauth_error_handler  # type: ignore[assignment]
     unauthorized_handler: ExceptionHandler = unauthorized_error_handler  # type: ignore[assignment]
@@ -399,6 +433,9 @@ def register_error_handlers(app: FastAPI) -> None:
     # Validation error handlers
     app.add_exception_handler(RequestValidationError, validation_handler)
     app.add_exception_handler(ValidationError, validation_handler)
+
+    # A column refusing a value is a bad request, not a server fault.
+    app.add_exception_handler(DataError, data_error_handler)
 
     # HTTP exception handler
     app.add_exception_handler(HTTPException, http_handler)

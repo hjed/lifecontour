@@ -17,7 +17,13 @@ from core_shared.models.journals import (
     JournalType,
     PitchType,
 )
+from core_shared.models.journals.exceptions import JournalValidationError
+from core_shared.models.journals.type_data_schemas import (
+    TYPE_DATA_MODELS,
+    accepted_fields,
+)
 from pydantic import BaseModel, Field
+from pydantic import ValidationError as PydanticValidationError
 
 # Field description constants
 JOURNAL_TITLE_DESC = "Journal title"
@@ -485,6 +491,92 @@ class JournalHistoryResponse(BaseModel):
         description="History entries ordered newest first for this page",
     )
     summary: str = Field(description="AI-friendly summary of the journal's history")
+
+
+def validate_type_data(
+    type_data: dict[str, dict[str, Any]] | None,
+) -> dict[str, dict[str, Any]] | None:
+    """Check ``type_data`` against each type's write model at the tool boundary.
+
+    Validating here rather than deep in the write path is what makes a bad
+    value answerable. The composite write splits on whether ``types`` was also
+    sent, and one of those branches reached the column without running the
+    domain's checks, so an over-long ``role`` came back as a bare "Internal
+    error" while the same value sent alone came back naming the field. The
+    boundary sees every call the same way.
+
+    Returns the payload re-dumped in JSON mode with ``exclude_unset=True``: the
+    service must keep receiving the primitives it already parses, and a field
+    the caller did not mention must stay absent. Dumping every field would
+    materialise the untouched ones as ``None`` and turn a partial update into a
+    blanking overwrite.
+
+    Raises:
+        JournalValidationError: the payload is not valid for that type. The MCP
+            error handler already reports a domain error with its message
+            intact, which is the shape every other rejection from these tools
+            uses.
+    """
+    if not type_data:
+        return type_data
+
+    validated: dict[str, dict[str, Any]] = {}
+    for type_name, attrs in type_data.items():
+        try:
+            journal_type = JournalType[type_name.upper()]
+        except KeyError:
+            valid = ", ".join(sorted(t.name for t in JournalType))
+            raise JournalValidationError(
+                "type_data", f"Unknown journal type {type_name!r}. Valid types: {valid}"
+            ) from None
+
+        model = TYPE_DATA_MODELS.get(journal_type)
+        if model is None:
+            raise JournalValidationError(
+                f"type_data.{journal_type.name}",
+                "managed by an integration and cannot be set through this tool",
+            )
+
+        if not isinstance(attrs, dict):
+            raise JournalValidationError(
+                f"type_data.{journal_type.name}", "must be an object"
+            )
+
+        try:
+            parsed = model.model_validate(attrs)
+        except PydanticValidationError as exc:
+            raise JournalValidationError(
+                f"type_data.{journal_type.name}",
+                _describe_type_data_errors(journal_type, exc),
+            ) from exc
+
+        validated[type_name] = parsed.model_dump(mode="json", exclude_unset=True)
+
+    return validated
+
+
+def _describe_type_data_errors(
+    journal_type: JournalType, exc: PydanticValidationError
+) -> str:
+    """Render every rejection in one message, each naming its own field.
+
+    Pydantic's own text for an unknown key is "Extra inputs are not permitted",
+    which does not say what the caller should have written instead — so that
+    case lists the fields the type actually takes.
+    """
+    accepted = ", ".join(accepted_fields(journal_type))
+    problems: list[str] = []
+
+    for error in exc.errors():
+        field = ".".join(str(part) for part in error["loc"]) or journal_type.name
+        if error["type"] == "extra_forbidden":
+            problems.append(
+                f"{field}: unknown field. {journal_type.name} accepts: {accepted}"
+            )
+        else:
+            problems.append(f"{field}: {error['msg']}")
+
+    return "; ".join(problems)
 
 
 class JournalCreateRequest(BaseModel):

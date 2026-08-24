@@ -19,6 +19,8 @@ from core_shared.models.journals import (
     JournalNotFoundError,
 )
 from core_shared.models.tasks import TaskDomainError
+from fastapi import HTTPException
+from sqlalchemy.exc import DataError
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
@@ -26,6 +28,18 @@ from app.core.contacts.models.exceptions import (
     TagNotFoundError,
 )
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
+
+
+def _database_rejection(error: DataError) -> str:
+    """The driver's own reason, without the SQL and parameters around it.
+
+    A ``DataError`` carries the statement and every bound value; echoing those
+    back would bury the one line that says what was wrong, and would repeat the
+    caller's data into the response.
+    """
+    original = getattr(error, "orig", None)
+    reason = str(original) if original is not None else str(error)
+    return reason.strip().splitlines()[0] if reason.strip() else "Invalid value"
 
 
 def mcp_unified_error_handler(
@@ -191,19 +205,50 @@ def mcp_unified_error_handler(
                 MCPLogger.log_validation_error(
                     operation_name, f"Schema validation failed: {str(e)}"
                 )
-                # Extract the first error's field path if available
+                # Every rejection, not just the first: a call that got three
+                # fields wrong should not need three round trips to find out.
                 errors = e.errors()
-                field_name = (
-                    ".".join(str(p) for p in errors[0]["loc"])
-                    if errors and errors[0].get("loc")
-                    else "Input"
+                if not errors:
+                    return MCPResponseBuilder.validation_error_response("Input", str(e))
+
+                def _path(error: Any) -> str:
+                    return (
+                        ".".join(str(part) for part in error.get("loc", ())) or "Input"
+                    )
+
+                field_name = _path(errors[0])
+                message = "; ".join(
+                    f"{_path(error)}: {error['msg']}" for error in errors
                 )
-                message = errors[0]["msg"] if errors else str(e)
                 return MCPResponseBuilder.validation_error_response(field_name, message)
 
             except ValueError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))
                 return MCPResponseBuilder.validation_error_response("Input", str(e))
+
+            except HTTPException as e:
+                # A service has no business raising an HTTP error, but one that
+                # slips through must not be flattened: HTTPException is neither
+                # a domain error nor a ValueError, so the catch-all below used
+                # to report it as "Internal error" and lose the detail that
+                # said what was actually wrong.
+                MCPLogger.log_validation_error(operation_name, str(e.detail))
+                return MCPResponseBuilder.error_response(
+                    error_type="Validation error",
+                    message=str(e.detail),
+                    context={"status_code": e.status_code},
+                )
+
+            except DataError as e:
+                # The database refusing a value for its column — too long, out
+                # of range, wrong type — is a bad request, not a server fault,
+                # and the driver's message names the constraint. Reporting it
+                # as an internal error tells an agent nothing it can act on.
+                MCPLogger.log_validation_error(operation_name, str(e))
+                return MCPResponseBuilder.validation_error_response(
+                    "type_data" if operation_type == "journal" else "Input",
+                    _database_rejection(e),
+                )
 
             except Exception as e:  # noqa: BLE001
                 # Handle search-specific errors
