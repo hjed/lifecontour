@@ -24,6 +24,15 @@ jest.mock('@/lib/api/tasks', () => ({
   useDeleteTask: () => ({ mutate: jest.fn(), isPending: false }),
   useRetargetTask: () => ({ mutate: jest.fn(), isPending: false }),
   useTaskWriteInFlight: () => false,
+  useDetachTaskIntermediateJournal: () => ({
+    mutate: jest.fn(),
+    isPending: false,
+  }),
+  useAttachTaskIntermediateJournal: () => ({
+    mutate: jest.fn(),
+    isPending: false,
+  }),
+  TASK_JOURNAL_IS_ANCHOR: 'TASK_JOURNAL_IS_ANCHOR',
   TaskApiError: class TaskApiError extends Error {},
   TASK_REOPEN_NOT_ACKNOWLEDGED: 'TASK_REOPEN_NOT_ACKNOWLEDGED',
   TASK_DUE_JOURNAL_NOT_FUTURE: 'TASK_DUE_JOURNAL_NOT_FUTURE',
@@ -65,15 +74,29 @@ beforeEach(() => {
 });
 
 describe('JournalTasksSection', () => {
+  /**
+   * The grouping is read from `meta.groups` on one unfiltered listing, never
+   * from three role-filtered ones. Asserted over every call rather than by
+   * counting them: the card also mounts the attach dialog, which reads the
+   * same hook for whichever journal the user names in it, so a count would be
+   * measuring how many components are on screen rather than what they ask for.
+   */
   it('asks for every role in one request rather than filtering', () => {
     mockListing([], {});
 
     render(<JournalTasksSection journalId='7' />);
 
-    expect(mockUseJournalTasks).toHaveBeenCalledTimes(1);
-    const [journalId, options] = mockUseJournalTasks.mock.calls[0];
-    expect(journalId).toBe('7');
-    expect(options?.role).toBeUndefined();
+    const calls = mockUseJournalTasks.mock.calls;
+    // Exactly one journal is ever asked about — the one being viewed. The
+    // dialog reads the same hook, but with `''` until a journal is named in
+    // it, which the hook disables; anything else here would be a second
+    // listing this surface does not need.
+    expect(new Set(calls.map(([journalId]) => journalId))).toEqual(
+      new Set(['7', ''])
+    );
+    calls.forEach(([, options]) => {
+      expect(options?.role).toBeUndefined();
+    });
   });
 
   describe('the three groups', () => {
@@ -201,21 +224,152 @@ describe('JournalTasksSection', () => {
     });
   });
 
-  describe('when there is nothing to show', () => {
-    it('renders nothing rather than an empty container', () => {
-      mockListing([], { due: [], created: [], mentioned: [] });
+  /**
+   * Criterion 2, asserted where the two halves of it meet: the remove
+   * affordance follows the **group**, not the task. A retarget onto a journal
+   * the task already mentioned leaves it due *and* mentioned here, the listing
+   * names it in both groups, and only the mention is removable — the anchors
+   * are reachable only through `create_task` and `retarget_due_journal`.
+   */
+  describe('where the remove affordance is offered', () => {
+    const REMOVE = 'Remove mention from this journal';
 
-      const { container } = render(<JournalTasksSection journalId='1' />);
+    it('offers it under Mentioned and not under Due for one task in both', () => {
+      mockListing(
+        [
+          createMockJournalTask({
+            id: '1',
+            text: 'Due here and mentioned here',
+            link_roles: [TaskLinkRole.DUE, TaskLinkRole.MENTIONED],
+          }),
+        ],
+        { due: [1], mentioned: [1] }
+      );
 
-      expect(container).toBeEmptyDOMElement();
+      render(<JournalTasksSection journalId='1' />);
+
+      const due = screen.getByRole('region', { name: DUE_HEADING });
+      const mentioned = screen.getByRole('region', {
+        name: MENTIONED_HEADING,
+      });
+      expect(
+        within(due).queryByRole('button', { name: REMOVE })
+      ).not.toBeInTheDocument();
+      expect(
+        within(mentioned).getByRole('button', { name: REMOVE })
+      ).toBeInTheDocument();
     });
 
-    it('renders nothing while the listing is loading', () => {
+    it('offers it on no row of a journal that only anchors its tasks', () => {
+      mockListing(
+        [
+          createMockJournalTask({ id: '1', text: 'Due task' }),
+          createMockJournalTask({ id: '2', text: 'Created task' }),
+        ],
+        { due: [1], created: [2] }
+      );
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(
+        screen.queryByRole('button', { name: REMOVE })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Phase 16 rendered nothing at all when a journal held no tasks. Criterion 1
+   * of Phase 19 needs somewhere to attach *from*, and the journal most likely
+   * to want it is exactly the one with no tasks yet — so a listing that has
+   * *loaded* now renders the card, while the **loading pass still renders
+   * nothing**, which is what Phase 16's reason was actually about: no skeleton
+   * flashing on nearly every journal detail view.
+   */
+  describe('when the journal has no tasks', () => {
+    it('renders the card so a task can still be attached to it', () => {
+      mockListing([], { due: [], created: [], mentioned: [] });
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(
+        screen.getByRole('button', { name: 'Attach task' })
+      ).toBeInTheDocument();
+      expect(screen.getByText(/no tasks are linked/i)).toBeInTheDocument();
+    });
+
+    it('shows no group headings for groups that do not exist', () => {
+      mockListing([], { due: [], created: [], mentioned: [] });
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(
+        screen.queryByRole('heading', { level: 4 })
+      ).not.toBeInTheDocument();
+    });
+
+    it('renders nothing at all while the listing is loading', () => {
       mockState({ isLoading: true });
 
       const { container } = render(<JournalTasksSection journalId='1' />);
 
       expect(container).toBeEmptyDOMElement();
+    });
+  });
+
+  describe('the attach affordance', () => {
+    it('sits in the card header on a journal that does have tasks', () => {
+      mockListing([createMockJournalTask({ id: '1', text: 'Due task' })], {
+        due: [1],
+      });
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(
+        screen.getByRole('button', { name: 'Attach task' })
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * The dialog excludes tasks already linked here, and it reads that set from
+     * the listing this section has in hand. A failed listing does not have it,
+     * so offering the affordance would mean offering a picker that could not
+     * keep the two refusals off the screen.
+     */
+    it('is not offered when the listing failed', () => {
+      mockState({ isError: true });
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(
+        screen.queryByRole('button', { name: 'Attach task' })
+      ).not.toBeInTheDocument();
+    });
+
+    /**
+     * A *refresh* that fails is not a listing that failed. React Query keeps
+     * the previous `data` and only sets the status, so a refetch error — a
+     * window refocus while the network is down — must not replace a card that
+     * has perfectly good tasks to show. It would take any open attach dialog
+     * with it, closing over a request that may already have left, which is the
+     * one outcome that dialog's close guard exists to prevent.
+     */
+    it('survives a failed refresh that still has tasks to show', () => {
+      mockUseJournalTasks.mockReturnValue({
+        data: {
+          data: [createMockJournalTask({ id: '1', text: 'Due task' })],
+          meta: { groups: { due: [1], created: [], mentioned: [] } },
+        },
+        isLoading: false,
+        isError: true,
+      } as unknown as ReturnType<typeof useJournalTasks>);
+
+      render(<JournalTasksSection journalId='1' />);
+
+      expect(screen.getByText('Due task')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Attach task' })
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
     });
   });
 

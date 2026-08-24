@@ -22,7 +22,11 @@ import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { lapseWording, statusWording } from '@/lib/task-display';
-import { TaskStatus, type JournalTaskResource } from '@/types/tasks';
+import {
+  TaskStatus,
+  type JournalTaskResource,
+  type TaskLinkRole,
+} from '@/types/tasks';
 import { JournalTaskActions } from './JournalTaskActions';
 
 interface JournalTaskRowProps {
@@ -30,6 +34,15 @@ interface JournalTaskRowProps {
   readonly task: JournalTaskResource;
   /** The journal being viewed, which decides whether to name the due journal. */
   readonly journalId: string;
+  /**
+   * The role this row's link holds in the journal being viewed.
+   *
+   * Passed down rather than read off `link_roles`, because the listing renders
+   * a task holding two roles **once per group** and the two rows differ only
+   * by which group they are in — `link_roles` says the task is both and cannot
+   * tell one row from the other.
+   */
+  readonly role: TaskLinkRole;
 }
 
 /**
@@ -59,7 +72,7 @@ function nameParts(displayName: string): { first: string; last: string } {
   return { first, last: rest.join(' ') };
 }
 
-export function JournalTaskRow({ task, journalId }: JournalTaskRowProps) {
+export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
   const { text, status, lapsed, lapse_reason, due_journal, contacts } =
     task.attributes;
   // The actions are named the same on every row, so they are described by the
@@ -120,7 +133,12 @@ export function JournalTaskRow({ task, journalId }: JournalTaskRowProps) {
             )}
           </div>
 
-          <JournalTaskActions task={task} describedById={textId} />
+          <JournalTaskActions
+            task={task}
+            journalId={journalId}
+            role={role}
+            describedById={textId}
+          />
         </div>
       </div>
 

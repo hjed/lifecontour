@@ -2,7 +2,7 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **63 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–15 complete** (task tables + domain entity; task repository; journal-date
+**ITER18-001 Phases 1–19 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
 MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
 one automatic link, and its only way back out of a terminal status — and then retargeting over REST and
@@ -15,10 +15,13 @@ however many tasks a journal holds; and the upcoming-window listing the dashboar
 `GET /api/tasks/upcoming` and `list_upcoming_tasks`, over one pure window rule and one statement, reusing
 that same batched assembly; and the frontend's task API client, which wraps those routes in TanStack
 Query hooks with the query keys structured so a journal's list and the dashboard's section invalidate
-independently. **A task is now readable, not only writable, the query the home dashboard is built on
-exists, and the frontend can call it** — Phase 15 reserved its `upcoming()` key against an endpoint
-that had not landed yet, and Phase 14 is that endpoint. What remains is the components themselves
-(16–20), the journal-list indicator whose backend half is still to come (21), and the e2e (22).)
+independently; and the journal task surface itself — a journal's tasks in the three groups the
+specification names, their inline status actions, the retarget that doubles as the resurrect and the
+reopen, and now the attach and detach of the third kind of link. **A task is now readable, not only
+writable, the query the home dashboard is built on exists, and a user can work with a task on the
+surface the specification designates for it** — Phase 15 reserved its `upcoming()` key against an
+endpoint that had not landed yet, and Phase 14 is that endpoint. What remains is creating a task from a
+journal (20), the journal-list indicator whose backend half is still to come (21), and the e2e (22).)
 **ITER18-002 Phases 1, 2, 3 and 4 complete** (the delete guard: journal deletion is refused,
 explanatorily, for any journal anchoring a task, and that refusal now reaches REST and MCP callers as
 machine-readable blockers alongside the prose; merge, which is never refused — it re-points task links
@@ -4683,22 +4686,331 @@ extended, and the ARIA). `home-dashboard-wireframe.md` gains gap 10: the retarge
 journal-only for the same reason delete is, and the dashboard's own row stays exactly as W24 draws it.
 `api-design.md` is deliberately untouched: no backend file was changed.
 
-#### Phase 19: Frontend — Attach and Detach Mention Links
+#### Phase 19: Frontend — Attach and Detach Mention Links ✅ COMPLETE
 
 **Prerequisites:** Phases 10 and 16.
 **Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimate revised before work started:** **~400 production → ~1,300–1,500 tracked.** Phase 17 measured
+the shape a frontend phase takes — count the production *sites* and allow ~140 lines each — and this
+phase has six: `AttachTaskDialog` (~230, it carries the two-step picker and the field-level error
+mapping), `DetachMentionButton` (~60), the section's header, empty state and role threading (~50), the
+row (~15), the actions group (~20), and `linkRemovable` plus the exported error code (~30). At the
+2.2–3× test ratio Phases 15–18 each measured, that is ~1,300–1,500 tracked. Recorded **before** the
+work rather than after it, per delivery rule 3, which Phase 6 was marked as breaching by recording its
+overrun late.
 
-**Acceptance Criteria:**
+**Splitting is rejected rather than overlooked.** The figure is over rule 3's 500 lines and inside the
+"one capability per phase, ~1,500 tracked" form the iteration's own calibration rules restate it as for
+this domain. The natural cut — attach first, detach after — would ship a card that can make mention
+links and not unmake them, or a remove button for links only a retarget can create; and criterion 2
+("creating and due links offer no remove affordance") is a statement about the row that has to be made
+either way. That breaks rule 9 more plainly than the overrun breaks rule 3.
 
-- [ ] From a journal, the user can **attach an existing task** to the journal they are viewing, creating an
-      intermediate ("mentioned") link — one of the two deliberate actions the specification names.
-- [ ] A mention link can be **removed** from the journal that carries it; creating and due links offer no
-      remove affordance.
-- [ ] The task picker for attaching is scoped and searchable rather than listing every task — there is no
-      global task list, and this affordance must not become one.
+**Actual:** **739 production → 2,402 tracked** (2,402 insertions, 50 deletions across 16 files: 739
+production, 1,249 tests and 414 docs — the docs figure counting this entry, which is ~290 of it).
+
+**The revised estimate missed production by 1.8× and the total by 1.6×.** 2,402 against the original
+~440 is 5.5×, and against this phase's own production it is **3.3×** — under the ×4 calibration rule,
+with tests at 1.7× production rather than the 2.2–3× Phases 15–18 each measured. **The reason is worth
+recording, because it inverts the usual finding:** production came in high (739 against ~400) while
+tests came in *low relative to it*, and both have the same cause.
+Phase 17's refinement — count the production sites and allow ~140 lines each — was applied to six sites
+and gave ~400; the sites were identified correctly, but two of them are dominated by prose rather than
+code. `AttachTaskDialog` is 502 lines of which roughly a third is the docstring and the inline
+reasoning for the picker's shape, and the same is true of `DetachMentionButton` at 80. **The review
+round below sharpened this rather than changing it:** every one of its eight fixes was a handful of
+lines of code and a paragraph saying why, which is the same ratio again. **Suggested
+refinement to Phase 17's rule:** a frontend site whose *design* is the deliverable — where the phase's
+argument is why the control is shaped this way rather than what it renders — costs ~200 lines, not
+~140, and its tests do not scale with those lines, because comments are not behaviour to assert.
+
+**Acceptance criteria, ticked:**
+
+- [x] From a journal, the user can **attach an existing task** to the journal they are viewing, creating an
+      intermediate ("mentioned") link — one of the two deliberate actions the specification names. —
+      `frontend/src/components/journals/AttachTaskDialog.tsx`, triggered from the `Tasks` card header.
+      Asserted on the request rather than on the dialog closing: a `POST` to
+      `/api/tasks/{id}/relationships/intermediate-journals` carrying
+      `{data: {type: 'journals', id: <the journal being viewed>}}`, and exactly one write.
+- [x] A mention link can be **removed** from the journal that carries it; creating and due links offer no
+      remove affordance. — `DetachMentionButton.tsx`, mounted by `JournalTaskActions` only where
+      `linkRemovable(role)` permits. The half that matters is asserted three ways: exhaustively over the
+      role enum without rendering (`linkRemovable`), on a row rendered in each role, and — the case the
+      rule exists for — on **one task holding two roles in one journal**, which the listing renders
+      twice and which offers a remove under *Mentioned* and none under *Due*.
+- [x] The task picker for attaching is scoped and searchable rather than listing every task — there is no
+      global task list, and this affordance must not become one. — Asserted on *which requests are
+      made*, because a suite checking only what appears on screen would pass just as well if the picker
+      fetched every journal's tasks and filtered them in the browser: with the dialog open and no
+      journal named, **no task listing has been requested at all**; after a journal is named, the task
+      reads are exactly `['/api/journals/{that one}/tasks']`; and the text filter narrows what is
+      already in hand without a second request.
+
+**Decisions taken (Phase 19):**
+
+1. **The picker names a journal before it names a task, and the scoping is structural rather than a
+   policy.** There is no endpoint that lists or searches tasks across journals — `GET
+   /api/journals/{id}/tasks` and `GET /api/tasks/upcoming` are the whole surface — so the user finds the
+   journal the task is on with the existing `JournalSearchCombobox` and picks out of that journal's own
+   listing. **The reverse shape was considered and rejected:** a task search narrowed by journal is the
+   global task list the specification refuses, wearing a filter, and it would need an endpoint built to
+   be one. Recording it this way round matters, because "scoped picker" reads like a restraint the
+   implementation chose to exercise and could later relax; here there is nothing to relax.
+2. **`JournalSearchCombobox` was reused rather than a picker written.** It is already a WAI-ARIA
+   combobox with keyboard navigation, a debounce and an `excludeJournalId` prop, and it **returns
+   nothing until a query is typed** — so "no unbounded list" is its existing behaviour rather than a
+   rule this dialog has to keep. Phase 18 rejected extending it for the *future-journal* picker because
+   that needed a date window, an ordering and a refusal table it does not have; this needs none of
+   those, which is why the same component is right here and was wrong there.
+3. **Two exclusions keep the server's refusals off the screen, and the 409 is still rendered.** The
+   journal being viewed cannot be its own source, and a task already linked here in any role is not
+   offered — one already mentioned here is a no-op, one anchored here is a 409. Both are computed from
+   the listing `JournalTasksSection` is already rendering, passed down rather than fetched again. But
+   the cache can be stale — a task retargeted onto this journal from somewhere else is an anchor here by
+   the time the request lands — so `TASK_JOURNAL_IS_ANCHOR` is mapped through `form.setError` onto the
+   task field, with the hook's toast left in place. The same rule and the same reason as Phase 18's
+   `TASK_DUE_JOURNAL_NOT_FUTURE`; the code is exported from `lib/api/tasks.ts` beside it.
+4. **The remove affordance belongs to the row's *group*, not to the task.** A retarget onto a journal
+   the task already mentioned leaves it due *and* mentioned there, the listing names it in both groups,
+   and only the mention is removable. So the role travels section → row → actions, and `link_roles` is
+   deliberately not consulted: it says the task is both and cannot tell the two rows apart. This is the
+   same reasoning Phase 16 recorded for reading the grouping from `meta.groups`, arriving one layer
+   further down.
+5. **The rule is a table — `linkRemovable(role)` in `lib/task-display.ts`** — not an inline comparison,
+   following the status offer table and the lapse wording. One test then asserts it over
+   `Object.values(TaskLinkRole)`, so a fourth role or a flipped anchor is caught by a test that never
+   renders a component.
+6. **No confirmation on the remove, and that is a distinction rather than an omission.** Deletion is
+   gated because it is permanent and takes the task off every journal it is linked to; a mention is one
+   link, and the way back is the attach affordance in the same card. What it borrows from delete is the
+   *presentation* — icon-only, `ghost`, muted, never the destructive variant, placed before delete so
+   the destructive action stays last — because it is still not one of the ordinary status moves.
+7. **Mounted inside the existing actions group**, so it shares the group's `aria-busy`, the per-task
+   in-flight lock, and the `aria-describedby` that names the commitment the group acts on. That last is
+   a property of the *group*, not something its buttons inherit — a user tabbing straight to this button
+   hears its name without the task, as they do for delete — which is how Phase 17 built it and is not
+   this phase's to change for one control. `useTaskWriteInFlight` keys on the
+   mutation's `taskId` variable, which the detach input already carries, so this needed no change to a
+   guard that now covers one more write.
+8. **A journal with no tasks now renders the card — Phase 16's rule, narrowed on purpose.** That
+   decision's stated reason was a skeleton flashing on nearly every journal detail view, and it still
+   holds: the **loading** pass renders nothing. What changed is that the card gained an affordance of
+   its own, and the journal most likely to want *attach an existing task* is exactly the one with
+   nothing on it yet — a card that hid itself would put the control out of reach precisely where it is
+   wanted. A **failed** listing still offers no attach affordance, because the dialog cannot compute
+   either exclusion without the set of tasks already linked here.
+9. **The options are a real `RadioGroup`, and that is what makes this phase's ESLint suppression count
+   zero.** Phase 18's picker needed one, because the APG's combobox pattern puts every key on the input
+   and leaves options unfocusable, so `jsx-a11y/click-events-have-key-events` fires on an option handler
+   no keyboard can reach. A radio group has no such tension: arrow-key navigation and the roving
+   tabindex come from Radix. The group is named by a `legend` through `aria-labelledby`, because a
+   `<label>` cannot name a `radiogroup` — it is not a labelable element — and a `FormLabel` here would
+   have carried an `htmlFor` pointing at nothing.
+10. **One `role="status"` line states what the picker holds in every state, including the ordinary
+    one.** A live region that only spoke up on failure would leave a screen-reader user with a list that
+    had silently changed under a filter. It also carries the four empty cases the picker can reach —
+    journal not yet named, journal has no tasks, every task already linked here, filter matches nothing
+    — which are four different things to tell a user and would otherwise all read as an empty box.
+11. **Narrowing the filter past the chosen task clears the choice.** Leaving it selected would arm the
+    submit button over a task no longer on screen: the dialog would be about to mention something the
+    user could not see it was about to mention.
+12. **Nothing closes over the write.** Cancel is disabled and Escape refused until the request settles —
+    Phase 18's stance, unchanged, and for its reason: a `POST` that has reached the server may already
+    have committed, so a dialog that vanished on Cancel and then toasted "Journal linked" would report
+    the opposite of what the user had just asked for.
+13. **The submit condition re-reads what is offered *now*, not what was offered when the choice was
+    made** — Phase 18's rule, met here through a different prop and found by looking for its shape
+    rather than by a failing test. `linkedTaskIds` is a prop, so a write elsewhere on the page can
+    refresh this journal's listing under an open dialog and make the chosen task one the journal already
+    holds; the source journal's own listing can equally refetch without it. Either way the choice has
+    left the list it was picked from, and submitting it sends the request the exclusions exist to keep
+    off the wire. The filter's own clearing covers the visible half of the same rule — a choice narrowed
+    off the screen is cleared — and this covers the half that happens where the user cannot see it.
+    Recorded as a decision rather than a fix because the first draft had the visible half only, which is
+    exactly the incomplete-fix shape Phase 18 recorded twice.
 
 **Required Test Coverage:** unit (RTL) — attach, detach, the absence of remove on anchor links, and that
 the picker is search-scoped rather than an unbounded list. E2E deferred to Phase 22.
+
+**Delivered:** **55** unit tests, taking the frontend suite from 175 suites / 2,073 tests to **176 /
+2,128**. **The baseline was measured rather than taken from Phase 18's entry**, which records 2,065:
+that figure was true when it was written and other work has landed since, and the first draft of this
+paragraph subtracted from it and got the delivered count wrong by eight. Measured by restoring the six
+touched test files to `HEAD` and holding the new suite aside for one run — nine tests fail in that state,
+because old tests meet new production code, but the *total* is what the count needs. The new suite is
+`components/journals/__tests__/AttachTaskDialog.test.tsx` (27); the other 28
+extend the four suites this phase touches — `JournalTaskActions.test.tsx`, `JournalTasksSection.test.tsx`,
+`JournalTaskRow.test.tsx`, `lib/__tests__/task-display.test.ts` and `lib/api/__tests__/tasks.test.ts` —
+rather than starting files beside them. The attach suite **spies `fetch` rather than mocking the hooks**,
+because the request is the thing criterion 3 is about; every other suite keeps the mocking idiom it
+already had. Beyond the required four: the four empty states the picker can reach, the anchor refusal
+landing on the field while the toast survives, both close guards, the keyboard path through the radio
+group, and the assertion that a detach is offered in **every** status — a mention on a done or cancelled
+task is as removable as one on a live task, because the service reads the link and not the status.
+
+**Integration:** none, and not a deferral of convenience — the phase adds no Python, which
+`git status` is asked rather than assumed (`0` files matching `.py`). Both endpoints carry Phase 10's
+integration coverage and both MCP tools have existed since then, so **MCP parity needed nothing**: the
+specification's *attach and detach intermediate journals* line was already satisfied, and a frontend
+phase cannot widen it. **E2E:** none *new* — Phase 22 owns ITER18-001's e2e along with the
+`TestDataManager` task helpers and the lapsed-fixture recipe, and building them here would fork that
+work.
+
+**A regression e2e pass was run instead, and it was not a formality:** decision 8 mounts a card on
+**every** journal detail view, which can move scroll positions and click targets in specs that pass
+today. `journal-detail.spec.ts` (55 tests), `journal-history.spec.ts` and `journals-hierarchy.spec.ts`
+(25) — **80 tests, all passing, on both projects** (27 firefox / 27 Mobile Chrome on the first, the
+remainder split likewise). `journal-detail.spec.ts` was re-run in full **after** the review's section
+change, since `isError && !data` moves the branch that decides whether the card renders at all.
+
+**Mutation checks.** Twelve deliberate breakages, each reverted after confirming it was caught — five
+before the review, five over its fixes and two over the PR review's (removing the Escape guard, dropping `excludeJournalId`, making
+the filter stop clearing the choice, unlocking the detach once settled, and returning the section's
+failure branch to bare `isError`), each of which failed exactly the test written for it. The first five:
+dropping
+the `linkRemovable` guard so every row offers a remove failed **9** tests across three suites; dropping
+the already-linked exclusion failed 2; pointing the picker's listing at the journal being viewed instead
+of the chosen one failed **17** of the attach suite's 20; and letting Cancel and Escape close over an
+in-flight write failed 1; and dropping decision 13's re-read so the submit stayed armed over a choice
+the journal had acquired failed exactly its own test. Two of the five are worth recording. **The
+close-guard breakage was caught by the Escape test alone**, because Cancel is *disabled* while the write
+is in flight, so clicking it cannot reach the guard at all; the Cancel test was renamed to say what it
+actually asserts — that the control is locked — and the guard's own coverage left where it really is.
+And **two tests were vacuous when first written, both caught by mutating rather than by re-reading
+them.** Decision 13's re-rendered with a fresh `QueryClient`, which empties the option list by dropping
+the cached listing, so it passed for a reason unrelated to the rule it names. Decision 11's asserted
+against the filtered view, where the submit guard disables the button anyway — clearing the filter
+afterwards is what tells a *cleared* choice from a merely hidden one. **The pattern is worth naming: a
+test that observes a state where two mechanisms both produce the expected result cannot tell you which
+one did.** The PR review's fix made it three for three — clearing the input before retyping fires the
+combobox's own `onClear`, which does the same thing the new guard does.
+
+**Gates run locally:** `pnpm format` then `pnpm quality:check` — Prettier, ESLint and `tsc --noEmit`
+clean, **0 errors**; **112 warnings**, the same pre-existing Playwright-plugin ones in `tests/e2e/` that
+Phases 17 and 18 each recorded, so this phase added none. The **full** Jest suite rather than the
+changed files alone: **176 suites and 2,128 tests, all passing**. **No ESLint suppression anywhere in
+this phase** — see decision 9, and note that the one the first draft did carry, a
+`react-hooks/exhaustive-deps` disable on a focus effect, went away when the effect turned out to be
+redundant beside `onOpenAutoFocus`. No backend gates — `ruff`, `mypy` and pytest all had nothing to
+run.
+
+**One environment failure, recorded because it is not this phase's and will meet the next person.** The
+first e2e attempt never started: MeiliSearch exited 1 with *"Your database version (1.38.2) is
+incompatible with your current engine version (1.52.3)"*, leaving the backend unhealthy and the run
+stuck on `/api/health/ready` for two minutes of retries that say nothing about the real cause. A stale
+volume in this worktree's compose project, cleared by `python3 scripts/teardown_workspace.py`; the
+re-run came up first time. Worth knowing that the symptom surfaces two containers away from the cause.
+
+**An independent review was run against the specification and this entry before the phase was called
+done, and it found eight things worth changing.** Recorded in full, because three of them are defects the
+phase's own tests had no way to catch and two are claims this entry made that the code did not support.
+
+- **High: Escape inside the journal-search dropdown closed the whole dialog.** The combobox closes its
+  own results and lets the key carry on; Radix's dismissable layer listens on `document` in the
+  **capture** phase, so one press dismissed a dropdown and threw away the journal, the filter and the
+  chosen task. The first fix — `stopPropagation` from a React handler — *cannot work* against a capture
+  listener on `document`, and the test said so; the interception has to be Radix's own `onEscapeKeyDown`,
+  gated on the `aria-expanded` the combobox already publishes. **Pre-existing in the combobox**
+  (`MergeJournalDialog` composes it the same way) but newly reachable here, and fixed at the composition
+  rather than in a shared component this phase has no other business in.
+- **Medium: a settled detach stayed pressable.** The row leaves the listing only when the invalidated
+  refetch returns, a round trip after the `DELETE` resolves, and the shared in-flight guard goes false
+  the moment it does. A second press in that window is refused on **exactly the shape this affordance
+  exists for** — a journal holding an anchor role keeps its intermediate link removable, and the service
+  raises rather than answering idempotently the second time — so an impatient double-click produced
+  "Journal unlinked successfully" followed by an error naming the anchor. Locked on success as well as
+  in flight; a *failed* detach still unlocks, since the link is still there.
+- **Medium: a failed *refresh* unmounted the card, and any open dialog with it.** React Query keeps the
+  previous `data` on a refetch error and sets only the status, and the section's failure branch was
+  reached on `isError` alone — so a window refocus while the network was down replaced a card that had
+  perfectly good tasks to show. Under an open attach dialog that is a close the write guard cannot
+  refuse, **because it never sees it**: decision 12 protects against the user closing the dialog and not
+  against its own parent. `isError && !data` is the whole fix, and it is a better rule anyway.
+- **Medium, three at once: three documented behaviours had nothing holding them.** Decision 11's
+  clearing, the `excludeJournalId` exclusion — the search fixture never returned the journal being
+  viewed, so the prop could be deleted with every test still green — and, in a different way, the
+  focus-on-open test, which asserts a place Radix's own default would have reached anyway. The first two
+  now have tests that fail without them; the third is left as the guarantee it really is (a control
+  added above the picker must not silently take the focus) with its comment corrected to say so.
+- **Medium: this entry's own numbers were wrong**, in two directions at once — see *Delivered* above.
+- **Low, fixed: two nested groups with one name.** The options sat in a `<fieldset>` whose `<legend>`
+  *also* named the inner `radiogroup` through `aria-labelledby`, so a screen reader announced "Task to
+  attach, group … Task to attach, radio group". A `<span>` and the same `aria-labelledby` gives one
+  named group; the disabling the fieldset did for free was already passed to each option.
+- **Low, fixed: a server error could land on an unmounted `FormMessage`.** The field was gated on there
+  being options, so a list that emptied between the submit and the 409 left the refusal with nowhere to
+  render and only the toast surviving. The field is mounted as soon as a journal is named.
+- **Low, fixed: `onClear` left the filter set** where `chooseSource` clears all three, and the section's
+  "one request" assertion had been weakened to `some(...)` when the attach dialog began calling the same
+  hook — it now asserts the exact set of journal ids asked about (`{'7', ''}`), which is what the title
+  claims.
+
+**The PR's automated review then found one more, and it is the same shape as three of the above: a
+control that reports one of its state changes and not the others.** `JournalSearchCombobox` calls
+`onClear` only when its input goes fully **empty**, so editing a chosen "Trip planning" into another
+query left `source` untouched — the field showed one journal while the option list underneath still held
+the other one's tasks, and a task could be attached from a source the user believed they had moved off.
+`onSearchChange` fires on user input alone and never on a selection, so comparing the query against the
+chosen title is safe; both callbacks now route through one `forgetSource`. **Its test was vacuous on the
+first attempt for the third time in this phase** — it cleared the input before retyping, which fires
+`onClear` and would have passed without the new guard — and the mutation is what said so. Typed *onto*
+the title instead.
+
+**A second review round found two more, and the first is a defect the first round's own fix
+introduced.** Recorded that way round rather than folded into the fix above, because the shape is the
+one this iteration keeps meeting: **a fix that reaches for the state it is correcting, and takes
+something else with it.**
+
+- **Medium: putting the journal down emptied the search box.** `forgetSource` cleared `source`, and the
+  combobox's `value` prop was `source?.title ?? ''` — and `JournalSearchCombobox` re-syncs its own input
+  whenever that prop changes. So the keystroke that put the journal down was itself discarded: typing
+  `Beach` over a chosen "Trip planning" searched for `each`, and a whole-value replacement or a paste
+  came back as an empty query, leaving the intended journal unfindable. The query is now the dialog's
+  own state, set on selection and on every input change, so the prop and the input always agree and the
+  sync is a no-op instead of a rewind. **Neither of the round-one tests could have caught it**: both
+  assert what the *option list* does, and the option list is right either way.
+- **Low: the `aria-describedby` claim survived in two of the three places it was made.** The iteration
+  entry's decision 7 was corrected after the first review said the group's description is not inherited
+  by its buttons — and the same sentence was left standing in `JournalTaskActions`'s docstring and in
+  `frontend-design.md`. **The incomplete half of a fix is worse than no fix**, because the correction
+  reads as complete; this is the third time this iteration has recorded that shape and the second time
+  in this phase. All three now say the same true thing.
+
+**Considered and declined, with reasons, rather than silently ignored:**
+
+- **The live region announces on every filter keystroke.** Real — the combobox above it debounces and
+  this does not, so typing "permit" queues six count announcements. Declined because the count *is* what
+  a filtering user needs, and the alternative is a timer and an effect in a component that currently has
+  neither, tested for a behaviour whose correct interval is a guess. Named here so it is a known cost.
+- **Focus is destroyed when a control disables itself**, including this one: activating *Remove mention*
+  from the keyboard disables the focused button and focus falls to `<body>`. This is the pre-existing
+  pattern for every button in the group (Phase 17), and fixing it for one control would make the row
+  inconsistent with itself. It belongs to whoever fixes it for all of them.
+- **The dialog's built-in close `X` is not visibly disabled while the write is in flight.** It is
+  *refused* — it routes through `onOpenChange`, which the guard rejects — but unlike Cancel it does not
+  say so, and making it say so means changing the shared `DialogContent`, which is not this phase's to
+  change on one surface's behalf.
+- **`aria-describedby` on the actions group is not inherited by its buttons**, so a user tabbing straight
+  to *Remove mention* hears the name without which task it acts on. True of every button in that group
+  since Phase 17, and this phase's decision 7 overstated it as "inherits its description"; the wording is
+  corrected below to say it *sits inside* the group that carries it.
+- **Criterion 3's "searchable" is over journals, not tasks.** The picker searches journals and then
+  filters one journal's tasks by substring. The criterion passes — and decision 1 is why no other shape
+  is buildable on the current endpoints — but the consequence should be stated plainly: **a user who
+  cannot name the journal a task lives on cannot attach it at all.** The follow-up that would fix it is
+  the same one Phase 18 recorded, a task listing that can be searched across journals, and it would have
+  to be designed so it does not become the global task list the specification refuses.
+
+**Docs:** `frontend-design.md` gains two subsections under *The Journal Task Surface* — *Attaching a
+mention* (why the picker is journal-scoped and why the reverse shape was rejected, the two exclusions
+and why the 409 is still rendered, the client-side filter and the choice it clears, why a failed listing
+offers no attach, and the `RadioGroup`/`legend` accessibility) and *Removing a mention* (why the
+affordance follows the group rather than the task, why the rule is a table, why no confirmation) — and
+its statement of Phase 16's "nothing renders when there is nothing to show" is narrowed in place rather
+than left to contradict the code. `home-dashboard-wireframe.md` gains gap 11: mention links have no
+wireframe surface at all, because a dashboard row is not shown in the context of any journal and so has
+no "this journal" for a mention to attach to. `api-design.md` is deliberately untouched: no backend file
+changed.
 
 #### Phase 20: Frontend — Create a Task from a Journal
 

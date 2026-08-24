@@ -26,7 +26,11 @@ import { JournalTaskActions } from '../JournalTaskActions';
 import { JournalTasksSection } from '../JournalTasksSection';
 import { createMockJournalTask, createTestQueryClient } from '../test-helpers';
 import { taskKeys } from '@/lib/api/tasks';
-import { TaskStatus, type JournalTasksResponse } from '@/types/tasks';
+import {
+  TaskLinkRole,
+  TaskStatus,
+  type JournalTasksResponse,
+} from '@/types/tasks';
 import type { JournalTaskResource } from '@/types/tasks';
 
 globalThis.fetch = jest.fn();
@@ -93,7 +97,10 @@ function cachedListing(task: JournalTaskResource): JournalTasksResponse {
  * rollback have something real to move, rather than being asserted on a cache
  * nothing reads.
  */
-function renderActions(task = createMockJournalTask()) {
+function renderActions(
+  task = createMockJournalTask(),
+  role: TaskLinkRole = TaskLinkRole.DUE
+) {
   const queryClient = createTestQueryClient();
   queryClient.setQueryData(
     taskKeys.journalList(JOURNAL_ID),
@@ -104,7 +111,12 @@ function renderActions(task = createMockJournalTask()) {
     <QueryClientProvider client={queryClient}>
       <div>
         <p id={TEXT_ID}>{task.attributes.text}</p>
-        <JournalTaskActions task={task} describedById={TEXT_ID} />
+        <JournalTaskActions
+          task={task}
+          journalId={JOURNAL_ID}
+          role={role}
+          describedById={TEXT_ID}
+        />
       </div>
     </QueryClientProvider>
   );
@@ -334,10 +346,20 @@ describe('JournalTaskActions', () => {
           <div>
             <p id={TEXT_ID}>{task.attributes.text}</p>
             <div data-testid='copy-created'>
-              <JournalTaskActions task={task} describedById={TEXT_ID} />
+              <JournalTaskActions
+                task={task}
+                journalId={JOURNAL_ID}
+                role={TaskLinkRole.CREATED}
+                describedById={TEXT_ID}
+              />
             </div>
             <div data-testid='copy-mentioned'>
-              <JournalTaskActions task={task} describedById={TEXT_ID} />
+              <JournalTaskActions
+                task={task}
+                journalId={JOURNAL_ID}
+                role={TaskLinkRole.MENTIONED}
+                describedById={TEXT_ID}
+              />
             </div>
           </div>
         </QueryClientProvider>
@@ -808,6 +830,176 @@ describe('JournalTaskActions', () => {
           screen.getByTestId('journal-task-action-retarget')
         ).toBeEnabled();
       });
+    });
+  });
+
+  /**
+   * Criterion 2: "a mention link can be **removed** from the journal that
+   * carries it; creating and due links offer no remove affordance."
+   *
+   * The affordance belongs to the row's **group**, not to the task. A journal
+   * renders a task holding two roles once per group, so the same commitment
+   * can show a remove under *Mentioned* and none under *Due* — which is why
+   * these actions take a role rather than deriving one from `link_roles`.
+   */
+  describe('removing a mention', () => {
+    const REMOVE = 'Remove mention from this journal';
+
+    it.each([TaskLinkRole.DUE, TaskLinkRole.CREATED])(
+      'offers no remove on a %s row',
+      role => {
+        renderActions(createMockJournalTask(), role);
+
+        expect(
+          screen.queryByRole('button', { name: REMOVE })
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByTestId('journal-task-action-detach')
+        ).not.toBeInTheDocument();
+      }
+    );
+
+    it('offers a remove on a mentioned row', () => {
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      expect(screen.getByRole('button', { name: REMOVE })).toBeInTheDocument();
+    });
+
+    /**
+     * Every status keeps the affordance. A mention is a statement that the
+     * task was discussed here, and a cancelled or done task's mentions are as
+     * removable as a live one's — the service reads the link, not the status.
+     */
+    it.each([TaskStatus.NOT_DONE, TaskStatus.DONE, TaskStatus.CANCELLED])(
+      'offers it on a %s task too',
+      status => {
+        renderActions(
+          createMockJournalTask({ status }),
+          TaskLinkRole.MENTIONED
+        );
+
+        expect(
+          screen.getByRole('button', { name: REMOVE })
+        ).toBeInTheDocument();
+      }
+    );
+
+    it('detaches this journal from the task, and nothing else', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse());
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      await userEvent.click(screen.getByRole('button', { name: REMOVE }));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          `/api/tasks/1/relationships/intermediate-journals/${JOURNAL_ID}`,
+          { method: 'DELETE', credentials: 'include' }
+        );
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(toast.success).toHaveBeenCalledWith(
+        'Journal unlinked successfully'
+      );
+    });
+
+    /**
+     * Removing a mention is reversible by the affordance in the same card, so
+     * it is not gated behind a confirmation the way deletion is — but it is
+     * still not an *ordinary* action, so it is presented as quietly as delete
+     * and stays out of the destructive variant.
+     */
+    it('removes on the click rather than asking first', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse());
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      await userEvent.click(screen.getByRole('button', { name: REMOVE }));
+
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+
+    it('is presented quietly and never as a destructive button', () => {
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      const remove = screen.getByRole('button', { name: REMOVE });
+      expect(remove.className).toContain('text-muted-foreground');
+      expect(remove.className).not.toContain('bg-destructive');
+    });
+
+    it('sits after the retarget and before the delete, which stays last', () => {
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      const order = within(actionGroup())
+        .getAllByRole('button')
+        .map(button => button.getAttribute('data-testid'));
+
+      expect(order).toEqual([
+        'journal-task-action-done',
+        'journal-task-action-cancel',
+        'journal-task-action-retarget',
+        'journal-task-action-detach',
+        'journal-task-action-delete',
+      ]);
+    });
+
+    it('is locked while a write against the task is in flight', async () => {
+      let release: () => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise<Response>(resolve => {
+            release = () => {
+              resolve(okResponse(TaskStatus.DONE));
+            };
+          })
+      );
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Mark done' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: REMOVE })).toBeDisabled();
+      });
+
+      release();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: REMOVE })).toBeEnabled();
+      });
+    });
+
+    /**
+     * The row does not leave the listing until the invalidated refetch comes
+     * back, a round trip after the `DELETE` resolves, and the shared in-flight
+     * guard goes false the moment it does. The second press would be refused
+     * on exactly the shape this affordance exists for — a journal that is also
+     * an anchor keeps its intermediate link removable, and the service raises
+     * rather than answering idempotently the second time — so the user would
+     * see "Journal unlinked successfully" followed by an error naming the
+     * anchor, reading as though the removal had failed.
+     */
+    it('stays locked after the removal settles, not only while it is in flight', async () => {
+      mockFetch.mockResolvedValueOnce(noContentResponse());
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      await userEvent.click(screen.getByRole('button', { name: REMOVE }));
+
+      await waitFor(() => {
+        expect(toast.success).toHaveBeenCalled();
+      });
+      expect(screen.getByRole('button', { name: REMOVE })).toBeDisabled();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a failed removal rather than leaving the row looking unlinked', async () => {
+      mockFetch.mockResolvedValueOnce(failureResponse('Journal is not linked'));
+      renderActions(createMockJournalTask(), TaskLinkRole.MENTIONED);
+
+      await userEvent.click(screen.getByRole('button', { name: REMOVE }));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Journal is not linked');
+      });
+      // Still there *and* still pressable: a failure leaves the link in place,
+      // so the way to try again must not have been locked away with it.
+      expect(screen.getByRole('button', { name: REMOVE })).toBeEnabled();
     });
   });
 });

@@ -75,6 +75,20 @@ export const TASK_REOPEN_NOT_ACKNOWLEDGED = 'TASK_REOPEN_NOT_ACKNOWLEDGED';
 export const TASK_DUE_JOURNAL_NOT_FUTURE = 'TASK_DUE_JOURNAL_NOT_FUTURE';
 
 /**
+ * The refusal a journal draws when it already holds an **anchor** role on the
+ * task — its creating journal, or its due journal.
+ *
+ * The two anchors are reachable only through `create_task` and
+ * `retarget_due_journal`, so the intermediate relationship refuses to touch a
+ * journal holding one. Exported for the same reason as the future-date refusal
+ * above: the attach picker already excludes such a task, but it computes that
+ * from a cache which can be stale — a task retargeted onto this journal from
+ * somewhere else is an anchor here by the time the request lands — so the
+ * answer belongs *against the field* the user chose in, not only in a toast.
+ */
+export const TASK_JOURNAL_IS_ANCHOR = 'TASK_JOURNAL_IS_ANCHOR';
+
+/**
  * Query keys for tasks.
  *
  * `details`, `journalLists` and `upcoming` are **siblings** under `all`, never

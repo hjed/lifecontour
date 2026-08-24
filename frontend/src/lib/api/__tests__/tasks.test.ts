@@ -8,6 +8,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import React, { ReactNode } from 'react';
 import {
+  TASK_JOURNAL_IS_ANCHOR,
   TaskApiError,
   taskKeys,
   useAttachTaskIntermediateJournal,
@@ -1446,6 +1447,36 @@ describe('Task API client', () => {
       expect(toast.error).toHaveBeenCalledWith(
         'Journal 42 is the due journal; retarget the task instead'
       );
+    });
+
+    /**
+     * The attach picker excludes tasks already linked to the journal being
+     * viewed, but it computes that from a cache which can be stale — a task
+     * retargeted onto this journal elsewhere is an anchor here by the time the
+     * request lands. The refusal is therefore a field-level answer the dialog
+     * renders, not a failure, so it needs the code as a constant rather than as
+     * a string spelled out at the call site.
+     */
+    it('names the anchor refusal as an exported code', () => {
+      expect(TASK_JOURNAL_IS_ANCHOR).toBe('TASK_JOURNAL_IS_ANCHOR');
+    });
+
+    it('surfaces the refusal to attach an anchor journal under that code', async () => {
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(
+          409,
+          TASK_JOURNAL_IS_ANCHOR,
+          'Journal 42 is the creating journal of task 1'
+        )
+      );
+
+      const { result } = renderHook(() => useAttachTaskIntermediateJournal(), {
+        wrapper: createWrapper,
+      });
+
+      await expect(
+        result.current.mutateAsync({ taskId: '1', journalId: '42' })
+      ).rejects.toMatchObject({ code: TASK_JOURNAL_IS_ANCHOR });
     });
   });
 

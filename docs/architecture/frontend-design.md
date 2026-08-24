@@ -182,10 +182,14 @@ where tasks are worked with; there is no `/tasks` route.
   this listing must never filter one out. Done and cancelled rows are
   de-emphasised (muted, struck through) but never hidden — the stance the
   wireframe takes on cancelled journals.
-- **Nothing renders when there is nothing to show**, and that includes the
-  loading pass: most journals hold no tasks, so a skeleton would flash on nearly
-  every journal detail view for a section about to render nothing. An empty
-  group is omitted rather than shown as a heading with nothing under it.
+- **Nothing renders while the listing loads**: most journals hold no tasks, so
+  a skeleton would flash on nearly every journal detail view for a section
+  usually about to render nothing. An empty group is omitted rather than shown
+  as a heading with nothing under it. A listing that has *loaded* and found
+  nothing still renders the card, with one line saying so — narrowed from the
+  original "nothing renders when there is nothing to show" when the card gained
+  an affordance of its own, because the journal most likely to want *attach an
+  existing task* is exactly the one with no tasks on it yet.
 - **A failed listing is the one case that does render.** One quiet line, because
   hiding the section on error is indistinguishable from "this journal has no
   tasks" — a journal whose lapsed tasks failed to load would read as clean,
@@ -453,6 +457,134 @@ nothing but the retarget dialog uses it today.
   twice). Unifying them means changing signatures across files this phase has no
   other business in, so it is named here as a follow-up rather than done under
   cover of an unrelated change.
+
+#### Attaching a mention
+
+`AttachTaskDialog` (`components/journals/AttachTaskDialog.tsx`) is one of the
+two deliberate acts the specification names — "a link is created when the user
+deliberately attaches an existing task to the journal they are viewing, or links
+a journal to a task from the task itself". Only the first has a surface, because
+tasks have no route of their own. It is triggered from the `Tasks` card header,
+so it is reachable on a journal holding no tasks at all.
+
+- **The picker names a journal before it names a task, and the scoping is
+  structural rather than a policy.** The criterion is that it be "scoped and
+  searchable rather than listing every task ... this affordance must not become
+  one", and there is no endpoint that lists or searches tasks across journals —
+  `GET /api/journals/{id}/tasks` and `GET /api/tasks/upcoming` are the whole
+  surface. So the user finds the journal the task is on with the existing
+  `JournalSearchCombobox`, and picks out of that journal's own listing. The
+  reverse shape — a task search narrowed by journal — would be the global task
+  list the specification refuses, wearing a filter, and it would need an
+  endpoint built to be one.
+- **Two exclusions keep the server's refusals off the screen.** The journal
+  being viewed cannot be its own source (`excludeJournalId`), and a task already
+  linked here in any role is not offered: one already mentioned here is a no-op,
+  and one anchored here is a 409. The linked set is the listing
+  `JournalTasksSection` is already rendering, passed down rather than fetched
+  again.
+- **Typing over the chosen journal puts it down**, along with the task picked
+  out of it. `JournalSearchCombobox` reports `onClear` only when its input goes
+  fully *empty*, so editing "Trip planning" into another query would leave the
+  field showing one journal while the list underneath still held the other
+  one's tasks. `onSearchChange` fires on user input alone and never on a
+  selection, which is what makes comparing against the chosen title safe.
+- **The search box's contents are the dialog's own state, not derived from the
+  chosen journal.** The combobox re-syncs its input whenever its `value` prop
+  changes, so a `value` of `source?.title ?? ''` throws away the very keystroke
+  that puts the journal down — typing `Beach` over a chosen journal searches for
+  `each`, and a whole-value replacement comes back empty. Tracking what was
+  actually typed keeps the prop and the input in agreement, so the sync is a
+  no-op rather than a rewind. **A caution worth carrying past this component:
+  deriving a controlled child's value from state that the child's own callback
+  clears makes the callback eat its own input.**
+- **The 409 is still rendered against the field**, because that exclusion is
+  computed from a cache and a cache can be stale — a task retargeted onto this
+  journal from somewhere else is an anchor here by the time the request lands.
+  `TASK_JOURNAL_IS_ANCHOR` is mapped through `form.setError` onto the task
+  field, and the hook's toast is left in place: the same rule, and the same
+  reason, as `TASK_DUE_JOURNAL_NOT_FUTURE` on the retarget dialog.
+- **The filter is client-side, over one journal's tasks.** The set is bounded by
+  the journal, so narrowing it is not a second request; and narrowing past the
+  chosen task *clears the choice*, since leaving it selected would arm the
+  submit button over a task no longer on screen.
+- **No attach affordance on a failed listing.** The dialog cannot compute its
+  exclusions without the set of tasks already linked here, so a failed listing
+  would mean offering a picker that could not keep either refusal off the
+  screen. The failure line stays exactly as it was.
+- **Nothing closes over the write**, as on the retarget dialog and for the same
+  reason: Cancel is disabled and Escape refused until the request settles,
+  because a `POST` that has reached the server may already have committed and a
+  dialog that vanished on Cancel and then toasted "Journal linked" would report
+  the opposite of what the user had just asked for. **The parent counts as a way
+  of closing it**, which is why `JournalTasksSection` renders its failure line
+  only when it has no data: React Query keeps the previous `data` on a refetch
+  error and sets the status alone, so a refresh that failed under an open dialog
+  would otherwise replace the card and take the dialog with it — a close the
+  guard cannot refuse because it never sees it.
+- **Escape belongs to whichever thing is open.** `JournalSearchCombobox` closes
+  its own dropdown on Escape and lets the key carry on, and Radix's dismissable
+  layer listens on `document` in the *capture* phase — so one press would dismiss
+  a dropdown and throw the dialog away with it, losing the journal, the filter
+  and the chosen task. A React handler cannot get in front of a capture listener
+  on `document`, so the interception is Radix's own `onEscapeKeyDown`, gated on
+  the `aria-expanded` the combobox already publishes. A second press, with no
+  dropdown open, still closes the dialog.
+- Accessibility: the options are a real `RadioGroup`, so arrow-key navigation
+  and a roving tabindex come from Radix rather than from a hand-rolled listbox —
+  which is why this surface needs no `jsx-a11y` suppression. The group is named
+  through `aria-labelledby` pointing at a `<span>`, because a `<label>` cannot
+  name a `radiogroup` and a `<fieldset>`/`<legend>` would wrap it in a *second*
+  group carrying the same name, which a screen reader reads out twice. Focus on
+  open is set explicitly with `onOpenAutoFocus` rather than left to Radix's
+  first-tabbable default; and one `role="status"` line states what the picker
+  currently holds in *every* state — including the ordinary one, so a list that
+  changes under a filter does not change silently.
+- **The field stays mounted while a journal is named**, not only while there are
+  options, because the server's refusal is written onto it: if the list emptied
+  between the submit and the 409 arriving, `FormMessage` would not be in the
+  document to receive it and only the toast would survive.
+
+#### Removing a mention
+
+`DetachMentionButton` (`components/journals/DetachMentionButton.tsx`) is the
+other half: "intermediate links can be removed. The creating and due links
+cannot be removed, only replaced in the case of the due journal."
+
+- **The affordance belongs to the row's *group*, not to the task.** A task can
+  be due in this journal *and* mentioned in it — a retarget onto a journal it
+  already mentioned produces exactly that — and the listing renders it once per
+  group. So the section passes each group's role down through `JournalTaskRow`
+  to `JournalTaskActions`, and one commitment shows a remove under *Mentioned*
+  and none under *Due*. Reading `link_roles` instead could not tell the two rows
+  apart, because it says the task is both.
+- **The rule is a table, `linkRemovable(role)` in `lib/task-display.ts`**, not
+  an inline comparison — the idiom the status offer table and the lapse wording
+  already follow, and what lets one test assert it exhaustively over the role
+  enum without rendering anything.
+- **Mounted inside the actions group**, so it shares the group's `aria-busy` and
+  the per-task in-flight lock — a detach is a write against the same task as
+  everything else there. It does **not** inherit the group's
+  `aria-describedby`: that names the commitment when the group is *entered*, so
+  a user tabbing straight to one button hears its name without the task. True of
+  every button in that group since Phase 17, and not this phase's to change for
+  one control.
+- **No confirmation.** Deletion is gated because it is permanent and takes the
+  task off every journal it is linked to; a mention is one link, and the way
+  back is the attach affordance in the same card. What it borrows from delete is
+  the presentation — icon-only, `ghost`, muted, never the destructive variant —
+  because it is still not one of the ordinary status moves. It is placed before
+  delete, which stays last.
+- **It stays locked once the write has *succeeded*, not only while it is in
+  flight.** The row leaves the listing when the invalidated refetch returns,
+  which is a round trip after the `DELETE` resolves, and the shared in-flight
+  guard goes false the moment it does. A second press in that window is refused
+  — a journal holding an anchor role keeps its intermediate link removable, and
+  the service raises rather than answering idempotently the second time — so the
+  user would see "Journal unlinked successfully" followed by an error naming the
+  anchor, reading as though the removal had failed. A *failed* detach unlocks:
+  the link is still there, so the way to try again must not be locked away with
+  it.
 
 #### Journal and contact writes invalidate `taskKeys.all`
 

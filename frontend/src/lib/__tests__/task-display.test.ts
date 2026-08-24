@@ -10,12 +10,13 @@
 
 import {
   lapseWording,
+  linkRemovable,
   retargetAction,
   statusActions,
   statusChangeWording,
   statusWording,
 } from '@/lib/task-display';
-import { LapseReason, TaskStatus } from '@/types/tasks';
+import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
 
 describe('statusWording', () => {
   it.each([
@@ -279,5 +280,34 @@ describe('retargetAction', () => {
       expect(offer.dialogDescription.length).toBeGreaterThan(0);
       expect(offer.submitLabel.length).toBeGreaterThan(0);
     });
+  });
+});
+
+/**
+ * The rule behind criterion 2: "a mention link can be removed from the journal
+ * that carries it; creating and due links offer no remove affordance".
+ *
+ * Asserted exhaustively over the role enum rather than one role at a time. A
+ * test that only checked `mentioned` would still pass after an anchor role was
+ * made removable, and the anchors are the half of this rule that matters — the
+ * service reaches them only through `create_task` and `retarget_due_journal`,
+ * and a remove button on one could do nothing but draw a 409.
+ */
+describe('linkRemovable', () => {
+  it('allows a mention to be removed', () => {
+    expect(linkRemovable(TaskLinkRole.MENTIONED)).toBe(true);
+  });
+
+  it.each([TaskLinkRole.DUE, TaskLinkRole.CREATED])(
+    'refuses to remove the %s anchor',
+    role => {
+      expect(linkRemovable(role)).toBe(false);
+    }
+  );
+
+  it('permits exactly one of the roles the listing groups by', () => {
+    const removable = Object.values(TaskLinkRole).filter(linkRemovable);
+
+    expect(removable).toEqual([TaskLinkRole.MENTIONED]);
   });
 });
