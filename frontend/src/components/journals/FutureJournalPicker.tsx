@@ -38,7 +38,9 @@
  *   than in the dialogs above so both of them have it, and it appears only
  *   where it is the honest answer — with nothing in the window and no search
  *   narrowing it, because an empty *search* says nothing about the user's
- *   calendar.
+ *   calendar. It opens a new tab so the dialog it sits in survives, which
+ *   works as a recovery only because `useFutureJournals` opts out of the
+ *   staleness gate on window focus; see the note there.
  * - **`JournalSearchCombobox` was not extended.** It searches *all* journals,
  *   shows nothing until typed into, and has no date filter; the merge dialog
  *   and the parent-journal field depend on all three. Four new branches under
@@ -265,10 +267,15 @@ export function FutureJournalPicker({
               place would throw that away — the text typed, the contacts chosen
               — and land the user on the *new* journal rather than back on the
               one they were writing in, with no route back to finish. In a new
-              tab the dialog survives untouched, and the app's queries refetch
-              on window focus, so the journal they just made is in this list
-              when they return to it. The label says so, because a link that
-              opens a tab without saying it is its own small betrayal. */}
+              tab the dialog survives untouched, and `useFutureJournals` asks
+              for `refetchOnWindowFocus: 'always'` so the journal they just
+              made is in this list when they return. **That `'always'` is
+              load-bearing, not belt-and-braces:** the app-wide default
+              refetches only *stale* queries and this one is fresh for five
+              minutes, so without it a user who did exactly what they were
+              asked would come back to the same empty picker. The label says
+              the tab opens, because a link that opens one without saying so is
+              its own small betrayal. */}
           {!search && (
             <Button
               asChild

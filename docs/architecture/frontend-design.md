@@ -462,10 +462,19 @@ component unchanged.
   inside dialogs that are mid-write, so navigating away in place would throw
   away the task being composed and land the user on the journal they had just
   made rather than back on the one they were writing in — with no route back to
-  finish. In a new tab the dialog survives, and the app's
-  `refetchOnWindowFocus` puts the new journal in this list when they return. A
-  link that opens a tab without saying so is its own small betrayal, so the
+  finish. In a new tab the dialog survives, and returning re-reads this list.
+  A link that opens a tab without saying so is its own small betrayal, so the
   label carries it.
+- **`useFutureJournals` asks for `refetchOnWindowFocus: 'always'`, and that is
+  what makes the new tab a recovery rather than a dead end.** The app-wide
+  default is `true`, which refetches only queries React Query considers
+  *stale*, and this one has a five-minute `staleTime`; a journal created in
+  another tab cannot invalidate this tab's cache. Without the opt-out, a user
+  who took the offer, made the journal and came back inside five minutes would
+  find the picker still empty and the submit still disabled, having done
+  exactly what they were asked. It costs one listing request per refocus, and
+  only while a picker is mounted — which is only while one of the two dialogs
+  is open.
 - **`DueJournalFormField`, exported from the same module**, is the picker wired
   to a react-hook-form field, and it exists because *neither* dialog can wrap
   the picker in `FormControl`: that clones `id`, `aria-describedby` and

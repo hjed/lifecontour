@@ -5139,10 +5139,10 @@ and the difference is what fixing five defects and extracting one shared compone
 search and ordering, field-level error mapping, and keyboard/ARIA behaviour of the picker. E2E deferred
 to Phase 22.
 
-**Delivered: 72 tests added, all passing** — 56 frontend, taking the suite from 176 suites / 2,128 tests
-to **177 / 2,184**, and 16 backend. (Both figures are post-review; the phase went green at 70 and 2,182,
-and the review round below added one dialog test and one picker test, and strengthened four more in
-place.)
+**Delivered: 73 tests added, all passing** — 57 frontend, taking the suite from 176 suites / 2,128 tests
+to **177 / 2,185**, and 16 backend. (Figures are post-review; the phase went green at 70 and 2,182, the
+local review round added one dialog test and one picker test and strengthened four more in place, and
+the PR review added the hook test below.)
 
 - **Dialog (37):** `components/journals/__tests__/CreateTaskDialog.test.tsx` — the whole request pinned
   body-and-URL on the happy path; the three inputs and no fourth; nearest-first, search and the
@@ -5156,6 +5156,9 @@ place.)
 - **Section (5 added; 22 in the file):** `JournalTasksSection.test.tsx` — the trigger on a populated
   journal, an empty one and a **failed** one, absent during the loading pass, and opening nothing by
   itself.
+- **Hook (1 added; 16 in the file):** `lib/api/__tests__/future-journals.test.ts` — that a **fresh**
+  query still re-reads on window focus, driven through `focusManager`, which is what makes the
+  new-tab offer a recovery.
 - **Client (8 added; 75 in the file):** `lib/api/__tests__/tasks.test.ts` — `taskValidationField` over
   both fields, both codes, a missing meta, a non-string field, a non-`TaskApiError`, and end to end
   through a real `useCreateTask` rejection.
@@ -5200,10 +5203,9 @@ were acted on; the line counts above are the figures after that work.
 - **The create-a-journal offer threw the task away, and there was no route back.** It was a plain link
   in a modal that is mid-write: a user who had typed the commitment and chosen contacts lost all of it
   on click, and landed on the journal they had just made rather than back on the one they were writing
-  in — which is the *only* user this criterion exists for. It now opens in a **new tab** and says so.
-  The dialog survives untouched, and the app's `refetchOnWindowFocus` means the journal they just made
-  is in the list when they come back to it. The two tests asserted only the `href`, so nothing caught
-  it; there is a third now.
+  in — which is the *only* user this criterion exists for. It now opens in a **new tab** and says so,
+  so the dialog survives untouched. The two tests asserted only the `href`, so nothing caught it; there
+  is a third now. **The PR review then found that the fix's own recovery did not work** — see below.
 - **A refusal placed on the contacts field was never announced.** `FormMessage` is a plain paragraph
   rather than a live region, so the text and due-journal branches were being announced only because
   they move focus into the described input — and the `CONTACT_NOT_FOUND` branch did not. Every field
@@ -5233,6 +5235,20 @@ were acted on; the line counts above are the figures after that work.
 - Four claims in this entry were overstated and are corrected above: the line counts (understated by
   278 and two files, and the deletions figure counted only production), what the three-input assertion
   catches, "nothing below the component is mocked", and the `or {}` in decision 4.
+
+**What the PR review found, and it was a defect in one of the fixes above.** The new-tab offer was
+only half a fix: the dialog survived, but the picker did not refill. `useFutureJournals` carries a
+five-minute `staleTime`, and the app-wide `refetchOnWindowFocus: true` refetches only queries React
+Query considers **stale** — while a journal created in another tab cannot invalidate this tab's cache.
+So a user who took the offer, made the journal and came back inside five minutes met the same empty
+picker and the same disabled submit, having done exactly what they were asked. The query now asks for
+`refetchOnWindowFocus: 'always'`, opting this one read out of the staleness gate; it costs one listing
+request per refocus and only while a picker is mounted, which is only while one of the two dialogs is
+open. A hook test drives it with `focusManager` over a **fresh** query, so it fails without the
+opt-out. **Worth recording as a shape rather than a one-off:** the first review round's fix was
+verified by asserting the link's attributes, and the mechanism the fix depended on was never asserted
+at all — a fix whose correctness rests on behaviour somewhere else needs a test *there*, not only
+where the change was made.
 
 **One follow-up recorded rather than built.** `MCPResponseBuilder.error_response` flattens `context`
 into the payload's top level (`error_data.update(context)`), so now that task errors forward

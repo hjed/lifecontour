@@ -19,6 +19,7 @@
  */
 
 import { renderHook, waitFor } from '@testing-library/react';
+import { focusManager } from '@tanstack/react-query';
 import { createQueryTestHarness } from '@/test-utils';
 import { useFutureJournals } from '../journals';
 import { addDaysToIsoDate, todayIn } from '@/lib/future-journals';
@@ -509,5 +510,38 @@ describe('useFutureJournals', () => {
 
     await waitFor(() => expect(result.current.fetchStatus).toBe('idle'));
     expect(() => journalsRequestUrl()).toThrow(/no journals request/);
+  });
+
+  /**
+   * The picker's empty state offers to create a journal **in a new tab**,
+   * which only works as a recovery if coming back re-reads this list.
+   *
+   * The app refetches on window focus, but React Query's focus handler
+   * refetches only queries it considers *stale* — and this one has a
+   * five-minute `staleTime`. So a user who took the offer, made the journal
+   * and came back within five minutes would find the picker still empty and
+   * the submit still disabled, having done exactly what they were asked to.
+   * A journal created in another tab cannot invalidate this tab's cache, so
+   * the query opts out of the staleness gate instead.
+   */
+  it('re-reads the list on window focus even while it is fresh', async () => {
+    pagedRespondWith({ 1: [daysAhead('near', 2, 'UTC')] }, 1);
+
+    const { wrapper } = createQueryTestHarness();
+    const { result } = renderHook(() => useFutureJournals(), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const before = requestedPages().length;
+
+    // The query is fresh: nothing has advanced the clock past `staleTime`.
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+
+    await waitFor(() =>
+      expect(requestedPages().length).toBeGreaterThan(before)
+    );
+
+    // Left as it was found, or the next test inherits a forced focus state.
+    focusManager.setFocused(undefined);
   });
 });
