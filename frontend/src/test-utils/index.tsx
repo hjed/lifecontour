@@ -14,6 +14,7 @@ import {
   ContactResource,
   ContactListResponse,
 } from '@/types/contacts';
+import { createMockAppRouter } from './mock-router';
 
 // Test constants to avoid string duplication
 export const TEST_CONSTANTS = {
@@ -185,14 +186,7 @@ export const setupMocks = {
       [key: string]: unknown;
     } = {}
   ) => {
-    const baseRouter = {
-      push: jest.fn(),
-      replace: jest.fn(),
-      prefetch: jest.fn(),
-      back: jest.fn(),
-      forward: jest.fn(),
-      refresh: jest.fn(),
-    };
+    const baseRouter = createMockAppRouter();
     const router = overrides.router
       ? { ...baseRouter, ...overrides.router }
       : baseRouter;

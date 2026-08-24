@@ -7,6 +7,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { AuthGuard, withAuth } from '../AuthGuard';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { AuthState, SessionUser, OAuthProvider } from '@/types/auth';
+import { createMockAppRouter } from '@/test-utils/mock-router';
 
 // Mock Next.js navigation
 jest.mock('next/navigation', () => ({
@@ -72,14 +73,7 @@ jest.mock('@/components/ui/skeleton', () => ({
   ),
 }));
 
-const mockRouter = {
-  replace: jest.fn(),
-  push: jest.fn(),
-  back: jest.fn(),
-  forward: jest.fn(),
-  refresh: jest.fn(),
-  prefetch: jest.fn(),
-};
+const mockRouter = createMockAppRouter();
 
 const mockUseRouter = useRouter as jest.MockedFunction<typeof useRouter>;
 const mockUsePathname = usePathname as jest.MockedFunction<typeof usePathname>;

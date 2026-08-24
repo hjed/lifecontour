@@ -9,6 +9,7 @@ import { render, screen } from '@testing-library/react';
 import { useRouter, usePathname, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { OAuthProvider } from '@/types/auth';
+import { createMockAppRouter } from './mock-router';
 
 // Mock Next.js navigation hooks
 jest.mock('next/navigation', () => ({
@@ -28,14 +29,7 @@ const mockUseParams = useParams as jest.MockedFunction<typeof useParams>;
 const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
 
 // Common mock router setup
-export const createMockRouter = () => ({
-  push: jest.fn(),
-  replace: jest.fn(),
-  back: jest.fn(),
-  forward: jest.fn(),
-  refresh: jest.fn(),
-  prefetch: jest.fn(),
-});
+export const createMockRouter = createMockAppRouter;
 
 // Common auth states
 export const authStates = {
@@ -111,8 +105,7 @@ export interface PlaceholderPageConfig {
 export function setupPlaceholderPageMocks(config: PlaceholderPageConfig) {
   beforeEach(() => {
     // Mock Next.js router hooks
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockUseRouter.mockReturnValue(createMockRouter() as any);
+    mockUseRouter.mockReturnValue(createMockRouter());
     mockUsePathname.mockReturnValue(config.pathname);
 
     if (config.params) {
