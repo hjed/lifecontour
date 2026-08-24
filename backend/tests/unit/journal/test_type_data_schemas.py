@@ -1,0 +1,549 @@
+"""The type_data write models are the single source of field constraints.
+
+``list_journal_types`` publishes these models' JSON Schema and the MCP tools
+validate against them, so a bound that is missing here is a limit no client can
+discover and no boundary enforces — which is how a 100-character ``role`` cap
+stayed invisible until a write breached it and surfaced as a 500.
+
+These tests guard three things: every writable type has a model, every bound is
+the constant the domain validates against (not a copy of its value), and every
+closed vocabulary is its enum.
+"""
+
+from typing import Any
+
+import pytest
+from core_shared.models.journals import JournalType
+from core_shared.models.journals.constants import (
+    MAX_ENERGY_LEVEL,
+    MAX_FRENCH_GRADE_LENGTH,
+    MAX_LOCATION_LENGTH,
+    MAX_MOOD_LABEL_LENGTH,
+    MAX_MOOD_VALUE,
+    MAX_PARTICIPANT_NOTES_LENGTH,
+    MAX_PLAN_DOCUMENT_TITLE_LENGTH,
+    MAX_PLAN_DOCUMENT_URL_LENGTH,
+    MAX_RETIREMENT_REASON_LENGTH,
+    MAX_ROLE_LENGTH,
+    MAX_STRAVA_ACTIVITY_ID_LENGTH,
+    MAX_TIMEZONE_LENGTH,
+    MAX_WATER_GAUGE_NAME_LENGTH,
+    MAX_WEATHER_CONDITIONS_LENGTH,
+    MIN_ENERGY_LEVEL,
+    MIN_MOOD_VALUE,
+    VALID_ANCHOR_LOCATIONS,
+    VALID_ANCHOR_TYPES,
+    VALID_CLIMBING_TYPES,
+    VALID_MAINTENANCE_TYPES,
+    VALID_PITCH_TYPES,
+    VALID_RAPIDS_GRADES,
+    VALID_TRACK_GRADES,
+)
+from core_shared.models.journals.event_state import EventState
+from core_shared.models.journals.outdoor_activity_subtypes import OutdoorActivitySubtype
+from core_shared.models.journals.type_data_schemas import (
+    INTEGRATION_MANAGED_TYPES,
+    TYPE_DATA_MODELS,
+    AbseilingTripTypeData,
+    AbseilPitchTypeData,
+    BushwalkingTypeData,
+    CanyoningTypeData,
+    ClimbingTypeData,
+    EventTypeData,
+    FitnessTypeData,
+    GearMaintenanceTypeData,
+    GearUsageTypeData,
+    KayakingTypeData,
+    MoodRatingTypeData,
+    OutdoorActivityTypeData,
+    OutdoorPlanningTypeData,
+    PlanDocumentTypeData,
+    TypeDataModel,
+)
+from pydantic import ValidationError
+
+
+def _field_schema(model: type[TypeDataModel], field: str) -> dict[str, Any]:
+    """One field's JSON Schema, flattened past the optional ``anyOf`` wrapper.
+
+    Pydantic renders ``str | None`` as ``anyOf: [{...}, {"type": "null"}]``, so
+    the constraints sit on the non-null branch rather than the top level.
+    """
+    schema: dict[str, Any] = model.model_json_schema()["properties"][field]
+    if "anyOf" in schema:
+        non_null = [
+            branch for branch in schema["anyOf"] if branch.get("type") != "null"
+        ]
+        assert len(non_null) == 1, f"{field} has an ambiguous anyOf"
+        return {**schema, **non_null[0]}
+    return schema
+
+
+class TestRegistryCoverage:
+    def test_every_writable_type_has_a_model(self) -> None:
+        """A type missing here accepts type_data no client can discover."""
+        expected = set(JournalType) - INTEGRATION_MANAGED_TYPES
+        assert set(TYPE_DATA_MODELS) == expected
+
+    def test_photo_album_has_no_write_model(self) -> None:
+        """PHOTO_ALBUM is Immich-synced; the write paths refuse it outright."""
+        assert JournalType.PHOTO_ALBUM not in TYPE_DATA_MODELS
+
+    def test_every_model_forbids_unknown_fields(self) -> None:
+        """A mistyped key must be refused, not dropped in silence."""
+        for journal_type, model in TYPE_DATA_MODELS.items():
+            assert model.model_config.get("extra") == "forbid", journal_type
+
+
+class TestLengthBounds:
+    """Each cap is the constant the entity validates against, not a copy."""
+
+    @pytest.mark.parametrize(
+        ("model", "field", "expected"),
+        [
+            (OutdoorActivityTypeData, "role", MAX_ROLE_LENGTH),
+            (
+                OutdoorActivityTypeData,
+                "weather_conditions",
+                MAX_WEATHER_CONDITIONS_LENGTH,
+            ),
+            (
+                OutdoorActivityTypeData,
+                "participant_notes",
+                MAX_PARTICIPANT_NOTES_LENGTH,
+            ),
+            (EventTypeData, "location", MAX_LOCATION_LENGTH),
+            (EventTypeData, "timezone", MAX_TIMEZONE_LENGTH),
+            (MoodRatingTypeData, "mood_label", MAX_MOOD_LABEL_LENGTH),
+            (FitnessTypeData, "strava_activity_id", MAX_STRAVA_ACTIVITY_ID_LENGTH),
+            (PlanDocumentTypeData, "url", MAX_PLAN_DOCUMENT_URL_LENGTH),
+            (PlanDocumentTypeData, "title", MAX_PLAN_DOCUMENT_TITLE_LENGTH),
+            (CanyoningTypeData, "french_grade", MAX_FRENCH_GRADE_LENGTH),
+            (CanyoningTypeData, "water_guage_name", MAX_WATER_GAUGE_NAME_LENGTH),
+            (
+                GearMaintenanceTypeData,
+                "retirement_reason",
+                MAX_RETIREMENT_REASON_LENGTH,
+            ),
+        ],
+    )
+    def test_max_length_is_published(
+        self, model: type[TypeDataModel], field: str, expected: int
+    ) -> None:
+        assert _field_schema(model, field)["maxLength"] == expected
+
+    def test_role_rejects_a_value_past_the_cap(self) -> None:
+        """The reported failure, refused at the boundary instead of the column."""
+        with pytest.raises(ValidationError) as caught:
+            OutdoorActivityTypeData.model_validate(
+                {"role": "x" * (MAX_ROLE_LENGTH + 1)}
+            )
+
+        error = caught.value.errors()[0]
+        assert error["loc"] == ("role",)
+        assert str(MAX_ROLE_LENGTH) in error["msg"]
+
+
+class TestNumericBounds:
+    @pytest.mark.parametrize(
+        ("model", "field", "minimum", "maximum"),
+        [
+            (MoodRatingTypeData, "mood_value", MIN_MOOD_VALUE, MAX_MOOD_VALUE),
+            (MoodRatingTypeData, "energy_level", MIN_ENERGY_LEVEL, MAX_ENERGY_LEVEL),
+        ],
+    )
+    def test_scaled_fields_publish_both_bounds(
+        self, model: type[TypeDataModel], field: str, minimum: int, maximum: int
+    ) -> None:
+        schema = _field_schema(model, field)
+        assert schema["minimum"] == minimum
+        assert schema["maximum"] == maximum
+
+    @pytest.mark.parametrize(
+        ("model", "field"),
+        [
+            (FitnessTypeData, "distance"),
+            (FitnessTypeData, "duration"),
+            (FitnessTypeData, "elevation_gain"),
+            (FitnessTypeData, "elevation_loss"),
+            (FitnessTypeData, "heart_rate_avg"),
+            (FitnessTypeData, "heart_rate_max"),
+            (FitnessTypeData, "calories"),
+            (ClimbingTypeData, "grade"),
+            (ClimbingTypeData, "length"),
+            (AbseilingTripTypeData, "number_of_abseils"),
+            (AbseilingTripTypeData, "total_length"),
+            (AbseilingTripTypeData, "number_of_setups"),
+            (AbseilingTripTypeData, "number_of_rescues"),
+            (AbseilPitchTypeData, "height"),
+        ],
+    )
+    def test_measured_fields_are_non_negative(
+        self, model: type[TypeDataModel], field: str
+    ) -> None:
+        """The entities reject negatives; the schema must say so up front."""
+        assert _field_schema(model, field)["minimum"] == 0
+
+
+class TestUnitsArePublished:
+    """A bare int cannot tell a caller metres from kilometres."""
+
+    @pytest.mark.parametrize(
+        ("field", "unit"),
+        [
+            ("distance", "m"),
+            ("duration", "seconds"),
+            ("elevation_gain", "m"),
+            ("elevation_loss", "m"),
+            ("heart_rate_avg", "bpm"),
+            ("calories", "kcal"),
+        ],
+    )
+    def test_fitness_fields_state_their_unit(self, field: str, unit: str) -> None:
+        assert _field_schema(FitnessTypeData, field)["unit"] == unit
+
+    def test_pace_is_seconds_per_kilometre(self) -> None:
+        """Published as a '5:30/km' string until now; the column is an int."""
+        from core_shared.models.journals.type_data_schemas import JoggingTypeData
+
+        schema = _field_schema(JoggingTypeData, "pace")
+        assert schema["type"] == "integer"
+        assert schema["unit"] == "seconds per km"
+
+
+class TestFitnessUnitsMatchTheColumns:
+    """The published unit must be the unit the column actually stores.
+
+    These are the raw column units: the migration comments read "Distance in
+    meters" and "Duration in seconds", the Strava worker stores
+    ``round(activity.distance)`` and ``activity.moving_time`` — both already
+    metres and seconds — and the frontend divides by 1000 to display km. The
+    discovery metadata said kilometres and minutes, which would have had a
+    client store a 10 km ride as 10 m.
+    """
+
+    def test_distance_is_metres(self) -> None:
+        spec = _field_schema(FitnessTypeData, "distance")
+        assert spec["unit"] == "m"
+        assert "metres" in spec["description"]
+
+    def test_duration_is_seconds(self) -> None:
+        spec = _field_schema(FitnessTypeData, "duration")
+        assert spec["unit"] == "seconds"
+        assert "seconds" in spec["description"]
+
+    def test_a_strava_sized_value_is_accepted(self) -> None:
+        """10 km / 1 h as the worker stores it — not as km and minutes."""
+        parsed = FitnessTypeData.model_validate({"distance": 10000, "duration": 3600})
+
+        assert parsed.distance == 10000
+        assert parsed.duration == 3600
+
+
+class TestRouteIdIsNotWritable:
+    """route_id left these tables when routes became a journal child.
+
+    The update helpers still pass it to ``dataclasses.replace``, which raises
+    TypeError because no such field exists — so advertising it would point a
+    caller at a guaranteed 500.
+    """
+
+    @pytest.mark.parametrize(
+        "journal_type",
+        [
+            JournalType.BUSHWALKING,
+            JournalType.JOGGING,
+            JournalType.CANYONING,
+            JournalType.CROSS_COUNTRY_SKIING,
+        ],
+    )
+    def test_route_id_is_not_advertised(self, journal_type: JournalType) -> None:
+        assert "route_id" not in TYPE_DATA_MODELS[journal_type].model_fields
+
+
+class TestBlankTextIsRefused:
+    """The entities reject whitespace-only text, so the boundary must too."""
+
+    @pytest.mark.parametrize(
+        ("model", "field"),
+        [
+            (OutdoorActivityTypeData, "role"),
+            (OutdoorActivityTypeData, "weather_conditions"),
+            (OutdoorActivityTypeData, "participant_notes"),
+            (FitnessTypeData, "strava_activity_id"),
+        ],
+    )
+    def test_a_whitespace_only_value_is_refused(
+        self, model: type[TypeDataModel], field: str
+    ) -> None:
+        with pytest.raises(ValidationError):
+            model.model_validate({field: "   "})
+
+    def test_a_blank_plan_document_url_is_refused(self) -> None:
+        """``_build_plan_document`` rejects it with .strip(); min_length did not."""
+        from core_shared.models.journals.type_data_schemas import PlanTypeData
+
+        with pytest.raises(ValidationError):
+            PlanTypeData.model_validate({"documents": [{"url": "   "}]})
+
+    def test_a_blank_focus_area_is_refused(self) -> None:
+        """OutdoorTrainingData requires every entry to be non-blank."""
+        from core_shared.models.journals.type_data_schemas import (
+            OutdoorTrainingTypeData,
+        )
+
+        with pytest.raises(ValidationError):
+            OutdoorTrainingTypeData.model_validate(
+                {"focus_areas": ["bushwalking", "   "]}
+            )
+
+    def test_free_text_focus_areas_still_pass(self) -> None:
+        """Non-blank free text stays allowed — only blanks are refused."""
+        from core_shared.models.journals.type_data_schemas import (
+            OutdoorTrainingTypeData,
+        )
+
+        parsed = OutdoorTrainingTypeData.model_validate(
+            {"focus_areas": ["bushwalking", "knot tying"]}
+        )
+
+        assert parsed.focus_areas == ["bushwalking", "knot tying"]
+
+    def test_null_still_clears_the_field(self) -> None:
+        """Clearing is a real intention; blank is not the way to express it."""
+        assert OutdoorActivityTypeData.model_validate({"role": None}).role is None
+
+
+class TestRetirementNeedsAReason:
+    """GearMaintenanceData refuses to retire an item without saying why."""
+
+    def test_retiring_without_a_reason_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="retirement_reason"):
+            GearMaintenanceTypeData.model_validate(
+                {
+                    "gear_item_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+                    "maintenance_type": "retiring gear",
+                }
+            )
+
+    def test_retiring_with_a_reason_is_accepted(self) -> None:
+        parsed = GearMaintenanceTypeData.model_validate(
+            {
+                "gear_item_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+                "maintenance_type": "retiring gear",
+                "retirement_reason": "sheath core-shot",
+            }
+        )
+
+        assert parsed.retirement_reason == "sheath core-shot"
+
+    def test_another_maintenance_type_needs_no_reason(self) -> None:
+        parsed = GearMaintenanceTypeData.model_validate(
+            {
+                "gear_item_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+                "maintenance_type": "routine inspection",
+            }
+        )
+
+        assert parsed.retirement_reason is None
+
+
+class TestRulesDecidableFromThePayload:
+    """Cross-field rules the boundary can hold without seeing the stored row."""
+
+    GEAR = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+    def test_an_unresolvable_timezone_is_refused(self) -> None:
+        """CalendarInfo resolves it through ZoneInfo; length alone did not."""
+        with pytest.raises(ValidationError):
+            EventTypeData.model_validate(
+                {"calendar_id": self.GEAR, "timezone": "Australia/Sidney"}
+            )
+
+    def test_a_real_timezone_is_accepted(self) -> None:
+        parsed = EventTypeData.model_validate(
+            {"calendar_id": self.GEAR, "timezone": "Australia/Sydney"}
+        )
+
+        assert parsed.timezone == "Australia/Sydney"
+
+    def test_an_all_day_event_carrying_a_time_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="all-day"):
+            EventTypeData.model_validate(
+                {
+                    "calendar_id": self.GEAR,
+                    "is_all_day": True,
+                    "start_time": "09:00",
+                }
+            )
+
+    def test_a_check_in_before_its_check_out_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="checkin_date"):
+            GearUsageTypeData.model_validate(
+                {
+                    "gear_item_id": self.GEAR,
+                    "checkout_date": "2024-01-15T10:00:00Z",
+                    "checkin_date": "2024-01-14T10:00:00Z",
+                }
+            )
+
+    def test_a_check_in_alone_is_left_to_the_entity(self) -> None:
+        """A patch cannot see the stored checkout, so it must not guess."""
+        parsed = GearUsageTypeData.model_validate(
+            {"gear_item_id": self.GEAR, "checkin_date": "2024-01-15T10:00:00Z"}
+        )
+
+        assert parsed.checkin_date is not None
+
+
+class TestRulesLeftToTheEntities:
+    """Rules the boundary must NOT take on, and why.
+
+    Enforcing these here would reject calls that are correct, because the
+    deciding context is a row or a date range the model never sees.
+    """
+
+    GEAR = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+    def test_an_event_running_past_midnight_is_accepted(self) -> None:
+        """23:00 to 01:00 is a real event, not an inverted one.
+
+        CalendarInfo resolves the pair against the journal's event_date_range;
+        type_data carries no dates, so ordering times here would refuse a
+        legitimate cross-midnight event.
+        """
+        parsed = EventTypeData.model_validate(
+            {
+                "calendar_id": self.GEAR,
+                "start_time": "23:00",
+                "end_time": "01:00",
+            }
+        )
+
+        assert parsed.start_time is not None
+        assert parsed.end_time is not None
+
+    def test_one_time_without_the_other_is_accepted(self) -> None:
+        """Whether its partner is already stored is invisible to a patch."""
+        parsed = EventTypeData.model_validate(
+            {"calendar_id": self.GEAR, "start_time": "09:00"}
+        )
+
+        assert parsed.end_time is None
+
+
+class TestClosedVocabularies:
+    @pytest.mark.parametrize(
+        ("model", "field", "valid"),
+        [
+            (BushwalkingTypeData, "track_grading", VALID_TRACK_GRADES),
+            (ClimbingTypeData, "climbing_type", VALID_CLIMBING_TYPES),
+            (KayakingTypeData, "rapids_grade", VALID_RAPIDS_GRADES),
+            (GearMaintenanceTypeData, "maintenance_type", VALID_MAINTENANCE_TYPES),
+            (AbseilPitchTypeData, "anchor_type", VALID_ANCHOR_TYPES),
+            (AbseilPitchTypeData, "anchor_location", VALID_ANCHOR_LOCATIONS),
+            (AbseilPitchTypeData, "pitch_type", VALID_PITCH_TYPES),
+        ],
+    )
+    def test_vocabulary_is_published_as_an_enum(
+        self, model: type[TypeDataModel], field: str, valid: list[str]
+    ) -> None:
+        """Derived from the enum, so the schema cannot drift from the domain."""
+        schema = model.model_json_schema()
+        assert _enum_values(schema, field) == list(valid)
+
+    def test_event_state_is_published(self) -> None:
+        """Accepted by the write path but never documented before."""
+        schema = EventTypeData.model_json_schema()
+        assert _enum_values(schema, "event_state") == [s.value for s in EventState]
+
+    def test_activity_types_are_published(self) -> None:
+        """OUTDOOR_PLANNING validates these; the vocabulary was undocumented."""
+        schema = OutdoorPlanningTypeData.model_json_schema()
+        assert _enum_values(schema, "activity_types") == [
+            s.value for s in OutdoorActivitySubtype
+        ]
+
+    def test_off_vocabulary_track_grading_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            BushwalkingTypeData.model_validate({"track_grading": "Grade 9"})
+
+    def test_focus_areas_stay_open(self) -> None:
+        """OUTDOOR_TRAINING deliberately accepts free text beyond the subtypes."""
+        from core_shared.models.journals.type_data_schemas import (
+            OutdoorTrainingTypeData,
+        )
+
+        assert OutdoorTrainingTypeData(
+            focus_areas=["bushwalking", "knot tying"]
+        ).focus_areas == ["bushwalking", "knot tying"]
+
+
+def _enum_values(schema: dict[str, Any], field: str) -> list[str]:
+    """Resolve a field's enum values through $ref / anyOf / array items."""
+    defs = schema.get("$defs", {})
+
+    def resolve(node: dict[str, Any]) -> list[str] | None:
+        if "enum" in node:
+            return list(node["enum"])
+        if "$ref" in node:
+            return resolve(defs[node["$ref"].rsplit("/", 1)[1]])
+        if "items" in node:
+            return resolve(node["items"])
+        for branch in node.get("anyOf", []):
+            found = resolve(branch)
+            if found is not None:
+                return found
+        return None
+
+    values = resolve(schema["properties"][field])
+    assert values is not None, f"{field} publishes no enum"
+    return values
+
+
+class TestUnboundedStringsAreDeliberate:
+    """Every string field either carries a cap or is named as free text.
+
+    A ``VARCHAR(n)`` column reached with a longer value is a driver error the
+    API can only report as a 500, so a new string field must make a choice.
+    The columns behind these names are ``TEXT`` — genuinely unbounded.
+    """
+
+    FREE_TEXT = {
+        ("EventTypeData", "description"),
+        ("PlanDocumentTypeData", "description"),
+        ("KayakingTypeData", "water_type"),
+        ("CanoeingTypeData", "water_type"),
+        ("CrossCountrySkiingTypeData", "snow_conditions"),
+        ("OutdoorPlanningTypeData", "topics"),
+        ("OutdoorTrainingTypeData", "focus_areas"),
+        ("AbseilPitchTypeData", "notes"),
+    }
+
+    def test_no_accidental_unbounded_string(self) -> None:
+        unbounded: set[tuple[str, str]] = set()
+        models: list[type[TypeDataModel]] = [
+            *TYPE_DATA_MODELS.values(),
+            PlanDocumentTypeData,
+            AbseilPitchTypeData,
+        ]
+        for model in models:
+            schema = model.model_json_schema()
+            for field, spec in schema["properties"].items():
+                flat = _field_schema(model, field)
+                is_string = flat.get("type") == "string" or (
+                    flat.get("type") == "array"
+                    and flat.get("items", {}).get("type") == "string"
+                )
+                # A format (uuid, date-time, time) is its own bound.
+                if not is_string or "enum" in flat or "format" in flat:
+                    continue
+                if "$ref" in str(spec):
+                    continue
+                if "maxLength" not in flat and "pattern" not in flat:
+                    unbounded.add((model.__name__, field))
+
+        assert unbounded == self.FREE_TEXT, (
+            "a string field gained or lost a cap: add the cap, or add it to "
+            "FREE_TEXT if its column is TEXT"
+        )

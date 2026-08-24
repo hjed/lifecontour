@@ -18,6 +18,7 @@ Per-item batch operations (contact-relationship bulk processing) use
 just its SAVEPOINT and the loop continues.
 """
 
+import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
 
@@ -1013,11 +1014,8 @@ class JournalWriteService:
                 )
                 await self.event_publisher.publish(calendar_sync_event)
             except (ValueError, KeyError) as exc:
-                from fastapi import HTTPException
-
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid EVENT type_data: {exc}",
+                raise JournalValidationError(
+                    "event", f"Invalid EVENT data: {exc}"
                 ) from exc
 
         # PHOTO_ALBUM type data is integration-managed (Immich album sync) and is
@@ -1055,32 +1053,25 @@ class JournalWriteService:
             if mood_data is None:
                 mood_data = MoodData(journal_id=journal_id)
 
-            mood_value_raw = mood_payload.get("mood_value")
-            energy_level_raw = mood_payload.get("energy_level")
-
-            if mood_value_raw is not None:
+            updates: dict[str, Any] = {}
+            for field in ("mood_value", "energy_level"):
+                raw = mood_payload.get(field)
+                if raw is None:
+                    continue
                 try:
-                    mood_data.mood_value = int(mood_value_raw)
+                    updates[field] = int(raw)
                 except (TypeError, ValueError) as exc:
-                    from fastapi import HTTPException
+                    raise JournalValidationError(field, "Must be an integer") from exc
 
-                    raise HTTPException(
-                        status_code=400,
-                        detail="mood_value must be an integer",
-                    ) from exc
-            if energy_level_raw is not None:
-                try:
-                    mood_data.energy_level = int(energy_level_raw)
-                except (TypeError, ValueError) as exc:
-                    from fastapi import HTTPException
+            label = mood_payload.get("mood_label")
+            if label:
+                updates["mood_label"] = label
 
-                    raise HTTPException(
-                        status_code=400,
-                        detail="energy_level must be an integer",
-                    ) from exc
-            mood_data.mood_label = (
-                mood_payload.get("mood_label") or mood_data.mood_label
-            )
+            # ``replace`` rather than attribute assignment: a dataclass only runs
+            # __post_init__ when it is constructed, so assigning in place skipped
+            # every bound the entity defines and left the column to reject the
+            # value as a driver error.
+            mood_data = dataclasses.replace(mood_data, **updates)
 
             await self.mood_data_repo.save(mood_data)
 
@@ -1102,24 +1093,25 @@ class JournalWriteService:
                 "elevation_loss",
                 "calories",
             )
+            fitness_updates: dict[str, Any] = {}
             for field in numeric_fields:
-                if field in fitness_payload:
-                    value = fitness_payload[field]
-                    if value is None:
-                        setattr(fitness_data, field, None)
-                    else:
-                        try:
-                            setattr(fitness_data, field, int(value))
-                        except (TypeError, ValueError) as exc:
-                            from fastapi import HTTPException
-
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"{field} must be an integer",
-                            ) from exc
+                if field not in fitness_payload:
+                    continue
+                value = fitness_payload[field]
+                if value is None:
+                    fitness_updates[field] = None
+                    continue
+                try:
+                    fitness_updates[field] = int(value)
+                except (TypeError, ValueError) as exc:
+                    raise JournalValidationError(field, "Must be an integer") from exc
 
             if "strava_activity_id" in fitness_payload:
-                fitness_data.strava_activity_id = fitness_payload["strava_activity_id"]
+                fitness_updates["strava_activity_id"] = fitness_payload[
+                    "strava_activity_id"
+                ]
+
+            fitness_data = dataclasses.replace(fitness_data, **fitness_updates)
 
             await self.fitness_data_repo.save(fitness_data)
 
@@ -1134,14 +1126,17 @@ class JournalWriteService:
             if outdoor_data is None:
                 outdoor_data = OutdoorActivityData(journal_id=journal_id)
 
-            if "weather_conditions" in outdoor_payload:
-                outdoor_data.weather_conditions = outdoor_payload["weather_conditions"]
-            if "role" in outdoor_payload:
-                outdoor_data.role = outdoor_payload["role"]
-            if "in_leadership_role" in outdoor_payload:
-                outdoor_data.in_leadership_role = outdoor_payload["in_leadership_role"]
-            if "participant_notes" in outdoor_payload:
-                outdoor_data.participant_notes = outdoor_payload["participant_notes"]
+            outdoor_updates = {
+                field: outdoor_payload[field]
+                for field in (
+                    "weather_conditions",
+                    "role",
+                    "in_leadership_role",
+                    "participant_notes",
+                )
+                if field in outdoor_payload
+            }
+            outdoor_data = dataclasses.replace(outdoor_data, **outdoor_updates)
 
             await self.outdoor_activity_data_repo.save(outdoor_data)
 
@@ -1157,7 +1152,10 @@ class JournalWriteService:
                 bushwalking_data = BushwalkingData(journal_id=journal_id)
 
             if "track_grading" in bushwalking_payload:
-                bushwalking_data.track_grading = bushwalking_payload["track_grading"]
+                bushwalking_data = dataclasses.replace(
+                    bushwalking_data,
+                    track_grading=bushwalking_payload["track_grading"],
+                )
 
             await self.bushwalking_data_repo.save(bushwalking_data)
 
@@ -1172,18 +1170,15 @@ class JournalWriteService:
 
             if "pace" in jogging_payload:
                 pace_raw = jogging_payload["pace"]
-                if pace_raw is None:
-                    jogging_data.pace = None
-                else:
+                pace: int | None = None
+                if pace_raw is not None:
                     try:
-                        jogging_data.pace = int(pace_raw)
+                        pace = int(pace_raw)
                     except (TypeError, ValueError) as exc:
-                        from fastapi import HTTPException
-
-                        raise HTTPException(
-                            status_code=400,
-                            detail="pace must be an integer (seconds per km)",
+                        raise JournalValidationError(
+                            "pace", "Must be an integer (seconds per km)"
                         ) from exc
+                jogging_data = dataclasses.replace(jogging_data, pace=pace)
 
             await self.jogging_data_repo.save(jogging_data)
 

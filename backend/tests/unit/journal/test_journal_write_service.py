@@ -14,12 +14,20 @@ from uuid import uuid4
 import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
+    BushwalkingData,
+    BushwalkingDataValidationError,
     EventDateRange,
     Journal,
     JournalContactRelationshipType,
+    JournalDomainError,
     JournalType,
     JournalValidationError,
+    MoodData,
+    MoodDataValidationError,
+    OutdoorActivityData,
+    OutdoorActivityDataValidationError,
 )
+from core_shared.models.journals.constants import MAX_ROLE_LENGTH
 from core_shared.models.journals.gear_usage_data import GearUsageData
 
 from app.core.journal.models.journal_tag import JournalTag
@@ -265,15 +273,21 @@ class TestRemoveType:
 class TestUpdateTypeData:
     @pytest.mark.asyncio
     async def test_update_type_data_mood(self, write_service, mock_transaction):
-        """update_type_data for MOOD_RATING updates the mood row."""
-        existing = MagicMock()
-        write_service.mood_data_repo.find_by_journal_id.return_value = existing
+        """update_type_data for MOOD_RATING updates the mood row.
+
+        A real entity rather than a mock: the update rebuilds it so the
+        entity's own bounds run, and a mock would accept anything.
+        """
+        write_service.mood_data_repo.find_by_journal_id.return_value = MoodData(
+            journal_id=7
+        )
 
         await write_service.update_type_data(
             7, JournalType.MOOD_RATING, {"mood_value": 5}, mock_transaction
         )
 
         write_service.mood_data_repo.save.assert_awaited_once()
+        assert write_service.mood_data_repo.save.await_args.args[0].mood_value == 5
 
     @pytest.mark.asyncio
     async def test_update_type_data_gear_usage(self, write_service, mock_transaction):
@@ -764,3 +778,77 @@ class TestRemoveTypeEvent:
 
         mock_journal_service.remove_type_from_journal.assert_awaited_once()
         write_service.calendar_info_repo.delete.assert_awaited_once_with(9)
+
+
+class TestReplaceTypesValidatesTypeData:
+    """Type-data supplied alongside ``types`` must run the domain's validation.
+
+    The composite update splits on whether ``types`` was sent: ``type_data``
+    alone routes through ``update_type_data`` (which rebuilds the entity with
+    ``dataclasses.replace``, so ``__post_init__`` runs), while sending ``types``
+    too routes through ``_process_journal_type_data``. That branch used to
+    assign the attributes in place, so no validation ran at all and an
+    over-long value reached the column and surfaced as an opaque 500. Both
+    branches must reject the same input with the same domain error.
+    """
+
+    @pytest.mark.asyncio
+    async def test_over_long_role_is_rejected(self, write_service):
+        """A role past the column's cap is a validation error, not a DB failure."""
+        write_service.outdoor_activity_data_repo.find_by_journal_id.return_value = (
+            OutdoorActivityData(journal_id=7)
+        )
+
+        with pytest.raises(OutdoorActivityDataValidationError, match="role"):
+            await write_service._process_journal_type_data(
+                7,
+                {"outdoor_activity": {"role": "x" * (MAX_ROLE_LENGTH + 1)}},
+                AsyncMock(),
+            )
+
+        write_service.outdoor_activity_data_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_off_vocabulary_track_grading_is_rejected(self, write_service):
+        """track_grading is a closed vocabulary on both write paths."""
+        write_service.bushwalking_data_repo.find_by_journal_id.return_value = (
+            BushwalkingData(journal_id=7)
+        )
+
+        with pytest.raises(BushwalkingDataValidationError, match="track_grading"):
+            await write_service._process_journal_type_data(
+                7, {"bushwalking": {"track_grading": "Grade 9"}}, AsyncMock()
+            )
+
+        write_service.bushwalking_data_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_mood_value_is_rejected(self, write_service):
+        """mood_value outside 1-10 fails the entity's own bounds check."""
+        write_service.mood_data_repo.find_by_journal_id.return_value = MoodData(
+            journal_id=7
+        )
+
+        with pytest.raises(MoodDataValidationError, match="mood_value"):
+            await write_service._process_journal_type_data(
+                7, {"mood_rating": {"mood_value": 99}}, AsyncMock()
+            )
+
+        write_service.mood_data_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_integer_mood_value_raises_a_domain_error(self, write_service):
+        """A service must not raise HTTPException: MCP cannot recognise one.
+
+        ``mcp_unified_error_handler`` matches domain errors and ValueError; an
+        HTTPException falls through to the catch-all and is reported as
+        "Internal error", which tells an agent nothing it can act on.
+        """
+        write_service.mood_data_repo.find_by_journal_id.return_value = MoodData(
+            journal_id=7
+        )
+
+        with pytest.raises(JournalDomainError):
+            await write_service._process_journal_type_data(
+                7, {"mood_rating": {"mood_value": "not-a-number"}}, AsyncMock()
+            )

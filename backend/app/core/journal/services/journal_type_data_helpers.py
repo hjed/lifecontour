@@ -485,15 +485,17 @@ async def update_mood_type_data(
             "journal_type", f"Journal does not have type {journal_type}"
         )
 
-    # Update fields from request
-    if "mood_value" in attrs:
-        mood_data.mood_value = attrs["mood_value"]
-    if "mood_label" in attrs:
-        mood_data.mood_label = attrs["mood_label"]
-    if "energy_level" in attrs:
-        mood_data.energy_level = attrs["energy_level"]
+    # dataclasses.replace() so __post_init__ runs: assigning in place skips the
+    # entity's own bounds (mood 1-10, label length) and leaves the column to
+    # reject the value as a driver error rather than a named field.
+    updates: dict[str, Any] = {
+        field: attrs[field]
+        for field in ("mood_value", "mood_label", "energy_level")
+        if field in attrs
+    }
 
-    await mood_data_repo.save(mood_data)
+    validated_data = dataclasses.replace(mood_data, **updates)
+    await mood_data_repo.save(validated_data)
 
 
 async def update_fitness_type_data(
@@ -509,25 +511,24 @@ async def update_fitness_type_data(
             "journal_type", f"Journal does not have type {journal_type}"
         )
 
-    # Update fields from request
-    if "heart_rate_avg" in attrs:
-        fitness_data.heart_rate_avg = attrs["heart_rate_avg"]
-    if "heart_rate_max" in attrs:
-        fitness_data.heart_rate_max = attrs["heart_rate_max"]
-    if "distance" in attrs:
-        fitness_data.distance = attrs["distance"]
-    if "elevation_gain" in attrs:
-        fitness_data.elevation_gain = attrs["elevation_gain"]
-    if "elevation_loss" in attrs:
-        fitness_data.elevation_loss = attrs["elevation_loss"]
-    if "duration" in attrs:
-        fitness_data.duration = attrs["duration"]
-    if "calories" in attrs:
-        fitness_data.calories = attrs["calories"]
-    if "strava_activity_id" in attrs:
-        fitness_data.strava_activity_id = attrs["strava_activity_id"]
+    # dataclasses.replace() so __post_init__ runs — see update_mood_type_data.
+    updates: dict[str, Any] = {
+        field: attrs[field]
+        for field in (
+            "heart_rate_avg",
+            "heart_rate_max",
+            "distance",
+            "elevation_gain",
+            "elevation_loss",
+            "duration",
+            "calories",
+            "strava_activity_id",
+        )
+        if field in attrs
+    }
 
-    await fitness_data_repo.save(fitness_data)
+    validated_data = dataclasses.replace(fitness_data, **updates)
+    await fitness_data_repo.save(validated_data)
 
 
 async def update_outdoor_activity_type_data(
@@ -868,12 +869,11 @@ async def update_outdoor_training_type_data(
             "type_data", f"Journal {journal_id} is missing OUTDOOR_TRAINING type data"
         )
 
+    from core_shared.models.journals.type_data_schemas import OutdoorTrainingTypeData
     from pydantic import ValidationError
 
-    from app.api.journals.schemas import OutdoorTrainingDataSchema
-
     try:
-        validated_data = OutdoorTrainingDataSchema.model_validate(data)
+        validated_data = OutdoorTrainingTypeData.model_validate(data)
     except ValidationError as e:
         error = e.errors()[0]
         field_path = ".".join(str(loc) for loc in error["loc"])

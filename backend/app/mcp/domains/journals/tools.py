@@ -229,6 +229,7 @@ from app.mcp.domains.journals.schemas import (
     TemplatePitchInput,
     UpcomingOutdoorActivityMCPEntry,
     build_dashboard_summary,
+    validate_type_data,
 )
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
@@ -1938,6 +1939,11 @@ async def create_journal_entry(
                 f"Valid types are: {', '.join(sorted(valid_type_names))}"
             )
 
+    # Check every value against its type's write model before anything is
+    # written, so a bad one is refused with the field named rather than
+    # reaching the column (see validate_type_data).
+    validated_type_data = validate_type_data(request.type_data)
+
     if request.contact_relationships:
         _validate_contact_relationships(request.contact_relationships)
 
@@ -1949,7 +1955,7 @@ async def create_journal_entry(
     # same thing selecting one in the UI does (the abseil counts then follow from
     # the pitches, in AbseilingService). Resolved here, before any write, so an
     # unusable template_id creates no journal.
-    type_data = request.type_data
+    type_data = validated_type_data
     # ``is not None`` rather than truthiness: an explicit empty string is a
     # malformed id, and must be refused rather than quietly creating an
     # untemplated journal.
@@ -2087,6 +2093,13 @@ async def update_journal_entry(
     if request.contact_relationships is not None:
         _validate_contact_relationships(request.contact_relationships)
 
+    # Check every value against its type's write model before anything is
+    # written. The composite update reaches the type-data write down two
+    # different branches and only one of them ran the domain's checks, so an
+    # over-long value came back as a bare "Internal error" when ``types`` was
+    # sent alongside it (see validate_type_data).
+    validated_type_data = validate_type_data(request.type_data, partial=True)
+
     # --- All inputs validated, proceed with DB writes ---
 
     # Repositories are still needed to load the journal and read back enrichment
@@ -2138,7 +2151,7 @@ async def update_journal_entry(
         existing_journal,
         db_connection,
         types=request.types,
-        type_data=request.type_data,
+        type_data=validated_type_data,
         relationships=relationships,
         tags=request.tags,
         changed_by="mcp",
