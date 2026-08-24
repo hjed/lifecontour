@@ -13,12 +13,21 @@ from core_shared.models.journals import (
     TemplateType,
 )
 from core_shared.models.journals.constants import (
+    FRENCH_CANYON_GRADE_PATTERN,
+    MAX_FRENCH_GRADE_LENGTH,
+    MAX_MOOD_VALUE,
+    MAX_ROLE_LENGTH,
+    MIN_MOOD_VALUE,
     VALID_ANCHOR_LOCATIONS,
     VALID_ANCHOR_TYPES,
     VALID_CANYON_TYPES,
     VALID_CLIMBING_TYPES,
     VALID_PITCH_TYPES,
     VALID_TEMPLATE_TYPES,
+)
+from core_shared.models.journals.event_state import EventState
+from core_shared.models.journals.outdoor_activity_subtypes import (
+    OutdoorActivitySubtype,
 )
 
 from app.mcp.domains.journals.tools import list_journal_types
@@ -81,7 +90,7 @@ async def test_list_journal_types_states_units_and_enums() -> None:
     assert fitness["distance"]["type"] == "int"
     assert fitness["duration"]["unit"] == "minutes"
     assert fitness["elevation_gain"]["unit"] == "m"
-    assert fitness["distance"]["summary"] == "int in km (optional)"
+    assert fitness["distance"]["summary"] == "int in km (optional, min 0)"
     assert by_name["ABSEILING_TRIP"]["type_data_fields"]["total_length"]["unit"] == "m"
     assert by_name["CLIMBING"]["type_data_fields"]["length"]["unit"] == "m"
     assert (
@@ -98,3 +107,68 @@ async def test_list_journal_types_states_units_and_enums() -> None:
     assert payload["enums"]["canyon_types"] == VALID_CANYON_TYPES
     assert payload["enums"]["pitch_types"] == VALID_PITCH_TYPES
     assert payload["units"]["distance"].startswith("km")
+
+
+@pytest.mark.asyncio
+async def test_list_journal_types_publishes_every_field_limit() -> None:
+    """A limit a caller cannot read is one they can only find by breaching it.
+
+    ``role`` capping at 100 characters was invisible until a write breached it
+    and came back as an opaque 500, so every bound the domain enforces is
+    published: text caps, numeric ranges, fixed formats and closed vocabularies.
+    """
+    payload = json.loads(await list_journal_types())
+    by_name = {t["name"]: t for t in payload["journal_types"]}
+
+    role = by_name["OUTDOOR_ACTIVITY"]["type_data_fields"]["role"]
+    assert role["max_length"] == MAX_ROLE_LENGTH
+    assert "max 100 chars" in role["summary"]
+
+    mood = by_name["MOOD_RATING"]["type_data_fields"]["mood_value"]
+    assert (mood["minimum"], mood["maximum"]) == (MIN_MOOD_VALUE, MAX_MOOD_VALUE)
+    assert "1-10" in mood["summary"]
+
+    french_grade = by_name["CANYONING"]["type_data_fields"]["french_grade"]
+    assert french_grade["pattern"] == FRENCH_CANYON_GRADE_PATTERN
+    assert french_grade["max_length"] == MAX_FRENCH_GRADE_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_list_journal_types_publishes_the_undocumented_vocabularies() -> None:
+    """event_state and activity_types are validated but were never published."""
+    payload = json.loads(await list_journal_types())
+    by_name = {t["name"]: t for t in payload["journal_types"]}
+
+    assert payload["enums"]["event_states"] == [state.value for state in EventState]
+    assert payload["enums"]["activity_subtypes"] == [
+        subtype.value for subtype in OutdoorActivitySubtype
+    ]
+    assert by_name["EVENT"]["type_data_fields"]["event_state"]["allowed_values"] == [
+        state.value for state in EventState
+    ]
+    assert by_name["OUTDOOR_PLANNING"]["type_data_fields"]["activity_types"][
+        "allowed_values"
+    ] == [subtype.value for subtype in OutdoorActivitySubtype]
+
+
+@pytest.mark.asyncio
+async def test_pitch_fields_are_structured_rather_than_prose() -> None:
+    """The pitch shape used to be one prose blob a caller had to parse."""
+    payload = json.loads(await list_journal_types())
+    by_name = {t["name"]: t for t in payload["journal_types"]}
+
+    pitches = by_name["ABSEILING_TRIP"]["type_data_fields"]["pitches"]
+    assert pitches["fields"]["pitch_number"]["required"] is True
+    assert pitches["fields"]["anchor_type"]["allowed_values"] == VALID_ANCHOR_TYPES
+    assert pitches["fields"]["height"]["unit"] == "m"
+
+
+@pytest.mark.asyncio
+async def test_jogging_pace_is_published_as_the_integer_it_is() -> None:
+    """It was published as a '5:30/km' string; the column is seconds per km."""
+    payload = json.loads(await list_journal_types())
+    by_name = {t["name"]: t for t in payload["journal_types"]}
+
+    pace = by_name["JOGGING"]["type_data_fields"]["pace"]
+    assert pace["type"] == "int"
+    assert pace["unit"] == "seconds per km"

@@ -31,9 +31,9 @@ from core_shared.models.journals import (
     CanyoningData,
     CavingData,
     ClimbingData,
+    JournalType,
 )
-
-from app.core.journal.services.journal_type_metadata import JOURNAL_TYPE_DATA_FIELDS
+from core_shared.models.journals.type_data_schemas import TYPE_DATA_MODELS
 
 _THIS = Path(__file__).resolve()
 _BACKEND_ROOT = _THIS.parents[3]  # …/backend
@@ -84,15 +84,18 @@ class TestNoSubtypeTemplateIdReferences:
         column that no longer exists, and it is dropped without a word.
         """
         offenders = [
-            type_name
-            for type_name, fields in JOURNAL_TYPE_DATA_FIELDS.items()
-            if "template_id" in fields and type_name != "ABSEILING_TRIP"
+            journal_type.name
+            for journal_type, model in TYPE_DATA_MODELS.items()
+            if "template_id" in model.model_fields
+            and journal_type is not JournalType.ABSEILING_TRIP
         ]
         assert not offenders, (
             "Type metadata still advertises a subtype template_id for: "
             + ", ".join(offenders)
         )
-        assert "template_id" in JOURNAL_TYPE_DATA_FIELDS["ABSEILING_TRIP"]
+        assert (
+            "template_id" in TYPE_DATA_MODELS[JournalType.ABSEILING_TRIP].model_fields
+        )
 
     def test_mcp_tools_have_no_subtype_template_id(self) -> None:
         text = _MCP_TOOLS_FILE.read_text(encoding="utf-8")

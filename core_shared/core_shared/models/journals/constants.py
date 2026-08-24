@@ -71,6 +71,7 @@ VALID_TRACK_GRADES: list[str] = [member.value for member in TrackGrade]
 # Example: v3a2IV** = vertical 3, aquatic 2, engagement IV, 2 stars
 # Vertical: 1-7, Aquatic: 1-7, Engagement: I-VI (optional), Stars: *-*** (optional)
 FRENCH_CANYON_GRADE_PATTERN: str = r"^v[1-7]a[1-7](I{1,3}|IV|V|VI)?(\*{1,3})?$"
+MAX_FRENCH_GRADE_LENGTH: int = 20
 
 
 # ClimbingData constants (CLIMBING type)

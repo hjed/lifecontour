@@ -211,14 +211,20 @@ class FitnessDataSchema(BaseModel):
     heart_rate_max: int | None = Field(
         default=None, description="Maximum heart rate (bpm)", ge=0
     )
-    distance: int | None = Field(default=None, description="Distance (meters)", ge=0)
+    distance: int | None = Field(
+        default=None,
+        description="Distance in whole kilometres (fractions are truncated)",
+        ge=0,
+    )
     elevation_gain: int | None = Field(
-        default=None, description="Elevation gain (meters)", ge=0
+        default=None, description="Elevation gain in metres", ge=0
     )
     elevation_loss: int | None = Field(
-        default=None, description="Elevation loss (meters)", ge=0
+        default=None, description="Elevation loss in metres", ge=0
     )
-    duration: int | None = Field(default=None, description="Duration (seconds)", ge=0)
+    duration: int | None = Field(
+        default=None, description="Duration in whole minutes", ge=0
+    )
     calories: int | None = Field(default=None, description="Calories burned", ge=0)
     strava_activity_id: str | None = Field(
         default=None,

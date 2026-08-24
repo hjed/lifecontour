@@ -10,7 +10,7 @@ fails if a :class:`JournalType` has no description here.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, NamedTuple
+from typing import Any
 
 from core_shared.models.journals import JournalContactRelationshipType, JournalType
 from core_shared.models.journals.constants import (
@@ -24,6 +24,9 @@ from core_shared.models.journals.constants import (
     VALID_TEMPLATE_TYPES,
     VALID_TRACK_GRADES,
 )
+from core_shared.models.journals.event_state import EventState
+from core_shared.models.journals.outdoor_activity_subtypes import OutdoorActivitySubtype
+from core_shared.models.journals.type_data_schemas import TYPE_DATA_MODELS
 
 JOURNAL_TYPE_DESCRIPTIONS: dict[str, str] = {
     "NOTE": "Simple text note using only base journal fields (no type_data needed)",
@@ -53,196 +56,167 @@ JOURNAL_TYPE_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-class TypeDataFieldSpec(NamedTuple):
-    """Discovery metadata for one type_data field (see list_journal_types)."""
-
-    type: str
-    description: str = ""
-    unit: str | None = None
-    required: bool = False
-    allowed_values: Sequence[str] | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        summary = self.type
-        if self.unit:
-            summary += f" in {self.unit}"
-        summary += " (required)" if self.required else " (optional)"
-        spec: dict[str, Any] = {
-            "type": self.type,
-            "unit": self.unit,
-            "required": self.required,
-            "description": self.description,
-            "summary": summary,
-        }
-        if self.allowed_values is not None:
-            spec["allowed_values"] = list(self.allowed_values)
-        return spec
-
-
-PITCH_FIELDS_DESCRIPTION = (
-    "list of pitch objects. pitch_number (int) is required. Optional: height "
-    "(int, metres), anchor_location (see enums.anchor_locations), anchor_type "
-    "(see enums.anchor_types), did_rescue (bool), did_setup (bool), notes (str)"
-)
-
-# Keyed by JournalType name; every field the type_data for that type accepts.
-# Units are stated explicitly so an agent never has to infer them.
-JOURNAL_TYPE_DATA_FIELDS: dict[str, dict[str, TypeDataFieldSpec]] = {
-    "EVENT": {
-        "calendar_id": TypeDataFieldSpec("uuid", "UUID of the calendar", required=True),
-        "start_time": TypeDataFieldSpec("string", "Start time (HH:MM or ISO datetime)"),
-        "end_time": TypeDataFieldSpec("string", "End time (HH:MM or ISO datetime)"),
-        "is_all_day": TypeDataFieldSpec("bool", "All-day event (default false)"),
-        "location": TypeDataFieldSpec("string", "Free-text location"),
-        "timezone": TypeDataFieldSpec("string", "IANA timezone name"),
-        "event_state": TypeDataFieldSpec("string", "Event state (default 'confirmed')"),
-    },
-    "MOOD_RATING": {
-        "mood_value": TypeDataFieldSpec(
-            "int", "Mood on a 1-10 scale", unit="1-10 scale"
-        ),
-        "mood_label": TypeDataFieldSpec("string", "Free-text mood label"),
-        "energy_level": TypeDataFieldSpec(
-            "int", "Energy on a 1-10 scale", unit="1-10 scale"
-        ),
-    },
-    "PLAN": {
-        "documents": TypeDataFieldSpec(
-            "list",
-            "Linked documents, replacing the whole list. Each: url (str, "
-            "required), title (str), description (str), order (int)",
-        ),
-    },
-    "PHOTO_ALBUM": {
-        "immich_album_id": TypeDataFieldSpec("uuid", "Immich album UUID"),
-    },
-    "FITNESS": {
-        "heart_rate_avg": TypeDataFieldSpec("int", "Average heart rate", unit="bpm"),
-        "heart_rate_max": TypeDataFieldSpec("int", "Maximum heart rate", unit="bpm"),
-        "distance": TypeDataFieldSpec(
-            "int",
-            "Distance in whole kilometres (fractions are truncated)",
-            unit="km",
-        ),
-        "elevation_gain": TypeDataFieldSpec("int", "Total ascent", unit="m"),
-        "elevation_loss": TypeDataFieldSpec("int", "Total descent", unit="m"),
-        "duration": TypeDataFieldSpec("int", "Elapsed time", unit="minutes"),
-        "calories": TypeDataFieldSpec("int", "Energy expended", unit="kcal"),
-        "strava_activity_id": TypeDataFieldSpec(
-            "string", "Linked Strava activity id (creates the Strava external link)"
-        ),
-    },
-    "OUTDOOR_ACTIVITY": {
-        "weather_conditions": TypeDataFieldSpec(
-            "string", "Weather during the activity"
-        ),
-        "role": TypeDataFieldSpec(
-            "string",
-            "User's role on trip. Max 5 words. E.g. 'Guide', 'Organiser', 'Course Leader'.",
-        ),
-        "in_leadership_role": TypeDataFieldSpec("bool", "Whether you led the trip"),
-        "participant_notes": TypeDataFieldSpec(
-            "string", "Notes about participants not listed via contact relationships"
-        ),
-    },
-    "BUSHWALKING": {
-        "track_grading": TypeDataFieldSpec(
-            "string",
-            "Australian Walking Track Grading System grade",
-            allowed_values=VALID_TRACK_GRADES,
-        ),
-    },
-    "JOGGING": {
-        "pace": TypeDataFieldSpec("string", "Pace, e.g. '5:30/km'", unit="min/km"),
-    },
-    "ABSEILING_TRIP": {
-        "template_id": TypeDataFieldSpec(
-            "uuid",
-            "Activity template this abseiling-derived journal was created from "
-            "(preserved when pitches are edited). This is the single home for "
-            "the reference on every abseiling-derived journal; on create, prefer "
-            "create_journal_entry's top-level template_id, which also applies "
-            "the template's pitches and type fields",
-        ),
-        "number_of_abseils": TypeDataFieldSpec("int", "Count of abseils"),
-        "total_length": TypeDataFieldSpec("int", "Total abseiled length", unit="m"),
-        "number_of_setups": TypeDataFieldSpec("int", "Anchors you set up"),
-        "number_of_rescues": TypeDataFieldSpec("int", "Rescues performed"),
-        "pitches": TypeDataFieldSpec("list", PITCH_FIELDS_DESCRIPTION),
-    },
-    "CANYONING": {
-        "french_grade": TypeDataFieldSpec(
-            "string", "French canyon grade, e.g. 'v3a2IV**' (v1-7, a1-7, I-VI, *-***)"
-        ),
-        "water_guage_name": TypeDataFieldSpec("string", "Name of the water gauge used"),
-        "water_guage_level": TypeDataFieldSpec(
-            "int", "Gauge reading at the time of the trip", unit="gauge units"
-        ),
-        "is_vertical": TypeDataFieldSpec("bool", "Primarily vertical canyon"),
-        "is_night_canyon": TypeDataFieldSpec("bool", "Done at night"),
-        "is_white_water": TypeDataFieldSpec("bool", "Significant white water"),
-    },
-    "CLIMBING": {
-        "climbing_type": TypeDataFieldSpec(
-            "string", "Climbing discipline", allowed_values=VALID_CLIMBING_TYPES
-        ),
-        "grade": TypeDataFieldSpec("int", "Ewbank (Australian) grade"),
-        "length": TypeDataFieldSpec("int", "Route length", unit="m"),
-        "indoor": TypeDataFieldSpec(
-            "bool", "Indoor climb (default false) — independent of climbing_type"
-        ),
-    },
-    "KAYAKING": {
-        "water_type": TypeDataFieldSpec(
-            "string", "Type of water body (river, lake, sea)"
-        ),
-        "is_white_water": TypeDataFieldSpec("bool", "White-water paddle"),
-        "rapids_grade": TypeDataFieldSpec(
-            "string",
-            "International Scale of River Difficulty",
-            allowed_values=VALID_RAPIDS_GRADES,
-        ),
-    },
-    "CROSS_COUNTRY_SKIING": {
-        "snow_conditions": TypeDataFieldSpec("string", "Snow conditions"),
-    },
-    "CAVING": {
-        "is_vertical": TypeDataFieldSpec("bool", "Vertical cave (SRT)"),
-        "is_horizontal": TypeDataFieldSpec("bool", "Horizontal cave"),
-    },
-    "CANOEING": {
-        "water_type": TypeDataFieldSpec(
-            "string", "Type of water body (river, lake, sea)"
-        ),
-    },
-    "OUTDOOR_PLANNING": {
-        "topics": TypeDataFieldSpec("string", "Meeting topics"),
-        "activity_types": TypeDataFieldSpec(
-            "list[string]", "Outdoor activity types the meeting relates to"
-        ),
-    },
-    "OUTDOOR_TRAINING": {
-        "focus_areas": TypeDataFieldSpec(
-            "list[string]", "Activity subtypes trained, or free text"
-        ),
-    },
-    "GEAR_MAINTENANCE": {
-        "gear_item_id": TypeDataFieldSpec("uuid", "Gear item", required=True),
-        "maintenance_type": TypeDataFieldSpec(
-            "string",
-            "Kind of maintenance",
-            required=True,
-            allowed_values=VALID_MAINTENANCE_TYPES,
-        ),
-        "activity_types": TypeDataFieldSpec("list[string]", "Related activity types"),
-        "retirement_reason": TypeDataFieldSpec("string", "Why the item was retired"),
-    },
-    "GEAR_USAGE": {
-        "gear_item_id": TypeDataFieldSpec("uuid", "Gear item", required=True),
-        "checkout_date": TypeDataFieldSpec("datetime", "ISO datetime checked out"),
-        "checkin_date": TypeDataFieldSpec("datetime", "ISO datetime checked in"),
-    },
+# JSON Schema's own vocabulary, translated to the short type names this tool
+# has always published. A caller reads "int" and "uuid", not "integer" with a
+# format keyword.
+_JSON_TYPE_NAMES: dict[str, str] = {
+    "integer": "int",
+    "number": "float",
+    "boolean": "bool",
+    "string": "string",
+    "object": "object",
 }
+
+_FORMAT_TYPE_NAMES: dict[str, str] = {
+    "uuid": "uuid",
+    "date-time": "datetime",
+    "date": "date",
+    "time": "time",
+}
+
+# Constraint keywords worth publishing, and the name each is published under.
+# JSON Schema's names are kept where they are already plain (``pattern``);
+# ``maxLength`` becomes ``max_length`` to match the snake_case of everything
+# else in the payload.
+_CONSTRAINT_KEYS: dict[str, str] = {
+    "maxLength": "max_length",
+    "minLength": "min_length",
+    "minimum": "minimum",
+    "maximum": "maximum",
+    "pattern": "pattern",
+}
+
+
+def _resolve(node: dict[str, Any], defs: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one property's schema to the branch that carries its rules.
+
+    Pydantic renders an optional field as ``anyOf: [{...}, {"type": "null"}]``
+    and an enum or nested model as a ``$ref`` into ``$defs``, so the constraints
+    a caller needs are never on the property itself.
+    """
+    own = {k: v for k, v in node.items() if k not in ("$ref", "anyOf")}
+
+    if "$ref" in node:
+        target = defs.get(node["$ref"].rsplit("/", 1)[1], {})
+        # The field's own keys win: a ``$ref`` to an enum carries that enum
+        # class's docstring as ``description``, which would otherwise replace
+        # what the field says about itself.
+        return {**target, **own}
+
+    if "anyOf" in node:
+        for branch in node["anyOf"]:
+            if branch.get("type") == "null":
+                continue
+            return {**_resolve(branch, defs), **own}
+
+    return node
+
+
+def _type_name(schema: dict[str, Any], defs: dict[str, Any]) -> str:
+    """The short type name for a resolved property schema."""
+    if "enum" in schema:
+        return "string"
+
+    json_type = schema.get("type")
+    if json_type == "array":
+        item = _resolve(schema.get("items", {}), defs)
+        return f"list[{_type_name(item, defs)}]"
+
+    fmt = schema.get("format")
+    if json_type == "string" and fmt in _FORMAT_TYPE_NAMES:
+        return _FORMAT_TYPE_NAMES[fmt]
+
+    return str(_JSON_TYPE_NAMES.get(str(json_type), "any"))
+
+
+def _summarise(spec: dict[str, Any]) -> str:
+    """The one-line human summary, now carrying the field's limits.
+
+    An agent that reads only this line still learns the cap it would otherwise
+    discover by breaching it.
+    """
+    summary: str = str(spec["type"])
+    if spec.get("unit"):
+        summary += f" in {spec['unit']}"
+    summary += " (required" if spec["required"] else " (optional"
+
+    limits: list[str] = []
+    if spec.get("max_length") is not None:
+        limits.append(f"max {spec['max_length']} chars")
+    minimum, maximum = spec.get("minimum"), spec.get("maximum")
+    if minimum is not None and maximum is not None:
+        limits.append(f"{minimum}-{maximum}")
+    elif minimum is not None:
+        limits.append(f"min {minimum}")
+    elif maximum is not None:
+        limits.append(f"max {maximum}")
+    if spec.get("pattern"):
+        limits.append("must match pattern")
+    if spec.get("allowed_values"):
+        limits.append(f"one of {len(spec['allowed_values'])} values")
+
+    if limits:
+        summary += ", " + ", ".join(limits)
+    return summary + ")"
+
+
+def _describe_field(
+    name: str,
+    node: dict[str, Any],
+    defs: dict[str, Any],
+    required: set[str],
+) -> dict[str, Any]:
+    """Publish one type_data field from its JSON Schema."""
+    schema = _resolve(node, defs)
+
+    spec: dict[str, Any] = {
+        "type": _type_name(schema, defs),
+        "unit": schema.get("unit"),
+        "required": name in required,
+        "description": schema.get("description", ""),
+    }
+
+    for json_key, published in _CONSTRAINT_KEYS.items():
+        if json_key in schema:
+            spec[published] = schema[json_key]
+
+    if "enum" in schema:
+        spec["allowed_values"] = list(schema["enum"])
+    elif schema.get("type") == "array":
+        item = _resolve(schema.get("items", {}), defs)
+        if "enum" in item:
+            spec["allowed_values"] = list(item["enum"])
+        elif "properties" in item:
+            spec["fields"] = _describe_fields(item, defs)
+
+    if "properties" in schema and spec["type"] == "object":
+        spec["fields"] = _describe_fields(schema, defs)
+
+    spec["summary"] = _summarise(spec)
+    return spec
+
+
+def _describe_fields(
+    schema: dict[str, Any], defs: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Publish every field of one model's JSON Schema."""
+    required = set(schema.get("required", []))
+    return {
+        name: _describe_field(name, node, defs, required)
+        for name, node in schema.get("properties", {}).items()
+    }
+
+
+def describe_type_data_fields(journal_type: JournalType) -> dict[str, Any] | None:
+    """The published field metadata for one type, or None when it takes no data."""
+    model = TYPE_DATA_MODELS.get(journal_type)
+    if model is None:
+        return None
+
+    schema = model.model_json_schema()
+    fields = _describe_fields(schema, schema.get("$defs", {}))
+    return fields or None
+
 
 # Closed vocabularies surfaced by list_journal_types so an agent can discover
 # valid values up front instead of through validation failures.
@@ -256,21 +230,31 @@ JOURNAL_ENUMS: dict[str, Sequence[str]] = {
     "track_grades": VALID_TRACK_GRADES,
     "rapids_grades": VALID_RAPIDS_GRADES,
     "maintenance_types": VALID_MAINTENANCE_TYPES,
+    # Both are validated by the domain but were never published, so an agent
+    # could only discover them by guessing a value and being refused.
+    "event_states": [state.value for state in EventState],
+    "activity_subtypes": [subtype.value for subtype in OutdoorActivitySubtype],
 }
 
 
-JOURNAL_UNITS: dict[str, str] = {
-    "distance": "km (whole kilometres)",
-    "elevation_gain": "m",
-    "elevation_loss": "m",
-    "duration": "minutes",
-    "total_length": "m",
-    "length": "m",
-    "height": "m",
-    "heart_rate_avg": "bpm",
-    "heart_rate_max": "bpm",
-    "calories": "kcal",
-}
+def _collect_units() -> dict[str, str]:
+    """Every field that states a unit, gathered from the models themselves.
+
+    Published as a flat block as well as per-field so a caller can look a name
+    up once rather than hunting through the type it belongs to.
+    """
+    units: dict[str, str] = {}
+    for model in TYPE_DATA_MODELS.values():
+        schema = model.model_json_schema()
+        defs = schema.get("$defs", {})
+        for name, node in schema.get("properties", {}).items():
+            unit = _resolve(node, defs).get("unit")
+            if unit:
+                units[name] = unit
+    return units
+
+
+JOURNAL_UNITS: dict[str, str] = _collect_units()
 
 
 def describe_journal_types() -> dict[str, Any]:
@@ -290,10 +274,7 @@ def describe_journal_types() -> dict[str, Any]:
             "description": JOURNAL_TYPE_DESCRIPTIONS.get(type_name, ""),
             "dependencies": dep_names,
         }
-        fields = JOURNAL_TYPE_DATA_FIELDS.get(type_name)
-        entry["type_data_fields"] = (
-            {name: spec.as_dict() for name, spec in fields.items()} if fields else None
-        )
+        entry["type_data_fields"] = describe_type_data_fields(jt)
 
         types_info.append(entry)
 
@@ -314,8 +295,12 @@ def describe_journal_types() -> dict[str, Any]:
             "Dependencies are added automatically; NOTE is implicit and ignored "
             "when combined with other types. Pass type-specific data in the "
             "'type_data' field keyed by type name. Each field lists its type, "
-            "unit, whether it is required, and allowed_values where the "
-            "vocabulary is closed; 'enums' repeats every closed vocabulary."
+            "unit, whether it is required, and every limit it is held to: "
+            "allowed_values for a closed vocabulary, max_length for text, "
+            "minimum/maximum for numbers, and pattern where the format is "
+            "fixed. A value outside those limits is refused with the field "
+            "named, so there is no need to probe for them. 'enums' repeats "
+            "every closed vocabulary."
         ),
     }
 

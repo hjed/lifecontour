@@ -868,12 +868,11 @@ async def update_outdoor_training_type_data(
             "type_data", f"Journal {journal_id} is missing OUTDOOR_TRAINING type data"
         )
 
+    from core_shared.models.journals.type_data_schemas import OutdoorTrainingTypeData
     from pydantic import ValidationError
 
-    from app.api.journals.schemas import OutdoorTrainingDataSchema
-
     try:
-        validated_data = OutdoorTrainingDataSchema.model_validate(data)
+        validated_data = OutdoorTrainingTypeData.model_validate(data)
     except ValidationError as e:
         error = e.errors()[0]
         field_path = ".".join(str(loc) for loc in error["loc"])
