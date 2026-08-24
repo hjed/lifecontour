@@ -12,20 +12,29 @@ the reason carries the caller's own submitted data. That is fine in a log and
 wrong in an HTTP response: these handlers are global, the value may be
 somebody's personal data, and a response travels further than a log line.
 
-So the shape of the failure is kept and every quoted literal is redacted. What
-survives — "value too long for type character varying(100)", "invalid input
-syntax for type uuid" — is what a client needs to correct the call, and the
-full text stays in the log for whoever is debugging it.
+So the shape of the failure is kept and everything from the first quote to the
+last is redacted. What survives — "value too long for type character
+varying(100)", "invalid input syntax for type uuid" — is what a client needs to
+correct the call, and the full text stays in the log for whoever is debugging
+it.
 """
 
 import re
 
 from sqlalchemy.exc import DataError
 
-# Postgres quotes the offending value into its message. Identifiers are quoted
-# the same way, but a DataError is raised about a *value*, so redacting every
-# quoted span costs little and cannot leak submitted data.
-_QUOTED_LITERAL = re.compile(r'"[^"]*"')
+# Postgres quotes the offending value into its message, but it interpolates the
+# text verbatim, so a submitted value containing a double quote produces
+# unbalanced quoting: prefix"secret becomes ... "prefix"secret". Pairing the
+# quotes off would redact "prefix" and hand back secret.
+#
+# So this spans the first quote to the last rather than matching pairs. Only
+# text outside every quote survives, and Postgres always closes the value's
+# quote before the rest of its message, so nothing submitted can get past it.
+# The cost is a message carrying two separate quoted spans losing the words
+# between them, which is worth paying to make the guarantee hold by
+# construction rather than by the shape of the value.
+_QUOTED_LITERAL = re.compile(r'"[\s\S]*"')
 
 _REDACTED = '"..."'
 

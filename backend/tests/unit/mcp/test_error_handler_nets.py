@@ -96,6 +96,48 @@ async def test_database_rejection_redacts_a_quoted_literal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_value_containing_a_quote_cannot_slip_past_redaction() -> None:
+    """Postgres interpolates the value verbatim, so quoting can be unbalanced.
+
+    A submitted `prefix"secret` renders as ... "prefix"secret", and pairing the
+    quotes off would redact "prefix" and hand `secret` straight back. The span
+    runs first-quote-to-last so nothing inside can survive.
+    """
+
+    @mcp_unified_error_handler("update_journal_entry", "journal")
+    async def tool() -> str:
+        raise DataError(
+            "INSERT INTO journals (id) VALUES ($1)",
+            {"id": 'prefix"secret-078051120'},
+            Exception('invalid input syntax for type uuid: "prefix"secret-078051120"'),
+        )
+
+    payload = json.loads(await tool())
+
+    assert "secret" not in payload["message"]
+    assert "078051120" not in payload["message"]
+    assert "invalid input syntax for type uuid" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_text_after_the_quoted_value_is_kept() -> None:
+    """Redaction must not swallow the half of the message that is actionable."""
+
+    @mcp_unified_error_handler("update_journal_entry", "journal")
+    async def tool() -> str:
+        raise DataError(
+            "INSERT INTO journal_fitness_data (distance) VALUES ($1)",
+            {"distance": "99999999999"},
+            Exception('value "99999999999" is out of range for type integer'),
+        )
+
+    payload = json.loads(await tool())
+
+    assert "99999999999" not in payload["message"]
+    assert "is out of range for type integer" in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_every_schema_rejection_is_reported() -> None:
     """Three wrong fields should not need three round trips to discover."""
 
