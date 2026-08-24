@@ -2098,7 +2098,7 @@ async def update_journal_entry(
     # different branches and only one of them ran the domain's checks, so an
     # over-long value came back as a bare "Internal error" when ``types`` was
     # sent alongside it (see validate_type_data).
-    validated_type_data = validate_type_data(request.type_data)
+    validated_type_data = validate_type_data(request.type_data, partial=True)
 
     # --- All inputs validated, proceed with DB writes ---
 

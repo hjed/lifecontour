@@ -63,6 +63,56 @@ class TestRejections:
             validate_type_data({"OUTDOOR_ACTIVITY": "Guide"})  # type: ignore[dict-item]
 
 
+class TestUpdatesArePatches:
+    """A field required to build a row is not required to edit one.
+
+    Every update helper is explicitly partial — each reads ``if "field" in
+    attrs`` — so an EVENT update that only moves the location never carried
+    ``calendar_id``. Validating an update against the create model would refuse
+    calls that have always worked.
+    """
+
+    @pytest.mark.parametrize(
+        ("journal_type", "attrs"),
+        [
+            ("EVENT", {"location": "Blue Mountains"}),
+            ("GEAR_USAGE", {"checkin_date": "2024-01-15T09:30:00Z"}),
+            ("GEAR_MAINTENANCE", {"retirement_reason": "frayed sheath"}),
+        ],
+    )
+    def test_a_partial_update_needs_no_creation_only_field(
+        self, journal_type: str, attrs: dict[str, object]
+    ) -> None:
+        assert validate_type_data({journal_type: attrs}, partial=True) == {
+            journal_type: attrs
+        }
+
+    def test_creation_still_demands_its_required_fields(self) -> None:
+        """The create path builds the row, so it must carry them."""
+        with pytest.raises(JournalValidationError) as caught:
+            validate_type_data({"EVENT": {"location": "Blue Mountains"}})
+
+        assert "calendar_id" in caught.value.message
+
+    def test_a_supplied_field_is_still_held_to_its_rules(self) -> None:
+        """Partial drops requiredness, not validation."""
+        with pytest.raises(JournalValidationError):
+            validate_type_data({"OUTDOOR_ACTIVITY": {"role": "x" * 101}}, partial=True)
+
+    def test_an_unknown_field_is_still_refused_on_an_update(self) -> None:
+        with pytest.raises(JournalValidationError) as caught:
+            validate_type_data(
+                {"BUSHWALKING": {"track_grade": "Grade 3"}}, partial=True
+            )
+
+        assert "track_grading" in caught.value.message
+
+    def test_an_explicit_null_for_a_non_nullable_field_is_refused(self) -> None:
+        """Otherwise it reaches UUID(None) downstream and fails as a 500."""
+        with pytest.raises(JournalValidationError):
+            validate_type_data({"EVENT": {"calendar_id": None}}, partial=True)
+
+
 class TestNormalisation:
     def test_a_partial_update_stays_partial(self) -> None:
         """The trap in validating through a model.

@@ -971,6 +971,62 @@ class TestJournalToolsIntegration:
         assert "Child of: Test Journal" in read_payload["summary"]
 
     @pytest.mark.asyncio
+    async def test_partial_type_data_update_keeps_the_untouched_fields(
+        self, authenticated_lifespan_client, sample_journal_id: int
+    ) -> None:
+        """An update is a patch: it carries what changed, nothing more.
+
+        Validating an update against the create model would demand every field
+        needed to build the row — an OUTDOOR_ACTIVITY edit that only sets the
+        role would have to resend the weather too, and would blank it if it
+        did not.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "update_journal_entry",
+                {
+                    "journal_id": sample_journal_id,
+                    "request": {
+                        "types": ["OUTDOOR_ACTIVITY"],
+                        "type_data": {
+                            "OUTDOOR_ACTIVITY": {
+                                "role": "Guide",
+                                "weather_conditions": "hot and windy",
+                            }
+                        },
+                    },
+                },
+            )
+
+            payload = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "update_journal_entry",
+                {
+                    "journal_id": sample_journal_id,
+                    "request": {
+                        "type_data": {"OUTDOOR_ACTIVITY": {"role": "Participant"}}
+                    },
+                },
+            )
+            assert "error" not in payload, payload
+
+            read_back = await call_mcp_tool(
+                authenticated_client,
+                session_id,
+                "get_journal",
+                {"journal_id": sample_journal_id},
+            )
+
+        outdoor = read_back["type_data"]["outdoor_activity"]
+        assert outdoor["role"] == "Participant"
+        assert outdoor["weather_conditions"] == "hot and windy"
+
+    @pytest.mark.asyncio
     async def test_combined_update_surfaces_the_underlying_validation_error(
         self, authenticated_lifespan_client, sample_journal_id: int
     ) -> None:
