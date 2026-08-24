@@ -25,6 +25,19 @@ entity dataclasses validate the same rules again in ``__post_init__``: these
 models guard the boundary, the entities guard the domain, and both read the
 same constants.
 
+What these models do **not** hold is any rule that needs a row they cannot
+see. A ``type_data`` update is a patch, so a model validating it sees only the
+fields the caller sent — never the stored ones. "start_time and end_time must
+be given together" and "an all-day event has no times" cannot both be decided
+from a patch, and whether an end time earlier than its start is an error or an
+event running past midnight depends on the journal's date range, which is not
+in ``type_data`` at all. Those live in the entities, which see the merged row,
+and they surface as ordinary 400s rather than the opaque failure this work was
+about. Where a rule *is* decidable from the payload alone — a timezone
+``ZoneInfo`` cannot resolve, an all-day event carrying a time, a check-in
+before its check-out — it is enforced here too and named in the field
+description, so ``list_journal_types`` still teaches it.
+
 Vocabularies are typed as their enum **here** but stay ``str`` on the read
 side, so a legacy row holding an off-vocabulary value still reads back instead
 of failing deserialisation.
@@ -35,7 +48,7 @@ dropped in silence, which reads to a caller as a write that succeeded.
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import UTC, datetime, time
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -87,6 +100,26 @@ def _reject_blank(value: str) -> str:
 NonBlankStr = Annotated[str, AfterValidator(_reject_blank)]
 
 
+def _resolvable_timezone(value: str) -> str:
+    """An IANA name ``ZoneInfo`` can actually resolve.
+
+    ``CalendarInfo`` checks this, and length alone let "Australia/Sidney"
+    through a boundary that claims to hold the write constraints. This one is a
+    single field, so unlike the cross-field event rules it can live here
+    without needing to see the stored row.
+    """
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, KeyError, ValueError) as exc:
+        raise ValueError(f"is not a known IANA timezone: {value!r}") from exc
+    return value
+
+
+TimezoneStr = Annotated[str, AfterValidator(_resolvable_timezone)]
+
+
 def _unit(unit: str) -> dict[str, Any]:
     """Carry a field's unit into its JSON Schema.
 
@@ -115,20 +148,34 @@ class EventTypeData(TypeDataModel):
         default=None, description="Event description, separate from the journal content"
     )
     start_time: time | None = Field(
-        default=None, description="Start time of day, HH:MM or HH:MM:SS, no timezone"
+        default=None,
+        description=(
+            "Start time of day, HH:MM or HH:MM:SS, no timezone. On a create, "
+            "start_time and end_time must be given together or both omitted. "
+            "An end earlier than the start is allowed and means the event runs "
+            "past midnight, resolved against the journal's event_date_range"
+        ),
     )
     end_time: time | None = Field(
-        default=None, description="End time of day, HH:MM or HH:MM:SS, no timezone"
+        default=None,
+        description=(
+            "End time of day, HH:MM or HH:MM:SS, no timezone. See start_time "
+            "for the pairing and past-midnight rules"
+        ),
     )
     is_all_day: bool | None = Field(
-        default=None, description="All-day event; clears the times when true"
+        default=None,
+        description=(
+            "All-day event. An all-day event holds no times: leave them out "
+            "and any stored times are cleared for you"
+        ),
     )
     location: str | None = Field(
         default=None, description="Free-text location", max_length=MAX_LOCATION_LENGTH
     )
-    timezone: str | None = Field(
+    timezone: TimezoneStr | None = Field(
         default=None,
-        description="IANA timezone name, e.g. 'Australia/Sydney'",
+        description="IANA timezone name that ZoneInfo can resolve, e.g. 'Australia/Sydney'",
         max_length=MAX_TIMEZONE_LENGTH,
     )
     sync_invitees: bool | None = Field(
@@ -141,6 +188,23 @@ class EventTypeData(TypeDataModel):
     event_state: EventState | None = Field(
         default=None, description="Participation state (defaults to confirmed)"
     )
+
+    @model_validator(mode="after")
+    def _all_day_events_hold_no_times(self) -> EventTypeData:
+        """An all-day event carrying a time contradicts itself.
+
+        Only the rules that need no other row are checked here. Whether the
+        times are supplied *as a pair* depends on what is already stored, which
+        a patch cannot see, and an end earlier than its start is legal — it
+        means the event runs past midnight, resolved against the journal's date
+        range. CalendarInfo owns both of those, with the dates in hand.
+        """
+        if self.is_all_day and (self.start_time or self.end_time):
+            raise ValueError(
+                "an all-day event cannot have start_time or end_time; "
+                "omit them and any stored times are cleared"
+            )
+        return self
 
 
 class MoodRatingTypeData(TypeDataModel):
@@ -522,8 +586,34 @@ class GearUsageTypeData(TypeDataModel):
         default=None, description="ISO datetime the item was checked out"
     )
     checkin_date: datetime | None = Field(
-        default=None, description="ISO datetime the item was checked back in"
+        default=None,
+        description=(
+            "ISO datetime the item was checked back in; cannot be earlier than "
+            "checkout_date"
+        ),
     )
+
+    @model_validator(mode="after")
+    def _checkin_cannot_precede_checkout(self) -> GearUsageTypeData:
+        """An interval that ends before it begins, refused where it is named.
+
+        Checked only when the payload carries both ends: a patch setting one of
+        them cannot see the stored other, and GearUsageData checks the merged
+        row regardless.
+        """
+        if self.checkout_date is None or self.checkin_date is None:
+            return self
+
+        checkout, checkin = self.checkout_date, self.checkin_date
+        # The entity treats a naive datetime as UTC when comparing against an
+        # aware one; match that rather than raising on the mix.
+        if (checkout.tzinfo is None) != (checkin.tzinfo is None):
+            checkout = checkout.replace(tzinfo=checkout.tzinfo or UTC)
+            checkin = checkin.replace(tzinfo=checkin.tzinfo or UTC)
+
+        if checkout > checkin:
+            raise ValueError("checkin_date cannot be earlier than checkout_date")
+        return self
 
 
 # Every JournalType that accepts type_data on a write, and the model that

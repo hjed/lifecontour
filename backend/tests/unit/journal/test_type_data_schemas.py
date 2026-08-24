@@ -52,6 +52,7 @@ from core_shared.models.journals.type_data_schemas import (
     EventTypeData,
     FitnessTypeData,
     GearMaintenanceTypeData,
+    GearUsageTypeData,
     KayakingTypeData,
     MoodRatingTypeData,
     OutdoorActivityTypeData,
@@ -345,6 +346,90 @@ class TestRetirementNeedsAReason:
         )
 
         assert parsed.retirement_reason is None
+
+
+class TestRulesDecidableFromThePayload:
+    """Cross-field rules the boundary can hold without seeing the stored row."""
+
+    GEAR = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+    def test_an_unresolvable_timezone_is_refused(self) -> None:
+        """CalendarInfo resolves it through ZoneInfo; length alone did not."""
+        with pytest.raises(ValidationError):
+            EventTypeData.model_validate(
+                {"calendar_id": self.GEAR, "timezone": "Australia/Sidney"}
+            )
+
+    def test_a_real_timezone_is_accepted(self) -> None:
+        parsed = EventTypeData.model_validate(
+            {"calendar_id": self.GEAR, "timezone": "Australia/Sydney"}
+        )
+
+        assert parsed.timezone == "Australia/Sydney"
+
+    def test_an_all_day_event_carrying_a_time_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="all-day"):
+            EventTypeData.model_validate(
+                {
+                    "calendar_id": self.GEAR,
+                    "is_all_day": True,
+                    "start_time": "09:00",
+                }
+            )
+
+    def test_a_check_in_before_its_check_out_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="checkin_date"):
+            GearUsageTypeData.model_validate(
+                {
+                    "gear_item_id": self.GEAR,
+                    "checkout_date": "2024-01-15T10:00:00Z",
+                    "checkin_date": "2024-01-14T10:00:00Z",
+                }
+            )
+
+    def test_a_check_in_alone_is_left_to_the_entity(self) -> None:
+        """A patch cannot see the stored checkout, so it must not guess."""
+        parsed = GearUsageTypeData.model_validate(
+            {"gear_item_id": self.GEAR, "checkin_date": "2024-01-15T10:00:00Z"}
+        )
+
+        assert parsed.checkin_date is not None
+
+
+class TestRulesLeftToTheEntities:
+    """Rules the boundary must NOT take on, and why.
+
+    Enforcing these here would reject calls that are correct, because the
+    deciding context is a row or a date range the model never sees.
+    """
+
+    GEAR = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+    def test_an_event_running_past_midnight_is_accepted(self) -> None:
+        """23:00 to 01:00 is a real event, not an inverted one.
+
+        CalendarInfo resolves the pair against the journal's event_date_range;
+        type_data carries no dates, so ordering times here would refuse a
+        legitimate cross-midnight event.
+        """
+        parsed = EventTypeData.model_validate(
+            {
+                "calendar_id": self.GEAR,
+                "start_time": "23:00",
+                "end_time": "01:00",
+            }
+        )
+
+        assert parsed.start_time is not None
+        assert parsed.end_time is not None
+
+    def test_one_time_without_the_other_is_accepted(self) -> None:
+        """Whether its partner is already stored is invisible to a patch."""
+        parsed = EventTypeData.model_validate(
+            {"calendar_id": self.GEAR, "start_time": "09:00"}
+        )
+
+        assert parsed.end_time is None
 
 
 class TestClosedVocabularies:
