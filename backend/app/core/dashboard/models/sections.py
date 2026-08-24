@@ -5,15 +5,23 @@ any one of them can fail without the page being useless. So every section is
 wrapped in a :class:`DashboardSection`, which distinguishes the two answers a
 section can give that look alike but are not:
 
-- **ready** — the section was read. Its payload may hold nothing, and "nothing
+- **ready** — the section has a payload. It may hold nothing, and "nothing
   scheduled today" is a real answer that a surface renders as one quiet line.
-- **unavailable** — the section could not be read. ``data`` is ``None`` rather
-  than an empty payload, so no caller can mistake a failure for an empty day.
+- **unavailable** — the section has no payload. ``data`` is ``None`` rather than
+  an empty payload, so no caller can mistake it for an empty day.
 
-The payload types are declared here from the outset and filled by later phases
-(summary, agenda, tasks, upcoming dates). They are deliberately empty for now:
-what this phase settles is the *envelope*, so the phases that add fields do not
-have to change the contract around them.
+**A section with no payload need not have failed.** The envelope was written for
+sections that are lists, where *could not read* and *read, found nothing* are
+worth separating. The summary is not a list: either the day has a summary or it
+does not, and "it does not" is the same quiet line as "we could not tell you", so
+that section reports unavailable for both. A section whose emptiness is
+meaningful says so with a ready payload instead; both kinds are in use, and which
+a section is belongs to the section, not to this envelope.
+
+The payload types are declared here from the outset and filled by their own
+phases. Summary is filled; agenda, tasks and upcoming dates are still empty,
+which serialises as ``{}`` — ready, holding nothing — until the phases that give
+them fields land.
 """
 
 from __future__ import annotations
@@ -24,7 +32,7 @@ from enum import StrEnum
 
 
 class SectionStatus(StrEnum):
-    """Whether a section was read, or could not be."""
+    """Whether a section has a payload, or has nothing for the page."""
 
     READY = "ready"
     UNAVAILABLE = "unavailable"
@@ -48,7 +56,12 @@ class DashboardSection[T]:
 
     @classmethod
     def unavailable(cls) -> DashboardSection[T]:
-        """The section could not be read; it carries no payload."""
+        """The section has nothing to show: it could not be read, or has none.
+
+        Which of the two it was is deliberately not on the wire. Both render as
+        the same quiet line, and a section that wanted to tell them apart would
+        report *ready* with a payload saying so.
+        """
         return cls(status=SectionStatus.UNAVAILABLE, data=None)
 
     @property
@@ -57,9 +70,41 @@ class DashboardSection[T]:
         return self.status is SectionStatus.READY
 
 
+class DashboardSummaryState(StrEnum):
+    """Which of the summary card's two *present* states a payload is in.
+
+    The wireframe declares three states for the card, and the third —
+    *unavailable* — is the absence of a summary rather than a summary in some
+    condition, so it is the section's status and has no payload to sit in. That
+    leaves exactly these two here, which is why a section that is ``ready``
+    always has something the card can draw.
+    """
+
+    GENERATED = "generated"
+    GENERATING = "generating"
+
+
 @dataclass(frozen=True)
 class SummarySectionData:
-    """Today's daily summary. Filled by Phase 2."""
+    """Today's daily summary — the page's headline.
+
+    The same ``journal_daily_summaries`` row the journals view shows, read
+    rather than produced: the dashboard never generates a summary, because a
+    page load must not write.
+
+    ``summary_text`` is the prose of the generated state and is ``None`` in the
+    generating one, taken from the entity's own ``get_display_text`` so a row
+    invalidated after the day changed cannot show yesterday's words. The four
+    counters are carried whichever state applies; where they are *rendered* is
+    the card's decision, not the payload's.
+    """
+
+    state: DashboardSummaryState
+    summary_text: str | None = None
+    journal_count: int = 0
+    event_count: int = 0
+    contact_count: int = 0
+    mood_average: float | None = None
 
 
 @dataclass(frozen=True)

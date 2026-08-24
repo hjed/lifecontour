@@ -426,6 +426,40 @@ rather than this API's taste:
   fields are the pagination ones a singleton does not have. Clients should label
   the page from `meta.anchor.date` rather than re-deriving "today" in the
   browser's zone, which can differ from the configured one.
+- **The `summary` section is a pure read of today's daily summary.** It returns
+  the same `journal_daily_summaries` row `GET /api/journals/daily-summary/{date}`
+  serves, read through `JournalDailySummaryRepository` rather than
+  `DailySummaryService.get_or_generate` — that path commits a row and then calls
+  an AI model, and a dashboard load must not write. Which of the five stored
+  statuses the page can show is the section's own decision:
+
+  | Stored status | Section `status` | `data.state` |
+  |---|---|---|
+  | no row (including AI not configured) | `unavailable` | — |
+  | `failed` | `unavailable` | — |
+  | `disabled` (day below the summary threshold) | `unavailable` | — |
+  | `pending` | `ready` | `generating` |
+  | `generating` | `ready` | `generating` |
+  | `generated` | `ready` | `generated` |
+
+  A summary section has no *empty* state — it is not a list — so `unavailable`
+  covers both "could not be read" and "there is none today", which the page
+  renders as one quiet line either way. `pending` folds into `generating`
+  because to a reader waiting for words, queued and in-flight are the same
+  condition — but note that **nothing currently moves a journal daily summary
+  out of `pending`** except the daily-summary endpoints, which this one does not
+  call. A client that renders `generating` should therefore offer the
+  regeneration action rather than waiting for the state to change on its own.
+  The payload is
+  `{state, summary_text, journal_count, event_count, contact_count,
+  mood_average}`: `summary_text` comes from the entity's `get_display_text`, so
+  it is `null` unless the summary is generated and prose from a superseded
+  generation never reaches a client. The four counters are the row's own and are
+  carried in both states; `mood_average` is out of ten and `null` on a day
+  nothing was rated. The section is **read-only** — no links, no action fields.
+  Regeneration is `POST /api/journals/daily-summary/{date}/regenerate`, and the
+  date it needs is `meta.anchor.date`, which is present even when the section is
+  not.
 - **Sections embed denormalised refs; there is no compound document.**
   `relationships` + `included` is the specification's way to serve related
   resources in one round trip, and it was the live alternative here. It cannot

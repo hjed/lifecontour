@@ -1,10 +1,16 @@
 """Unit tests for the dashboard section envelope.
 
-Pins the one distinction the whole dashboard rests on: a section that has
-nothing to show is **ready and empty**, while a section that could not be read
-is **unavailable**. Three later phases fill sections that must be able to say
-which of the two happened, so the vocabulary is asserted here before any of them
-depend on it.
+Pins the distinction the dashboard's list sections rest on: one that read its
+window and found nothing is **ready** with an empty payload, while one with no
+payload at all is **unavailable**. Three later phases fill sections that must be
+able to say which of the two happened, so the vocabulary is asserted here before
+any of them depend on it.
+
+Reporting unavailable is not a claim that something went wrong — the summary
+section uses it for a day that simply has no summary. What the vocabulary
+guarantees is narrower, and is what these tests hold: an empty payload and a
+missing one are never the same value, so a caller cannot read "nothing scheduled
+today" off a section that has not told it anything.
 """
 
 import pytest
@@ -41,8 +47,8 @@ class TestAnUnavailableSection:
     def test_carries_no_data_at_all(self) -> None:
         """``data`` is null rather than an empty payload.
 
-        A caller cannot then read an empty list off a section that failed and
-        report "nothing scheduled today" when the truth is "we could not tell".
+        A caller cannot then read an empty list off a section that never
+        answered, and report "nothing scheduled today" on the strength of it.
         """
         section: DashboardSection[AgendaSectionData] = DashboardSection.unavailable()
 

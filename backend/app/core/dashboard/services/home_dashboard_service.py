@@ -11,6 +11,12 @@ the zone once and uses the module's pure ``today_in`` — the batch discipline t
 resolver's docstring asks for. Near local midnight an AEST user's "today" is not
 UTC's, which is the whole reason the anchor is not simply ``date.today()``.
 
+**Nothing here writes.** The summary section is the first to make that costly:
+the journals view reads its summary through ``get_or_generate``, which commits a
+row and then calls an AI model, so this service goes to
+``JournalDailySummaryRepository`` for the same row instead. A page load must not
+mutate, and regeneration stays a thing the user asks for on its own endpoint.
+
 **Sections are read one at a time, each behind its own SAVEPOINT.** A request
 holds a single ``AsyncConnection``, so concurrent section queries are not an
 option, and a failed query would otherwise leave the transaction aborted and take
@@ -42,6 +48,7 @@ from app.core.dashboard.models.sections import (
     TasksSectionData,
     UpcomingDatesSectionData,
 )
+from app.core.dashboard.services.summary_section import summary_section_for
 from app.core.journal.services.journal_date_resolver import today_in
 from app.infrastructure.unit_of_work import savepoint
 
@@ -50,6 +57,9 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
+    from app.core.journal.services.daily_summary_repository import (
+        JournalDailySummaryRepository,
+    )
     from app.core.journal.services.journal_date_resolver import JournalDateResolver
 
 logger = structlog.get_logger()
@@ -61,9 +71,11 @@ class HomeDashboardService:
     def __init__(
         self,
         date_resolver: JournalDateResolver,
+        summary_repo: JournalDailySummaryRepository,
         connection: AsyncConnection | None = None,
     ) -> None:
         self.date_resolver = date_resolver
+        self.summary_repo = summary_repo
         # Held for the per-section SAVEPOINTs, not for querying: the sections
         # read through their own repositories. ``savepoint`` no-ops without a
         # real connection, so a unit test may leave it out.
@@ -105,12 +117,21 @@ class HomeDashboardService:
         )
 
     async def _section[T](
-        self, name: str, load: Callable[[], Awaitable[T]]
+        self, name: str, load: Callable[[], Awaitable[T | None]]
     ) -> DashboardSection[T]:
-        """Read one section, degrading to *unavailable* if it cannot be read."""
+        """Read one section, degrading to *unavailable* if it cannot be read.
+
+        A loader returns ``None`` when it read successfully and found there is
+        nothing for the section to show — which for the summary is the ordinary
+        state of a user whose day has no summary. That is unavailable too, since
+        the wire distinguishes only *has a payload* from *has not*, but it is not
+        an incident, so it is not logged as one. The loud path stays loud: a
+        query that raised still warns, and its SAVEPOINT still rolls back so the
+        remaining sections can use the connection.
+        """
         try:
             async with savepoint(self.connection):
-                return DashboardSection.ready(await load())
+                data = await load()
         except Exception:
             logger.warning(
                 "Home dashboard section unavailable",
@@ -119,11 +140,23 @@ class HomeDashboardService:
             )
             return DashboardSection.unavailable()
 
+        if data is None:
+            return DashboardSection.unavailable()
+        return DashboardSection.ready(data)
+
     async def _load_summary(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo
-    ) -> SummarySectionData:
-        """Today's daily summary. Filled by Phase 2."""
-        return SummarySectionData()
+    ) -> SummarySectionData | None:
+        """Today's daily summary, read and never generated.
+
+        ``DailySummaryService.get_or_generate`` is the journals view's path and
+        it writes — a DISABLED row for an ineligible day, a GENERATING marker,
+        then a multi-second AI call — so the dashboard goes to the repository
+        instead. It is the same row, and a page load stays read-only.
+        """
+        return summary_section_for(
+            await self.summary_repo.find_by_user_and_date(user_id, anchor)
+        )
 
     async def _load_agenda(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo
