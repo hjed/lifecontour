@@ -110,6 +110,34 @@ async def test_list_journal_types_states_units_and_enums() -> None:
 
 
 @pytest.mark.asyncio
+async def test_units_block_still_covers_every_measured_field() -> None:
+    """The flat ``units`` block is a documented lookup — it must not shrink.
+
+    Deriving it from the models dropped ``height``, which lives on a pitch and
+    is only reachable through ABSEILING_TRIP.pitches, so a caller looking a
+    bare field name up lost its unit.
+    """
+    payload = json.loads(await list_journal_types())
+    units = payload["units"]
+
+    for field in (
+        "distance",
+        "duration",
+        "elevation_gain",
+        "elevation_loss",
+        "total_length",
+        "length",
+        "height",
+        "heart_rate_avg",
+        "heart_rate_max",
+        "calories",
+    ):
+        assert field in units, f"{field} lost its unit in the flat block"
+
+    assert units["height"] == "m"
+
+
+@pytest.mark.asyncio
 async def test_list_journal_types_publishes_every_field_limit() -> None:
     """A limit a caller cannot read is one they can only find by breaching it.
 

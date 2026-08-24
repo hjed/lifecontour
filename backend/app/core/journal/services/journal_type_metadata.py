@@ -244,13 +244,24 @@ def _collect_units() -> dict[str, str]:
     up once rather than hunting through the type it belongs to.
     """
     units: dict[str, str] = {}
-    for model in TYPE_DATA_MODELS.values():
-        schema = model.model_json_schema()
-        defs = schema.get("$defs", {})
+
+    def walk(schema: dict[str, Any], defs: dict[str, Any]) -> None:
         for name, node in schema.get("properties", {}).items():
-            unit = _resolve(node, defs).get("unit")
+            resolved = _resolve(node, defs)
+            unit = resolved.get("unit")
             if unit:
                 units[name] = unit
+            # Recurse through nested models: a pitch's height is only reachable
+            # via ABSEILING_TRIP.pitches, and the flat block is documented as
+            # the place to look a field name up without knowing its type.
+            item = _resolve(resolved.get("items", {}), defs)
+            for nested in (resolved, item):
+                if "properties" in nested and nested is not schema:
+                    walk(nested, defs)
+
+    for model in TYPE_DATA_MODELS.values():
+        schema = model.model_json_schema()
+        walk(schema, schema.get("$defs", {}))
     return units
 
 

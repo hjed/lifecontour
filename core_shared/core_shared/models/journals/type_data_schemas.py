@@ -2,14 +2,21 @@
 
 These are the single source of truth for what a client may send in
 ``type_data``: the field names, their types, and every constraint the domain
-enforces. Three surfaces read them, so none of them has to restate a limit:
+enforces. Two surfaces read them, so neither has to restate a limit:
 
-* the MCP tools validate ``type_data`` against them at the tool boundary, so a
-  bad value is refused with the field named rather than reaching the column and
-  surfacing as an opaque driver error;
 * ``list_journal_types`` publishes their JSON Schema, which is how an agent
   discovers that ``role`` caps at 100 characters *before* breaching it;
-* the REST response schemas in ``app.api.journals.schemas`` build on them.
+* the MCP tools validate ``type_data`` against them at the tool boundary, so a
+  bad value is refused with the field named rather than reaching the column and
+  surfacing as an opaque driver error. That wiring lands in the next change of
+  this stack; here the models exist and are published.
+
+The REST response schemas in ``app.api.journals.schemas`` deliberately do NOT
+build on these. Reading has to be more forgiving than writing — a row holding a
+value that predates a vocabulary still has to deserialise — so the two model
+sets differ by type, and inheriting one from the other is a Liskov violation
+mypy rightly rejects. The numbers stay single-sourced regardless: both sides
+read the same constants.
 
 Every bound is imported from :mod:`core_shared.models.journals.constants` and
 every closed vocabulary is its ``StrEnum``, so a limit is defined exactly once
