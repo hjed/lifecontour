@@ -11,6 +11,7 @@ import {
   contactTestUtils,
   setupMocks,
 } from '@/test-utils';
+import { createMockAppRouter } from '@/test-utils/mock-router';
 
 // Mock the API hooks
 jest.mock('@/lib/api/contacts', () => ({
@@ -19,14 +20,7 @@ jest.mock('@/lib/api/contacts', () => ({
 
 // Create trackable mock for router
 const mockRouterPush = jest.fn();
-const mockRouter = {
-  push: mockRouterPush,
-  replace: jest.fn(),
-  prefetch: jest.fn(),
-  back: jest.fn(),
-  forward: jest.fn(),
-  refresh: jest.fn(),
-};
+const mockRouter = { ...createMockAppRouter(), push: mockRouterPush };
 
 // Mock Next.js navigation
 jest.mock('next/navigation', () => ({

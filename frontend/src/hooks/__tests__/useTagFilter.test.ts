@@ -5,18 +5,13 @@
 import { renderHook, act } from '@testing-library/react';
 import { useTagFilter } from '../useTagFilter';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
+// Alias must start with `mock` to be referenced inside the jest.mock factory below.
+import { createMockAppRouter as mockCreateAppRouter } from '@/test-utils/mock-router';
 
 jest.mock('next/navigation', () => ({
   useSearchParams: jest.fn(() => new URLSearchParams()),
   usePathname: jest.fn(() => '/contacts'),
-  useRouter: jest.fn(() => ({
-    push: jest.fn(),
-    replace: jest.fn(),
-    back: jest.fn(),
-    forward: jest.fn(),
-    refresh: jest.fn(),
-    prefetch: jest.fn(),
-  })),
+  useRouter: jest.fn(() => mockCreateAppRouter()),
 }));
 
 const mockUseSearchParams = useSearchParams as jest.MockedFunction<
