@@ -27,6 +27,7 @@ from app.api.home_dashboard.schemas import (
 from app.core.dashboard.models.sections import (
     AgendaSectionData,
     DashboardSection,
+    DashboardSummaryState,
     HomeDashboard,
     SummarySectionData,
     TasksSectionData,
@@ -39,11 +40,24 @@ USER_ID = "test-user-123"
 ANCHOR = datetime.date(2026, 7, 31)
 BASE_URL = "http://testserver"
 
+GENERATED_SUMMARY = SummarySectionData(
+    state=DashboardSummaryState.GENERATED,
+    summary_text="A long day of climbing and two good conversations.",
+    journal_count=4,
+    event_count=2,
+    contact_count=3,
+    mood_average=7.5,
+)
+
+# The sections Phases 5-6, 11 and 13 have yet to fill. Named rather than
+# repeated so a phase filling one has a single place to stop excluding it.
+STILL_EMPTY = ("agenda", "tasks", "upcoming_dates")
+
 
 def dashboard(**overrides: object) -> HomeDashboard:
-    """A dashboard with every section ready and empty, as Phase 1 builds one."""
+    """A dashboard with every section ready, as the service builds one."""
     sections: dict[str, object] = {
-        "summary": DashboardSection.ready(SummarySectionData()),
+        "summary": DashboardSection.ready(GENERATED_SUMMARY),
         "agenda": DashboardSection.ready(AgendaSectionData()),
         "tasks": DashboardSection.ready(TasksSectionData()),
         "upcoming_dates": DashboardSection.ready(UpcomingDatesSectionData()),
@@ -79,8 +93,8 @@ class TestTheAnchorInMeta:
         assert response.meta.anchor.date == ANCHOR
         assert response.meta.anchor.timezone == "Australia/Sydney"
 
-    def test_is_present_even_though_every_section_is_empty(self) -> None:
-        """A client renders "Today, 31 July" with nothing else on the page."""
+    def test_is_present_however_little_the_sections_hold(self) -> None:
+        """A client renders "Today, 31 July" whatever else it does or does not."""
         document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
 
         assert document["meta"]["anchor"] == {
@@ -108,12 +122,19 @@ class TestTheFourSections:
         }
 
     def test_a_ready_section_carries_a_payload_object(self) -> None:
-        """Empty, but present — the shape later phases add fields to."""
+        """Present whether or not the phase that fills it has landed yet.
+
+        The three unfilled sections serialise as ``{}`` — "ready and holding
+        nothing", which is a real answer rather than an absence — while the
+        summary carries the fields this phase gave it.
+        """
         document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
 
         for name, section in document["data"]["attributes"].items():
             assert section["status"] == "ready", name
-            assert section["data"] == {}, name
+            assert section["data"] is not None, name
+        for name in STILL_EMPTY:
+            assert document["data"]["attributes"][name]["data"] == {}, name
 
     def test_an_unavailable_section_carries_null_data(self) -> None:
         document = to_home_dashboard_response(
@@ -164,3 +185,106 @@ class TestADegradedDocumentIsStillASuccessfulOne:
         }
         assert statuses == {"unavailable"}
         assert document["meta"]["anchor"]["date"] == "2026-07-31"
+
+
+class TestTheSummarySection:
+    """The one section with a payload of its own, as of this phase.
+
+    Two of the wireframe's three declared states live in ``data.state``; the
+    third is the envelope's ``unavailable``, which is why there is no
+    ``"unavailable"`` member of the state vocabulary to serialise.
+    """
+
+    def test_serialises_every_field_the_card_renders(self) -> None:
+        document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
+
+        assert document["data"]["attributes"]["summary"] == {
+            "status": "ready",
+            "data": {
+                "state": "generated",
+                "summary_text": "A long day of climbing and two good conversations.",
+                "journal_count": 4,
+                "event_count": 2,
+                "contact_count": 3,
+                "mood_average": 7.5,
+            },
+        }
+
+    def test_a_generating_summary_carries_no_prose(self) -> None:
+        """W8 replaces the body with one muted line, so there is nothing to send."""
+        document = to_home_dashboard_response(
+            dashboard(
+                summary=DashboardSection.ready(
+                    SummarySectionData(
+                        state=DashboardSummaryState.GENERATING,
+                        journal_count=1,
+                    )
+                )
+            )
+        ).model_dump(mode="json")
+
+        payload = document["data"]["attributes"]["summary"]["data"]
+        assert payload["state"] == "generating"
+        assert payload["summary_text"] is None
+
+    def test_absent_values_serialise_as_null_rather_than_vanishing(self) -> None:
+        """A key that disappears reads to a client as a schema change.
+
+        ``mood_average`` is null on any day nobody rated their mood, which is
+        most days, so the field has to be reliably present for W10 to decide
+        whether to draw its fourth stat.
+        """
+        document = to_home_dashboard_response(
+            dashboard(
+                summary=DashboardSection.ready(
+                    SummarySectionData(state=DashboardSummaryState.GENERATED)
+                )
+            )
+        ).model_dump(mode="json")
+
+        payload = document["data"]["attributes"]["summary"]["data"]
+        assert payload["summary_text"] is None
+        assert payload["mood_average"] is None
+        assert payload["journal_count"] == 0
+
+    def test_an_unavailable_summary_takes_nothing_else_down(self) -> None:
+        """The specification's ruling, now that the section has real content."""
+        document = to_home_dashboard_response(
+            dashboard(summary=DashboardSection.unavailable())
+        ).model_dump(mode="json")
+
+        assert set(document) == {"data", "meta"}
+        assert document["data"]["attributes"]["summary"] == {
+            "status": "unavailable",
+            "data": None,
+        }
+        for name in STILL_EMPTY:
+            assert document["data"]["attributes"][name]["status"] == "ready", name
+
+    def test_the_page_can_still_name_its_day_without_a_summary(self) -> None:
+        """W6's Regenerate control persists in the unavailable state.
+
+        It posts to the daily-summary endpoint for a date, and the only date
+        left in the document is the anchor — so that is where a client takes it
+        from, and it must survive the section it belongs to going missing.
+        """
+        document = to_home_dashboard_response(
+            dashboard(summary=DashboardSection.unavailable())
+        ).model_dump(mode="json")
+
+        assert document["meta"]["anchor"]["date"] == "2026-07-31"
+
+    def test_exposes_no_mutation_affordance(self) -> None:
+        """Read-only: regeneration stays on the existing daily-summary endpoint."""
+        payload = to_home_dashboard_response(dashboard()).model_dump(mode="json")[
+            "data"
+        ]["attributes"]["summary"]["data"]
+
+        assert set(payload) == {
+            "state",
+            "summary_text",
+            "journal_count",
+            "event_count",
+            "contact_count",
+            "mood_average",
+        }

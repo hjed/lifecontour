@@ -5,18 +5,26 @@ sections whether or not they have anything in them, "today" is the user's local
 date and never UTC's, and one section failing costs only that section — the
 others still answer, and its SAVEPOINT is rolled back so the shared connection
 survives to serve them.
+
+The summary is the first section with a query of its own, so this file also pins
+what the service does with it — which day it asks for, that it only ever reads,
+and that its absence is an ordinary answer rather than an incident.
 """
 
 import datetime
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
+from core_shared.models.contacts.entities import SummaryStatus
+from core_shared.models.journals.daily_summary import JournalDailySummary
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.dashboard.models.sections import (
     AgendaSectionData,
+    DashboardSummaryState,
     HomeDashboard,
     SectionStatus,
 )
@@ -27,6 +35,7 @@ pytestmark = pytest.mark.unit
 
 USER_ID = "test-user-123"
 SECTIONS = ("summary", "agenda", "tasks", "upcoming_dates")
+SERVICE_LOGGER = HomeDashboardService.__module__
 
 # 00:30 on 31 July in Sydney (+10), while UTC is still on the 30th — the instant
 # that tells a local reading apart from a UTC one.
@@ -51,6 +60,23 @@ def date_resolver(mock_settings_repo: AsyncMock) -> JournalDateResolver:
 
 
 @pytest.fixture
+def mock_summary_repo() -> AsyncMock:
+    """A summary repository holding a generated summary for any day asked for.
+
+    A generated row by default so the envelope tests still see four ready
+    sections; the tests that care about the other statuses set their own.
+    """
+    repo = AsyncMock()
+    repo.find_by_user_and_date.return_value = JournalDailySummary(
+        user_id=USER_ID,
+        summary_date=datetime.date(2026, 7, 31),
+        summary_text="A long day.",
+        status=SummaryStatus.GENERATED,
+    )
+    return repo
+
+
+@pytest.fixture
 def connection() -> MagicMock:
     """A connection that passes ``savepoint``'s isinstance check.
 
@@ -66,9 +92,15 @@ def connection() -> MagicMock:
 
 @pytest.fixture
 def service(
-    date_resolver: JournalDateResolver, connection: MagicMock
+    date_resolver: JournalDateResolver,
+    mock_summary_repo: AsyncMock,
+    connection: MagicMock,
 ) -> HomeDashboardService:
-    return HomeDashboardService(date_resolver=date_resolver, connection=connection)
+    return HomeDashboardService(
+        date_resolver=date_resolver,
+        summary_repo=mock_summary_repo,
+        connection=connection,
+    )
 
 
 def sections_of(dashboard: HomeDashboard) -> dict[str, Any]:
@@ -76,10 +108,15 @@ def sections_of(dashboard: HomeDashboard) -> dict[str, Any]:
 
 
 class TestTheFourSectionEnvelope:
-    async def test_declares_every_section_even_with_nothing_to_show(
+    async def test_declares_every_section_whatever_each_one_holds(
         self, service: HomeDashboardService
     ) -> None:
-        """Later phases fill this contract; none of them adds a section to it."""
+        """Later phases fill this contract; none of them adds a section to it.
+
+        Three of the four still answer with an empty payload, which is itself the
+        assertion: a section without a query yet is *ready and holding nothing*,
+        never absent from the projection.
+        """
         dashboard = await service.dashboard(USER_ID)
 
         assert set(sections_of(dashboard)) == set(SECTIONS)
@@ -207,10 +244,14 @@ class TestPerSectionIsolation:
         assert nested.commit.await_count == len(SECTIONS) - 1
 
     async def test_a_missing_connection_is_tolerated(
-        self, date_resolver: JournalDateResolver
+        self, date_resolver: JournalDateResolver, mock_summary_repo: AsyncMock
     ) -> None:
         """``savepoint(None)`` no-ops, so the guard is still the guard."""
-        service = HomeDashboardService(date_resolver=date_resolver, connection=None)
+        service = HomeDashboardService(
+            date_resolver=date_resolver,
+            summary_repo=mock_summary_repo,
+            connection=None,
+        )
 
         dashboard = await service.dashboard(USER_ID)
 
@@ -241,3 +282,114 @@ class TestTheAnchorTimezoneObject:
         assert seen == [
             (USER_ID, datetime.date(2026, 7, 31), ZoneInfo("Australia/Sydney"))
         ]
+
+
+class TestTheSummarySection:
+    """What the service asks the repository for, and what it does with it.
+
+    The mapping itself is tested in ``test_summary_section.py``; what belongs
+    here is the part only the service can get wrong — reading the *user's* day
+    rather than the server's, never generating, and degrading alone.
+    """
+
+    async def test_reads_the_summary_for_the_users_local_today(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """A UTC-anchored read would fetch the previous day's summary here."""
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        mock_summary_repo.find_by_user_and_date.assert_awaited_once_with(
+            USER_ID, datetime.date(2026, 7, 31)
+        )
+
+    async def test_carries_the_summary_the_row_holds(
+        self, service: HomeDashboardService
+    ) -> None:
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.summary.status is SectionStatus.READY
+        assert dashboard.summary.data is not None
+        assert dashboard.summary.data.state is DashboardSummaryState.GENERATED
+        assert dashboard.summary.data.summary_text == "A long day."
+
+    async def test_reports_unavailable_when_the_user_has_no_summary(
+        self, service: HomeDashboardService, mock_summary_repo: AsyncMock
+    ) -> None:
+        """The ordinary state of a day below the threshold, or of no AI at all."""
+        mock_summary_repo.find_by_user_and_date.return_value = None
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.summary.status is SectionStatus.UNAVAILABLE
+        assert dashboard.summary.data is None
+
+    async def test_having_nothing_to_show_is_not_logged_as_a_failure(
+        self,
+        service: HomeDashboardService,
+        mock_summary_repo: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A user without a summary is not an incident, so it warns about nothing.
+
+        The distinction matters because the *other* route to an unavailable
+        section — a query that raised — must stay loud enough to notice, and a
+        log that cries wolf on every summary-less day is one nobody reads.
+
+        Read through ``caplog`` rather than ``structlog.testing.capture_logs``:
+        the application configures structlog to cache its bound loggers, so once
+        anything in the process has logged, swapping the processor chain no
+        longer intercepts and the capture silently returns nothing. That made
+        this assertion pass or fail on test *ordering*.
+        """
+        mock_summary_repo.find_by_user_and_date.return_value = None
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+            await service.dashboard(USER_ID)
+
+        assert caplog.records == []
+
+    async def test_a_query_that_raises_is_still_logged(
+        self,
+        service: HomeDashboardService,
+        mock_summary_repo: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_summary_repo.find_by_user_and_date.side_effect = RuntimeError("db is down")
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+            dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.summary.status is SectionStatus.UNAVAILABLE
+        assert len(caplog.records) == 1
+        assert '"section": "summary"' in caplog.records[0].getMessage()
+
+    async def test_a_summary_failure_costs_only_the_summary(
+        self, service: HomeDashboardService, mock_summary_repo: AsyncMock
+    ) -> None:
+        """The specification's ruling: a failed summary must not take the page."""
+        mock_summary_repo.find_by_user_and_date.side_effect = RuntimeError("db is down")
+
+        dashboard = await service.dashboard(USER_ID)
+
+        for name in ("agenda", "tasks", "upcoming_dates"):
+            assert getattr(dashboard, name).status is SectionStatus.READY, name
+        assert dashboard.anchor_date is not None
+
+    async def test_never_asks_for_a_summary_to_be_generated(
+        self, service: HomeDashboardService, mock_summary_repo: AsyncMock
+    ) -> None:
+        """The dashboard reads; it does not produce.
+
+        ``DailySummaryService.get_or_generate`` writes a DISABLED or GENERATING
+        row and then calls Gemini, so the read path is pinned to the repository
+        to keep a page load from mutating anything.
+        """
+        await service.dashboard(USER_ID)
+
+        touched = {name for name, _args, _kwargs in mock_summary_repo.mock_calls}
+        assert touched == {"find_by_user_and_date"}

@@ -33,8 +33,10 @@ from pydantic import BaseModel, Field
 from app.api.common.schemas import JsonApiLinks
 from app.core.dashboard.models.sections import (
     DashboardSection,
+    DashboardSummaryState,
     HomeDashboard,
     SectionStatus,
+    SummarySectionData,
 )
 
 RESOURCE_TYPE_DESC = "Resource type"
@@ -60,7 +62,42 @@ class DashboardSectionSchema[T](BaseModel):
 
 
 class SummarySectionSchema(BaseModel):
-    """Today's daily summary. Fields land in Phase 2."""
+    """Today's daily summary — the same entity the journals view shows.
+
+    Read-only. There is no regenerate link or action field here: regeneration is
+    `POST /api/journals/daily-summary/{date}/regenerate`, and the date it needs
+    is `meta.anchor.date`, which is present whether or not this section is.
+    """
+
+    state: DashboardSummaryState = Field(
+        ...,
+        description=(
+            "`generated` when the summary is written and `summary_text` holds "
+            "it; `generating` while it is queued or being produced, when there "
+            "is nothing to read yet. There is no third value: a day with no "
+            "summary makes the whole section `unavailable`."
+        ),
+    )
+    summary_text: str | None = Field(
+        default=None,
+        description=(
+            "The summary in full, or null while generating. Null rather than "
+            "stale: a summary invalidated by a change to the day keeps its old "
+            "text in storage, and this never returns it."
+        ),
+    )
+    journal_count: int = Field(
+        ..., description="Journals on this day — the first of the four key stats"
+    )
+    event_count: int = Field(..., description="Events on this day")
+    contact_count: int = Field(..., description="Contacts seen or mentioned")
+    mood_average: float | None = Field(
+        default=None,
+        description=(
+            "Average mood for the day out of ten, or null when nothing was "
+            "rated — which is most days, so surfaces must handle the null."
+        ),
+    )
 
 
 class AgendaSectionSchema(BaseModel):
@@ -185,6 +222,23 @@ def _rendered[T, P: BaseModel](
     return envelope(status=SectionStatus.READY, data=render(section.data))
 
 
+def _summary(data: SummarySectionData) -> SummarySectionSchema:
+    """The summary payload on the wire — a field-for-field copy.
+
+    Nothing is decided here: which statuses are showable and whether the prose
+    may be sent were settled in ``summary_section_for``, so this stays a
+    transcription and the rules have one home.
+    """
+    return SummarySectionSchema(
+        state=data.state,
+        summary_text=data.summary_text,
+        journal_count=data.journal_count,
+        event_count=data.event_count,
+        contact_count=data.contact_count,
+        mood_average=data.mood_average,
+    )
+
+
 def to_home_dashboard_response(
     dashboard: HomeDashboard, base_url: str = ""
 ) -> HomeDashboardResponse:
@@ -208,7 +262,7 @@ def to_home_dashboard_response(
                 summary=_rendered(
                     dashboard.summary,
                     DashboardSectionSchema[SummarySectionSchema],
-                    lambda _data: SummarySectionSchema(),
+                    _summary,
                 ),
                 agenda=_rendered(
                     dashboard.agenda,

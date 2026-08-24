@@ -4,6 +4,9 @@ from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
+from app.core.journal.services.daily_summary_repository import (
+    JournalDailySummaryRepository,
+)
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 
 
@@ -14,17 +17,26 @@ class DashboardProvider(Provider):
     for its per-section SAVEPOINTs. It opens no transaction of its own — the
     dashboard is read-only.
 
-    ``JournalDateResolver`` comes from ``JournalProvider`` (which itself needs
-    ``SettingsProvider``), and Dishka validates the whole graph at container
-    construction, so a container registering this provider must register those
-    too. The application container and both integration-test containers do.
+    ``JournalDateResolver`` and ``JournalDailySummaryRepository`` both come from
+    ``JournalProvider`` (which itself needs ``SettingsProvider``), and Dishka
+    validates the whole graph at container construction, so a container
+    registering this provider must register those too. The application container
+    and both integration-test containers do.
+
+    The **repository** rather than ``DailySummaryService`` is deliberate: the
+    service's read path generates, and a dashboard load must not write.
     """
 
     @provide(scope=Scope.REQUEST)
     def home_dashboard_service(
         self,
         date_resolver: JournalDateResolver,
+        summary_repo: JournalDailySummaryRepository,
         connection: AsyncConnection,
     ) -> HomeDashboardService:
         """Provide a HomeDashboardService instance."""
-        return HomeDashboardService(date_resolver=date_resolver, connection=connection)
+        return HomeDashboardService(
+            date_resolver=date_resolver,
+            summary_repo=summary_repo,
+            connection=connection,
+        )
