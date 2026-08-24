@@ -36,10 +36,10 @@ dropped in silence, which reads to a caller as a write that succeeded.
 from __future__ import annotations
 
 from datetime import datetime, time
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from core_shared.models.journals.constants import (
     FRENCH_CANYON_GRADE_PATTERN,
@@ -70,6 +70,21 @@ from core_shared.models.journals.constants import (
 from core_shared.models.journals.event_state import EventState
 from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.journals.outdoor_activity_subtypes import OutdoorActivitySubtype
+
+
+def _reject_blank(value: str) -> str:
+    """A text field the domain requires to be non-blank.
+
+    ``"   "`` clears nothing and means nothing; the entities reject it, so the
+    boundary has to as well or the advertised constraints are not the ones
+    actually enforced. Use ``null`` to clear a field.
+    """
+    if not value.strip():
+        raise ValueError("must not be blank; use null to clear it")
+    return value
+
+
+NonBlankStr = Annotated[str, AfterValidator(_reject_blank)]
 
 
 def _unit(unit: str) -> dict[str, Any]:
@@ -205,9 +220,9 @@ class FitnessTypeData(TypeDataModel):
     )
     distance: int | None = Field(
         default=None,
-        description="Distance in whole kilometres (fractions are truncated)",
+        description="Distance covered, in metres (a 10 km ride is 10000)",
         ge=0,
-        json_schema_extra=_unit("km"),
+        json_schema_extra=_unit("m"),
     )
     elevation_gain: int | None = Field(
         default=None,
@@ -223,9 +238,9 @@ class FitnessTypeData(TypeDataModel):
     )
     duration: int | None = Field(
         default=None,
-        description="Elapsed time in whole minutes",
+        description="Moving time, in seconds (an hour is 3600)",
         ge=0,
-        json_schema_extra=_unit("minutes"),
+        json_schema_extra=_unit("seconds"),
     )
     calories: int | None = Field(
         default=None,
@@ -233,7 +248,7 @@ class FitnessTypeData(TypeDataModel):
         ge=0,
         json_schema_extra=_unit("kcal"),
     )
-    strava_activity_id: str | None = Field(
+    strava_activity_id: NonBlankStr | None = Field(
         default=None,
         description="Linked Strava activity id; creates the Strava external link",
         max_length=MAX_STRAVA_ACTIVITY_ID_LENGTH,
@@ -243,12 +258,12 @@ class FitnessTypeData(TypeDataModel):
 class OutdoorActivityTypeData(TypeDataModel):
     """OUTDOOR_ACTIVITY."""
 
-    weather_conditions: str | None = Field(
+    weather_conditions: NonBlankStr | None = Field(
         default=None,
         description="Weather during the activity, e.g. 'hot and windy'",
         max_length=MAX_WEATHER_CONDITIONS_LENGTH,
     )
-    role: str | None = Field(
+    role: NonBlankStr | None = Field(
         default=None,
         description="Your role on the trip, e.g. 'Guide', 'Organiser', 'Course Leader'",
         max_length=MAX_ROLE_LENGTH,
@@ -256,7 +271,7 @@ class OutdoorActivityTypeData(TypeDataModel):
     in_leadership_role: bool | None = Field(
         default=None, description="Whether you led the trip"
     )
-    participant_notes: str | None = Field(
+    participant_notes: NonBlankStr | None = Field(
         default=None,
         description="Notes about participants not listed via contact relationships",
         max_length=MAX_PARTICIPANT_NOTES_LENGTH,
@@ -266,7 +281,6 @@ class OutdoorActivityTypeData(TypeDataModel):
 class BushwalkingTypeData(TypeDataModel):
     """BUSHWALKING."""
 
-    route_id: UUID | None = Field(default=None, description="UUID of the route walked")
     track_grading: TrackGrade | None = Field(
         default=None, description="Australian Walking Track Grading System grade"
     )
@@ -275,7 +289,6 @@ class BushwalkingTypeData(TypeDataModel):
 class JoggingTypeData(TypeDataModel):
     """JOGGING."""
 
-    route_id: UUID | None = Field(default=None, description="UUID of the route run")
     pace: int | None = Field(
         default=None,
         description="Pace in seconds per kilometre, e.g. 330 for 5:30/km",
@@ -345,7 +358,6 @@ class AbseilingTripTypeData(TypeDataModel):
 class CanyoningTypeData(TypeDataModel):
     """CANYONING."""
 
-    route_id: UUID | None = Field(default=None, description="UUID of the canyon route")
     french_grade: str | None = Field(
         default=None,
         description=(
@@ -396,10 +408,9 @@ class ClimbingTypeData(TypeDataModel):
 class KayakingTypeData(TypeDataModel):
     """KAYAKING."""
 
-    water_type: str | None = Field(
+    water_type: NonBlankStr | None = Field(
         default=None,
         description="Type of water body — free text, e.g. 'river', 'lake', 'sea'",
-        min_length=1,
     )
     is_white_water: bool | None = Field(default=None, description="White-water paddle")
     rapids_grade: RapidsGrade | None = Field(
@@ -410,14 +421,12 @@ class KayakingTypeData(TypeDataModel):
 class CrossCountrySkiingTypeData(TypeDataModel):
     """CROSS_COUNTRY_SKIING."""
 
-    route_id: UUID | None = Field(default=None, description="UUID of the route skied")
-    snow_conditions: str | None = Field(
+    snow_conditions: NonBlankStr | None = Field(
         default=None,
         description=(
             "Snow conditions — free text with no fixed vocabulary, e.g. "
             "'fresh powder', 'packed powder', 'spring corn', 'icy', 'slush'"
         ),
-        min_length=1,
     )
 
 
@@ -431,10 +440,9 @@ class CavingTypeData(TypeDataModel):
 class CanoeingTypeData(TypeDataModel):
     """CANOEING."""
 
-    water_type: str | None = Field(
+    water_type: NonBlankStr | None = Field(
         default=None,
         description="Type of water body — free text, e.g. 'river', 'lake', 'sea'",
-        min_length=1,
     )
 
 
@@ -479,11 +487,32 @@ class GearMaintenanceTypeData(TypeDataModel):
     activity_types: list[OutdoorActivitySubtype] | None = Field(
         default=None, description="Activity types the item is used for"
     )
-    retirement_reason: str | None = Field(
+    retirement_reason: NonBlankStr | None = Field(
         default=None,
-        description="Why the item was retired; required when retiring gear",
+        description=(
+            "Why the item was retired. Required when maintenance_type is "
+            f"'{MaintenanceType.RETIRING_GEAR.value}'"
+        ),
         max_length=MAX_RETIREMENT_REASON_LENGTH,
     )
+
+    @model_validator(mode="after")
+    def _retirement_needs_a_reason(self) -> GearMaintenanceTypeData:
+        """The domain refuses to retire an item without saying why.
+
+        Only checked when maintenance_type is actually supplied: on a partial
+        update it may be absent, and the stored value is not visible here. The
+        entity checks it again against the merged row.
+        """
+        if (
+            self.maintenance_type == MaintenanceType.RETIRING_GEAR
+            and not self.retirement_reason
+        ):
+            raise ValueError(
+                "retirement_reason is required when maintenance_type is "
+                f"'{MaintenanceType.RETIRING_GEAR.value}'"
+            )
+        return self
 
 
 class GearUsageTypeData(TypeDataModel):

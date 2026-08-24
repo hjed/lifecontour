@@ -190,8 +190,8 @@ class TestUnitsArePublished:
     @pytest.mark.parametrize(
         ("field", "unit"),
         [
-            ("distance", "km"),
-            ("duration", "minutes"),
+            ("distance", "m"),
+            ("duration", "seconds"),
             ("elevation_gain", "m"),
             ("elevation_loss", "m"),
             ("heart_rate_avg", "bpm"),
@@ -208,6 +208,113 @@ class TestUnitsArePublished:
         schema = _field_schema(JoggingTypeData, "pace")
         assert schema["type"] == "integer"
         assert schema["unit"] == "seconds per km"
+
+
+class TestFitnessUnitsMatchTheColumns:
+    """The published unit must be the unit the column actually stores.
+
+    These are the raw column units: the migration comments read "Distance in
+    meters" and "Duration in seconds", the Strava worker stores
+    ``round(activity.distance)`` and ``activity.moving_time`` — both already
+    metres and seconds — and the frontend divides by 1000 to display km. The
+    discovery metadata said kilometres and minutes, which would have had a
+    client store a 10 km ride as 10 m.
+    """
+
+    def test_distance_is_metres(self) -> None:
+        spec = _field_schema(FitnessTypeData, "distance")
+        assert spec["unit"] == "m"
+        assert "metres" in spec["description"]
+
+    def test_duration_is_seconds(self) -> None:
+        spec = _field_schema(FitnessTypeData, "duration")
+        assert spec["unit"] == "seconds"
+        assert "seconds" in spec["description"]
+
+    def test_a_strava_sized_value_is_accepted(self) -> None:
+        """10 km / 1 h as the worker stores it — not as km and minutes."""
+        parsed = FitnessTypeData.model_validate({"distance": 10000, "duration": 3600})
+
+        assert parsed.distance == 10000
+        assert parsed.duration == 3600
+
+
+class TestRouteIdIsNotWritable:
+    """route_id left these tables when routes became a journal child.
+
+    The update helpers still pass it to ``dataclasses.replace``, which raises
+    TypeError because no such field exists — so advertising it would point a
+    caller at a guaranteed 500.
+    """
+
+    @pytest.mark.parametrize(
+        "journal_type",
+        [
+            JournalType.BUSHWALKING,
+            JournalType.JOGGING,
+            JournalType.CANYONING,
+            JournalType.CROSS_COUNTRY_SKIING,
+        ],
+    )
+    def test_route_id_is_not_advertised(self, journal_type: JournalType) -> None:
+        assert "route_id" not in TYPE_DATA_MODELS[journal_type].model_fields
+
+
+class TestBlankTextIsRefused:
+    """The entities reject whitespace-only text, so the boundary must too."""
+
+    @pytest.mark.parametrize(
+        ("model", "field"),
+        [
+            (OutdoorActivityTypeData, "role"),
+            (OutdoorActivityTypeData, "weather_conditions"),
+            (OutdoorActivityTypeData, "participant_notes"),
+            (FitnessTypeData, "strava_activity_id"),
+        ],
+    )
+    def test_a_whitespace_only_value_is_refused(
+        self, model: type[TypeDataModel], field: str
+    ) -> None:
+        with pytest.raises(ValidationError):
+            model.model_validate({field: "   "})
+
+    def test_null_still_clears_the_field(self) -> None:
+        """Clearing is a real intention; blank is not the way to express it."""
+        assert OutdoorActivityTypeData.model_validate({"role": None}).role is None
+
+
+class TestRetirementNeedsAReason:
+    """GearMaintenanceData refuses to retire an item without saying why."""
+
+    def test_retiring_without_a_reason_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="retirement_reason"):
+            GearMaintenanceTypeData.model_validate(
+                {
+                    "gear_item_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+                    "maintenance_type": "retiring gear",
+                }
+            )
+
+    def test_retiring_with_a_reason_is_accepted(self) -> None:
+        parsed = GearMaintenanceTypeData.model_validate(
+            {
+                "gear_item_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+                "maintenance_type": "retiring gear",
+                "retirement_reason": "sheath core-shot",
+            }
+        )
+
+        assert parsed.retirement_reason == "sheath core-shot"
+
+    def test_another_maintenance_type_needs_no_reason(self) -> None:
+        parsed = GearMaintenanceTypeData.model_validate(
+            {
+                "gear_item_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+                "maintenance_type": "routine inspection",
+            }
+        )
+
+        assert parsed.retirement_reason is None
 
 
 class TestClosedVocabularies:

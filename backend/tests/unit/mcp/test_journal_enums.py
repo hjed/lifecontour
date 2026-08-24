@@ -86,11 +86,11 @@ async def test_list_journal_types_states_units_and_enums() -> None:
     by_name = {t["name"]: t for t in payload["journal_types"]}
 
     fitness = by_name["FITNESS"]["type_data_fields"]
-    assert fitness["distance"]["unit"] == "km"
+    assert fitness["distance"]["unit"] == "m"
     assert fitness["distance"]["type"] == "int"
-    assert fitness["duration"]["unit"] == "minutes"
+    assert fitness["duration"]["unit"] == "seconds"
     assert fitness["elevation_gain"]["unit"] == "m"
-    assert fitness["distance"]["summary"] == "int in km (optional, min 0)"
+    assert fitness["distance"]["summary"] == "int in m (optional, min 0)"
     assert by_name["ABSEILING_TRIP"]["type_data_fields"]["total_length"]["unit"] == "m"
     assert by_name["CLIMBING"]["type_data_fields"]["length"]["unit"] == "m"
     assert (
@@ -106,7 +106,7 @@ async def test_list_journal_types_states_units_and_enums() -> None:
     assert payload["enums"]["anchor_types"] == VALID_ANCHOR_TYPES
     assert payload["enums"]["canyon_types"] == VALID_CANYON_TYPES
     assert payload["enums"]["pitch_types"] == VALID_PITCH_TYPES
-    assert payload["units"]["distance"].startswith("km")
+    assert payload["units"]["distance"] == "m"
 
 
 @pytest.mark.asyncio
