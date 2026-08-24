@@ -261,6 +261,19 @@ export function FutureJournalPicker({
               calendar, and sending them off to create a journal there would be
               answering a question they did not ask.
 
+              **"No search" means both the live query and the debounced one**,
+              because the two disagree for 300ms in each direction and the
+              offer would be wrong in both windows. Typing: the debounced term
+              is still empty, so a gate reading only that keeps offering
+              "create a journal" to someone visibly searching for one.
+              Clearing: the live query empties at once while the results on
+              screen are still the search's, so a gate reading only that offers
+              a journal beside "No future journals match ...". The message
+              above stays keyed to the debounced term on purpose — its subject
+              is what the last completed read actually found, and keying it to
+              the live query would have it name a result nothing has fetched
+              yet.
+
               **It opens in a new tab, and that is the whole point of it.** This
               control lives inside dialogs that are mid-write: a task being
               composed, or a lapsed one being resurrected. Navigating away in
@@ -276,7 +289,7 @@ export function FutureJournalPicker({
               asked would come back to the same empty picker. The label says
               the tab opens, because a link that opens one without saying so is
               its own small betrayal. */}
-          {!search && (
+          {!query.trim() && !search && (
             <Button
               asChild
               variant='outline'

@@ -657,6 +657,51 @@ describe('FutureJournalPicker', () => {
       expect(offer()).toBeNull();
     });
 
+    /**
+     * The gate is the **live** query, not the debounced one. For the debounce
+     * interval after someone starts typing, the debounced term is still empty
+     * — so a gate reading it would keep offering "create a journal" while the
+     * user is plainly in the middle of searching for one.
+     */
+    it('goes as soon as the user starts typing, not a debounce later', async () => {
+      const user = userEvent.setup();
+      renderPicker();
+
+      expect(offer()).toBeInTheDocument();
+
+      await user.type(screen.getByRole('combobox'), 'k');
+
+      // Asserted without waiting: the debounce has not fired yet, which is the
+      // whole window this test exists for.
+      expect(offer()).toBeNull();
+    });
+
+    /**
+     * And the same rule in reverse. Clearing the box empties the live query
+     * immediately while the debounced term — and the results on screen — are
+     * still the search's, so an offer keyed only to the live query would
+     * appear beside "No future journals match ...".
+     */
+    it('waits for the search to actually clear before coming back', async () => {
+      const user = userEvent.setup();
+      renderPicker();
+
+      await user.type(screen.getByRole('combobox'), 'k');
+      await waitFor(() =>
+        expect(screen.getByTestId('future-journal-empty')).toHaveTextContent(
+          /no future journals match/i
+        )
+      );
+
+      await user.clear(screen.getByRole('combobox'));
+
+      // The results on screen are still the search's, so the offer is not yet
+      // the honest answer.
+      expect(offer()).toBeNull();
+
+      await waitFor(() => expect(offer()).toBeInTheDocument());
+    });
+
     it('is not offered while the listing is still loading', () => {
       mockUseFutureJournals.mockReturnValue(
         queryResult({ isLoading: true, data: undefined })

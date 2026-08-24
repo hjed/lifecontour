@@ -458,6 +458,16 @@ component unchanged.
   user's calendar, and never while the listing is loading or has failed. The
   wording keeps saying the journals are not in the next ninety days and keeps
   offering search for a later one; the offer is added, not substituted.
+- **"No search" means the live query *and* the debounced one.** The two
+  disagree for the length of the debounce in each direction, and a gate reading
+  either alone is wrong in one of them: keyed to the debounced term, the offer
+  goes on being shown to somebody who has just started searching for the very
+  journal it is offering to create; keyed to the live query, it reappears
+  beside "No future journals match …" the moment the box is cleared, while the
+  results on screen are still the search's. The *message* stays keyed to the
+  debounced term, because its subject is what the last completed read found
+  rather than what the user is doing — keying it to the live query would have
+  it name a result nothing has fetched yet.
 - **The offer opens in a new tab, and the label says so.** This control sits
   inside dialogs that are mid-write, so navigating away in place would throw
   away the task being composed and land the user on the journal they had just

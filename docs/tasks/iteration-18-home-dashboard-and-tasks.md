@@ -5139,8 +5139,8 @@ and the difference is what fixing five defects and extracting one shared compone
 search and ordering, field-level error mapping, and keyboard/ARIA behaviour of the picker. E2E deferred
 to Phase 22.
 
-**Delivered: 73 tests added, all passing** — 57 frontend, taking the suite from 176 suites / 2,128 tests
-to **177 / 2,185**, and 16 backend. (Figures are post-review; the phase went green at 70 and 2,182, the
+**Delivered: 75 tests added, all passing** — 59 frontend, taking the suite from 176 suites / 2,128 tests
+to **177 / 2,187**, and 16 backend. (Figures are post-review; the phase went green at 70 and 2,182, the
 local review round added one dialog test and one picker test and strengthened four more in place, and
 the PR review added the hook test below.)
 
@@ -5150,9 +5150,11 @@ the PR review added the hook test below.)
   the input in both states; the two empty-journal cases; six field-mapping cases including a
   `meta.field` this form has no input for, a `meta.field` that is a *prototype* key, and an ordinary
   failure; and seven on opening, closing and reopening.
-- **Picker (6 added; 41 in the file):** `FutureJournalPicker.test.tsx` — the offer present in the
-  unsearched empty state and pointing at `/journals/new`, that it opens in a new tab and says so, and
-  that it is absent in each of the four states where it would be dishonest.
+- **Picker (8 added; 43 in the file):** `FutureJournalPicker.test.tsx` — the offer present in the
+  unsearched empty state and pointing at `/journals/new`, that it opens in a new tab and says so, that
+  it is absent in each of the four states where it would be dishonest, and one test per **direction**
+  of the debounce window: gone the instant typing starts, and not back until the search has actually
+  cleared.
 - **Section (5 added; 22 in the file):** `JournalTasksSection.test.tsx` — the trigger on a populated
   journal, an empty one and a **failed** one, absent during the loading pass, and opening nothing by
   itself.
@@ -5249,6 +5251,18 @@ opt-out. **Worth recording as a shape rather than a one-off:** the first review 
 verified by asserting the link's attributes, and the mechanism the fix depended on was never asserted
 at all — a fix whose correctness rests on behaviour somewhere else needs a test *there*, not only
 where the change was made.
+
+**And a second PR-review round found the offer's condition disagreed with itself for 300ms in each
+direction.** The gate read the **debounced** term, so while someone typed into an empty picker the
+offer went on being shown for the length of the debounce — to a user visibly searching for the journal
+it was offering to create. The naive fix is worse than the bug in the other direction: keyed to the
+*live* query alone, clearing the box would put the offer back beside "No future journals match …",
+because the results on screen are still the search's. So the condition is **both**, and there is a test
+per direction — each one failing under exactly one of the two one-sided gates. The message above it
+stays keyed to the debounced term on purpose: its subject is what the last completed read found, and
+keying it to the live query would have it name a result nothing has fetched yet. **The shape, again:**
+a debounced value and the value it lags are two different facts, and a condition that mixes subjects —
+"what is on screen" with "what the user is doing" — has to say which one it means.
 
 **One follow-up recorded rather than built.** `MCPResponseBuilder.error_response` flattens `context`
 into the payload's top level (`error_data.update(context)`), so now that task errors forward
