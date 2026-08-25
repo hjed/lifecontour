@@ -845,6 +845,7 @@ def authenticated_search_client(
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
     from app.infrastructure.di.settings import SettingsProvider
+    from app.infrastructure.di.tasks import TaskProvider
     from app.main import create_app
 
     app = create_app(settings=test_settings)
@@ -859,6 +860,11 @@ def authenticated_search_client(
         InfrastructureProvider(),
         ContactProvider(),
         JournalProvider(),
+        # The journal list reads its tasks-due indicator through
+        # ``TaskReadService``. Without this the endpoint answers 500 rather than
+        # failing to resolve at construction, so a test that only reads the body
+        # goes on passing while the route is broken.
+        TaskProvider(),
         DashboardProvider(),
         IntegrationProvider(),
         SettingsProvider(),

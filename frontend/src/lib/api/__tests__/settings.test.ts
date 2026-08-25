@@ -2,7 +2,17 @@
  * @jest-environment jsdom
  */
 
-import { fetchUserSettings, updateTimezone } from '../settings';
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import React, { ReactNode } from 'react';
+
+import {
+  fetchUserSettings,
+  updateTimezone,
+  useUpdateTimezone,
+} from '../settings';
+import { journalKeys } from '../journal-keys';
+import { taskKeys } from '../tasks';
 
 globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
@@ -70,6 +80,56 @@ describe('settings API', () => {
         body: JSON.stringify({ timezone: 'America/New_York' }),
       });
       expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('useUpdateTimezone', () => {
+    /**
+     * Changing the zone changes what "today" is, and two answers are *derived*
+     * from that rather than stored: whether a task has lapsed, and the journal
+     * list's `tasks_due_count`, which is the same rule over a whole page. Both
+     * sit behind the app-wide five-minute `staleTime`, so a mutation that named
+     * only its own namespace would leave the user looking at verdicts reached
+     * in the zone they have just corrected.
+     */
+    function wrapper(client: QueryClient) {
+      return function Wrapper({ children }: { children: ReactNode }) {
+        return React.createElement(QueryClientProvider, { client }, children);
+      };
+    }
+
+    it('invalidates the timezone-derived reads, not only its own', async () => {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      });
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            id: 'user-1',
+            type: 'user_settings',
+            attributes: { timezone: 'Australia/Sydney' },
+          },
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useUpdateTimezone(), {
+        wrapper: wrapper(queryClient),
+      });
+
+      await result.current.mutateAsync('Australia/Sydney');
+
+      await waitFor(() => {
+        const keys = invalidateSpy.mock.calls.map(
+          ([filters]) => filters?.queryKey
+        );
+        expect(keys).toContainEqual(journalKeys.lists());
+        expect(keys).toContainEqual(taskKeys.all);
+      });
     });
   });
 });

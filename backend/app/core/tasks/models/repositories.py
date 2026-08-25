@@ -358,6 +358,47 @@ class TaskRepository(ABC):
             with ties broken by contact id.
         """
 
+    @abstractmethod
+    async def count_not_done_tasks_by_due_journal(
+        self, journal_ids: list[int], user_id: str
+    ) -> dict[int, int]:
+        """How many not-done tasks are due in each of these journals.
+
+        The journal list's "tasks due" indicator, and the only read here whose
+        subject is a *journal* rather than a task. One statement for a whole
+        page, because the alternative is a query per row on the busiest listing
+        in the product — the same reason the batched link reads above exist.
+
+        **Only the due anchor counts.** A journal a task was created in or
+        merely mentions is not waiting on it, so neither
+        ``creating_journal_id`` nor ``task_intermediate_journals`` is consulted.
+        A task holding two roles in one journal is therefore counted once
+        without needing to be de-duplicated.
+
+        **Lapsing is not filtered here**, matching
+        :meth:`find_upcoming_tasks`'s reasoning. Whether a journal's date has
+        passed depends on the acting user's timezone, and whether it is a
+        cancelled event depends on a batched lookup the caller already makes —
+        so the verdict belongs to
+        ``TaskReadService.due_task_counts``, and putting it in SQL would be a
+        second definition of *lapsed* that no unit test could reach. The status
+        and the anchor are all this statement knows about.
+
+        Args:
+            journal_ids: The journals to count for — a listing's page. An empty
+                list reads nothing at all.
+            user_id: The acting user. Load-bearing here, unlike on the joins
+                elsewhere in this repository: nothing in the schema stops a task
+                being anchored to a journal somebody else owns, so without the
+                predicate one user's commitments could count towards another's
+                indicator.
+
+        Returns:
+            A mapping of journal id to its count. **Journals with none are
+            absent** rather than present with a zero, as the batched link reads
+            are, so callers read through ``.get(journal_id, 0)``.
+        """
+
 
 class TaskAnchorRepository(ABC):
     """The tasks a journal anchors, for the journal domain's two anchor rules.

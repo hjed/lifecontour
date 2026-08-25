@@ -440,6 +440,11 @@ PORT_READ_METHODS = frozenset(
         # unclassified and the suite red — which is the guard working: a new port
         # method fails this test until somebody says which kind it is.
         "find_upcoming_tasks",
+        # The journal list's tasks-due count (ITER18-001 Phase 21). Counts the
+        # not-done tasks due in each of a page of journals; writes nothing and
+        # publishes nothing, so there is no event to owe. The guard did its job
+        # again here — this test was the phase's first failure.
+        "count_not_done_tasks_by_due_journal",
     }
 )
 

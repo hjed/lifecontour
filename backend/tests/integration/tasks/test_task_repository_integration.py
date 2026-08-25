@@ -36,6 +36,8 @@ from tests.integration.tasks.task_seeding import (
     count,
     create_contact,
     create_journal,
+    create_task,
+    link_intermediate_journal,
     make_task_container,
 )
 
@@ -767,3 +769,278 @@ class TestDependencyInjection:
             assert isinstance(repository, SqlTaskRepository)
         finally:
             await container.close()
+
+
+@pytest.mark.integration
+class TestDueTaskCounts:
+    """How many live commitments each of a page of journals holds.
+
+    The journal list's indicator, and the only read in this repository whose
+    subject is a *journal* rather than a task. It answers for a whole page in
+    one statement, because the alternative is a query per row on the busiest
+    listing in the product.
+
+    What it deliberately does **not** know about is lapsing. A journal's date
+    and its cancellation are the caller's to judge — see
+    ``TaskReadService.due_task_counts`` — so everything here is about the two
+    facts SQL can settle: the task is not done, and this journal is the one it
+    is due in.
+    """
+
+    async def test_counts_not_done_tasks_per_due_journal(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Each journal is reported with its own count, not the page's total."""
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        busy_id = await create_journal(journal_repository, title="Busy", days_offset=7)
+        quiet_id = await create_journal(
+            journal_repository, title="Quiet", days_offset=8
+        )
+        for text_ in ("book the hut", "pack the rope"):
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=busy_id,
+                text=text_,
+            )
+        await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=quiet_id,
+            text="return the key",
+        )
+
+        counts = await task_repository.count_not_done_tasks_by_due_journal(
+            [busy_id, quiet_id], USER_ID
+        )
+
+        assert counts == {busy_id: 2, quiet_id: 1}
+
+    async def test_a_journal_with_no_due_tasks_is_absent(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Absent rather than present with a zero, as the batched reads are.
+
+        The caller reads through ``.get(journal_id, 0)``, so a page of journals
+        holding nothing costs no rows at all rather than one row each.
+        """
+        empty_id = await create_journal(journal_repository, title="Nothing due here")
+
+        assert (
+            await task_repository.count_not_done_tasks_by_due_journal(
+                [empty_id], USER_ID
+            )
+            == {}
+        )
+
+    async def test_done_and_cancelled_tasks_are_not_counted(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Only a not-done task is a live commitment.
+
+        The not-done task beside them is what makes this a count rather than an
+        existence check: without it the journal would be absent either way, and
+        a query that had dropped its status predicate would pass.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        for status in (TaskStatus.NOT_DONE, TaskStatus.DONE, TaskStatus.CANCELLED):
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text=f"a {status.value} task",
+                status=status,
+            )
+
+        counts = await task_repository.count_not_done_tasks_by_due_journal(
+            [due_id], USER_ID
+        )
+
+        assert counts == {due_id: 1}
+
+    async def test_another_users_task_does_not_count(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A foreign task due in the caller's journal is invisible to the count.
+
+        Nothing in the schema forbids the row — the two foreign keys point at
+        ``journals`` without comparing owners — so the predicate is what keeps
+        one user's commitments off another's list, and this is the only way to
+        show it is there.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="not yours to see",
+            user_id=OTHER_USER_ID,
+        )
+
+        assert (
+            await task_repository.count_not_done_tasks_by_due_journal([due_id], USER_ID)
+            == {}
+        )
+
+    async def test_only_the_due_anchor_counts(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A journal the task was created in, or merely mentions, lights nothing.
+
+        The indicator says *tasks due here*, which is one of the three link
+        roles rather than any of them: a journal that recorded a commitment is
+        not a journal that is waiting on one.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        mentioned_id = await create_journal(journal_repository, title="Mentioned")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="one commitment, three journals",
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned_id
+        )
+
+        counts = await task_repository.count_not_done_tasks_by_due_journal(
+            [creating_id, mentioned_id, due_id], USER_ID
+        )
+
+        assert counts == {due_id: 1}
+
+    async def test_a_task_anchored_twice_to_one_journal_is_counted_once(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Invariant 6's shared journal is one commitment, not two.
+
+        A count is what makes this assertable at all: a boolean signal would
+        read the same whether the task were counted once or twice.
+        """
+        shared_id = await create_journal(
+            journal_repository, title="Both", days_offset=7
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=shared_id,
+            due_journal_id=shared_id,
+            text="arose and matters here",
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=shared_id
+        )
+
+        counts = await task_repository.count_not_done_tasks_by_due_journal(
+            [shared_id], USER_ID
+        )
+
+        assert counts == {shared_id: 1}
+
+    async def test_journals_outside_the_page_are_not_counted(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """The answer is about the ids asked for, not about the user's tasks.
+
+        A listing is a page of a much longer list, and a count that ignored its
+        argument would still satisfy every assertion above.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        on_page_id = await create_journal(
+            journal_repository, title="On page", days_offset=7
+        )
+        off_page_id = await create_journal(
+            journal_repository, title="Off page", days_offset=8
+        )
+        for due_id in (on_page_id, off_page_id):
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text="a commitment",
+            )
+
+        counts = await task_repository.count_not_done_tasks_by_due_journal(
+            [on_page_id], USER_ID
+        )
+
+        assert counts == {on_page_id: 1}
+
+    async def test_the_page_costs_one_statement_whatever_its_size(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """One round trip for two journals, and still one for eight.
+
+        The doubling is the part that matters. A fixed number on its own would
+        pass against a loop that happened to run a fixed number of times, so the
+        assertion is that the number does not move when the page does.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        journal_ids = [
+            await create_journal(
+                journal_repository, title=f"Due {index}", days_offset=index + 1
+            )
+            for index in range(8)
+        ]
+        for due_id in journal_ids:
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text="a commitment",
+            )
+
+        with recorded_statements(async_connection) as few:
+            small = await task_repository.count_not_done_tasks_by_due_journal(
+                journal_ids[:2], USER_ID
+            )
+        with recorded_statements(async_connection) as many:
+            large = await task_repository.count_not_done_tasks_by_due_journal(
+                journal_ids, USER_ID
+            )
+
+        assert len(small) == 2
+        assert len(large) == 8
+        assert len(few) == 1
+        assert len(many) == 1
+
+    async def test_an_empty_page_issues_no_statement(
+        self, task_repository: SqlTaskRepository, async_connection: AsyncConnection
+    ):
+        """Nothing asked about is nothing to ask.
+
+        The common shape on a filtered listing that matched no journals, and the
+        same short-circuit ``find_cancelled_journal_ids`` takes.
+        """
+        with recorded_statements(async_connection) as statements:
+            counts = await task_repository.count_not_done_tasks_by_due_journal(
+                [], USER_ID
+            )
+
+        assert counts == {}
+        assert statements == []
