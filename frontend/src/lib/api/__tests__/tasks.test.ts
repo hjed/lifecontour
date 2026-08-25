@@ -26,6 +26,7 @@ import {
   useUnlinkTaskContact,
   useUpdateTask,
 } from '../tasks';
+import { journalKeys } from '../journals';
 import {
   JournalTasksResponse,
   LapseReason,
@@ -610,7 +611,7 @@ describe('Task API client', () => {
       });
     });
 
-    it('refreshes the journal listings and the upcoming window, but no task detail', async () => {
+    it('refreshes the journal listings, the upcoming window and the journal lists, but no task detail', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse(), 201));
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -628,6 +629,7 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          journalKeys.lists(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task created successfully');
@@ -730,7 +732,7 @@ describe('Task API client', () => {
       });
     });
 
-    it('refreshes the task, the journal listings and the upcoming window', async () => {
+    it('refreshes the task, the journal listings, the upcoming window and the journal lists', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -748,6 +750,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          journalKeys.lists(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task marked done');
@@ -1154,7 +1157,7 @@ describe('Task API client', () => {
       });
     });
 
-    it('refreshes the task, the journal listings and the upcoming window', async () => {
+    it('refreshes the task, the journal listings, the upcoming window and the journal lists', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -1169,6 +1172,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          journalKeys.lists(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith(
@@ -1240,7 +1244,7 @@ describe('Task API client', () => {
       expect(response.json).not.toHaveBeenCalled();
     });
 
-    it('refreshes the journal listings and the upcoming window', async () => {
+    it('refreshes the journal listings, the upcoming window and the journal lists', async () => {
       mockFetch.mockResolvedValueOnce(noContentResponse());
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -1254,6 +1258,7 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          journalKeys.lists(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task deleted successfully');
@@ -1327,6 +1332,13 @@ describe('Task API client', () => {
           taskKeys.upcoming(),
         ]);
       });
+      // Named rather than left to the exhaustive match above: `tasks_due_count`
+      // counts not-done tasks by *due journal*, so linking a person to a task
+      // moves no journal's badge. The "names only the namespaces its change can
+      // reach" rule is only worth stating if something is excluded by it.
+      expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
+        journalKeys.lists()
+      );
       expect(toast.success).toHaveBeenCalledWith('Contact linked successfully');
     });
 
@@ -1403,6 +1415,11 @@ describe('Task API client', () => {
       });
       expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
         taskKeys.upcoming()
+      );
+      // The journal *lists* are excluded for the same reason: the due count
+      // reads the due anchor only, so a mention moves no badge either.
+      expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
+        journalKeys.lists()
       );
       expect(toast.success).toHaveBeenCalledWith('Journal linked successfully');
     });

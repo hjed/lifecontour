@@ -2,7 +2,7 @@
 
 **Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **63 phases**, one PR each, with per-phase
 acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
-**ITER18-001 Phases 1–19 complete** (task tables + domain entity; task repository; journal-date
+**ITER18-001 Phases 1–21 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
 MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
 one automatic link, and its only way back out of a terminal status — and then retargeting over REST and
@@ -20,8 +20,13 @@ specification names, their inline status actions, the retarget that doubles as t
 reopen, and now the attach and detach of the third kind of link. **A task is now readable, not only
 writable, the query the home dashboard is built on exists, and a user can work with a task on the
 surface the specification designates for it** — Phase 15 reserved its `upcoming()` key against an
-endpoint that had not landed yet, and Phase 14 is that endpoint. What remains is creating a task from a
-journal (20), the journal-list indicator whose backend half is still to come (21), and the e2e (22).)
+endpoint that had not landed yet, and Phase 14 is that endpoint; and creating a task from a journal,
+where the due journal is chosen from the user's future journals and the empty case is met with the
+offer to make one. **And the journal list now says which journals are waiting on something**:
+`GET /api/journals` carries a `tasks_due_count` per row, computed for the whole page in one query and
+filtered through the *same* lapse rule the read model uses rather than a second one written in SQL, so
+a lapsed commitment produces no badge — which is what the specification requires of lapsing.
+**Only the e2e (22) remains.**)
 **ITER18-002 Phases 1, 2, 3 and 4 complete** (the delete guard: journal deletion is refused,
 explanatorily, for any journal anchoring a task, and that refusal now reaches REST and MCP callers as
 machine-readable blockers alongside the prose; merge, which is never refused — it re-points task links
@@ -5282,22 +5287,341 @@ naming *the field* the refusal is about. Both are described, with the rule that 
 needs a field at all: one code covering several fields does, and a code a client can place on its own
 does not.
 
-#### Phase 21: Journal List "Tasks Due" Indicator
+#### Phase 21: Journal List "Tasks Due" Indicator ✅ COMPLETE
 
 **Prerequisites:** Phase 12.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Overrun recorded before work started
+(delivery rule 3): ~265 production → ~1,100 tracked.** The original figure reads the phase as an
+attribute on an existing resource plus a badge, which is the *production* shape but not the phase's.
+Three things beyond it. The signal needs a **port method and its adapter** for what is four lines of
+SQL, and rule 13 has already priced that pair — "a port ABC costs roughly as much as its adapter in a
+codebase that documents every abstract method". The one-query criterion is a claim about three
+different layers, so the same assertion is owed at repository, service and endpoint level, each of it
+twice over at two page sizes, because a fixed statement count alone passes against a loop that ran a
+fixed number of times. And the lapse exclusion crosses two causes with a day boundary in a non-UTC
+zone, which Phase 12 recorded as a matrix before a single journal is seeded — this phase inherits the
+matrix, in the narrower form where the due journal *is* the row journal. **Not split**, because the
+two halves are one user-visible fact and a backend-only phase would ship an attribute nothing renders.
+**That is a judgement rather than an exemption, and the first draft of this paragraph mis-stated it as
+one:** rule 3's escape clause is "unless splitting would break rule 9", and rule 9 is about a phase
+relying on a later one to *restore behaviour it broke* — which a backend-only 21a would not do. The
+honest reason to keep it whole is that a phase whose entire deliverable is an unread attribute is not
+worth a PR of its own, and the review that caught the misattribution is why it is written this way.
+· **Actual:** ~287 production → **~2,378 tracked** (2,378 insertions, 14 deletions across 30 files:
+287 production, 1,688 tests, 403 docs — the last inflated by this entry, whose two review sections
+are more than a third of it).
 
-**Acceptance Criteria:**
+**The pre-recorded overrun was right about the shape and low by 2.2× on the number, and against
+production it is ×8.3 — more than double calibration rule 1's ×4.** The pre-record named the three
+drivers correctly; what it mispriced is that two of them *multiply* rather than add. The one-query
+criterion is one claim written at three layers, and the lapse matrix is one matrix written at two —
+but the layers and the matrix are not independent, because each layer owes the matrix as well as the
+count. So the phase's 287 production lines are covered by 1,688 test lines that are, in substance,
+about six distinct facts asserted between two and four times each at deliberately different levels.
+**Suggested amendment, refining rule 1 rather than replacing it:** when a phase's criteria include
+*both* a cross-layer claim (the same property owed at repository, service and endpoint) *and* a
+matrix (causes × boundaries), estimate the test volume as their **product**, not their sum. Phase
+13's "estimate from the number of response shapes" amendment is the same observation seen from the
+other side.
 
-- [ ] The journal list response carries a lightweight per-journal signal that tasks are **due** in it
+**Two guards built by earlier phases caught this one, which is the return on having built them.**
+ITER18-003 Phase 5's completeness inventory — the one written to *fail* for a new port method rather
+than be a list somebody remembers to extend — was this phase's **first** failure, and it stayed red
+until `count_not_done_tasks_by_due_journal` was classified as a read. Phase 12's
+`derive_lapse_reason` is the other: reusing it rather than restating its branches is what makes the
+"loosen the boundary to `<=`" mutation fail **5** tests in a phase that never touched the rule.
+
+**And the wiring was estimated at nought and is ten**, which is Phase 1's finding recurring in a new
+place and worth stating as a rule. Making the journal *list* read the tasks domain means every
+container that serves `GET /api/journals` must now resolve `TaskReadService` — and ten test
+containers across ten files did not (eight API test modules, `tests/integration/api/conftest.py`, and
+`authenticated_search_client` in `tests/integration/conftest.py`; the other container in that file
+already had it, and `tests/integration/journal/test_journal_date_resolver.py` builds no app and was
+correctly left alone). That is not the interesting part. **The interesting part is
+that all 2,256 integration tests still passed while the endpoint returned 500**, because the tests
+using those containers read the response body without asserting its status; the only trace was a
+`NoFactoryError` logged and swallowed. **The rule:** a new *required collaborator* on a shipped
+endpoint is a change to every container that serves it, and a suite that does not assert status codes
+will not tell you which ones you missed. Found here only because the full-suite run's log was read
+rather than its exit code.
+
+**Acceptance criteria, ticked:**
+
+- [x] The journal list response carries a lightweight per-journal signal that tasks are **due** in it
       (count or boolean — state the choice), computed in **one query for the whole page** rather than per
-      row.
-- [ ] `JournalListItem` renders the indicator consistently with its existing list-level indicators.
-- [ ] Journals with no tasks due render no indicator; done, cancelled and lapsed tasks do not light it up.
+      row. — **A count**, `tasks_due_count`, for the reasons under *Decisions* below.
+      `TaskRepository.count_not_done_tasks_by_due_journal` answers a whole page in one statement over a
+      single `integer[]`, and the claim is asserted at **all three** layers — repository, service and
+      endpoint — each at two page sizes, because a fixed statement count alone passes against a loop
+      that ran a fixed number of times.
+- [x] `JournalListItem` renders the indicator consistently with its existing list-level indicators. —
+      Same `Badge`, same size classes and the same `CardTitle` slot as the cancelled and needs-review
+      markers, with a test rendering a journal carrying all three at once.
+- [x] Journals with no tasks due render no indicator; done, cancelled and lapsed tasks do not light it
+      up. — Terminal statuses are excluded in SQL; lapsed ones by `derive_lapse_reason`, both causes,
+      each asserted against real rows with a negative beside it.
+
+**Decisions taken (Phase 21):**
+
+- **A count, not a boolean.** The criterion allows either and asks for the choice. `COUNT(*) …
+  GROUP BY` returns the number for the same price as the existence check, and *"3 due"* is the
+  judgement a user is actually making when they scan a list. It also makes the surface assertable in
+  a way a flag is not: **a task holding two roles in one journal must be counted once**, which a
+  boolean could never show. The boolean is `count > 0` for anyone who wants it.
+- **The lapse exclusion is Python, not SQL, and that is the phase's central decision.** For this
+  surface the rule collapses — the due journal **is** the row journal, already loaded by the listing —
+  so "would a not-done task due here be lapsed?" is a question about the journal, put to Phase 12's
+  `derive_lapse_reason` once per row. Writing it in SQL would put a second definition of *lapsed* on
+  the busiest read in the product, which is the one most likely to drift. Same stance
+  `find_upcoming_tasks` already takes, for the same reason.
+- **A page with nothing due costs one statement; a page with something due costs three.** The count
+  runs **first** and short-circuits: with an empty result there is nothing to judge, so the timezone
+  read and the cancellation lookup never run. Most journals hold no tasks, so the ordinary listing
+  pays exactly the single query the criterion asks for. Neither figure grows with the page.
+- **`TaskReadService`, not a repository, and never `TaskService`.** Phase 12 built the read service so
+  "a caller that only needs to read a task is not handed the ability to change one", and it already
+  holds every collaborator this needs — the date resolver and `CalendarInfoRepository`, of which it is
+  already the only consumer outside the journal domain. `TaskAnchorRepository` was considered and
+  rejected: its class docstring states it is unscoped **by design** because every method stands in for
+  a foreign-key check, and a user-facing listing is the opposite kind of read.
+- **The service takes journals, not ids.** Judging the lapse needs each journal's date, and the
+  controller has already loaded them. Taking ids would have added a fourth query to learn what the
+  caller knew.
+- **The count is owner-scoped where this repository's other joins are not.** Nothing in the schema
+  compares a task's owner with its anchor journals' owner, so without the predicate one user's
+  commitments could count towards another's indicator. The row is constructible, so the test is real
+  rather than theatrical — and it is the mutation that proves the predicate is load-bearing.
+- **No MCP surface, argued rather than deferred.** Delivery rule 5 is about *capabilities* and this
+  introduces none: `list_journal_tasks` already returns a journal's tasks grouped by role, which is
+  strictly more than a count. The sibling list-level indicator `has_pending_reviews` is REST-only for
+  the same reason. And MCP's list analogue `browse_journals_by_date_window` anchors its window on
+  `datetime.now(UTC).date()` rather than the configured zone, so a timezone-derived lapse verdict on
+  that payload would disagree with itself about what day it is. **Follow-up recorded:** that UTC
+  anchor is a defect on its own terms — it is the same "date windows use the user's timezone" rule
+  Phase 3 established — and it should be fixed by a phase that has business in that tool.
+- **"Not computed" is not zero, and the schema is where that is said.** `tasks_due_count` is
+  **nullable**: `int | None`, defaulting to `None`, so only the endpoint that actually runs the count
+  ever writes a number. Every other journal payload answers `null` — the key is present, since
+  nothing serialises with `exclude_none`; what varies is whether it carries a value. Without this the
+  field would default to `0` and the *search* payload would tell a client that a journal with two
+  tasks genuinely due in it has none, which is a false claim rather than a missing one. The frontend
+  treats `null`, `undefined` and `0` alike and renders nothing for all three, so the distinction buys
+  the viewer nothing; it exists so the payload never asserts what no query checked. **This bullet
+  originally described the field as optional and the transform as passing `undefined`, which is what
+  it did before the review round found the field was not nullable at all** — see below.
+- **Only the list endpoint computes the count, and the sibling indicator is *not* the model for how
+  that is reported.** `_build_journal_list_resources` is reached from `list_journals` alone, so the
+  other surfaces that render `JournalListItem` — `GET /api/journals/search` behind the `/journals`
+  page's search mode, and a contact's journals — show no badge. The *rows* match
+  `has_pending_reviews` exactly, which is the criterion's "consistently with its existing list-level
+  indicators" holding in the awkward direction as well as the easy one. **The payloads deliberately
+  do not**, and an earlier draft of this bullet got that wrong: `has_pending_reviews` is
+  `bool = Field(default=False)`, so it is not absent from those payloads — it is **present and
+  `false`**, telling a client a journal has no pending review when nothing looked. `tasks_due_count`
+  is nullable precisely so it does not do that, which means the two indicators no longer have the
+  same shape, and that is the intended outcome rather than a drift. **Two follow-ups recorded:**
+  widening the count to those endpoints needs the same batched read there, and
+  `has_pending_reviews` carries the defect this phase just fixed for its own field — the same
+  one-word change would fix it, and it belongs to a phase with business in the review indicator.
+- **What the badge shows and what it announces are different strings.** (Not its "accessible name":
+  a shadcn `Badge` is a plain `div` with no role, so it has none — what the split changes is its
+  announced *text content*, which is also why an `aria-label` was rejected rather than used.)
+  `2 due` is unambiguous
+  *because the row it sits on is visible with it*, which is exactly what a screen reader meeting the
+  badge alone does not have — so the visible span is `aria-hidden` beside an `sr-only`
+  `tasksDueWording(count)`. An `aria-label` on the span was rejected: it needs a role to attach to.
+  **Follow-up recorded:** this row's existing hierarchy and sync indicators put `aria-label` on the
+  lucide `<svg>` itself and have the same weakness; named here rather than fixed under cover of an
+  unrelated change.
+
+**Delivered: 15 unit tests, 29 backend integration tests and 14 frontend component/helper tests.**
+
+- **Unit (15):** `backend/tests/unit/tasks/test_task_due_counts.py` — the service over doubles.
+  The date boundary at yesterday, **today** and tomorrow; a cancelled journal dated in the *future*,
+  which is the case showing the date cause demonstrably cannot be what fired; **the timezone pair in
+  both directions with a UTC control each** — Sydney past local midnight while UTC has not turned,
+  New York still inside the day UTC has left — because either alone proves only that something
+  lapsed; the empty page reading nothing at all; the page with nothing due asking no follow-up
+  questions; the cancellation lookup narrowed to the ids that have counts; and the timezone read once
+  rather than per journal.
+- **Integration (9):** `test_task_repository_integration.py::TestDueTaskCounts` — the statement's own
+  contract. Per-journal counts rather than a page total; absent-not-zero; done and cancelled excluded
+  **with a not-done control in the same journal**, which is what makes it a count rather than an
+  existence check; a real second user's task anchored to the caller's journal; only the *due* anchor
+  counting, with a creating journal and a mention on the same page reporting nothing; invariant 6's
+  shared journal counted **once**; journals outside the page untouched; one statement at two journals
+  and **still one** at eight; and an empty page issuing no statement.
+- **Integration (11):** `test_journal_due_task_counts_integration.py` — the same rules against real
+  rows. A real past-dated journal with its live sibling on the page, so the assertion is that *that*
+  journal fell out rather than that the read returned nothing; a real **cancelled event journal** —
+  real `calendars` and `journal_calendar_info` rows — **with a `confirmed` event beside it**, without
+  which the test would pass against a lookup treating any event journal as cancelled; the today
+  boundary; a real Sydney `user_settings` row against the same rows with **no** settings row, giving
+  opposite verdicts from one fixed `now`; three statements at two journals and still three at eight;
+  one when nothing is due; none for an empty page.
+- **Integration (9):** `test_journal_list_tasks_due_indicator.py` — the attribute on the wire. Two due
+  reading 2 beside a quiet journal reading **0**; the creating journal reading 0; both terminal
+  statuses; the lapsed journal; the cancelled event with its confirmed negative; **the
+  criterion's own assertion** — exactly one statement against `tasks` for a four-journal page and
+  still one for sixteen, scoped to `FROM tasks` deliberately because the endpoint has per-row reads
+  that predate this phase and a total count would be measuring somebody else's work; and the two
+  added by the review round — the list answering a real **0** for a journal it really checked, and
+  the detail view answering **null** for a journal with two tasks genuinely due in it, which is the
+  case where a defaulted zero would be an affirmatively false claim rather than a missing one.
+- **Frontend (14):** `tasksDueWording` singular and plural and that it names the journal
+  (`lib/__tests__/task-display.test.ts`); the transform carrying the count, leaving an omitted one
+  **undefined**, an explicit **null** as null, and a zero as zero
+  (`utils/__tests__/journalTransformers.test.ts`); and the row rendering the badge at 2, the full
+  phrase at 1, nothing at 0, nothing when the field is absent, nothing when it is **null** — what the
+  endpoints that do not compute it actually send — all three list-level badges together without
+  displacing the title link, and the **`aria-hidden` on the visible span**, which is the phase's
+  accessibility decision and was pinned by nothing until the review said so.
+- **Mutation checks, run rather than argued** — and **re-run after the review round**, because the
+  test set changed under them. Measured over the four backend files above (44 tests). Neutering the
+  lapse filter to "never lapsed" fails **9** across all three levels. Dropping the status predicate
+  fails **3** — one per level, which is what makes the not-done control in each fixture worth its
+  lines. Dropping the `user_id` predicate fails **2**. Loosening the today boundary from `<` to `<=`
+  fails **5**, three of them timezone cases. Turning the batched count into a query per journal fails
+  **5**, at unit, service and endpoint level. And **taking `tasks_due_count` back to a non-nullable
+  `default=0` fails 1** — which is the review's defect reproduced exactly, and the reason that test
+  was worth adding: before it, the phase's most user-visible error was caught by nothing.
+  *(A further mutation was attempted and is worth recording as a method note: deleting the status
+  predicate outright fails to **import** — SQLAlchemy refuses the now-orphaned `bindparams` — so the
+  whole suite errors rather than running, which is not a mutation result. Re-aimed as
+  `status = :status OR TRUE` it gives the 3 above.)*
+- **E2E:** none. **In tension with the Phase Completion Requirements**, which allow the deferral "only
+  for a phase with no user-visible surface" and this one adds a badge — recorded rather than glossed,
+  because the *Required Test Coverage* line below settles it the other way and Phase 22's fourth
+  criterion names "the journal list indicator" as one of its own specs. Building it here would fork
+  Phase 22's `TestDataManager` helpers and its lapsed-fixture recipe, which is the call Phases 15–20
+  each made. A **regression** pass was run instead, on the spec that renders the row this phase
+  changes: `journals-list.spec.ts` — **40 passed, 1 skipped** across **both** projects (`firefox`,
+  `Mobile Chrome`) in 5.9m. The skip is pre-existing and desktop-only (`if (isMobile) test.skip()`).
 
 **Required Test Coverage:** unit — indicator rendering rules. Integration — the list query emits the signal
 with one query for many journals (assert the query count) and excludes non-due and lapsed tasks. E2E in
-Phase 22.
+Phase 22. *(Restored: the first draft of this entry replaced the line instead of keeping it, which
+removes the bar a reviewer checks the delivered coverage against. Every other completed phase in this
+file keeps its.)*
+- **Docs:** `docs/architecture/domain-architecture.md` gains *The journal list's tasks-due indicator*
+  beside the read model's other two read shapes — why the lapse rule collapses on this surface, the
+  one/three statement table with what each step is skipped for, why the count is owner-scoped where
+  the neighbouring joins are not, and the MCP argument. `frontend-design.md` gains the matching
+  section: what *consistent* means in this row's vocabulary, why an absent count is not zero, and the
+  visible/announced split. `api-design.md` deliberately untouched — an attribute on an existing
+  resource is not an endpoint or an error shape.
+
+**What the review round found, and one of the five would have shipped as a user-visible false claim.**
+An independent review against the specification and this document turned up one defect, one untested
+decision, and three overstatements. All were acted on; the figures above are after that work.
+
+- **The "absent is not zero" rule was documented but not implemented, and the payload was lying.**
+  `tasks_due_count` was declared `int = Field(default=0)` — non-optional, so **every** journal payload
+  carried it, and `0` is what `GET /api/journals/search` and the detail view answered for a journal
+  with two tasks genuinely due in it. Not a missing indicator: an **affirmative false statement**, on
+  the surface the `/journals` page switches to the moment a user types in the search box. Both halves
+  of the frontend reasoning — the transform's deliberate pass-through, the row's "must not turn
+  silence into a claim" — were protecting against something the schema made unreachable. The field is
+  now `int | None = None`, the list path still writes its explicit zero, and an integration test reads
+  a journal with two tasks due back through the detail endpoint and requires **null** — a test the
+  sixth mutation above reproduces the defect against. *The shape worth keeping: a decision taken on
+  the client about a distinction the server never made is not a decision, and every test for it
+  passed.*
+- **The accessibility split was correct and pinned by nothing.** Deleting `aria-hidden` from the
+  visible span — which makes the badge announce "2 due 2 tasks due in this journal" — passed both of
+  its tests: `toHaveTextContent('2 due')` is a substring match against the badge's whole text, and
+  `getByText(...)` on the `sr-only` node only proves that node exists. There is a test on the
+  attribute now, and the mutation fails it. *Same shape as Phase 20's finding: a fix verified by
+  asserting what is on the page rather than the mechanism the fix depends on.*
+- **"8 frontend tests" was 11**, counted wrong against the file. The backend figures were exact.
+- **The Required Test Coverage line had been deleted rather than kept**, removing the bar a reviewer
+  checks against. Restored above.
+- **Rule 3's escape clause was cited for something it does not cover**, and the E2E deferral was
+  claimed without noting its tension with the Phase Completion Requirements. Both corrected above.
+**And a second review round, on the fixes themselves, found the nullable change had left two `None`s
+disagreeing five lines apart.** `_build_journal_list_resources` took `tasks_due_counts: dict | None`
+and did `tasks_due_counts or {}`, which collapses "no mapping was passed" into "a mapping was passed
+and it was empty" — so a caller that reused the helper without the counts would have stamped an
+explicit `0` on every row, which is the exact false claim the nullable field had just been introduced
+to prevent. Unreachable today, since `list_journals` is the only caller and always passes the
+mapping; fixed anyway, because a parameter's `None` and a field's `None` meaning opposite things at
+that distance is how the next caller gets it wrong. **The shape, again, and it is the same one as the
+original defect:** making a distinction at one layer does not make it at the layers either side, and
+the `or {}` idiom is precisely the thing that quietly un-makes it.
+
+Three further claims in this entry were falsified by that round and are corrected above: the field
+described as *optional* and the transform as passing `undefined` (it is **nullable**, and what
+arrives is `null`); `has_pending_reviews` described as **absent** from the search and detail payloads
+(it is present and `false` — which means the sibling still carries the defect this phase fixed for
+its own field, now recorded as a follow-up rather than asserted as a matching shape); and the badge's
+"accessible name", which a roleless `div` does not have.
+
+- **Three nits taken as follow-ups rather than fixed here.** The third statement is *redundant on the
+  endpoint path* — `_enrich_journal_data` already reads each row's `event_state` per journal, so
+  `find_cancelled_journal_ids` asks something the request has answered; consolidating means changing
+  the listing's enrichment, which this phase has no other business in. A **fourth** surface renders a
+  journal row — `JournalChildrenList`, from a `ChildJournalSummary` that carries no count — so a
+  journal shows the badge as a top-level row and not as a child; noted in `frontend-design.md`. And
+  the 500-behind-a-passing-suite discovery was fixed at all ten call sites but **no guard was added**,
+  so the next required collaborator on a shipped endpoint fails the same silent way; the rule is
+  recorded in prose only, which is exactly the weakness ITER18-003 Phase 5's port inventory was built
+  to remove for ports.
+
+**What the PR review found, and both were real.** `auggie review` on #1348 raised two, and the second
+falsifies a claim two earlier review rounds had both accepted.
+
+- **The badge went stale for five minutes after every task write.** The journal list is cached under
+  `journalKeys`, and the task mutations invalidate only `taskKeys` — which was correct until this
+  phase, because no journal-list payload had ever depended on task state. Now one does, so a user who
+  ticked a task done on a journal and went back to the list was told it was still waiting on one, for
+  the whole app-wide `staleTime`. `useCreateTask`, `useUpdateTask`, `useRetargetTask` and
+  `useDeleteTask` now name `journalKeys.lists()`. **This is the rule `frontend-design.md` already
+  stated pointing the other way** — "it equally obliges a journal or contact mutation to name the task
+  namespace, because that is a namespace its change genuinely reaches" — and the phase that made the
+  dependency mutual is the one that owed the mirror. The four existing key-set tests failed on the
+  change, which is the contract working: they are exhaustive `toEqual`s, so the key set cannot grow
+  silently. Contact links and mentions are **excluded** by name, because the count reads the due
+  anchor only.
+  **The fix's first shape was wrong and the suite caught it.** Importing
+  `journalKeys` from `journals.ts` — which already imports `taskKeys` back —
+  closes a runtime cycle, and `journals/__tests__/page.test.tsx` fails to run at
+  all under it (`Cannot access 'calendarKeys' before initialization`), because
+  its `jest.requireActual` partial mock re-enters `journals.ts` mid-evaluation.
+  The reasoning that the cycle was safe "because both directions are used only
+  inside functions" confused when the *functions* run with when the *modules*
+  are evaluated. `journalKeys` now lives in `lib/api/journal-keys.ts`,
+  re-exported from `journals.ts` so no call site changed.
+- **`_build_journal_list_resources` has a second caller, and it is a live endpoint.**
+  `app/api/contacts/controllers.py` imports it and calls it **without** the counts. So the `or {}`
+  fix recorded above as "unreachable today, since `list_journals` is the only caller" was wrong on
+  both halves: it is not the only caller, and the path was not unreachable — before that fix, a
+  contact's journals would every one of them have carried `tasks_due_count: 0`, which is the same
+  affirmative false claim the nullable field exists to prevent, on a shipped screen. **The estimate of
+  the fix's value was wrong in the safe direction, but the method that produced it was not:** the
+  original grep was scoped to the journals controller rather than the tree, and both this document and
+  an independent reviewer repeated the conclusion without re-deriving it. *A "only one caller" claim
+  is a claim about the whole repository and has to be checked against the whole repository.*
+
+**And a second PR-review round found the same class of staleness twice more — one fixed, one declined
+with reasons.** Both are about the count being *derived* from the user's day rather than stored.
+
+- **A timezone change did not refresh it, and now does.** `useUpdateTimezone` named only
+  `userSettingsKeys`, so correcting your zone left the badge — and the *lapse markers on task rows*,
+  which is the pre-existing half of the same gap — showing verdicts reached in the old zone for the
+  five-minute `staleTime`. It now names `journalKeys.lists()` and `taskKeys.all` in the same call,
+  with a hook test that fails when either is removed. The journal half arrived with this phase; the
+  task half predates it and is fixed at the same call site rather than left as an odd omission beside
+  the new line. `journal-keys.ts` is what made this expressible at all — `journals.ts` imports
+  `settings.ts`, so naming the key from there would have closed the cycle a second time.
+- **Crossing local midnight is not handled, and that is a decision rather than an oversight.** A
+  journals page left open and focused across midnight can keep rendering a badge for a task that has
+  just lapsed. The distinction that settles it: a timezone change is a **user action with a moment**,
+  so there is a mutation handler to hang an invalidation off; midnight fires nothing. The available
+  fix is a `today` term in `journalKeys.list()`, which rewrites the key every journal list query is
+  built on — and the staleness is not this badge's: the lapse marker on task rows and the dashboard's
+  upcoming window have exactly the same property, because they are the same rule read at a different
+  granularity. **Recorded as a follow-up** to be solved once for every date-derived read. The server
+  remains the authority and the view self-corrects on the next refetch.
 
 #### Phase 22: E2E — The Journal Task Surface
 

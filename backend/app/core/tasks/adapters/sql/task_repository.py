@@ -38,6 +38,21 @@ _TASK_COLUMN_NAMES = (
 _TASK_COLUMNS = ", ".join(_TASK_COLUMN_NAMES)
 
 
+# The journal list's indicator. Built once at module level, with the status
+# bound here rather than passed per call: it is the statement's own definition
+# of a live commitment, not something a caller chooses.
+_COUNT_DUE_BY_JOURNAL = text(
+    """
+    SELECT due_journal_id, COUNT(*) AS due_count
+    FROM tasks
+    WHERE due_journal_id = ANY(:ids)
+      AND user_id = :user_id
+      AND status = :status
+    GROUP BY due_journal_id
+    """
+).bindparams(status=TaskStatus.NOT_DONE.value)
+
+
 def _row_to_task(row: Any) -> Task:
     """Map a ``tasks`` row to a :class:`Task` entity."""
     return Task(
@@ -362,6 +377,29 @@ class SqlTaskRepository(TaskRepository):
             task_ids=task_ids,
             user_id=user_id,
         )
+
+    async def count_not_done_tasks_by_due_journal(
+        self, journal_ids: list[int], user_id: str
+    ) -> dict[int, int]:
+        """How many not-done tasks are due in each of these journals.
+
+        One statement over the whole page. The ids go in as a single
+        ``integer[]`` rather than a bind parameter each, following
+        ``find_cancelled_journal_ids``: the parameter count stays at one
+        whatever the page size, so a listing cannot walk into asyncpg's argument
+        limit.
+
+        ``GROUP BY`` is what makes a journal with nothing due absent from the
+        result rather than present with a zero — no row is produced for a group
+        with no members — which is the contract the port states.
+        """
+        if not journal_ids:
+            return {}
+
+        result = await self.conn.execute(
+            _COUNT_DUE_BY_JOURNAL, {"ids": journal_ids, "user_id": user_id}
+        )
+        return {int(row.due_journal_id): int(row.due_count) for row in result}
 
     async def _require_task_owned(self, task_id: int, user_id: str) -> None:
         """Fail unless the task exists and belongs to the acting user.

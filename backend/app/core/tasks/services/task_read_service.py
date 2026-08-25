@@ -33,8 +33,10 @@ from core_shared.models.tasks import (
     TaskJournalRef,
     TaskNotFoundError,
     TaskReadModel,
+    TaskStatus,
     UpcomingTasks,
     build_task_read_model,
+    derive_lapse_reason,
     group_tasks_by_link_role,
     select_upcoming_tasks,
     upcoming_window,
@@ -72,6 +74,32 @@ def _ordered_unique(values: Iterable[int]) -> list[int]:
     between runs rather than depending on set iteration.
     """
     return list(dict.fromkeys(values))
+
+
+def _lapses_its_tasks(
+    journal_day: datetime.date, *, cancelled: bool, today: datetime.date
+) -> bool:
+    """Whether a not-done task due in this journal would already have lapsed.
+
+    The lapse rule asked about a *journal* rather than a task. It is legitimate
+    only where the journal being judged is the due journal itself — which on the
+    listing it always is — and it goes through ``derive_lapse_reason`` rather
+    than restating its two branches, so a later change to what lapsing means
+    cannot leave the journal list behind.
+
+    ``NOT_DONE`` is passed as the status because that is the only status the
+    count contains: the query filters the terminal ones out before this is
+    reached, and a done or cancelled task can never lapse anyway.
+    """
+    return (
+        derive_lapse_reason(
+            status=TaskStatus.NOT_DONE,
+            due_journal_date=journal_day,
+            due_journal_cancelled=cancelled,
+            today=today,
+        )
+        is not None
+    )
 
 
 def _display_name(
@@ -310,6 +338,81 @@ class TaskReadService:
             timezone=timezone,
         )
         return select_upcoming_tasks(models, window)
+
+    async def due_task_counts(
+        self,
+        user_id: str,
+        journals: Sequence[Journal],
+        *,
+        now: datetime.datetime | None = None,
+    ) -> dict[int, int]:
+        """How many live commitments each of a page of journals is waiting on.
+
+        The journal list's "tasks due" indicator. It counts a journal's not-done
+        tasks and then drops the journals whose commitments have already
+        **lapsed** — because a lapsed task leaves the dashboard silently and
+        lighting a badge for it on the listing would be the counter the
+        specification says lapsing must never produce.
+
+        **The lapse rule collapses on this surface, which is why it is cheap.**
+        Everywhere else the verdict needs the task's *due* journal fetched
+        alongside it; here the due journal **is** the row journal, already
+        loaded by the listing. So "would a not-done task due here be lapsed?" is
+        a question about the journal, asked once per row, and it is put to
+        ``derive_lapse_reason`` by way of :func:`_lapses_its_tasks` rather than
+        re-derived — a second definition of *lapsed* on the busiest listing in
+        the product is exactly the drift the pure rule exists to prevent.
+
+        **A page that has nothing due costs one query.** The count runs first
+        and, when it comes back empty, the timezone read and the cancellation
+        lookup are skipped: there is nothing to judge. That is the path nearly
+        every journal page takes, most journals having no tasks at all. A page
+        that does have something due costs three, none of which grows with the
+        page size.
+
+        Args:
+            user_id: The acting user; the count is scoped to them
+            journals: The page's journals, as the listing already loaded them.
+                Taken as entities rather than ids because their dates are what
+                the lapse rule needs, and re-fetching them to learn what the
+                caller already knows would be a fourth query.
+            now: The instant to judge "today" from, for tests that need a
+                specific side of a day boundary. Production omits it.
+
+        Returns:
+            A mapping of journal id to its live count. **Journals with nothing
+            due are absent** rather than present with a zero, as the batched
+            reads below this are, so callers read through ``.get(journal_id, 0)``.
+        """
+        journal_ids = [journal.id for journal in journals if journal.id is not None]
+        if not journal_ids:
+            return {}
+
+        counts = await self.task_repo.count_not_done_tasks_by_due_journal(
+            journal_ids, user_id
+        )
+        if not counts:
+            return {}
+
+        timezone = await self.date_resolver.timezone_for(user_id)
+        today = today_in(timezone, now)
+        # Narrowed to the journals that could still change the answer. Handing
+        # the whole page over would make the cancellation lookup as wide as the
+        # listing to settle a question about the few rows holding a commitment.
+        cancelled = await self.calendar_info_repo.find_cancelled_journal_ids(
+            [journal_id for journal_id in journal_ids if journal_id in counts]
+        )
+
+        return {
+            journal.id: counts[journal.id]
+            for journal in journals
+            if journal.id in counts
+            and not _lapses_its_tasks(
+                journal_date(journal, timezone),
+                cancelled=journal.id in cancelled,
+                today=today,
+            )
+        }
 
     async def _assemble(
         self,

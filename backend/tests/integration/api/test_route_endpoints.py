@@ -75,6 +75,7 @@ async def integration_api_client(async_connection, clean_database, test_settings
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
     from app.infrastructure.di.settings import SettingsProvider
+    from app.infrastructure.di.tasks import TaskProvider
 
     class TestDatabaseProvider(Provider):
         """Test provider that uses the test database connection."""
@@ -108,6 +109,7 @@ async def integration_api_client(async_connection, clean_database, test_settings
         InfrastructureProvider(),
         ContactProvider(),
         JournalProvider(),
+        TaskProvider(),
         SettingsProvider(),
         IntegrationProvider(),
         FastapiProvider(),

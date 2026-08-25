@@ -173,8 +173,11 @@ the *creating* journal where it arose and the *due* journal where it matters.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below — and the
   link-role grouping a journal's task list is built on, see
-  *[A journal's tasks, by link role](#a-journals-tasks-by-link-role)*; and the forward-window rule the
-  home dashboard's tasks section is built on, see *[The upcoming window](#the-upcoming-window)*.
+  *[A journal's tasks, by link role](#a-journals-tasks-by-link-role)*; the per-page count behind the
+  journal list's indicator, see
+  *[The journal list's tasks-due indicator](#the-journal-lists-tasks-due-indicator)*; and the
+  forward-window rule the home dashboard's tasks section is built on, see
+  *[The upcoming window](#the-upcoming-window)*.
 - **Domain Services**: `TaskService`
   (`backend/app/core/tasks/services/task_service.py`), provided at request scope by `TaskProvider`.
   It is where the specification's *core invariants* are enforced, so REST and MCP both inherit them
@@ -779,6 +782,61 @@ order.
 **Every linked task is listed, in every status** — done, cancelled and lapsed included. A journal is
 where a lapsed task is meant to be found again, so the lapse is a marker on the row rather than a
 filter; the dashboard's tasks section is the surface that excludes them.
+
+### The journal list's tasks-due indicator
+
+`TaskReadService.due_task_counts` answers one question for a whole page of journals: how many live
+commitments is each of them waiting on. It is what `GET /api/journals` renders as
+`tasks_due_count`, and the
+[specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#where-tasks-appear)
+asks for it as a "lightweight indicator that a journal has tasks due in it, consistent with the
+other list-level indicators".
+
+**A count, not a boolean.** `COUNT(*) … GROUP BY` returns the number for the same price as the
+existence check, and it is the number the user is weighing when they scan a list — one commitment
+against five. It also makes the surface assertable in a way a flag is not: a task holding two roles
+in one journal must be counted **once**, which a boolean could never show.
+
+**The lapse rule collapses here, and that is what makes it cheap.** Everywhere else the verdict needs
+a task's due journal fetched alongside it; on the listing the due journal **is** the row journal,
+already loaded. So "would a not-done task due here be lapsed?" is a question about the journal, asked
+once per row through `derive_lapse_reason` rather than re-derived. Nothing about lapsing is written
+in SQL — the same stance `find_upcoming_tasks` takes, and for the stronger reason here that the
+journal list is the busiest read in the product and a second definition of *lapsed* on it would drift
+first.
+
+**Three statements when something is due, one when nothing is, and neither grows with the page.**
+
+| Step | Statement | Skipped when |
+|---|---|---|
+| `TaskRepository.count_not_done_tasks_by_due_journal` | ids as one `integer[]`, `GROUP BY due_journal_id` | the page is empty |
+| `JournalDateResolver.timezone_for` | the user's configured zone, read once | nothing is due |
+| `CalendarInfoRepository.find_cancelled_journal_ids` | narrowed to the ids that *have* counts | nothing is due |
+
+The short-circuit is the important one: most journals hold no tasks, so the ordinary page pays
+exactly the single query the acceptance criterion asks for, and the cancellation lookup is never
+asked about rows that could not change the answer.
+
+**Only the due anchor counts.** A journal a task was created in, or merely mentions, is not waiting
+on it — so neither `creating_journal_id` nor `task_intermediate_journals` is consulted, and a task
+holding two roles in one journal needs no de-duplication to be counted once.
+
+**The count is owner-scoped and the joins elsewhere in that repository are not.** Nothing in the
+schema compares a task's owner with its anchor journals' owner, so without the predicate one user's
+commitments could count towards another's indicator. The methods that stand in for foreign-key checks
+(`TaskAnchorRepository`) must see every row; a user-facing listing must see only one user's.
+
+**Journals with nothing due are absent from the mapping**, not present with a zero — the convention
+the batched link reads already follow — and the controller reads through `.get(journal_id, 0)`. The
+journals controller injects `TaskReadService`, never `TaskService`: it needs to know how many
+commitments a journal is waiting on, and must not be handed the ability to change one to find out.
+
+**No MCP surface.** Delivery rule 5 is about capabilities, and this adds none an agent lacks —
+`list_journal_tasks` already returns a journal's tasks grouped by role, which is strictly more than a
+count. The sibling list-level indicator `has_pending_reviews` is REST-only for the same reason, and
+MCP's list analogue `browse_journals_by_date_window` anchors its window on `datetime.now(UTC)` rather
+than the configured zone, so a timezone-derived lapse verdict on that payload would disagree with
+itself about what day it is. That is a defect worth fixing on its own terms.
 
 ### The upcoming window
 

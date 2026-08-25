@@ -137,6 +137,7 @@ async def unauthenticated_client(test_settings, async_connection: AsyncConnectio
     from app.infrastructure.di.integrations import IntegrationProvider
     from app.infrastructure.di.journal import JournalProvider
     from app.infrastructure.di.settings import SettingsProvider
+    from app.infrastructure.di.tasks import TaskProvider
     from app.main import create_app
 
     class TestDatabaseProvider(Provider):
@@ -152,6 +153,7 @@ async def unauthenticated_client(test_settings, async_connection: AsyncConnectio
         AuthProvider(),
         ContactProvider(),
         JournalProvider(),
+        TaskProvider(),
         SettingsProvider(),
         IntegrationProvider(),
         FastapiProvider(),

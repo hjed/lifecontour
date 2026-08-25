@@ -29,6 +29,7 @@ import {
   Cloud,
   Ban,
   GitBranch,
+  ListChecks,
   MapPin,
   Target,
   Wrench,
@@ -43,6 +44,7 @@ import { SearchHighlight } from '@/components/search/SearchHighlight';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { cn } from '@/lib/utils';
 import { formatDateRange } from '@/lib/date-utils';
+import { tasksDueWording } from '@/lib/task-display';
 import { JournalChildrenList } from './JournalChildrenList';
 
 interface JournalListItemProps {
@@ -109,6 +111,12 @@ export function JournalListItem({
     EventState.CANCELLED;
   const isHierarchyNode =
     Boolean(journal.parent_id) || (journal.children_count ?? 0) > 0;
+  // Null or absent means the endpoint did not compute a count — the search and
+  // contact-journal payloads do not — so it collapses to the same "render
+  // nothing" branch as a real zero without ever being stored as one. The
+  // distinction is kept on the wire and in the transform, where a reader can
+  // still tell "nothing due" from "nobody asked".
+  const tasksDue = journal.tasks_due_count ?? 0;
 
   // Calculate depth limit based on date proximity
   let shouldExpandChildren = true;
@@ -203,6 +211,26 @@ export function JournalListItem({
                 data-testid='needs-review-badge'
               >
                 Needs Review
+              </Badge>
+            )}
+            {tasksDue > 0 && (
+              <Badge
+                variant='secondary'
+                className='ml-2 px-1 py-0 text-[10px] leading-none font-bold uppercase'
+                data-testid='tasks-due-badge'
+              >
+                <ListChecks
+                  className='mr-1 inline h-3 w-3'
+                  aria-hidden='true'
+                />
+                {/*
+                 * The short form is for the eye and the full phrase is for the
+                 * ear. `aria-label` on a plain span is not reliably exposed —
+                 * it needs a role to attach to — so the two are rendered
+                 * separately rather than one overriding the other.
+                 */}
+                <span aria-hidden='true'>{tasksDue} due</span>
+                <span className='sr-only'>{tasksDueWording(tasksDue)}</span>
               </Badge>
             )}
           </CardTitle>

@@ -5,8 +5,10 @@
 import { render, screen } from '@testing-library/react';
 import { JournalListItem } from '../JournalListItem';
 import {
+  EventState,
   JournalResource,
   JournalType,
+  JournalTypeData,
   JournalContactRelationshipType,
 } from '@/types/journals';
 import { toDisplayJournal } from '../test-helpers';
@@ -278,5 +280,100 @@ describe('JournalListItem', () => {
 
     const item = screen.getByTestId('journal-1');
     expect(item).toHaveClass('custom-class');
+  });
+  describe('tasks due indicator', () => {
+    const withTasksDue = (
+      count: number | null | undefined
+    ): JournalResource => ({
+      ...baseJournal,
+      attributes: { ...baseJournal.attributes, tasks_due_count: count },
+    });
+
+    it('shows the count when the journal is waiting on commitments', () => {
+      render(<JournalListItem journal={toDisplayJournal(withTasksDue(2))} />);
+
+      expect(screen.getByTestId('tasks-due-badge')).toHaveTextContent('2 due');
+    });
+
+    it('announces the count as a full phrase', () => {
+      // The visible "2 due" is unambiguous only because the row it sits on is
+      // visible with it. A screen reader meets the badge on its own, so the
+      // accessible name has to carry the subject the layout supplies.
+      render(<JournalListItem journal={toDisplayJournal(withTasksDue(1))} />);
+
+      expect(
+        screen.getByText('1 task due in this journal')
+      ).toBeInTheDocument();
+    });
+
+    it('shows nothing when the journal has no tasks due', () => {
+      render(<JournalListItem journal={toDisplayJournal(withTasksDue(0))} />);
+
+      expect(screen.queryByTestId('tasks-due-badge')).not.toBeInTheDocument();
+    });
+
+    it('shows nothing when the payload never carried a count', () => {
+      // An older or partial payload must read as "nothing to say" rather than
+      // as "nothing due" — and must certainly not render "undefined due".
+      render(
+        <JournalListItem journal={toDisplayJournal(withTasksDue(undefined))} />
+      );
+
+      expect(screen.queryByTestId('tasks-due-badge')).not.toBeInTheDocument();
+    });
+
+    it('shows nothing when the endpoint did not compute a count', () => {
+      // Null is what the search and contact-journal payloads send. It renders
+      // as silence, the same as a real zero — the distinction is kept on the
+      // wire so the payload never claims a journal is clear without checking.
+      render(
+        <JournalListItem journal={toDisplayJournal(withTasksDue(null))} />
+      );
+
+      expect(screen.queryByTestId('tasks-due-badge')).not.toBeInTheDocument();
+    });
+
+    it('hides the short visible form from assistive technology', () => {
+      // The split is the phase's accessibility decision and nothing else pins
+      // it: without aria-hidden the badge announces "2 due 2 tasks due in this
+      // journal", which both of the assertions above go on passing through.
+      render(<JournalListItem journal={toDisplayJournal(withTasksDue(2))} />);
+
+      expect(screen.getByText('2 due')).toHaveAttribute('aria-hidden', 'true');
+      expect(
+        screen.getByText('2 tasks due in this journal')
+      ).not.toHaveAttribute('aria-hidden');
+    });
+
+    it('sits alongside the other list-level indicators', () => {
+      // The row already carries a cancelled badge and a needs-review badge, and
+      // a journal can legitimately hold all three at once. Asserting them
+      // together is what shows the new one was added to that group rather than
+      // in place of part of it — and that the title link, which is what the row
+      // is actually for, still reads as its own link.
+      const busyAndCancelled: JournalResource = {
+        ...baseJournal,
+        attributes: {
+          ...baseJournal.attributes,
+          tasks_due_count: 3,
+          has_pending_reviews: true,
+          types: [JournalType.EVENT],
+          type_data: {
+            event: {
+              event_state: EventState.CANCELLED,
+            } as unknown as JournalTypeData,
+          },
+        },
+      };
+
+      render(<JournalListItem journal={toDisplayJournal(busyAndCancelled)} />);
+
+      expect(screen.getByTestId('cancelled-badge')).toBeInTheDocument();
+      expect(screen.getByTestId('needs-review-badge')).toBeInTheDocument();
+      expect(screen.getByTestId('tasks-due-badge')).toHaveTextContent('3 due');
+      expect(
+        screen.getByRole('link', { name: 'Test Journal' })
+      ).toBeInTheDocument();
+    });
   });
 });

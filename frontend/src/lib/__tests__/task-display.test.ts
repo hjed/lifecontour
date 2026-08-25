@@ -15,6 +15,7 @@ import {
   statusActions,
   statusChangeWording,
   statusWording,
+  tasksDueWording,
 } from '@/lib/task-display';
 import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
 
@@ -309,5 +310,24 @@ describe('linkRemovable', () => {
     const removable = Object.values(TaskLinkRole).filter(linkRemovable);
 
     expect(removable).toEqual([TaskLinkRole.MENTIONED]);
+  });
+});
+
+describe('tasksDueWording', () => {
+  it('is singular for one commitment', () => {
+    expect(tasksDueWording(1)).toBe('1 task due in this journal');
+  });
+
+  it('is plural for more than one', () => {
+    expect(tasksDueWording(2)).toBe('2 tasks due in this journal');
+    expect(tasksDueWording(11)).toBe('11 tasks due in this journal');
+  });
+
+  it('names the journal, because the badge sits on a row among many', () => {
+    // The visible badge reads "2 due", which is unambiguous beside its journal
+    // and meaningless read out of a list of thirty. The accessible name is the
+    // one a screen-reader user hears on its own, so it has to carry the subject
+    // the sighted layout supplies.
+    expect(tasksDueWording(2)).toContain('in this journal');
   });
 });
