@@ -32,6 +32,7 @@ from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
 )
 from core_shared.models.journals.journal_types import JournalType
+from core_shared.models.journals.review_item import ReviewItem, ReviewReason
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     JournalSeriesCancelledEventData,
@@ -61,6 +62,9 @@ from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
 )
 from app.core.journal.adapters.sql.journal_series_repository import (
     SqlJournalSeriesRepository,
+)
+from app.core.journal.adapters.sql.review_item_repository import (
+    SqlReviewItemRepository,
 )
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
@@ -241,6 +245,7 @@ class JournalOutboxEventProcessor:
         self.match_candidate_detector = match_candidate_detector
         self.link_repo = SqlJournalEventLinkRepository(connection)
         self.series_repo = SqlJournalSeriesRepository(connection)
+        self.review_item_repo = SqlReviewItemRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -614,6 +619,13 @@ class JournalOutboxEventProcessor:
             external_event_id=external_event_id,
             etag=etag,
             recurring_event_id=payload.recurring_event_id,
+            external_identity=payload.external_identity,
+        )
+
+        # Surface any journal that turns out to describe the same event
+        await self._flag_duplicate_journals(
+            journal_id=existing_journal_id,
+            user_id=existing_journal.user_id,
             external_identity=payload.external_identity,
         )
 
@@ -1774,6 +1786,71 @@ class JournalOutboxEventProcessor:
             },
         )
         return result.fetchone()
+
+    async def _flag_duplicate_journals(
+        self,
+        journal_id: int,
+        user_id: str,
+        external_identity: str | None,
+    ) -> None:
+        """Send any journal describing this same event to the review queue.
+
+        De-duplication prevents *new* duplicates; it cannot retroactively
+        join two journals that already exist, because merging them means
+        choosing whose title, content and tags survive — the user's call,
+        not the sync's. What it can do is say with certainty that the pair
+        is one event, which is what the review queue is for.
+
+        The pair reaches this state through the identity backfill: two
+        journals synced before tokens existed each acquire the same token
+        on their next sync, and the second one to do so finds the first.
+
+        The journal ids are ordered before being recorded. The queue's
+        uniqueness is on the ordered pair, so flagging (A, B) on one sync
+        and (B, A) on the next would leave two rows describing one
+        duplicate — and which journal syncs first is not something this
+        controls.
+        """
+        if not external_identity:
+            return
+
+        result = await self.connection.execute(
+            text("""
+                SELECT DISTINCT l.journal_id
+                FROM journal_external_event_links l
+                JOIN journals j ON j.id = l.journal_id
+                WHERE j.user_id = :user_id
+                  AND l.external_identity = :external_identity
+                  AND l.journal_id <> :journal_id
+            """),
+            {
+                "user_id": str(user_id),
+                "external_identity": external_identity,
+                "journal_id": journal_id,
+            },
+        )
+
+        for row in result.fetchall():
+            source_id, candidate_id = sorted((journal_id, int(row.journal_id)))
+            _, created = await self.review_item_repo.create(
+                ReviewItem(
+                    user_id=str(user_id),
+                    source_journal_id=source_id,
+                    candidate_journal_id=candidate_id,
+                    reason=ReviewReason.EXTERNAL_LINK_MATCH,
+                    confidence_score=1.0,
+                    details={
+                        "external_identity": external_identity,
+                        "detected_by": "cross_calendar_identity",
+                    },
+                )
+            )
+            if created:
+                logger.info(
+                    "Flagged two journals as one external event for review",
+                    source_journal_id=source_id,
+                    candidate_journal_id=candidate_id,
+                )
 
     async def _find_journal_by_external_identity(
         self,

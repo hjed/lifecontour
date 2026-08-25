@@ -53,6 +53,19 @@ async def _links(connection: AsyncConnection, journal_id: int) -> list[Any]:
     return list(result.fetchall())
 
 
+async def _review_items(connection: AsyncConnection) -> list[Any]:
+    """Everything sitting in the review queue, oldest first."""
+    result = await connection.execute(
+        text("""
+            SELECT source_journal_id, candidate_journal_id, reason,
+                   confidence_score, status, details
+            FROM journal_review_items
+            ORDER BY created_at, id
+        """)
+    )
+    return list(result.fetchall())
+
+
 async def _journal_count(connection: AsyncConnection, user_id: str = USER_ID) -> int:
     result = await connection.execute(
         text("SELECT count(*) FROM journals WHERE user_id = :user_id"),
@@ -822,3 +835,305 @@ class TestARecurringEventSharedByTwoCalendars:
         series = await self._series_rows(async_connection)
         assert len(series) == 1
         assert series[0].member_count == 1
+
+
+class TestFlaggingDuplicatesThatAlreadyExist:
+    """Journals duplicated before the de-dupe shipped are surfaced, not merged.
+
+    The fix stops *new* duplicates. It cannot retroactively join two
+    journals that already exist — merging them means choosing whose title,
+    content and tags survive, which is the user's call. So once both
+    journals carry the same token, the pair goes to the review queue where
+    it can be merged or dismissed by hand.
+    """
+
+    async def _duplicate_pair(
+        self, connection: AsyncConnection
+    ) -> tuple[Any, str, str, int, int]:
+        """Two journals for one event, as a pre-de-dupe sync would leave them."""
+        processor = build_processor(connection)
+        work = await create_calendar(connection, name="Work")
+        personal = await create_calendar(connection, name="Personal")
+
+        first = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="work-copy-1",
+                external_identity=None,
+            )
+        )
+        second = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="personal-copy-9",
+                external_identity=None,
+            )
+        )
+        return (
+            processor,
+            work,
+            personal,
+            first["journal_id"],
+            second["journal_id"],
+        )
+
+    async def _backfill(
+        self,
+        processor: Any,
+        *,
+        calendar_id: str,
+        external_event_id: str,
+        journal_id: int,
+        etag: str = '"etag-2"',
+    ) -> None:
+        """The one-shot re-sync that gives an existing link its token."""
+        await processor.process_event(
+            sync_event(
+                "journal_event.updated",
+                calendar_id=calendar_id,
+                external_event_id=external_event_id,
+                existing_journal_id=journal_id,
+                etag=etag,
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+    async def test_a_duplicate_pair_reaches_the_review_queue(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Once both links carry the token, the pair is flagged."""
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert {items[0].source_journal_id, items[0].candidate_journal_id} == {
+            first,
+            second,
+        }
+        assert items[0].status == "pending"
+
+    async def test_the_flag_says_the_two_are_one_external_event(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The reason distinguishes this from an AI similarity guess.
+
+        This is not "these look alike" — the source told us they are one
+        event, so it is certain, and the queue should say so.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        item = (await _review_items(async_connection))[0]
+        assert item.reason == "external_link_match"
+        assert item.confidence_score == 1.0
+
+    async def test_repeated_syncs_do_not_pile_up_items(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A pending review item is raised once, not once per sync."""
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        for etag in ('"v2"', '"v3"', '"v4"'):
+            await self._backfill(
+                processor,
+                calendar_id=work,
+                external_event_id="work-copy-1",
+                journal_id=first,
+                etag=etag,
+            )
+            await self._backfill(
+                processor,
+                calendar_id=personal,
+                external_event_id="personal-copy-9",
+                journal_id=second,
+                etag=etag,
+            )
+
+        assert len(await _review_items(async_connection)) == 1
+
+    async def test_which_journal_syncs_first_does_not_change_the_item(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Order must not produce a second item for the same pair.
+
+        The queue's uniqueness constraint is on the ordered pair, so
+        flagging (A, B) on one sync and (B, A) on the next would leave the
+        user two rows describing one duplicate.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        # …and now the other way round.
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+            etag='"v3"',
+        )
+
+        assert len(await _review_items(async_connection)) == 1
+
+    async def test_a_de_duplicated_event_is_not_flagged(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """One journal with two links is the fixed state, not a duplicate.
+
+        This is the case the whole feature produces, so flagging it would
+        put a review item in the queue for every shared event the user has.
+        """
+        processor = build_processor(async_connection)
+        work = await create_calendar(async_connection, name="Work")
+        personal = await create_calendar(async_connection, name="Personal")
+
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="work-copy-1",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="personal-copy-9",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+        assert await _review_items(async_connection) == []
+        assert created["journal_id"] is not None
+
+    async def test_unrelated_journals_are_not_flagged(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Different tokens are different events, however alike they look."""
+        processor = build_processor(async_connection)
+        work = await create_calendar(async_connection, name="Work")
+        personal = await create_calendar(async_connection, name="Personal")
+
+        first = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="week-1",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        second = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="week-2",
+                external_identity=OTHER_TOKEN,
+            )
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="week-1",
+            journal_id=first["journal_id"],
+        )
+
+        assert await _review_items(async_connection) == []
+        assert first["journal_id"] != second["journal_id"]
+
+    async def test_another_users_duplicate_is_not_flagged_against_mine(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A review item names two journals one person can merge."""
+        processor = build_processor(async_connection)
+        mine = await create_calendar(async_connection, name="Mine")
+        theirs = await create_calendar(
+            async_connection, user_id="somebody-else", name="Theirs"
+        )
+
+        first = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=mine,
+                external_event_id="my-copy",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=theirs,
+                external_event_id="their-copy",
+                user_id="somebody-else",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=mine,
+            external_event_id="my-copy",
+            journal_id=first["journal_id"],
+        )
+
+        assert await _review_items(async_connection) == []
