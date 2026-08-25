@@ -19,6 +19,16 @@ export interface HistoryAttributes {
   /** Provenance source value (ui, mcp, google_contacts, google_calendar, strava, immich, ...). */
   source: string;
   created_at: string | null;
+  /**
+   * The name of the entity this entry is *about*, when the entry's own values
+   * do not carry it.
+   *
+   * Populated by the contact history endpoint for the task rows a linked task
+   * puts on that feed: both of their values are the contact's own id, and a
+   * task has no route of its own to link to instead. Absent everywhere else,
+   * including on a task's own feed, where the row already names itself.
+   */
+  entity_label?: string | null;
 }
 
 /**

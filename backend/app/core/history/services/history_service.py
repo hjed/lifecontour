@@ -49,7 +49,7 @@ from typing import Any
 
 from core_shared.models.history import Provenance
 
-from app.core.history.models import FieldHistoryEntry
+from app.core.history.models import DELETED_MARKER, FieldHistoryEntry
 from app.core.tasks.models.events import contact_field_name, journal_field_name
 from app.infrastructure.events.outbox_repository import OutboxEvent
 
@@ -746,7 +746,7 @@ class HistoryService:
                 data,
                 entity_type=_TASK_ENTITY_TYPE,
                 entity_id=data["task_id"],
-                field_name="__deleted__",
+                field_name=DELETED_MARKER,
                 old_value=None,
                 new_value=None,
             )

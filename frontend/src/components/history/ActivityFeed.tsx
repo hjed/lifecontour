@@ -23,10 +23,19 @@ import type {
   HistoryListResponse,
   HistoryResource,
 } from '@/types/history';
+import type { HistoryEntity } from '@/lib/history-display';
 import { ActivityItem } from './ActivityItem';
 
-/** The entity whose history is being displayed. Drives empty-state copy. */
-export type HistoryEntity = 'contact' | 'journal';
+/**
+ * The entity whose history is being displayed.
+ *
+ * It drives the empty-state copy, and — since ITER18-003 Phase 9 — reaches
+ * each entry, because a task's contact-membership row reads one way on the
+ * task's own history and another on the person's. Re-exported from
+ * `lib/history-display`, where the wording that depends on it lives, so the
+ * two cannot list different entities.
+ */
+export type { HistoryEntity };
 
 /**
  * Data hook contract the feed depends on. The shape is a structural subset of a
@@ -53,6 +62,17 @@ interface ActivityFeedProps {
   readonly className?: string;
   /** Initial page size (default: 10) */
   readonly pageSize?: number;
+  /**
+   * The card's heading, or `null` to render no header at all.
+   *
+   * `null` exists for the feed a journal's task row embeds. That page already
+   * has an "Activity" heading of its own, and a journal holding five open task
+   * rows would otherwise present six identically-named `h3`s nested inside a
+   * list — indistinguishable to anyone navigating by heading, which is exactly
+   * what the row's trigger label exists to prevent. A headerless feed is
+   * labelled by the disclosure that opened it instead.
+   */
+  readonly title?: string | null;
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -66,6 +86,28 @@ type ActivitiesState = {
   activities: HistoryResource[];
   entityId: string;
   page: number;
+  /**
+   * A fingerprint of the page already folded in.
+   *
+   * It has to satisfy two things at once, and the obvious implementations each
+   * satisfy only one.
+   *
+   * **It must change when the content changes**, not merely when the ids do: a
+   * task reworded between two reads comes back on the same link-row ids
+   * carrying a new `entity_label`, and a key built from `page` + ids left the
+   * feed rendering the old name until some other row moved or it remounted.
+   *
+   * **And it must be stable across renders of equal content.** Comparing the
+   * response object by reference looks right — structural sharing hands back
+   * the same object when the payload is deeply equal — but the contract here is
+   * an injected hook, and a hook that returns a fresh literal each call (every
+   * test double, and any caller that forgets to memoise) then makes the effect
+   * dispatch on every render, which is an infinite loop rather than a stale
+   * label.
+   *
+   * Serialising the page does both. It is bounded by `pageSize` and computed
+   * only when the effect runs.
+   */
   processedDataKey: string | null;
 };
 
@@ -130,6 +172,7 @@ export function ActivityFeed({
   entity = 'contact',
   className,
   pageSize = DEFAULT_PAGE_SIZE,
+  title = 'Activity',
 }: ActivityFeedProps) {
   const [state, dispatch] = useReducer(activitiesReducer, {
     activities: [],
@@ -152,20 +195,13 @@ export function ActivityFeed({
   useEffect(() => {
     if (!data) return;
 
-    const currentDataKey = `${state.page}-${data.data.map(a => a.id).join(',')}`;
+    // The whole page, not just its ids — see `processedDataKey`.
+    const dataKey = `${state.page}-${JSON.stringify(data.data)}`;
 
     if (state.page === 1) {
-      dispatch({
-        type: 'SET_ACTIVITIES',
-        activities: data.data,
-        dataKey: currentDataKey,
-      });
+      dispatch({ type: 'SET_ACTIVITIES', activities: data.data, dataKey });
     } else {
-      dispatch({
-        type: 'APPEND_ACTIVITIES',
-        activities: data.data,
-        dataKey: currentDataKey,
-      });
+      dispatch({ type: 'APPEND_ACTIVITIES', activities: data.data, dataKey });
     }
   }, [data, state.page]);
 
@@ -180,12 +216,14 @@ export function ActivityFeed({
 
   return (
     <Card className={className} data-testid='activity-feed'>
-      <CardHeader>
-        <CardTitle className='flex items-center gap-2'>
-          <Clock className='h-5 w-5' />
-          Activity
-        </CardTitle>
-      </CardHeader>
+      {title !== null && (
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <Clock className='h-5 w-5' />
+            {title}
+          </CardTitle>
+        </CardHeader>
+      )}
       <CardContent>
         {/* Loading state */}
         {isLoading && (
@@ -217,7 +255,11 @@ export function ActivityFeed({
           <TooltipProvider>
             <div className='space-y-1'>
               {state.activities.map(activity => (
-                <ActivityItem key={activity.id} activity={activity} />
+                <ActivityItem
+                  key={activity.id}
+                  activity={activity}
+                  entity={entity}
+                />
               ))}
 
               {/* Load More button */}

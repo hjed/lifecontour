@@ -551,6 +551,7 @@ class ContactHistoryConverter:
             if hasattr(entry.source, "value")
             else str(entry.source),
             created_at=created_at,
+            entity_label=entry.entity_label,
         )
 
         if entry.id is None:

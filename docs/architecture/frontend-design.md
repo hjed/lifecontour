@@ -144,6 +144,20 @@ Mutation handlers must refresh the cache through
 - **The role is part of the journal-list key.** A filtered listing narrows
   `link_roles` as well as the rows, so it is a different answer rather than a
   subset of the unfiltered one.
+- **A task's history is not under `taskKeys` at all.** `taskHistoryKeys` is
+  `['task-history']`, following `journalHistoryKeys` rather than becoming a
+  fourth namespace here, and the arrangement that reads as tidy is the wrong
+  one. `useUpdateTask.onMutate` cancels and optimistically patches *every* query
+  under `taskKeys.all`: a history page underneath it would have its in-flight
+  fetch cancelled by a status click — leaving an open feed on "No activity yet"
+  with nothing to refetch it — and `patchResource` matches on id alone, so a
+  `field_history` row id colliding with a task id would have `status` and `text`
+  merged into it. Every journal and contact mutation invalidates `taskKeys.all`
+  too, which would discard the history for a change that cannot affect it.
+  `refreshTask` names `taskHistoryKeys.list(taskId)` **explicitly**, which is
+  the point: a task's own write does make its history stale, and nothing else
+  should be able to throw it away by accident. Pinned in both directions by
+  `task-cache-freshness.test.ts`.
 - Task failures throw `TaskApiError`, whose `message` is `errors[0].detail` as
   every other client's is, **plus** the JSON:API `status`, `code` and `meta`
   beside it. Surfaces branch on the code — `TASK_REOPEN_NOT_ACKNOWLEDGED` is a
@@ -210,6 +224,63 @@ where tasks are worked with; there is no `/tasks` route.
 - Accessibility: each group is a `<section aria-labelledby>` with an `h4` and a
   list, under the card's own `h3`, so a group is announced by name with its item
   count rather than as a flat run of text.
+
+#### The task's own change history
+
+A task has no route, so ITER18-003 Phase 8 made its history a task-scoped read
+and Phase 9 renders it here: a disclosure on `JournalTaskRow` that expands into
+`TaskActivityFeed` (`components/tasks/TaskActivityFeed.tsx`).
+
+- **It is the shared feed, not a bespoke list.** `TaskActivityFeed` is a thin
+  wrapper over `components/history/ActivityFeed` supplying `useTaskHistory`,
+  mirroring the contact and journal wrappers, so all three surfaces share one
+  layout, one set of provenance icons and one pagination behaviour — which is
+  what the activity-history specification asks for.
+- **The row does not mount the feed until it is opened**, rather than mounting
+  it with a disabled query: a journal can hold many tasks, and a flag would
+  leave a hidden card and empty state in the DOM on every row to achieve less.
+- **It is the row's last child, and the feed renders no heading.** Both follow
+  from where it sits. Putting it above the contacts would push the people a
+  commitment involves below an activity card when it opened, against the
+  specification's "show the contact on the task wherever it is displayed"; and
+  the journal page already has an "Activity" `h3`, so a feed header per open row
+  would be a run of identically-named headings inside a list. `ActivityFeed`
+  therefore takes `title`, and `null` suppresses the header.
+- Accessibility: the trigger is a real button carrying `aria-expanded` and
+  `aria-controls`, and its accessible name **names the commitment** — every
+  row's would otherwise be "Show history", which is what a screen-reader user
+  hears tabbing through a journal's tasks. The panel is a `role="region"`
+  labelled by that trigger, which is what replaces the heading it no longer
+  renders.
+- **Entries are inert.** Nothing inside the feed is actionable on either surface
+  it appears on; the only button is the provenance icon, which carries the
+  tooltip. That is a product rule, not a styling choice — the specification's
+  *Where tasks appear* allows two working surfaces and says a record of the past
+  is not a third.
+
+#### Wording a history entry
+
+`taskEntryDescription` (`lib/history-display.ts`) words a task's history rows,
+falling through to the generic wording for everything it has nothing better to
+say about. It is a pure function for the reason `lapseWording` is: what an entry
+says is a product rule a test should be able to assert without rendering.
+
+- **It is gated on `entity_type`, never on the field name alone.** The marker
+  vocabulary is shared: a journal writes `__created__`, and a contact records
+  its own creation as `field_name="status"` carrying `"created"`. Wording by
+  field name would relabel other domains' rows — the contact one silently.
+- **The same row reads differently on each feed it can appear on.** A task's
+  contact membership is projected once, onto the task, and read from both ends:
+  *Linked a contact* on the task's own history, *Linked to a task* on the
+  person's. `ActivityFeed` therefore passes its `entity` down to `ActivityItem`.
+- **No entry names an id the reader cannot use.** A retarget's values are
+  journal ids and a contact-link row's values are the contact's own id, so both
+  are worded without them. What a contact-feed entry names instead is the
+  **task**, from `entity_label` on the row — *Linked to a task: "Return the
+  borrowed harness"* — falling back to the unnamed wording while projection
+  catches up, because an absent name is not the same as a task without one. The
+  label is not repeated on a task's own feed, where the reader is looking at the
+  task.
 
 #### Inline status actions
 

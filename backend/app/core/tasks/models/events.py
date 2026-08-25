@@ -61,6 +61,16 @@ from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+#: The prefix every contact-membership key carries.
+#:
+#: Named rather than inlined because a *third* place now has to agree about the
+#: format: the contact history aggregation predicate
+#: (``app.core.history.models``) selects a person's task records by matching
+#: this key exactly, so a task reaches their activity feed. The service builds
+#: the key, the projection recognises it, and that predicate reads it — one
+#: definition, three readers.
+CONTACT_FIELD_PREFIX = "contact:"
+
 
 def contact_field_name(contact_id: int) -> str:
     """The ``changed_fields`` key a contact's membership is recorded under.
@@ -77,7 +87,7 @@ def contact_field_name(contact_id: int) -> str:
     service builds these keys and the projection will later have to recognise
     them, and a format that lives in two places is one that can drift.
     """
-    return f"contact:{contact_id}"
+    return f"{CONTACT_FIELD_PREFIX}{contact_id}"
 
 
 def journal_field_name(journal_id: int) -> str:

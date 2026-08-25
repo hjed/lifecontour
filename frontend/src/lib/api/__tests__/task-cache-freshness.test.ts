@@ -26,7 +26,8 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
-import { taskKeys } from '../tasks';
+import { taskHistoryKeys, taskKeys, useUpdateTask } from '../tasks';
+import { TaskStatus } from '@/types/tasks';
 import {
   useDeleteJournal,
   useMergeJournal,
@@ -215,5 +216,93 @@ describe('the refresh reaches every namespace that embeds the entity', () => {
     const keys = invalidatedKeys(spy);
     expect(keys).not.toContainEqual(taskKeys.journalLists());
     expect(keys).not.toContainEqual(taskKeys.upcoming());
+  });
+});
+
+describe('a task history cache is not collateral damage', () => {
+  it('a journal mutation does not discard it', async () => {
+    // A journal write changes what a *task* answers — its title, its date, its
+    // lapse — so it invalidates `taskKeys.all`. It cannot change what already
+    // *happened* to a task, so it must not reach the history. That is only
+    // true because history lives under a root of its own; nested under
+    // `taskKeys.all` it would be thrown away by every mutation above.
+    const spy = jest.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useUpdateJournal(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ id: '1', data: { title: 'Renamed' } });
+
+    await expectTasksRefreshed(spy);
+    for (const key of invalidatedKeys(spy)) {
+      expect(key[0]).not.toBe(taskHistoryKeys.all[0]);
+    }
+  });
+
+  it('a contact mutation does not discard it either', async () => {
+    const spy = jest.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useUpdateContact(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ id: '1', data: { first_name: 'Renamed' } });
+
+    await expectTasksRefreshed(spy);
+    for (const key of invalidatedKeys(spy)) {
+      expect(key[0]).not.toBe(taskHistoryKeys.all[0]);
+    }
+  });
+
+  it('the history root is outside the task namespace', async () => {
+    // Stated directly as well as observed through the mutations, because this
+    // is the property every case above depends on and a future rename could
+    // move it back under `tasks` without failing any of them.
+    expect(taskHistoryKeys.all[0]).not.toBe(taskKeys.all[0]);
+    expect(taskHistoryKeys.list('1').slice(0, taskKeys.all.length)).not.toEqual(
+      [...taskKeys.all]
+    );
+  });
+});
+
+describe('a task write refreshes the history the user is looking at', () => {
+  it('invalidates the key a mounted disclosure actually holds', async () => {
+    // The point of this test is that an exact-key assertion cannot make it.
+    // A query-key filter matches by deep-partial equality, so the tempting
+    // `taskHistoryKeys.list(taskId)` — which carries
+    // `{ page: undefined, limit: undefined }` — matches no mounted query and
+    // invalidates nothing, while a test comparing invalidated keys to that same
+    // value passes. So this seeds the key the journal row's feed really uses
+    // and asks the cache whether it was reached.
+    const mountedKey = taskHistoryKeys.list('1', 1, 5);
+    queryClient.setQueryData(mountedKey, { data: [], meta: undefined });
+    expect(queryClient.getQueryState(mountedKey)?.isInvalidated).toBe(false);
+
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ taskId: '1', status: TaskStatus.DONE });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(mountedKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it('leaves another task’s history alone', async () => {
+    const other = taskHistoryKeys.list('2', 1, 5);
+    queryClient.setQueryData(other, { data: [], meta: undefined });
+
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ taskId: '1', status: TaskStatus.DONE });
+
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryState(taskHistoryKeys.list('1', 1, 5))
+      ).toBeUndefined();
+    });
+    expect(queryClient.getQueryState(other)?.isInvalidated).toBe(false);
   });
 });

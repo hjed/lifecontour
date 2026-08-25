@@ -537,12 +537,14 @@ rules below follow from that record and apply to every phase in this document:
     follow-up) and 13 (get *and* list-by-journal) are each two capabilities under one heading and should
     be split, or re-estimated at roughly ×9 against production.
 
-**Programme size:** 63 phases — and therefore 63 PRs — across the five iterations
-(ITER18-001: 22, ITER18-002: 6, ITER18-003: 10, ITER18-004: 17, ITER18-005: 8).
-ITER18-002 gained its sixth phase during ITER18-001 Phase 7's review — the retarget/merge lock order, and
-ITER18-003 gained its tenth during its own Phase 3 — the merge re-point publishing no task event. Both
-were found by review rather than by planning, and both are seams **between** two phases' subjects, which
-is where this programme's misses keep turning up. That count is the honest
+**Programme size:** 65 phases — and therefore 65 PRs — across the six iterations
+(ITER18-001: 22, ITER18-002: 6, ITER18-003: 10, ITER18-004: 17, ITER18-005: 8, ITER18-006: 2).
+ITER18-002 gained its sixth phase during ITER18-001 Phase 7's review — the retarget/merge lock order;
+ITER18-003 gained its tenth during its own Phase 3 — the merge re-point publishing no task event; and
+**ITER18-006 exists at all because of ITER18-003 Phase 9's review**, which found that a *contact* merge
+deletes a task's contact links outright. All three were found by review rather than by planning, and all
+three are seams **between** two phases' subjects — or, in ITER18-006's case, between two *iterations*',
+which is where this programme's misses keep turning up. That count is the honest
 consequence of a 500-line PR standard over a new core entity plus a new page; the alternative is fewer,
 larger PRs that review badly. **Expected landing zone:** most phases 400–600 tracked lines, capability
 triples 600–700, and the flagged exceptions up to ~750.
@@ -567,12 +569,13 @@ are numbered **W1**–**W33**.
 
 ```text
 ITER18-001 (tasks core) ──┬── ITER18-002 (anchor integrity)
-                          ├── ITER18-003 (events + history)
+                          ├── ITER18-003 (events + history) ── ITER18-006 (contact merge)
                           ├── ITER18-004 (home dashboard) ── ITER18-005 (summary extension)
                           └──────────────────────────────────┘
 ```
 
-Phase counts: ITER18-001 → 22, ITER18-002 → 6, ITER18-003 → 10, ITER18-004 → 17, ITER18-005 → 8.
+Phase counts: ITER18-001 → 22, ITER18-002 → 6, ITER18-003 → 10, ITER18-004 → 17, ITER18-005 → 8,
+ITER18-006 → 2.
 
 0. **A hard ordering constraint cuts across iterations 001 and 002.** ITER18-001 Phase 1 gives the task
    anchors `ON DELETE RESTRICT` foreign keys, and ITER18-001 Phase 5 makes tasks creatable. From that
@@ -597,6 +600,10 @@ Phase counts: ITER18-001 → 22, ITER18-002 → 6, ITER18-003 → 10, ITER18-004
    journals view consumes the same summary.
 5. **ITER18-003 is not a prerequisite for anything user-visible**, but should not be deferred past 004 —
    a dashboard that mutates task state with no history trail is a gap in the activity-history contract.
+6. **ITER18-006 is last and blocks nothing.** It repairs a defect in an operation that already works —
+   a contact merge drops a task's contact links — and needs ITER18-001 Phase 11 and ITER18-003 Phases 5
+   and 9. Nothing waits on it, and it is not optional: until it lands, merging two contacts silently
+   removes a task's reference to a person *and* the record that the reference ever existed.
 
 ## Iteration Breakdown
 
@@ -6607,13 +6614,16 @@ no change to task behaviour. Nothing else depends on it, but it should not lag I
 - [ ] `HistoryService` projects each task event into `field_history` rows under a task entity type, via
       the existing pure-mapping dispatch table; `HistoryProjectionConsumer` writes them idempotently, so
       stream redelivery produces no duplicates. Row timestamps come from `event.occurred_at`.
-- [ ] A task's change history is **readable**, with MCP parity, and rendered on the journal surface that
+- [x] A task's change history is **readable**, with MCP parity, and rendered on the journal surface that
       owns the task (tasks have no route of their own — see open decision 1).
       **Half done in Phase 8:** `GET /api/tasks/{id}/history` and the `get_task_history` MCP tool
-      both read it, owner-scoped and readable for a *deleted* task. The rendering half is Phase 9.
-- [ ] A task appears in a linked contact's activity history as a **read-only record** alongside their
+      both read it, owner-scoped and readable for a *deleted* task. **The rendering half landed in
+      Phase 9** as a disclosure on `JournalTaskRow` expanding into the shared activity feed.
+- [x] A task appears in a linked contact's activity history as a **read-only record** alongside their
       journals and other activity: not actionable from there, and not filterable down to "everything
       outstanding". This is a record of the past, not a third working surface.
+      **Delivered in Phase 9** as one branch on the `contact` aggregation predicate, keyed on the
+      field name rather than on a join, so the record survives an unlink and a hard-deleted task.
 - [ ] The search indexer **ignores** task events rather than failing on them: no tasks index is created,
       no task is ever returned by global search, and a task event never dead-letters in the
       `search-indexer` group.
@@ -7981,26 +7991,261 @@ recover what it already acknowledged, and what repairs it.
   duplication this module exists to avoid. Recorded in its docstring so the next person to widen it
   knows which property they are relying on.
 
-#### Phase 9: Contact Activity Record and Frontend History
+#### Phase 9: Contact Activity Record and Frontend History ✅ COMPLETE
 
 **Prerequisites:** Phase 8, ITER18-001 Phase 16.
 **Estimated diff:** ~160 production → **~640 tracked** (×4) — the only phase touching the contacts surface,
 and deliberately read-only (calibration rule 7)
 
+**Actual: 636 production insertions → 2,927 test lines (3,563 tracked), plus 143 architecture-doc
+lines and a new 105-line sub-iteration entry (ITER18-006) outside this one.** Production overran by
+~4× and tests by ~4.6×, landing at **4.6× production** — above the ×4 the estimate used, and the
+shape of the overrun is more useful than the ratio. **Roughly a third of the phase was added after
+its own review**, in two rounds: the review of the first implementation, and the decision that the
+contact entry had to name the task rather than record the follow-up. The estimate was not wrong about
+the mechanism; it was wrong about how much of a read surface is *not* the query.
+
+Two calibration points, both about where a predicate phase's volume actually goes.
+
+**A phase whose deliverable is a predicate budgets its tests from the size of the set it must
+exclude, not from the behaviour it adds.** Eleven of the twenty-eight new backend integration tests
+are negative — another contact's row, a prefix collision, the task's own lifecycle rows, an unlinked
+task, a deleted task, a contact never linked, a stranger's delete marker — because a predicate that
+is too *wide* passes every positive test ever written against it. Rule 14 says a phase whose
+deliverable is a decision is only meaningful at its boundaries; this is that rule for a **query**,
+where the boundary is what the query leaves out.
+
+**And a read surface's cost is dominated by what the rows do not say.** The predicate is four lines.
+What the phase actually spent its production on is everything needed because a `field_history` row
+about a task, read on a contact's page, carries the reader's own id in both of its values and nothing
+that identifies the commitment: a label resolver, a batched lookup, a new schema field, a wording
+function that knows which feed it is on, and the prose explaining each. That is not scope creep — it
+is the difference between the query answering and the surface being usable, and it was invisible from
+the criterion, which reads as though the rows were already legible.
+
+Production at 636 against ~160 also has the cause Phases 5, 6 and 8 each recorded: much of it is
+prose. The delete branch is four lines and its comment is fourteen.
+
 **Acceptance Criteria:**
 
-- [ ] A linked contact's activity history includes their tasks as **read-only records** alongside journals
+- [x] A linked contact's activity history includes their tasks as **read-only records** alongside journals
       and other activity, per open decision 3.
-- [ ] Entries are **not actionable** from the contact page and cannot be filtered down to "everything still
+      **Delivered as one branch on the `contact` aggregation predicate**, keyed on the field name
+      (`entity_type = 'task' AND field_name = 'contact:' || :root_id_text`) rather than on a join
+      through `task_contacts`. Reached by the endpoint, the frontend feed and the count inside
+      `get_contact(include_history=true)` alike, because all three already went through one strategy.
+- [x] Entries are **not actionable** from the contact page and cannot be filtered down to "everything still
       outstanding" — a record of the past, not a third working surface.
-- [ ] A task's own change history renders on the journal surface that owns it, reusing the shared
+      **Asserted rather than assumed**, at unit level and again in the browser: the only button inside
+      a task entry is the provenance icon (which carries the tooltip), and the feed holds no combobox,
+      tab or searchbox. The stronger half of this criterion is in the *predicate*: only link rows are
+      reached, so there is nothing outstanding to filter for.
+- [x] A task's own change history renders on the journal surface that owns it, reusing the shared
       history/activity feed components rather than a bespoke list.
-- [ ] E2E: a task change made in the UI appears in the relevant feed with UI provenance; a task linked to a
+      **Delivered as a disclosure on `JournalTaskRow`** expanding into `TaskActivityFeed` — a thin
+      wrapper over the same `components/history/ActivityFeed` the contact and journal pages use. The
+      row does not mount it until it is opened, so a journal holding ten tasks issues no history
+      requests to draw its list.
+- [x] E2E: a task change made in the UI appears in the relevant feed with UI provenance; a task linked to a
       contact appears on that contact's history and offers no action there.
+      **Delivered as `frontend/tests/e2e/task-activity-history.spec.ts`**, four tests green on both
+      projects. The status change is made by **clicking the row's own action**, not by an API call,
+      which is the only way to say the whole chain attributes it to the web interface.
 
 **Required Test Coverage:** unit (RTL) — feed rendering of task entries, provenance labels, absence of
 actions. Integration — the contact history read includes task records with correct provenance. E2E as above,
 on both e2e projects.
+
+**Delivered: 13 backend unit tests, 28 backend integration tests, 54 frontend unit tests and 5 e2e
+tests (10 runs across the two projects).** Backend unit: 7 in
+`tests/unit/history/test_aggregation_strategy.py` across two classes — the link branch exists, its
+format agrees with `contact_field_name`, it binds the id as text, it joins neither `task_contacts`
+nor `tasks`; and the delete branch exists, is narrowed by history itself, and joins neither either —
+and 6 in the new `tests/unit/history/test_task_labels.py` (which row names a task, and what happens
+when none does). Backend integration: 18 in
+`tests/integration/history/test_field_history_repository_integration.py` across three classes, 7 in
+`tests/integration/api/test_history_endpoints.py`, 4 in
+`tests/integration/infrastructure/events/test_task_history_projection_e2e.py` (the whole chain read
+from the *contact* end, through a real `TaskService`) and 2 in
+`tests/integration/mcp/test_contact_tools_integration.py`. Frontend: 20 in the new
+`src/lib/__tests__/history-display.test.ts`, 8 in `ActivityItem.test.tsx`, 4 in the new
+`components/tasks/__tests__/TaskActivityFeed.test.tsx`, 12 in `JournalTaskRow.test.tsx`, 3 in the
+contacts `ActivityFeed.test.tsx`, 4 in the shared `ActivityFeed.test.tsx` and 3 in
+`lib/api/__tests__/task-cache-freshness.test.ts`. Four cases in `lib/api/__tests__/tasks.test.ts`
+were amended rather than added: they pin the *whole* set of namespaces `refreshTask` invalidates,
+which is now four.
+
+**Documentation.** `docs/architecture/database-design.md` — the `contact` predicate's two task
+branches and their deliberate properties, the second `:root_id_text` bind, how a task row on a
+contact's feed is named, and the owner-scoping assumption.
+`docs/architecture/api-design.md` — what `GET /api/contacts/{contact_id}/history` now returns and the
+four contractual things about it. `docs/architecture/frontend-design.md` — the history query-key
+root and why it is not under `taskKeys`, the journal row's disclosure and where it sits, and how a
+history entry is worded and named. And a new sub-iteration, **ITER18-006**, for the contact-merge gap
+this phase's review found.
+
+**Decisions taken (Phase 9):**
+
+- **The branch keys on the field name; it does not join `task_contacts`.** The join is the obvious
+  design and is wrong for the reason the `task` predicate already carries about the `tasks` table, one
+  level out: the link row cascades away with a hard-deleted task and disappears on an unlink, so a
+  joined predicate would erase what the feed had already recorded. Mutation-checked, and the check is
+  the useful part: replacing the branch with the join fails **19** tests, of which the two that no
+  widening of assertions could rescue are the deleted-task read and the one asserting a task's own
+  lifecycle rows stay off the person's page.
+- **Equality, not a prefix match.** `contact:1` must not match `contact:12`, and a `LIKE 'contact:%'`
+  would put every task in the database on contact 1's feed the moment contact 12 was linked to one.
+  Its own test, and the only one a prefix mutation fails — which is exactly why it exists: every other
+  test in the class passes under the wrong predicate.
+- **A second bind, `:root_id_text`, supplied unconditionally.** The strategy contract said "a single
+  `:root_id`", and the branch needs the id as text to build a field name; reusing the integer bind
+  inside a `||` would ask PostgreSQL to infer two types for one parameter. The repository binds both
+  on every aggregate read *and* count, whether or not a strategy names the second, so the two
+  statements cannot disagree about what a predicate may use. The count is not a detail: a branch
+  reaching the list but not the count would advertise a "Load More" that returns nothing, and that
+  has its own test on both surfaces.
+- **`CONTACT_FIELD_PREFIX` is now named, and the predicate imports it.** Phase 5 made
+  `contact_field_name` a function because the service builds these keys and the projection has to
+  recognise them; this phase adds a **third** reader, and a format that lives in three places is one
+  that can drift twice. The unit test compares the predicate against `contact_field_name(7)` rather
+  than against a literal, so a change to the format fails a test instead of quietly emptying a feed.
+- **The record names the task, and where that name comes from is the phase's other central decision.**
+  The row carries the *contact's* id in `new_value` and the task's in `entity_id`; the task's text
+  lives on a different row. The first attempt shipped without a name and recorded it as a follow-up,
+  on the reasoning that the two obvious sources were both wrong: a cross-domain read from the contacts
+  service into `tasks` breaks rule 7 *and* cannot answer for a deleted task, and overwriting
+  `new_value` from the `__created__` row would make one row mean two different things depending on
+  which aggregate read returned it. Both objections stand — and both are about the *wrong two places
+  to look*. **The right one is `field_history` itself**, which is in-domain, permanent, and holds both
+  the creation marker and every reword. `resolve_task_label` reads the newest `text` row and falls
+  back to `__created__`; `get_task_labels` batches it to one query per page; and the name arrives on a
+  **new** field, `entity_label`, rather than displacing a value that already means something. The
+  field exists for exactly one condition and says so: *a row whose subject is not the aggregate you
+  are reading.* It is null on a contact's own rows and absent from the task and journal schemas
+  entirely.
+- **A hard-deleted task closes its own story on the person's page.** The `__deleted__` marker is
+  task-scoped, so the link branch could not reach it, and without it the feed kept "linked to a task"
+  for ever for a task that no longer exists — the one entry a person has about it reading as a
+  commitment still standing. A second branch reaches it, narrowed by a subquery over **history
+  itself** rather than over `task_contacts`: the link row is the only record of the link that survives
+  the task. It matches a task the contact was *ever* linked to, including one they were unlinked from
+  first, because the unlink entry already stands above it and the pair reads as a sequence. This is
+  also the case that makes resolving the name from history rather than from `tasks` load-bearing
+  rather than tidy: the entry that most needs a name is the one whose task is gone.
+- **The wording depends on which feed the row is read on, so `ActivityItem` learns the feed's
+  entity.** The same row reads *Linked a contact* on the task's own history and *Linked to a task* on
+  the person's, because the interesting party is the other end each time. `ActivityFeed` already took
+  an `entity` prop for its empty-state copy and now passes it down. Mutation-checked by collapsing the
+  two wordings into one: **3** tests fail, and the one that matters asserts the two are `not.toBe`
+  each other rather than each containing the word "task" — two tests written the obvious way would
+  both have passed.
+- **`taskEntryDescription` is gated on `entity_type`, not on the field name.** The marker vocabulary
+  is **shared across domains**: a journal writes `__created__`, and a contact records its own creation
+  as `field_name="status"` carrying `"created"`. Keying on the field name alone would relabel a
+  contact's create marker as a task status move — silently, on the very page this phase adds a row to.
+  Found while writing the tests rather than by a failure, and pinned by two cases in another domain's
+  vocabulary. Mutation-checked by dropping the gate: **3** tests fail.
+- **The journal row does not mount the feed while it is collapsed, rather than mounting it with a
+  disabled query.** The first implementation gave `TaskActivityFeed` an `enabled` prop; the row's test
+  then showed the hook was never called at all, because the component was not mounted — so the flag
+  was dead. It was removed: conditional mounting costs zero DOM and zero hooks, where the flag would
+  have left a hidden card and empty state on every row to achieve less. `TaskActivityFeed` is now the
+  same shape as the contact and journal wrappers, and a test pins the arity of the hook call so the
+  flag is not reintroduced as "the way it is done". Mutation-checked by mounting it unconditionally:
+  **25** of the row's 31 tests fail.
+- **The disclosure's accessible name names the commitment.** Every row's trigger would otherwise be
+  called "Show history", which is what a screen-reader user hears tabbing through a journal's tasks —
+  the same argument `JournalTaskRow` already applies to its status actions, which are described by the
+  text of the task they act on. Mutation-checked by making the label generic: **8** tests fail.
+- **The history cache is not under `taskKeys` at all — and the first attempt put it there, which was
+  a live defect.** It shipped as `taskKeys.histories()`, a fourth sibling under `taskKeys.all`, on
+  the reasoning that history is projected asynchronously and a write's own invalidation cannot
+  usefully refresh it. The phase's own review found what that arrangement actually does:
+  `useUpdateTask.onMutate` **cancels** and optimistically **patches** every query under
+  `taskKeys.all`, so ticking a status while an open row's history request was in flight cancelled it
+  — leaving the feed on *"No activity yet"* with nothing to refetch it — and `patchResource` matches
+  on id alone, so a `field_history` row id colliding with a task id would have `status` and `text`
+  merged into it. Every journal and contact mutation invalidates `taskKeys.all` too. Fixed by giving
+  it a root of its own, `taskHistoryKeys = ['task-history']`, which is what `journalHistoryKeys`
+  already does and should have been copied from at the outset. `refreshTask` now names
+  `taskHistoryKeys.list(taskId)` **explicitly** — a task's own write does make its history stale —
+  and three cases in `task-cache-freshness.test.ts` pin both directions. *The lesson is about the
+  argument, not the key:* the original rationale was written about `invalidateQueries` and the
+  namespace it was placed in is read by `cancelQueries` and `setQueriesData` as well. **A key's
+  placement is a claim about every matcher that walks it, not just the one you had in mind.**
+- **The disclosure is the row's last child and its feed renders no heading, both found by review.**
+  It was first inserted above the contacts, so opening a history pushed the people a commitment
+  involves below an activity card — against the specification's *"show the contact on the task
+  wherever it is displayed"*. And `ActivityFeed` always rendered an `h3` reading "Activity", on a
+  page that already has one: five open task rows meant six identically-named headings nested inside
+  a list, which is precisely what the trigger's `aria-label` had been written to avoid, undone one
+  element later. `ActivityFeed` now takes `title`, `null` suppresses the header, and the panel is a
+  `role="region"` labelled by its trigger instead. Three tests, one of them a DOM-order assertion.
+- **The e2e status change is made by clicking, and the assertion waits on the API before it looks at
+  the page.** Projection is asynchronous, so the spec polls `GET /api/tasks/{id}/history` with
+  `toPass` and only then opens the disclosure. It also asserts the *arrival of the opposite action*
+  rather than the status badge text after the click — a not-done row's "Done" **button** and a done
+  row's "Done" **badge** are both the string "Done", so an assertion on the text can pass before the
+  write lands. **The two contact-side tests are weaker than that and the difference is worth
+  stating:** they create the link through the REST API, and the endpoint hardcodes
+  `Provenance.UI` for every REST call, so their provenance assertion cannot fail. What they do prove
+  is that the record reaches the person's page and offers nothing to act on there, which is the
+  criterion they exist for.
+- **Two assertions derived their expectation from the thing under test, both found by review.** The
+  e2e read the provenance-trigger count off the DOM and asserted the button count equalled it — an
+  entry rendering no trigger and one stray action button satisfies `1 === 1`. And the endpoint's
+  pagination test compared `meta.total_count` to `len(data)`, which a count and a list that are
+  wrong in the same way both satisfy — the exact failure a branch reaching only one of the two
+  statements produces. Both now pin literals, the endpoint one against a baseline measured before
+  the row is seeded.
+- **`TestDataManager` deletes tasks before journals.** Both anchors are `ON DELETE RESTRICT`, so a
+  journal anchoring a task refuses deletion; without task tracking every task fixture would leak two
+  journals per test. The helpers (`createTaskAnchorJournals`, `createTask`, `linkTaskToContact`) build
+  their dates from a **UTC** instant, because the e2e user has no configured timezone and a fixture
+  built from local wall-clock noon can read as tomorrow. ITER18-001 Phase 22 should reuse these rather
+  than add its own.
+- **A pre-existing gap found while reading the merge path, recorded and deliberately not repaired.**
+  `ContactMergeService` re-points relationships, journal links, methods, addresses, notes, important
+  dates, tags, top-level history rows and external links — and **not `task_contacts`**. Since
+  `task_contacts.contact_id` is `ON DELETE CASCADE`, merging a contact a task references **deletes
+  that link**: the task silently loses the person. That is a seam between ITER13 and ITER18-001,
+  not this phase's, and rule 7 keeps a read-only contacts phase out of the merge. Listed as a
+  follow-up. This phase's own smaller half of it — that `repoint_entity_history` moves
+  `entity_type='contact'` rows and so cannot carry a task record onto the survivor — is listed with it.
+
+**Follow-ups (not in this phase):**
+
+1. **A supporting index on `field_history (entity_type, field_name)`.** The contact predicate is
+   already an eight-branch `OR` with six subqueries, so one more branch does not change its plan
+   shape, and a migration does not belong in a read-only phase. Worth noting the asymmetry: every
+   other arm can use `(entity_type, entity_id)`; the two task arms cannot.
+2. **The contact merge and task links** — promoted out of this list into **ITER18-006**, because it is
+   larger than a follow-up: a contact merge does not re-point `task_contacts` at all, and
+   `ON DELETE CASCADE` means merging deletes the link outright.
+3. **Owner-scope the contact predicate's task branch.** Every other branch reaches contact-domain
+   rows, which have no owner — `contacts` has no `user_id` column and neither does the read that
+   serves the predicate — while task rows are the one kind that carries one. In a multi-tenant
+   deployment this branch would surface another user's task on a shared contact's feed. Narrowing it
+   means giving the contact domain an owner first, which is not a read-only change; the assumption is
+   stated in the predicate's own comment and in `database-design.md` rather than left implicit.
+
+
+**Mutation-checked, eleven ways in total.** The link branch: dropping it fails **19** tests; replacing
+it with a `task_contacts` join fails **19**, of which the two no widened assertion could rescue are
+the deleted-task read and the one asserting a task's own lifecycle rows stay off the person's page;
+relaxing equality to a prefix `LIKE` fails exactly **1**, the `contact:1`/`contact:12` decoy, which is
+why that test exists — every other case in its class passes under the wrong predicate. The delete
+branch: dropping it fails **6**; un-narrowing it so every deleted task lands on every contact's feed
+fails **2**. The name: dropping the resolution step fails **1** on the backend (the two negative cases
+correctly still pass, and the e2e is what carries the rest); naming a task by its creation marker
+alone, never by a reword, fails **3**. The frontend: collapsing the two surfaces' wording into one
+fails **3**; dropping the `entity_type` gate fails **3**; a generic trigger label fails **8**; and
+mounting the feed unconditionally fails **25** of the row's 31.
+
+**Quality gates run locally:** `ruff format --check`, `ruff check` and `mypy` clean on `backend/` and
+`core_shared/`; the full backend unit suite and the full backend integration suite green against
+Docker PostgreSQL; `pnpm quality:check` clean and the whole Jest suite green (179 suites, 2,243
+tests); `task-activity-history.spec.ts` green on **both** e2e projects, five tests each.
 
 #### Phase 10: Events — Anchors Re-pointed by a Journal Merge
 
@@ -9028,6 +9273,112 @@ forces one. No e2e (Phase 8).
 
 **Required Test Coverage:** this phase *is* the e2e coverage for ITER18-005; unit and integration coverage
 landed in Phases 1–7.
+
+### ITER18-006: Contact Merge and Task Links
+
+**Objective:** Make a contact merge carry a task's people with it. Today it does not: merging two
+contacts **deletes** the absorbed contact's task links outright, and leaves the activity records of
+those links filed under an id that no longer exists.
+
+**Added during ITER18-003 Phase 9**, whose review of the merge path found it. It is a new
+sub-iteration rather than an amendment to [Iteration 13](./iteration-13-contact-merge.md) because
+that iteration is complete and merged: a shipped iteration's record is not edited to absorb work
+found later — the same rule that made ITER18-003 Phase 10 its own phase rather than a change to
+ITER18-002 Phase 3.
+
+**Independently deliverable because:** it changes the behaviour of one existing operation and is
+complete in itself. Nothing depends on it, and no surface changes.
+
+**Relevant documents:**
+
+- [Contacts Product Specification](../product-specifications/contacts-product-specification.md) — merge
+  produces *one* unified record
+- Specification §*Contacts on tasks* — a task's contacts are "a plain reference", and the link is what
+  puts the task on the person's activity history
+- `ContactMergeService.merge_contacts`, `TaskRepository`, `FieldHistoryRepository.repoint_entity_history`
+- [Iteration 13](./iteration-13-contact-merge.md) for the re-point pattern every sub-entity follows
+
+> **How the gap arose, because it is the more useful part.** `ContactMergeService` re-points nine
+> things — relationships, journal links, methods, addresses, notes, important dates, tags, top-level
+> history rows and external links — and it re-points exactly the tables that existed when it was
+> written. `task_contacts` arrived two iterations later (ITER18-001 Phase 1) with
+> `ON DELETE CASCADE` on `contact_id`, which is right for deleting a contact and silently wrong for
+> merging one: the merge ends by deleting the source row, and the cascade takes the task links with
+> it. *The lesson generalises past this fix:* **a merge is a list of tables, and every new table
+> referencing the merged entity is a line somebody has to remember to add.** Nothing fails when they
+> forget — which is why this went unnoticed through ITER18-001's twenty-two phases and ITER18-003's
+> nine.
+
+**Acceptance Criteria:**
+
+- [ ] Merging a contact **re-points** their task links onto the survivor rather than dropping them: a
+      task referencing the absorbed contact references the survivor afterwards, and a task that already
+      referenced both ends up referencing the survivor **once** (the `(task_id, contact_id)` primary key
+      makes the duplicate a hard error, not a cosmetic one).
+- [ ] The re-point happens **before** the source row is deleted, inside the merge's existing unit of
+      work, so a failed merge leaves the links exactly as they were.
+- [ ] A merge **never changes a task's status, text or anchors** — it is a change of who a task
+      references, nothing else.
+- [ ] The move is announced: each affected task publishes an event carrying the removal and the
+      addition, so the survivor's activity history gains the record and the projection stays the single
+      definition of what a task event means. **A new mutating `TaskRepository` method will fail
+      `test_every_port_method_is_a_read_or_a_classified_write` until this phase classifies it** — that
+      guard exists for exactly this shape of change (ITER18-003 Phase 5).
+- [ ] The absorbed contact's **existing** task activity records reach the survivor's feed, so the
+      unified record carries both contacts' trail as it already does for top-level contact rows.
+      `repoint_entity_history` cannot do it: those rows are `entity_type='task'` and are identified by
+      their `contact:{id}` **field name**, not by `entity_id`.
+- [ ] Not wireframe-bearing, and no surface changes: `POST /api/contacts/{id}/merge` and
+      `merge_contacts` behave the same from the caller's side.
+
+**Required Test Coverage:**
+
+- **Unit:** the merge service delegates the task-link re-point, and does it before deleting the source.
+- **Integration:** against the real schema — a link moves; a task linked to both collapses to one row
+  rather than raising a duplicate-key violation; a task linked to neither is untouched; status, text and
+  anchors are unchanged; the published event carries both halves; and the test must fail if the dedupe
+  step is removed.
+- **E2E:** none. The merge dialog is unchanged and the outcome is a record, not a screen.
+
+**Open decisions:**
+
+1. **Whether the historic activity records are rewritten or left where they are.** Rewriting
+   `contact:{source}` to `contact:{survivor}` on the absorbed contact's task rows makes the survivor's
+   feed complete, at the cost of editing rows that record what actually happened — history is otherwise
+   append-only in this system, and `repoint_entity_history` sets the precedent that it may move on a
+   merge. Leaving them orphans the record: the source contact is deleted, so nothing can ever read
+   them. The dedup index is on `(event_id, entity_type, entity_id, field_name)`, so a rewrite must be
+   `ON CONFLICT DO NOTHING` for the case where the survivor was linked to the same task by the same
+   event. Recommendation: **rewrite**, following `repoint_entity_history`'s precedent, and say so in
+   `database-design.md` beside it.
+2. **Whether the re-point publishes one event per task or one per merge.** One per task matches the
+   task event vocabulary — `TaskUpdated` with `{contact:{source}: (source, None), contact:{survivor}:
+   (None, survivor)}` — and needs no new type, which is the answer ITER18-003 Phase 5 reached for the
+   same question about contact membership. A merge touching many tasks then publishes many events;
+   that is what the outbox is for.
+
+#### Phase 1: Re-point Task Contact Links Through a Merge
+
+**Prerequisites:** ITER18-001 Phase 11, ITER18-003 Phase 5.
+**Estimated diff:** ~140 production → **~840 tracked** (×6) — a port + adapter pair on an existing
+repository plus a publish site, which calibration rules 13 and 15 both push above ×4.
+
+**Acceptance Criteria:** criteria 1–4 and 6 above.
+
+**Required Test Coverage:** unit and integration as above. No e2e.
+
+#### Phase 2: Carry the Activity Records onto the Survivor
+
+**Prerequisites:** Phase 1, ITER18-003 Phase 9.
+**Estimated diff:** ~90 production → **~450 tracked** (×5) — one statement and the decision behind it,
+with the fixture cost a history re-point test always carries.
+
+**Acceptance Criteria:** criterion 5 above, and open decision 1 settled and recorded.
+
+**Required Test Coverage:** integration — the absorbed contact's task records read back on the
+survivor's feed after a merge; a task both contacts were linked to does not produce a duplicate row;
+rows belonging to other contacts are untouched; and the test must fail if the statement's conflict
+clause is removed. No e2e.
 
 ## Specification Coverage Map
 

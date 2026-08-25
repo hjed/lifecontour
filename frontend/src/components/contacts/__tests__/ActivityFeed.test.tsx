@@ -107,3 +107,83 @@ describe('ActivityFeed (contact wrapper)', () => {
     expect(screen.getByTestId('activity-feed')).toHaveClass('custom-class');
   });
 });
+
+/**
+ * A task's record on the person's page.
+ *
+ * The specification's *Contacts on tasks* asks for the task to surface here as
+ * a read-only record; *Where tasks appear* says the entry "is not actionable
+ * from there" and that the feed cannot be filtered down to "everything still
+ * outstanding". Both are assertions this file can make and the backend cannot.
+ */
+describe('ActivityFeed (contact wrapper) — task records', () => {
+  const taskRecord = {
+    data: [
+      {
+        // The contact endpoint stamps `contact_history` on every row it
+        // returns, including the task ones — `entity_type` is what says which
+        // kind of row it is.
+        type: 'contact_history',
+        id: 'task-1',
+        attributes: {
+          entity_type: 'task',
+          entity_id: 42,
+          field_name: 'contact:123',
+          old_value: null,
+          new_value: '123',
+          changed_by: 'ui',
+          source: 'ui',
+          created_at: '2024-01-15T10:30:00Z',
+          entity_label: 'Return the borrowed harness',
+        },
+      },
+    ],
+    meta: { total_count: 1, page_count: 1, current_page: 1, per_page: 10 },
+  } as unknown as ContactHistoryListResponse;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUseContactHistory.mockReturnValue({
+      data: taskRecord,
+      isLoading: false,
+      error: null,
+      isFetching: false,
+    });
+  });
+
+  it('reads the record from the contact’s point of view, naming the task', async () => {
+    render(<ActivityFeed contactId='123' />);
+
+    expect(
+      await screen.findByText('Linked to a task: “Return the borrowed harness”')
+    ).toBeInTheDocument();
+  });
+
+  it('offers nothing to act on', async () => {
+    render(<ActivityFeed contactId='123' />);
+
+    await screen.findByText(/Linked to a task/);
+
+    const actionable = screen
+      .queryAllByRole('button')
+      .filter(
+        button =>
+          !(button.getAttribute('data-testid') ?? '').startsWith(
+            'provenance-trigger-'
+          )
+      );
+    expect(actionable).toHaveLength(0);
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('offers no way to filter the feed down to outstanding work', async () => {
+    render(<ActivityFeed contactId='123' />);
+
+    await screen.findByText(/Linked to a task/);
+
+    expect(screen.queryAllByRole('combobox')).toHaveLength(0);
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.queryAllByRole('searchbox')).toHaveLength(0);
+  });
+});

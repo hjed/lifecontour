@@ -1845,3 +1845,161 @@ class TestContactConverterAISummaryIntegration:
             assert links[0]["source"] == "immich"
             assert links[0]["external_id"] == "person-uuid-1"
             assert links[0]["url"] == "https://immich.example.com/people/person-uuid-1"
+
+
+@pytest.mark.integration
+class TestContactHistoryOverMCPCountsTaskRecords:
+    """MCP parity for the record a task leaves on a person's history.
+
+    Contact history reaches agents only as a count inside
+    ``get_contact(include_history=True)`` — there is no contact-history tool, and
+    ITER18-003 Phase 9 does not add one (a contacts-domain capability, not this
+    phase's). What this phase does owe is that the count is not blind to the new
+    record: an agent told "3 changes recorded" when the fourth is a commitment
+    to this person would be reporting a different history from the one the UI
+    shows.
+    """
+
+    @pytest_asyncio.fixture
+    async def test_container(self, clean_database: AsyncConnection):
+        container = make_async_container(ContactTestProvider(clean_database))
+        yield container
+        await container.close()
+
+    @pytest_asyncio.fixture
+    async def contact_service(self, test_container):
+        async with test_container() as request_container:
+            return await request_container.get(ContactService)
+
+    @pytest.mark.asyncio
+    async def test_the_change_count_includes_a_linked_tasks_record(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database: AsyncConnection,
+        task_anchors,
+    ):
+        from core_shared.models.contacts.entities import Contact
+        from core_shared.models.history import Provenance
+
+        from app.core.history.adapters.sql.field_history_repository import (
+            SqlFieldHistoryRepository,
+        )
+        from app.core.history.models import FieldHistoryEntry
+        from app.core.tasks.models.events import contact_field_name
+        from tests.integration.tasks.task_seeding import create_task
+
+        contact = await contact_service.create_contact(
+            Contact(first_name="Agent", last_name="Visible"), clean_database
+        )
+        assert contact.id is not None
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await SqlFieldHistoryRepository(clean_database).record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=contact_field_name(int(contact.id)),
+                old_value=None,
+                new_value=str(contact.id),
+                changed_by="ui",
+                source=Provenance.UI,
+                event_id=f"evt-mcp-{task_id}-{contact.id}",
+                user_id="test-user-123",
+            )
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            resp = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_contact",
+                        "arguments": {
+                            "contact_id": contact.id,
+                            "include_history": True,
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert resp.status_code == 200
+            payload = extract_mcp_json_payload(resp.text)
+            assert "Recent changes: 1 field updates recorded" in payload["summary"]
+
+    @pytest.mark.asyncio
+    async def test_a_task_linked_to_somebody_else_does_not_inflate_the_count(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database: AsyncConnection,
+        task_anchors,
+    ):
+        """The positive test alone would pass for a predicate matching every task."""
+        from core_shared.models.contacts.entities import Contact
+        from core_shared.models.history import Provenance
+
+        from app.core.history.adapters.sql.field_history_repository import (
+            SqlFieldHistoryRepository,
+        )
+        from app.core.history.models import FieldHistoryEntry
+        from app.core.tasks.models.events import contact_field_name
+        from tests.integration.tasks.task_seeding import create_task
+
+        subject = await contact_service.create_contact(
+            Contact(first_name="Not", last_name="Involved"), clean_database
+        )
+        other = await contact_service.create_contact(
+            Contact(first_name="Someone", last_name="Else"), clean_database
+        )
+        assert subject.id is not None
+        assert other.id is not None
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await SqlFieldHistoryRepository(clean_database).record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=contact_field_name(int(other.id)),
+                old_value=None,
+                new_value=str(other.id),
+                changed_by="ui",
+                source=Provenance.UI,
+                event_id=f"evt-mcp-other-{task_id}-{other.id}",
+                user_id="test-user-123",
+            )
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            session_id = await initialize_mcp_session(authenticated_client)
+
+            resp = await authenticated_client.post(
+                "/mcp-server/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_contact",
+                        "arguments": {
+                            "contact_id": subject.id,
+                            "include_history": True,
+                        },
+                    },
+                },
+                headers=mcp_headers(session_id),
+            )
+
+            assert resp.status_code == 200
+            payload = extract_mcp_json_payload(resp.text)
+            assert "No recent changes" in payload["summary"]

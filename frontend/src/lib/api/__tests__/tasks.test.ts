@@ -13,6 +13,7 @@ import {
   TASK_JOURNAL_IS_ANCHOR,
   TASK_VALIDATION_ERROR,
   TaskApiError,
+  taskHistoryKeys,
   taskKeys,
   taskValidationField,
   useAttachTaskIntermediateJournal,
@@ -732,7 +733,7 @@ describe('Task API client', () => {
       });
     });
 
-    it('refreshes the task, the journal listings, the upcoming window and the journal lists', async () => {
+    it('refreshes the task, its history, and the two listings that embed it', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -750,6 +751,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskHistoryKeys.forTask('1'),
           journalKeys.lists(),
         ]);
       });
@@ -1157,7 +1159,7 @@ describe('Task API client', () => {
       });
     });
 
-    it('refreshes the task, the journal listings, the upcoming window and the journal lists', async () => {
+    it('refreshes the task, its history, and the two listings that embed it', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -1172,6 +1174,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskHistoryKeys.forTask('1'),
           journalKeys.lists(),
         ]);
       });
@@ -1315,7 +1318,7 @@ describe('Task API client', () => {
       );
     });
 
-    it('refreshes the task, the journal listings and the upcoming window', async () => {
+    it('refreshes the task, the journal listings, the upcoming window and its history', async () => {
       mockFetch.mockResolvedValueOnce(noContentResponse());
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -1330,6 +1333,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskHistoryKeys.forTask('1'),
         ]);
       });
       // Named rather than left to the exhaustive match above: `tasks_due_count`
@@ -1342,7 +1346,7 @@ describe('Task API client', () => {
       expect(toast.success).toHaveBeenCalledWith('Contact linked successfully');
     });
 
-    it('refreshes the same three namespaces when unlinking', async () => {
+    it('refreshes the same four namespaces when unlinking', async () => {
       mockFetch.mockResolvedValueOnce(noContentResponse());
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -1357,6 +1361,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskHistoryKeys.forTask('1'),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith(

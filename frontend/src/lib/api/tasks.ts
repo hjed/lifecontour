@@ -46,6 +46,7 @@ import {
   TaskUpdateInput,
 } from '@/types/tasks';
 import type { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
+import type { HistoryFilters, HistoryListResponse } from '@/types/history';
 import {
   API_ENDPOINTS,
   ERROR_MESSAGES,
@@ -155,6 +156,41 @@ export const taskKeys = {
 };
 
 /**
+ * A task's change history, under a root of its **own** — not under `taskKeys`.
+ *
+ * `journalHistoryKeys` is `['journal-history']` rather than a branch of
+ * `journalKeys`, and this follows it, because a history cache is not a cache of
+ * the task: it holds `field_history` rows, whose `id` is a row id and whose
+ * attributes have nothing in common with a task's.
+ *
+ * **Nesting it under `taskKeys.all` is actively wrong**, which is worth stating
+ * because it is the arrangement that reads as tidy. `useUpdateTask.onMutate`
+ * cancels and optimistically patches *every* query under `taskKeys.all`: a
+ * history page underneath it would have its in-flight fetch cancelled by a
+ * status click — leaving an open feed stuck on "No activity yet" with nothing
+ * to refetch it — and `patchResource` matches on id alone, so a history row
+ * whose id happened to equal the task's would have `status` and `text` merged
+ * into it. Every journal and contact mutation invalidates `taskKeys.all` too
+ * (see `task-cache-freshness.test.ts`), which would throw the history away for
+ * a change that cannot affect it.
+ */
+export const taskHistoryKeys = {
+  all: ['task-history'] as const,
+  /**
+   * Every page of one task's history — the key an invalidation names.
+   *
+   * `list(...)` is **not** usable as a filter: a query-key filter matches by
+   * deep-partial equality, so `{ page: undefined, limit: undefined }` does not
+   * match a mounted `{ page: 1, limit: 5 }`. Passing it to `invalidateQueries`
+   * silently matches nothing and leaves the open disclosure stale for its whole
+   * cache lifetime. Filters name this; only `useQuery` names `list`.
+   */
+  forTask: (taskId: string) => [...taskHistoryKeys.all, taskId] as const,
+  list: (taskId: string, page?: number, limit?: number) =>
+    [...taskHistoryKeys.forTask(taskId), { page, limit }] as const,
+};
+
+/**
  * A task request that the API refused, carrying what the refusal said.
  *
  * `code` is the backend's machine-readable error code — `TASK_NOT_FOUND`,
@@ -251,6 +287,23 @@ async function fetchTask(taskId: string): Promise<TaskReadResponse> {
   });
 
   return readJson<TaskReadResponse>(response, ERROR_MESSAGES.FETCH_FAILED);
+}
+
+async function fetchTaskHistory(
+  taskId: string,
+  filters: HistoryFilters = {}
+): Promise<HistoryListResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.page) params.append('page', filters.page.toString());
+  if (filters.limit) params.append('limit', filters.limit.toString());
+
+  const response = await fetch(
+    `${API_ENDPOINTS.TASKS.HISTORY(taskId)}?${params.toString()}`,
+    { credentials: 'include' }
+  );
+
+  return readJson<HistoryListResponse>(response, ERROR_MESSAGES.FETCH_FAILED);
 }
 
 async function fetchJournalTasks(
@@ -428,14 +481,28 @@ async function detachTaskIntermediateJournal({
 // every one of them goes through `invalidateAfterMutation` so the fetches are
 // cancelled before they are invalidated (#1203).
 
-/** A change to a task's own state: everything that shows it can be stale. */
-function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
-  return invalidateAfterMutation(
-    queryClient,
+/**
+ * A change to a task's own state: everything that shows it can be stale.
+ *
+ * The task's **history** is named here explicitly, which is the whole point of
+ * keeping it under a root of its own: a change to this task genuinely does
+ * make its history stale, and nothing else should be able to discard it by
+ * accident. Projection is asynchronous, so the refetch this triggers may still
+ * arrive before the new row does — the specification allows that brief delay —
+ * but the alternative is a feed that stays two minutes out of date on the one
+ * surface that just changed.
+ */
+function taskFilters(taskId: string) {
+  return [
     { queryKey: taskKeys.detail(taskId) },
     { queryKey: taskKeys.journalLists() },
-    { queryKey: taskKeys.upcoming() }
-  );
+    { queryKey: taskKeys.upcoming() },
+    { queryKey: taskHistoryKeys.forTask(taskId) },
+  ];
+}
+
+function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
+  return invalidateAfterMutation(queryClient, ...taskFilters(taskId));
 }
 
 /**
@@ -458,18 +525,22 @@ function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
  * Kept apart from {@link refreshTask} rather than folded into it because two of
  * that function's callers — linking and unlinking a **contact** — cannot move a
  * count, and the rule is only worth stating if it is applied narrowly.
+ *
+ * It is expressed as `taskFilters` **plus one key** rather than as a second list
+ * of four, and that is the merge of ITER18-001 Phase 21 with ITER18-003 Phase 9
+ * recorded in code: those two phases each added a key to "what a task write
+ * reaches", one to each of these functions, and a duplicated list is how the
+ * next such addition lands in one and not the other. This very merge nearly
+ * shipped that way — the task-history key auto-merged into `refreshTask` alone,
+ * which is the half a *status change* does not call.
  */
 function refreshTaskAndDueCounts(
   queryClient: QueryClient,
   taskId: string
 ): Promise<void> {
-  return invalidateAfterMutation(
-    queryClient,
-    { queryKey: taskKeys.detail(taskId) },
-    { queryKey: taskKeys.journalLists() },
-    { queryKey: taskKeys.upcoming() },
-    { queryKey: journalKeys.lists() }
-  );
+  return invalidateAfterMutation(queryClient, ...taskFilters(taskId), {
+    queryKey: journalKeys.lists(),
+  });
 }
 
 /**
@@ -779,6 +850,42 @@ export function useTask(taskId: string) {
     queryFn: () => fetchTask(taskId),
     enabled: !!taskId,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+/**
+ * Reads one task's change history, most recent first.
+ *
+ * Two things about this endpoint shape the hook, and both come from ITER18-003
+ * Phase 8:
+ *
+ * - **It answers for a task `useTask` reports as not found.** A task is
+ *   hard-deleted and keeps its history, so this is not a read that can be
+ *   folded into the task's own query.
+ * - **An empty answer is not a missing task.** Projection lags the write, so a
+ *   task changed a moment ago legitimately has no rows yet. `staleTime`
+ *   therefore matches the other history hooks rather than the task ones: the
+ *   answer goes stale on a background process's schedule, not the user's.
+ *
+ * `options.enabled` exists only to match `useJournalHistory` and
+ * `useContactHistory`, whose shape the shared feed's hook contract is written
+ * against. It is **not** how a collapsed journal row avoids fetching: the row
+ * does not mount the feed at all until it is opened.
+ */
+export function useTaskHistory(
+  taskId: string,
+  filters: HistoryFilters = {},
+  options: { enabled?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: taskHistoryKeys.list(taskId, filters.page, filters.limit),
+    queryFn: () =>
+      fetchTaskHistory(taskId, {
+        page: filters.page,
+        limit: filters.limit,
+      }),
+    enabled: options.enabled !== false && !!taskId,
+    staleTime: 2 * 60 * 1000, // 2 minutes for history
   });
 }
 

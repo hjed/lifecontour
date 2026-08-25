@@ -45,6 +45,7 @@ export const API_ENDPOINTS = {
       `/api/tasks/${id}/relationships/intermediate-journals`,
     INTERMEDIATE_JOURNAL: (id: string, journalId: string) =>
       `/api/tasks/${id}/relationships/intermediate-journals/${journalId}`,
+    HISTORY: (id: string) => `/api/tasks/${id}/history`,
   },
   TEMPLATES: {
     BASE: '/api/templates',

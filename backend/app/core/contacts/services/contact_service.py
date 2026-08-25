@@ -2169,9 +2169,22 @@ class ContactService:
         """Get contacts by tag."""
         return await self.contact_repo.get_contacts_by_tag(tag_id)
 
-    async def get_contact_history(self, contact_id: int, limit: int = 50) -> list[Any]:
-        """Get contact history."""
-        return await self.history_service.get_contact_history(contact_id, limit)
+    async def get_contact_history(
+        self,
+        contact_id: int,
+        limit: int = 50,
+        *,
+        reader_user_id: str | None = None,
+    ) -> list[Any]:
+        """Get contact history.
+
+        ``reader_user_id`` scopes the linked-task rows this feed carries; see
+        ``ContactHistoryService.get_contact_history``. Omitting it drops them
+        rather than exposing another user's.
+        """
+        return await self.history_service.get_contact_history(
+            contact_id, limit, reader_user_id=reader_user_id
+        )
 
     async def toggle_contact_favourite(
         self,

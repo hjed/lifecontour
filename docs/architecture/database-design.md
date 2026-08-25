@@ -165,6 +165,57 @@ its related sub-entities; a `journal` strategy is added in ITER12-002 and a
 **not** join to `tasks` — that join would silently empty a deleted task's feed,
 which is the one thing this surface exists to serve.
 
+**The `contact` predicate reaches one row that is not a contact row.**
+ITER18-003 Phase 9 adds a branch matching `entity_type = 'task'` and
+`field_name = 'contact:' || :root_id_text`, so a task linked to a person appears
+on their activity history as the read-only record the specification's *Contacts
+on tasks* asks for. Three properties of that branch are deliberate:
+
+- **It keys on the field name, never on `task_contacts`.** The link row cascades
+  away when the task is hard-deleted and disappears when the task is unlinked, so
+  a joined predicate would erase what the feed had already recorded. Same
+  argument as the `task` predicate above, one level out.
+- **It is equality, not a prefix match** — `contact:1` must not match
+  `contact:12`.
+- **The link rows are reached, and the delete marker of a task they name.** A
+  task's text, status and retarget rows stay on its own history: the
+  specification allows two working surfaces, and a person's page is not a third
+  (ITER18-003 open decision 3). A hard delete is the exception, because it is
+  not progress — it is the end of the thing the record points at, and without it
+  the feed keeps "linked to a task" for ever for a task that no longer exists.
+  That second branch is narrowed by a subquery over `field_history` itself: the
+  link row is the only record of the link that survives the task.
+
+Because the field name carries the root id, the strategy contract gained a
+second bind. `SqlFieldHistoryRepository` supplies **both** `:root_id` (integer)
+and `:root_id_text` on every aggregate read and count, whether or not the
+strategy names the second — reusing the integer bind inside a string
+concatenation would ask PostgreSQL to infer two types for one parameter.
+
+A task row on a contact's feed is **named** by the read, not by the row.
+`ContactHistoryService` stamps `entity_label` on the task rows of each page from
+`FieldHistoryRepository.get_task_labels`, which resolves a task's newest `text`
+row (falling back to its `__created__` marker) in one query. It reads
+`field_history` rather than `tasks` for the same reason the predicate does not
+join it: the entry that most needs a name is the one a hard-deleted task left
+behind. `entity_label` is never stored, and is null wherever a row names itself.
+
+*The branch carries no owner filter, deliberately and with a stated assumption.*
+Every other branch reaches contact-domain rows, which have no owner — `contacts`
+has no `user_id` column and neither does the read that serves this predicate.
+Task rows are the one kind that *does* carry one, so in a multi-tenant
+deployment this branch would surface another user's task on a shared contact's
+feed. Narrowing it means giving the contact domain an owner first, which is not
+a read-only change; recorded as a follow-up.
+
+*Known limitation.* `repoint_entity_history` moves `entity_type='contact'` rows
+on a merge, so a task record filed under the **absorbed** contact's id does not
+follow the survivor. It is a `task` row identified by field name, which that
+statement cannot address. Listed as a follow-up rather than repaired here; the
+merge does not re-point `task_contacts` either (the link cascades with the
+absorbed contact row), which is the larger half of the same gap and belongs to
+the tasks/merge seam rather than to the history read.
+
 On contact merge (ITER13-004), `FieldHistoryRepository.repoint_entity_history` moves the
 source contact's top-level (`entity_type='contact'`) rows onto the survivor so the unified
 record carries both contacts' audit trail. It is a single copy-then-delete statement that

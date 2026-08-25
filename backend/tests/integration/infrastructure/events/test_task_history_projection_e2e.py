@@ -1018,3 +1018,200 @@ class TestProjectedRowsCarryTheirOwner:
         ).get_history_for_aggregate("task", task.id)
 
         assert [row.id for row in via_strategy] == [row.id for row in direct]
+
+
+@pytest.mark.integration
+class TestATaskReachesTheContactsOwnFeed:
+    """The whole chain, read from the *contact* end.
+
+    Everything above reads rows back under the task. The specification's
+    *Contacts on tasks* asks for the same rows to surface on the person's
+    activity history, which they reach through the widened ``"contact"``
+    aggregation strategy rather than through a second projection. These tests
+    close that loop: a real service write, relayed and projected, read through
+    the strategy the contact history endpoint uses.
+    """
+
+    @staticmethod
+    async def _contact_feed(
+        conn: AsyncConnection, contact_id: int
+    ) -> list[FieldHistoryEntry]:
+        return await SqlFieldHistoryRepository(conn).get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_task_created_with_someone_lands_on_their_feed(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        contact_id = await create_contact(async_connection, first_name="Sarah")
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            contact_ids=[contact_id],
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert task.id is not None
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-contact-feed"
+        )
+
+        entries = await self._contact_feed(async_connection, contact_id)
+
+        assert _values(entries) == {(f"contact:{contact_id}", None, str(contact_id))}
+        assert entries[0].entity_type == TASK_ENTITY_TYPE
+        assert entries[0].entity_id == task.id
+        assert entries[0].source == Provenance.UI
+        assert entries[0].changed_by == "ui"
+
+    @pytest.mark.asyncio
+    async def test_a_later_link_and_unlink_both_land_on_their_feed(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """Both halves of the pair, or the feed shows a removal with no addition."""
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        contact_id = await create_contact(async_connection, first_name="Marcus")
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+        assert await service.link_contact(
+            user_id=USER_ID,
+            task_id=task.id,
+            contact_id=contact_id,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        assert await service.unlink_contact(
+            user_id=USER_ID,
+            task_id=task.id,
+            contact_id=contact_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-contact-pair"
+        )
+
+        entries = await self._contact_feed(async_connection, contact_id)
+
+        assert _values(entries) == {
+            (f"contact:{contact_id}", None, str(contact_id)),
+            (f"contact:{contact_id}", str(contact_id), None),
+        }
+        assert {e.source for e in entries} == {Provenance.MCP, Provenance.UI}
+
+    @pytest.mark.asyncio
+    async def test_the_tasks_own_lifecycle_stays_off_their_feed(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """Open decision 3: the record is the link, not the task's progress.
+
+        A reword and a completion are projected — the assertions on the task's
+        own history above prove that — and neither reaches the person's page.
+        Folding them in would make a contact a third place to work through
+        tasks, which the specification's *Where tasks appear* forbids.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        contact_id = await create_contact(async_connection, first_name="Quiet")
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            contact_ids=[contact_id],
+        )
+        assert task.id is not None
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task.id,
+            text="Book the other venue",
+            status=TaskStatus.DONE,
+            transaction=async_connection,
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-contact-quiet"
+        )
+
+        task_rows = await _task_history(async_connection, task.id)
+        feed = await self._contact_feed(async_connection, contact_id)
+
+        assert {"text", "status"} <= {e.field_name for e in task_rows}
+        assert [e.field_name for e in feed] == [f"contact:{contact_id}"]
+
+    @pytest.mark.asyncio
+    async def test_deleting_the_task_does_not_erase_it_from_their_feed(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """A hard-deleted task is still part of the person's past — and says so.
+
+        Two things at once, because they are the same fact from both ends. The
+        link entry survives, which is the test a ``task_contacts`` join fails:
+        that row cascades away with the task, so a joined predicate would
+        silently empty the feed. And the **delete marker** arrives beside it, so
+        the person is not left with a link to a commitment that no longer
+        exists, reading as though it still stands.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        contact_id = await create_contact(async_connection, first_name="Remembered")
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            contact_ids=[contact_id],
+        )
+        assert task.id is not None
+        await service.delete_task(
+            user_id=USER_ID,
+            task_id=task.id,
+            transaction=async_connection,
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-contact-deleted"
+        )
+
+        entries = await self._contact_feed(async_connection, contact_id)
+
+        assert {e.entity_id for e in entries} == {task.id}
+        assert _values(entries) == {
+            (f"contact:{contact_id}", None, str(contact_id)),
+            ("__deleted__", None, None),
+        }

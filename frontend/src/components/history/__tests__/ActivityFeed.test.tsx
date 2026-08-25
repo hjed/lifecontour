@@ -102,6 +102,179 @@ describe('ActivityFeed (shared)', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders task empty-state copy when entity is task', () => {
+    const useHistory = stubHook({
+      data: { data: [], meta: undefined },
+      isLoading: false,
+      error: null,
+      isFetching: false,
+    });
+
+    render(<ActivityFeed entityId='7' entity='task' useHistory={useHistory} />);
+
+    expect(
+      screen.getByText(/Changes to this task will appear here/i)
+    ).toBeInTheDocument();
+  });
+
+  it('tells each entry which feed it is being read on', async () => {
+    // A contact-membership row reads one way on a task's own history and
+    // another on the person's, so the feed has to pass its entity down or the
+    // row cannot know which it is.
+    const useHistory = stubHook({
+      data: {
+        data: [
+          {
+            // As the contact endpoint stamps it: the resource type follows the
+            // aggregate that was read, `entity_type` the row that was written.
+            type: 'contact_history',
+            id: 'link-1',
+            attributes: {
+              entity_type: 'task',
+              entity_id: 42,
+              field_name: 'contact:12',
+              old_value: null,
+              new_value: '12',
+              changed_by: 'ui',
+              source: 'ui',
+              created_at: '2024-01-15T10:30:00Z',
+            },
+          },
+        ],
+        meta: undefined,
+      },
+      isLoading: false,
+      error: null,
+      isFetching: false,
+    });
+
+    render(
+      <ActivityFeed entityId='12' entity='contact' useHistory={useHistory} />
+    );
+
+    expect(await screen.findByText('Linked to a task')).toBeInTheDocument();
+  });
+
+  it('renders no header when title is null', () => {
+    // The journal's task row embeds this feed inside a list on a page that
+    // already has an "Activity" heading; one h3 per open row would be a run of
+    // identical headings to anyone navigating by heading.
+    const useHistory = stubHook({
+      data: { data: [], meta: undefined },
+      isLoading: false,
+      error: null,
+      isFetching: false,
+    });
+
+    render(
+      <ActivityFeed
+        entityId='7'
+        entity='task'
+        title={null}
+        useHistory={useHistory}
+      />
+    );
+
+    expect(screen.getByTestId('activity-feed')).toBeInTheDocument();
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  });
+
+  it('renders the default Activity heading otherwise', () => {
+    const useHistory = stubHook({
+      data: { data: [], meta: undefined },
+      isLoading: false,
+      error: null,
+      isFetching: false,
+    });
+
+    render(<ActivityFeed entityId='7' useHistory={useHistory} />);
+
+    expect(
+      screen.getByRole('heading', { name: /Activity/i })
+    ).toBeInTheDocument();
+  });
+
+  it('re-renders an entry whose content changed but whose ids did not', async () => {
+    // A task reworded between two reads comes back on the *same* link-row ids
+    // with a new `entity_label`. Keying the "already folded in" check on the
+    // page and the ids meant the feed kept rendering the old name until some
+    // other row changed or it remounted.
+    const entry = (label: string) => ({
+      type: 'contact_history',
+      id: 'link-1',
+      attributes: {
+        entity_type: 'task',
+        entity_id: 42,
+        field_name: 'contact:12',
+        old_value: null,
+        new_value: '12',
+        changed_by: 'ui',
+        source: 'ui',
+        created_at: '2024-01-15T10:30:00Z',
+        entity_label: label,
+      },
+    });
+    const page = (label: string) =>
+      ({
+        data: [entry(label)],
+        meta: undefined,
+      }) as unknown as HistoryListResponse;
+
+    let current = page('Book the venue');
+    const useHistory: UseHistoryHook = () => ({
+      data: current,
+      isLoading: false,
+      error: null,
+      isFetching: false,
+    });
+
+    const { rerender } = render(
+      <ActivityFeed entityId='12' entity='contact' useHistory={useHistory} />
+    );
+    expect(
+      await screen.findByText('Linked to a task: “Book the venue”')
+    ).toBeInTheDocument();
+
+    // A refetch that changed the label: a new response object, same ids.
+    current = page('Book the other venue');
+    rerender(
+      <ActivityFeed entityId='12' entity='contact' useHistory={useHistory} />
+    );
+
+    expect(
+      await screen.findByText('Linked to a task: “Book the other venue”')
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Linked to a task: “Book the venue”')
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not loop when the hook returns a fresh object each render', () => {
+    // The `useHistory` contract is an injected hook, and nothing makes a
+    // caller memoise its result — every test double in this repo returns a
+    // literal. Comparing the response by reference to decide "already folded
+    // in" therefore never short-circuits, and the effect dispatches on every
+    // render: an infinite loop that hangs the suite rather than a visible bug.
+    // The fingerprint has to be derived from the content, not the identity.
+    let calls = 0;
+    const useHistory: UseHistoryHook = () => {
+      calls += 1;
+      return {
+        data: { data: [], meta: undefined } satisfies HistoryListResponse,
+        isLoading: false,
+        error: null,
+        isFetching: false,
+      };
+    };
+
+    render(<ActivityFeed entityId='123' useHistory={useHistory} />);
+
+    // A handful of renders is normal; a runaway loop is hundreds before the
+    // test ever gets here.
+    expect(calls).toBeLessThan(10);
+    expect(screen.getByTestId('activity-feed')).toBeInTheDocument();
+  });
+
   it('renders activity items', async () => {
     const useHistory = stubHook({
       data: mockHistoryData,

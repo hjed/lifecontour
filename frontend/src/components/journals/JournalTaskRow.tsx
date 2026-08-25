@@ -15,11 +15,14 @@
 
 'use client';
 
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
+import { TaskActivityFeed } from '@/components/tasks/TaskActivityFeed';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { lapseWording, statusWording } from '@/lib/task-display';
 import {
@@ -78,6 +81,11 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
   // The actions are named the same on every row, so they are described by the
   // text of the commitment they act on rather than by a label of their own.
   const textId = useId();
+  // The history disclosure is closed to begin with and does not fetch until it
+  // is opened — a journal can hold many tasks, and each history is a request.
+  const historyId = useId();
+  const triggerId = useId();
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Terminal statuses are shown, not hidden, and never as if still live — the
   // stance the wireframe takes on cancelled journals (W18).
@@ -180,6 +188,49 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
           })}
         </ul>
       )}
+      {/* Last in the row, deliberately: expanding it must not push the task's
+          contacts away from the commitment they belong to. */}
+      <div className='mt-2'>
+        {/* The trigger names the commitment, not just "history": every row's
+            would otherwise have the same accessible name, which is what a
+            screen-reader user hears tabbing through a journal's tasks. */}
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='text-muted-foreground h-7 px-1.5 text-xs'
+          onClick={() => setHistoryOpen(open => !open)}
+          id={triggerId}
+          aria-expanded={historyOpen}
+          aria-controls={historyId}
+          aria-label={`${historyOpen ? 'Hide' : 'Show'} history for “${text}”`}
+        >
+          {historyOpen ? (
+            <ChevronDown className='mr-1 h-3.5 w-3.5' aria-hidden='true' />
+          ) : (
+            <ChevronRight className='mr-1 h-3.5 w-3.5' aria-hidden='true' />
+          )}
+          History
+        </Button>
+        {/* The panel takes its name from the trigger rather than from a heading
+            of its own: the journal page already has an "Activity" heading, and
+            one per open row would be a run of identical h3s inside a list. */}
+        <div
+          id={historyId}
+          hidden={!historyOpen}
+          role='region'
+          aria-labelledby={triggerId}
+        >
+          {historyOpen && (
+            <TaskActivityFeed
+              taskId={task.id}
+              className='mt-2 border-none shadow-none'
+              pageSize={5}
+              title={null}
+            />
+          )}
+        </div>
+      </div>
     </li>
   );
 }

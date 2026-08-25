@@ -26,6 +26,10 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import type { HistoryResource } from '@/types/history';
+import {
+  taskEntryDescription,
+  type HistoryEntity,
+} from '@/lib/history-display';
 import { cn } from '@/lib/utils';
 import {
   Tooltip,
@@ -36,6 +40,14 @@ import { Button } from '@/components/ui/button';
 
 interface ActivityItemProps {
   readonly activity: HistoryResource;
+  /**
+   * The feed this entry is being read on.
+   *
+   * Only task rows care, and they care a lot: a task's contact membership is
+   * projected once, onto the task, and read from both ends — "Linked a
+   * contact" on the task's own history, "Linked to a task" on the person's.
+   */
+  readonly entity?: HistoryEntity;
   readonly className?: string;
 }
 
@@ -167,10 +179,27 @@ function getProvenanceLabel(source: string) {
   }
 }
 
-export function ActivityItem({ activity, className }: ActivityItemProps) {
-  const { entity_type, field_name, old_value, new_value, created_at, source } =
-    activity.attributes;
+export function ActivityItem({
+  activity,
+  entity = 'contact',
+  className,
+}: ActivityItemProps) {
+  const {
+    entity_type,
+    field_name,
+    old_value,
+    new_value,
+    created_at,
+    source,
+    entity_label,
+  } = activity.attributes;
   const activityType = getActivityType(old_value, new_value);
+  // Task rows carry marker and collection field names the generic wording
+  // renders as "Added   Created  ". Everything else falls straight through.
+  const taskDescription = taskEntryDescription(
+    { entity_type, field_name, old_value, new_value, entity_label },
+    entity
+  );
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isSummaryRegen = source === 'summary_regeneration';
@@ -255,12 +284,13 @@ export function ActivityItem({ activity, className }: ActivityItemProps) {
       {/* Content */}
       <div className='min-w-0 flex-1'>
         <p className='text-sm'>
-          {formatActivityDescription(
-            field_name,
-            old_value,
-            new_value,
-            entity_type
-          )}
+          {taskDescription ??
+            formatActivityDescription(
+              field_name,
+              old_value,
+              new_value,
+              entity_type
+            )}
         </p>
         <div className='mt-1 flex items-center gap-2'>
           <Tooltip>
