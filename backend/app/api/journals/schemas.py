@@ -782,7 +782,17 @@ class JournalAttributes(BaseModel):
         description="Series memberships as {id, name} refs",
     )
     calendar: CalendarSchema | None = Field(
-        default=None, description="Calendar (for EVENT type)"
+        default=None,
+        description="The calendar the journal is displayed in (for EVENT type)",
+    )
+    calendars: list[CalendarSchema] = Field(
+        default_factory=list,
+        description=(
+            "Every calendar this event lives in, display calendar first. "
+            "One event can be held by several calendars — where one calendar "
+            "invites another — and the sync records it as a single journal "
+            "linked to each. The first entry is always the `calendar` above."
+        ),
     )
 
     # Hierarchy information

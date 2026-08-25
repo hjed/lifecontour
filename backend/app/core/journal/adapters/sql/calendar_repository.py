@@ -51,6 +51,38 @@ class SqlCalendarRepository(CalendarRepository):
 
         return self._row_to_calendar(row)
 
+    async def find_linked_to_journal(self, journal_id: int) -> list[Calendar]:
+        """Every calendar this journal's event lives in, display calendar first.
+
+        An event de-duplicated across calendars is one journal with an
+        ``journal_external_event_links`` row per calendar holding it, while
+        ``journal_calendar_info`` still names the single calendar the journal
+        is *displayed* in. Reading only the latter would drop the other
+        calendars from what a caller sees.
+
+        The display calendar is returned first so a caller can render the
+        list in order without comparing ids. A journal with no links at all
+        — a hand-made event — still yields its own calendar; a journal that
+        is not an event yields nothing.
+        """
+        query = text(
+            """
+            SELECT c.id, c.user_id, c.name, c.color, c.description,
+                   c.is_synced_to_google, c.google_calendar_id,
+                   c.access_role, c.created_at, c.updated_at,
+                   (jci.journal_id IS NOT NULL) AS is_display_calendar
+            FROM calendars c
+            LEFT JOIN journal_calendar_info jci
+                   ON jci.calendar_id = c.id AND jci.journal_id = :journal_id
+            LEFT JOIN journal_external_event_links jeel
+                   ON jeel.calendar_id = c.id AND jeel.journal_id = :journal_id
+            WHERE jci.journal_id IS NOT NULL OR jeel.journal_id IS NOT NULL
+            ORDER BY is_display_calendar DESC, c.name ASC
+            """
+        )
+        result = await self.conn.execute(query, {"journal_id": journal_id})
+        return [self._row_to_calendar(row) for row in result.fetchall()]
+
     async def save(self, calendar: Calendar) -> Calendar:
         """Save a calendar (insert or update)."""
         if calendar.id is None:

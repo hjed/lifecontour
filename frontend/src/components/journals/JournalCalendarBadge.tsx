@@ -30,6 +30,16 @@ import { JournalType, type JournalCalendar } from '@/types/journals';
 
 interface JournalCalendarBadgeProps {
   readonly calendar?: JournalCalendar | null;
+  /**
+   * Every calendar the event lives in, display calendar first.
+   *
+   * One event can be held by several calendars — where one calendar invites
+   * another — and the sync records that as a single journal linked to each.
+   * Only the first is the calendar the journal is *displayed* in, and only
+   * that one can be changed here. Omit on reads that do not load the links,
+   * where `calendar` alone is the answer.
+   */
+  readonly calendars?: JournalCalendar[];
   readonly journalTypes: JournalType[];
   readonly onCalendarChange?: (calendarId: string) => Promise<void>;
   readonly availableCalendars?: JournalCalendar[];
@@ -79,11 +89,45 @@ function CalendarSelect({
 }
 
 /**
+ * Renders a read-only badge for a calendar that also holds this event.
+ *
+ * Deliberately not a popover: reassigning one of these is not a thing the
+ * user can do, and offering it would imply the event could be moved out of
+ * a calendar that genuinely holds it upstream.
+ */
+function LinkedCalendarBadge({
+  calendar,
+}: {
+  readonly calendar: JournalCalendar;
+}) {
+  return (
+    <Badge
+      variant='outline'
+      className='gap-1.5 text-xs'
+      aria-label={`Also in ${calendar.name}`}
+      data-testid={`calendar-badge-linked-${calendar.id}`}
+    >
+      <div
+        className='h-2.5 w-2.5 rounded-full'
+        style={{ backgroundColor: calendar.color || '#6b7280' }}
+        aria-hidden='true'
+      />
+      <span>{calendar.name}</span>
+    </Badge>
+  );
+}
+
+/**
  * Calendar badge component with inline editing for EVENT type journals.
  * Displays calendar name with color indicator.
+ *
+ * When the event is held by more than one calendar, the display calendar is
+ * shown first — editable as before — followed by a read-only badge for each
+ * of the others.
  */
 export function JournalCalendarBadge({
   calendar,
+  calendars,
   journalTypes,
   onCalendarChange,
   availableCalendars = [],
@@ -175,13 +219,31 @@ export function JournalCalendarBadge({
     </Badge>
   );
 
+  // The calendars beyond the one the journal is displayed in. Falls back to
+  // none when the caller did not load the links.
+  const linkedCalendars = (calendars ?? []).filter(
+    entry => entry.id !== calendar.id
+  );
+
+  const withLinked = (primary: React.ReactNode) =>
+    linkedCalendars.length === 0 ? (
+      primary
+    ) : (
+      <span className='flex flex-wrap items-center gap-1.5'>
+        {primary}
+        {linkedCalendars.map(entry => (
+          <LinkedCalendarBadge key={entry.id} calendar={entry} />
+        ))}
+      </span>
+    );
+
   // If can't edit, just show the badge
   if (!canEdit) {
-    return badgeContent;
+    return withLinked(badgeContent);
   }
 
   // Editable badge with popover
-  return (
+  return withLinked(
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <button

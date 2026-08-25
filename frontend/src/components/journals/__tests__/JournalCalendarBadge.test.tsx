@@ -126,6 +126,100 @@ describe('JournalCalendarBadge', () => {
     });
   });
 
+  describe('An event held by more than one calendar', () => {
+    // One event can live in two calendars — where one calendar invites the
+    // other — and the sync records it as a single journal linked to each.
+    // The journal is still *displayed* in one of them, which is the only
+    // one that can be changed here.
+    const sharedCalendars: JournalCalendar[] = [
+      mockCalendar,
+      { id: 'cal2', name: 'Work', color: '#3b82f6' },
+    ];
+
+    it('names every calendar the event lives in', () => {
+      render(
+        <JournalCalendarBadge
+          calendar={mockCalendar}
+          calendars={sharedCalendars}
+          journalTypes={[JournalType.EVENT]}
+        />
+      );
+
+      expect(screen.getByText('Personal')).toBeInTheDocument();
+      expect(screen.getByText('Work')).toBeInTheDocument();
+    });
+
+    it('shows one badge per calendar', () => {
+      render(
+        <JournalCalendarBadge
+          calendar={mockCalendar}
+          calendars={sharedCalendars}
+          journalTypes={[JournalType.EVENT]}
+        />
+      );
+
+      expect(screen.getAllByTestId(/^calendar-badge/)).toHaveLength(2);
+    });
+
+    it('only the display calendar can be changed', () => {
+      // The others are where the same event also appears; reassigning one
+      // is not a thing the user can do from here, and offering it would
+      // imply the event could be moved out of a calendar that holds it.
+      render(
+        <JournalCalendarBadge
+          calendar={mockCalendar}
+          calendars={sharedCalendars}
+          journalTypes={[JournalType.EVENT]}
+          onCalendarChange={mockOnCalendarChange}
+          availableCalendars={mockAvailableCalendars}
+        />
+      );
+
+      expect(screen.getAllByTestId('calendar-badge-trigger')).toHaveLength(1);
+    });
+
+    it('marks the extra calendars as ones the event also appears in', () => {
+      render(
+        <JournalCalendarBadge
+          calendar={mockCalendar}
+          calendars={sharedCalendars}
+          journalTypes={[JournalType.EVENT]}
+        />
+      );
+
+      expect(
+        screen.getByTestId('calendar-badge-linked-cal2')
+      ).toHaveAccessibleName(/also in Work/i);
+    });
+
+    it('renders a single calendar exactly as before', () => {
+      // The common case must not grow a second badge or change shape.
+      render(
+        <JournalCalendarBadge
+          calendar={mockCalendar}
+          calendars={[mockCalendar]}
+          journalTypes={[JournalType.NOTE]}
+        />
+      );
+
+      expect(screen.getAllByTestId(/^calendar-badge/)).toHaveLength(1);
+      expect(screen.getByTestId('calendar-badge')).toBeInTheDocument();
+    });
+
+    it('falls back to the single calendar when the list is absent', () => {
+      // Search results and other reads that do not load the links.
+      render(
+        <JournalCalendarBadge
+          calendar={mockCalendar}
+          journalTypes={[JournalType.NOTE]}
+        />
+      );
+
+      expect(screen.getAllByTestId(/^calendar-badge/)).toHaveLength(1);
+      expect(screen.getByText('Personal')).toBeInTheDocument();
+    });
+  });
+
   describe('Accessibility', () => {
     it('has proper test id', () => {
       render(

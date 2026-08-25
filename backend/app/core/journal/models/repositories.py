@@ -514,6 +514,22 @@ class CalendarRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_linked_to_journal(self, journal_id: int) -> list[Calendar]:
+        """
+        Find every calendar a journal's event lives in.
+
+        An event de-duplicated across calendars is one journal linked to
+        several, while it is still *displayed* in exactly one.
+
+        Args:
+            journal_id: The journal to look up
+
+        Returns:
+            The calendars, display calendar first; empty for a non-event
+        """
+        pass
+
+    @abstractmethod
     async def save(self, calendar: Calendar) -> Calendar:
         """
         Save a calendar (insert or update).

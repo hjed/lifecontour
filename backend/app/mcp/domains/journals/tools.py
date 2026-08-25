@@ -2248,11 +2248,20 @@ async def _build_journal_response(
         journal_id, db_connection, user_id
     )
 
+    # Fetch every calendar this event lives in. One event held by two
+    # calendars — where one invited the other — is a single journal linked
+    # to each, so reporting only the one it is displayed in would hide the
+    # rest.
+    linked_calendars = await SqlCalendarRepository(
+        db_connection
+    ).find_linked_to_journal(journal_id)
+
     # Convert to AI-friendly response
     response = JournalConverter.to_response(
         journal=journal,
         types=types,
         type_data=type_data,
+        linked_calendars=linked_calendars,
         contacts=contacts,
         tags=journal_tags,
         parent=parent,

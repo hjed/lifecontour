@@ -42,6 +42,7 @@ class JournalConverter:
         contacts: list[ContactRelationshipSummary],
         tags: list[JournalTag],
         calendar: Calendar | None = None,
+        linked_calendars: list[Calendar] | None = None,
         parent: Journal | None = None,
         children: list[Journal] | None = None,
         additional_context: str = "",
@@ -60,7 +61,10 @@ class JournalConverter:
             type_data: Type-specific data organized by type
             contacts: List of ContactRelationshipSummary objects
             tags: List of JournalTag entities
-            calendar: Calendar entity (if EVENT type)
+            calendar: The calendar the event is displayed in (if EVENT type)
+            linked_calendars: Every calendar the event lives in, display
+                calendar first; the display calendar is taken from its first
+                entry when ``calendar`` is not given separately
             parent: Parent journal entity (if child)
             children: List of child journal entities (if parent)
             additional_context: Additional context to include in summary
@@ -83,12 +87,14 @@ class JournalConverter:
         # Build tag names
         tag_names = [tag.name for tag in tags]
 
-        # Build calendar schema
-        calendar_schema = None
-        if calendar:
-            calendar_schema = CalendarSchema(
-                id=str(calendar.id), name=calendar.name, color=calendar.color
-            )
+        # Build calendar schemas. The display calendar is the first of the
+        # linked ones unless the caller named it separately.
+        calendars = list(linked_calendars or ([calendar] if calendar else []))
+        calendar_schemas = [
+            CalendarSchema(id=str(entry.id), name=entry.name, color=entry.color)
+            for entry in calendars
+        ]
+        calendar_schema = calendar_schemas[0] if calendar_schemas else None
 
         # Build parent summary
         parent_summary = None
@@ -117,7 +123,7 @@ class JournalConverter:
             types=types,
             tags=tag_names,
             contacts=contact_relationships,
-            calendar=calendar_schema,
+            calendars=calendar_schemas,
             parent=parent_summary,
             children_count=len(children_summaries),
             additional_context=additional_context,
@@ -147,6 +153,7 @@ class JournalConverter:
             tags=tag_names,
             series=series or [],
             calendar=calendar_schema,
+            calendars=calendar_schemas,
             parent=parent_summary,
             children=children_summaries,
             external_links=external_link_schemas,
@@ -170,7 +177,7 @@ class JournalConverter:
         types: list[str],
         tags: list[str],
         contacts: list[ContactRelationshipSchema],
-        calendar: CalendarSchema | None,
+        calendars: list[CalendarSchema],
         parent: JournalChildSummary | None,
         children_count: int,
         additional_context: str = "",
@@ -190,8 +197,13 @@ class JournalConverter:
             contact_summary = f"{len(contacts)} contact(s)"
             summary_parts.append(contact_summary)
 
-        if calendar:
-            summary_parts.append(f"Calendar: {calendar.name}")
+        if calendars:
+            # Named in the plural when the event is held by more than one
+            # calendar, so an assistant reading the summary alone does not
+            # report a shared event as sitting in a single calendar.
+            names = ", ".join(entry.name for entry in calendars)
+            label = "Calendar" if len(calendars) == 1 else "Calendars"
+            summary_parts.append(f"{label}: {names}")
 
         if parent:
             summary_parts.append(f"Child of: {parent.title}")

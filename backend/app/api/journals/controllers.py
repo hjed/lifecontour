@@ -12,6 +12,7 @@ from uuid import UUID
 import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
+    Calendar,
     IncompleteOutdoorActivity,
     Journal,
     JournalContactRelationship,
@@ -364,7 +365,7 @@ async def _enrich_journal_data(
     dict[str, Any],
     list[Any],
     list[Any],
-    Any,
+    list[Calendar],
     list[Any] | None,
 ]:
     """
@@ -372,8 +373,12 @@ async def _enrich_journal_data(
 
     Retrieves types, type_data, contacts, tags, and calendar information.
 
+    ``calendars`` is every calendar the event lives in, display calendar
+    first — one event held by two calendars is a single journal linked to
+    each — and is empty for a journal that is not an event.
+
     Returns:
-        Tuple of (types, type_data, contacts, tags, calendar)
+        Tuple of (types, type_data, contacts, tags, calendars, routes)
     """
     # Journal must have an ID when being enriched (it was retrieved from the database)
     assert journal.id is not None, "Journal must have an ID to fetch enrichment data"
@@ -384,14 +389,16 @@ async def _enrich_journal_data(
 
     # Fetch type-specific data
     calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
+    # One event can be held by several calendars — where one calendar invites
+    # another the sync records a single journal linked to each — while it is
+    # still displayed in exactly one, which leads the list.
+    calendars: list[Calendar] = []
     if calendar_info:
         types.append(JournalType.EVENT.value)
-        calendar = await calendar_repo.find_by_id(calendar_info.calendar_id)
+        calendars = await calendar_repo.find_linked_to_journal(journal_id)
         type_data[JournalType.EVENT.value] = TypeDataConverter.calendar_info_to_schema(
             calendar_info
         )
-    else:
-        calendar = None
 
     mood_data = await mood_data_repo.find_by_journal_id(journal_id)
     if mood_data:
@@ -572,7 +579,7 @@ async def _enrich_journal_data(
     # Fetch routes
     routes = await route_repo.find_by_journal_id(journal_id) if include_routes else None
 
-    return types, type_data, contacts, tags, calendar, routes
+    return types, type_data, contacts, tags, calendars, routes
 
 
 def _journal_tag_resource(tag: JournalTag, base_url: str) -> JournalTagResource:
@@ -1078,7 +1085,14 @@ async def _build_journal_list_resources(
     # Enrich journals
     journal_resources = []
     for journal in all_journals:
-        types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+        (
+            types,
+            type_data,
+            contacts,
+            tags,
+            calendars,
+            routes,
+        ) = await _enrich_journal_data(
             journal,
             calendar_info_repo,
             calendar_repo,
@@ -1122,7 +1136,7 @@ async def _build_journal_list_resources(
             type_data=type_data,
             contacts=contacts,
             tags=tags,
-            calendar=calendar,
+            calendars=calendars,
             routes=routes,
             parent=parent,
             children_count=children_count,
@@ -2033,7 +2047,7 @@ async def get_journal(
     set_etag(response, "journals", journal_id, journal.updated_at)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         journal,
         calendar_info_repo,
         calendar_repo,
@@ -2109,7 +2123,7 @@ async def get_journal(
         type_data=type_data,
         contacts=contacts,
         tags=tags,
-        calendar=calendar,
+        calendars=calendars,
         parent=parent,
         children=children,
         children_count=children_count,
@@ -2230,7 +2244,7 @@ async def create_journal(
         raise ValueError(JOURNAL_ID_NOT_SET_MSG)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         created_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2281,7 +2295,7 @@ async def create_journal(
         type_data=type_data,
         contacts=contacts,
         tags=tags,
-        calendar=calendar,
+        calendars=calendars,
         parent=parent,
         depth=depth,
     )
@@ -2370,7 +2384,7 @@ async def update_journal(
     set_etag(response, "journals", journal_id, saved_journal.updated_at)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         saved_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2448,7 +2462,7 @@ async def update_journal(
         type_data=type_data,
         contacts=contacts,
         tags=tags,
-        calendar=calendar,
+        calendars=calendars,
         parent=parent,
         children=children,
         children_count=children_count,
@@ -2587,7 +2601,7 @@ async def partial_update_journal(
     set_etag(response, "journals", journal_id, saved_journal.updated_at)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         saved_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2665,7 +2679,7 @@ async def partial_update_journal(
         type_data=type_data,
         contacts=contacts,
         tags=tags,
-        calendar=calendar,
+        calendars=calendars,
         parent=parent,
         children=children,
         children_count=children_count,
@@ -2811,14 +2825,7 @@ async def merge_journal(
     if not target_journal:
         raise JournalNotFoundError(journal_id)
 
-    (
-        types,
-        type_data,
-        contacts,
-        tags,
-        calendar,
-        routes,
-    ) = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         target_journal,
         calendar_info_repo,
         calendar_repo,
@@ -2875,7 +2882,7 @@ async def merge_journal(
         type_data=type_data,
         contacts=contacts,
         tags=tags,
-        calendar=calendar,
+        calendars=calendars,
         parent=parent,
         children_count=children_count,
         depth=depth,
@@ -2988,7 +2995,7 @@ async def add_type_to_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3022,7 +3029,7 @@ async def add_type_to_journal(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -3112,7 +3119,7 @@ async def remove_type_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3146,7 +3153,7 @@ async def remove_type_from_journal(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -3233,7 +3240,7 @@ async def update_type_data(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3267,7 +3274,7 @@ async def update_type_data(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -3385,7 +3392,7 @@ async def add_contact_to_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3419,7 +3426,7 @@ async def add_contact_to_journal(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -3550,7 +3557,7 @@ async def update_journal_contact_relationship(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3584,7 +3591,7 @@ async def update_journal_contact_relationship(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -3672,7 +3679,7 @@ async def remove_contact_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3706,7 +3713,7 @@ async def remove_contact_from_journal(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -3788,7 +3795,7 @@ async def add_tag_to_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, routes = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3822,7 +3829,7 @@ async def add_tag_to_journal(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
@@ -3899,7 +3906,7 @@ async def remove_tag_from_journal(
         raise JournalNotFoundError(journal_id)
 
     # Fetch all enrichment data
-    types, type_data, contacts, tags, calendar, _ = await _enrich_journal_data(
+    types, type_data, contacts, tags, calendars, _ = await _enrich_journal_data(
         updated_journal,
         calendar_info_repo,
         calendar_repo,
@@ -3933,7 +3940,7 @@ async def remove_tag_from_journal(
     )
 
     journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendar
+        updated_journal, base_url, types, type_data, contacts, tags, calendars
     )
 
     return await _build_journal_response(journal_resource, contact_repo)
