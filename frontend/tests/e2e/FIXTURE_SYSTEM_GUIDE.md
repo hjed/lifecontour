@@ -184,6 +184,101 @@ test('untagged contacts', async ({ contactsWithoutTags }) => {
 });
 ```
 
+## 📋 Task and Dated-Journal Helpers
+
+Tasks are anchored to exactly two journals — the one the commitment arose in and a
+**future** one it comes due in — so a task fixture is always a fixture about dates.
+
+### Dates come from `utcDayOffset`, never from local time
+
+```typescript
+import { utcDayOffset } from './data-management';
+
+utcDayOffset(2); // midday UTC, two whole days from today
+utcDayOffset(-3, 9); // 09:00 UTC, three days ago
+```
+
+The e2e user has **no configured timezone**, so the backend decides what "future"
+means by UTC days. A journal built from a local midday can land on the far side of
+that boundary — reading as tomorrow when today was meant, or as future when a past
+journal was intended. Never build a task fixture from `new Date()` and local hours.
+
+### Building the journals
+
+```typescript
+const creating = await dataManager.createRelativeJournal({
+  title: 'Committee meeting',
+  dayOffset: 0, // today; signed, so this one builder covers both directions
+});
+const due = await dataManager.createFutureJournal({
+  title: 'Permit deadline',
+  daysAhead: 2,
+  cancellable: true, // gives it the EVENT type so it can be cancelled later
+});
+const past = await dataManager.createPastJournal({
+  title: 'Last week',
+  daysAgo: 7,
+});
+```
+
+`cancellable` is needed up front: cancelling is an edit to an EVENT journal's
+`event_state`, and EVENT type data requires a calendar, which the manager creates
+once on demand and cleans up with everything else.
+
+### Building the task
+
+```typescript
+const task = await dataManager.createTask({
+  creatingJournalId: creating.id,
+  dueJournalId: due.id, // must be dated after today — the service refuses otherwise
+  text: 'Print the permit',
+  contactIds: [contact.id], // optional
+});
+
+await dataManager.attachTaskMention(task.id, otherJournal.id);
+```
+
+### The lapsed-task recipe
+
+**No sequence of task calls can produce a lapsed task.** Both write paths — create
+and retarget — refuse a due journal that is not dated after today, so the _journal_
+has to move instead. Journal update deliberately does not re-validate task
+invariants: a task whose due journal has drifted into the past is _lapsed_, not
+invalid.
+
+```typescript
+// Cause 1: the date passed
+const moved = await dataManager.moveJournalToPast(due.id, 3);
+expect(moved.status()).toBe(200); // assert this — see below
+
+// Cause 2: the due journal was cancelled (needs `cancellable: true` above)
+const cancelled = await dataManager.cancelJournal(due.id);
+expect(cancelled.status()).toBe(200);
+```
+
+**Assert the mutation succeeded.** If journal update ever learned to re-check task
+invariants, the recipe would stop producing lapsed tasks and every test built on it
+would quietly assert things about a task that never lapsed. The status assertion is
+what makes that failure loud.
+
+### Cleanup order is load-bearing
+
+`cleanup()` deletes tracked **tasks before journals**, and then deletes each journal
+task-aware. A journal that is the creating or due journal of any task refuses
+deletion with `409 JOURNAL_HAS_ANCHORED_TASKS` whatever the task's status, so
+without that ordering a task spec leaks its journals into every test after it.
+
+For the rare test that needs the _absence_ of future journals — an empty due-journal
+picker — use `clearFutureJournals()`, which deletes every journal that has not
+already ended and resolves the 409 by deleting the blocking tasks the error body
+names.
+
+**It is destructive to the shared account**: it removes journals no test created,
+including one that started weeks ago and merely runs past today. That is safe only
+because `playwright.config.ts` pins `workers: 1`. Do not reach for it from a spec
+that could run beside another, and prefer building the state you need over clearing
+the state you don't.
+
 ## 🏭 Data Factories
 
 ### Contact Factory
