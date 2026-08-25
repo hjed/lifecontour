@@ -49,6 +49,11 @@ def _make_mock_connection() -> AsyncMock:
     """
     conn = AsyncMock(spec=AsyncConnection)
     conn.begin_nested = AsyncMock()
+    # An unconfigured query returns no rows. Without this the default mock
+    # hands back a truthy MagicMock, so an EXISTS-style check — "does another
+    # calendar still hold this event?" — would read as yes in every test that
+    # never set one up, and quietly suppress the write it guards.
+    conn.execute.return_value = _mock_empty_result()
     return conn
 
 
@@ -175,6 +180,41 @@ def _mock_resolve_contact(contact_id: int) -> MagicMock:
     row.id = contact_id
     result.fetchone.return_value = row
     return result
+
+
+def _call_writing_to(mock_connection: AsyncMock, table: str) -> Any:
+    """The execute() call that writes to ``table``.
+
+    Found by what the statement targets rather than by position, so a query
+    added elsewhere in the path does not silently re-point the assertion at
+    a different statement.
+    """
+    for call in mock_connection.execute.call_args_list:
+        statement = str(call.args[0])
+        if table in statement and "UPDATE" in statement.upper():
+            return call
+    raise AssertionError(f"no UPDATE against {table} was executed")
+
+
+def _assert_no_writes(mock_connection: AsyncMock) -> None:
+    """No statement executed changed anything."""
+    for call in mock_connection.execute.call_args_list:
+        statement = str(call.args[0]).upper()
+        assert not any(
+            verb in statement for verb in ("UPDATE ", "INSERT ", "DELETE ")
+        ), f"unexpected write: {statement}"
+
+
+def _assert_marked_cancelled(mock_connection: AsyncMock) -> None:
+    """Both writes a mark-cancelled makes: the link, then the event state.
+
+    Asserted by what the statements target rather than by counting calls, so
+    the cancellation path can grow a read — such as the check for another
+    calendar still holding the event — without this reading as a behaviour
+    change.
+    """
+    _call_writing_to(mock_connection, "journal_external_event_links")
+    _call_writing_to(mock_connection, "journal_calendar_info")
 
 
 def _mock_empty_result() -> MagicMock:
@@ -995,8 +1035,11 @@ class TestJournalOutboxEventProcessorCancelled:
         assert result["event_type"] == "journal_event.cancelled"
         assert result["journal_id"] == 42
 
-        # Should have called execute twice: once for link update, once for calendar_info update
-        assert mock_connection.execute.call_count == 2
+        # Both halves of a cancellation are written: the link is marked, and
+        # the journal's event state follows because no other calendar holds
+        # this event.
+        _call_writing_to(mock_connection, "journal_external_event_links")
+        _call_writing_to(mock_connection, "journal_calendar_info")
 
     @pytest.mark.asyncio
     async def test_cancelled_event_without_journal_id_skips(
@@ -1043,7 +1086,9 @@ class TestJournalOutboxEventProcessorCancelled:
 
         await processor.process_event(event)
 
-        statement, params = mock_connection.execute.call_args_list[1].args
+        statement, params = _call_writing_to(
+            mock_connection, "journal_calendar_info"
+        ).args
         assert params["event_state"] == EventState.CANCELLED.value
         # Bound rather than inlined, which is what makes the assertion above
         # about the code's behaviour and not about this test's own string.
@@ -1072,7 +1117,7 @@ class TestJournalOutboxEventProcessorCancelled:
 
         await processor.process_event(event)
 
-        _, params = mock_connection.execute.call_args_list[1].args
+        _, params = _call_writing_to(mock_connection, "journal_calendar_info").args
         assert params["event_state"] == _FIND_CANCELLED.compile().params["cancelled"]
 
     @pytest.mark.asyncio
@@ -2125,6 +2170,7 @@ def _make_linked_journal(
     *,
     journal_id: int = 42,
     user_id: str = "1",
+    calendar_id: UUID | None = None,
     external_event_id: str | None = "google-event-abc",
     recurring_event_id: str | None = "master-1",
     days_until_start: float = 10.0,
@@ -2149,6 +2195,7 @@ def _make_linked_journal(
     return SeriesLinkedJournal(
         journal_id=journal_id,
         user_id=user_id,
+        calendar_id=calendar_id or UUID(CALENDAR_ID),
         external_event_id=external_event_id,
         recurring_event_id=recurring_event_id,
         link_sync_status=link_sync_status,
@@ -2258,8 +2305,10 @@ class TestRecurringCancellationDeletesFutureInstances(_SeriesProcessorTestBase):
         # Links removed first so JournalDeleted carries no external ids
         # (the event is already gone upstream — no outbound delete).
         _mock(processor.link_repo).delete_links_for_journal.assert_awaited_once_with(42)
-        # No mark-cancelled SQL ran.
-        mock_connection.execute.assert_not_called()
+        # Nothing was marked cancelled — the journal is gone, not cancelled.
+        # Stated as "no write ran" rather than "no query ran", because
+        # deciding whether an instance may be deleted involves reads.
+        _assert_no_writes(mock_connection)
 
     @pytest.mark.asyncio
     async def test_recurring_id_from_link_row_when_payload_lacks_it(
@@ -2306,7 +2355,7 @@ class TestRecurringCancellationDeletesFutureInstances(_SeriesProcessorTestBase):
         assert result["status"] == "success"
         mock_journal_service.delete_journal.assert_not_called()
         # Falls back to the mark-cancelled writes (link + calendar_info).
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -2371,7 +2420,7 @@ class TestRecurringCancellationDeletesFutureInstances(_SeriesProcessorTestBase):
 
         assert result["status"] == "success"
         mock_journal_service.delete_journal.assert_not_called()
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)
 
     @pytest.mark.asyncio
     async def test_near_future_instance_marked_cancelled(
@@ -2397,7 +2446,7 @@ class TestRecurringCancellationDeletesFutureInstances(_SeriesProcessorTestBase):
 
         assert result["status"] == "success"
         mock_journal_service.delete_journal.assert_not_called()
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)
 
     @pytest.mark.asyncio
     async def test_non_recurring_event_marks_cancelled(
@@ -2423,7 +2472,7 @@ class TestRecurringCancellationDeletesFutureInstances(_SeriesProcessorTestBase):
 
         assert result["status"] == "success"
         mock_journal_service.delete_journal.assert_not_called()
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)
 
 
 class TestSeriesCancelledFanOut(_SeriesProcessorTestBase):
@@ -2452,7 +2501,7 @@ class TestSeriesCancelledFanOut(_SeriesProcessorTestBase):
         mock_journal_service.delete_journal.assert_awaited_once()
         assert mock_journal_service.delete_journal.call_args[0][0] == 1
         # Journal 2 marked cancelled: link + calendar_info updates.
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)
 
     @pytest.mark.asyncio
     async def test_edited_future_journal_preserved_as_cancelled(
@@ -2471,7 +2520,7 @@ class TestSeriesCancelledFanOut(_SeriesProcessorTestBase):
         assert result["deleted"] == 0
         assert result["cancelled"] == 1
         mock_journal_service.delete_journal.assert_not_called()
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)
 
     @pytest.mark.asyncio
     async def test_no_linked_journals_is_noop_success(
@@ -2511,7 +2560,7 @@ class TestSeriesCancelledFanOut(_SeriesProcessorTestBase):
             await processor.process_event(_make_series_cancelled_event())
 
         # Journal 2 was still attempted (marked cancelled) before the raise.
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)
 
 
 class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
@@ -2848,4 +2897,4 @@ class TestStickyCancellationDecision(_SeriesProcessorTestBase):
         assert result["status"] == "success"
         mock_journal_service.delete_journal.assert_not_called()
         # Falls through to the (idempotent) mark-cancelled writes.
-        assert mock_connection.execute.call_count == 2
+        _assert_marked_cancelled(mock_connection)

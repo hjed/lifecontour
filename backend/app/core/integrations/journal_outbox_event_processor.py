@@ -314,6 +314,33 @@ class JournalOutboxEventProcessor:
             event.event_data["existing_journal_id"] = existing_link.journal_id
             return await self._process_journal_updated(event)
 
+        # The same real-world event can reach us from more than one calendar
+        # — one calendar invites another, and each returns its own copy under
+        # its own event id, so the lookup above cannot match them. The source
+        # tells us they are the same thing by giving both copies one
+        # identity token; a journal already carrying it is this event's
+        # journal, and this calendar wants a link to it rather than a
+        # duplicate of it.
+        #
+        # The worker normally spots this and sends an update, so reaching
+        # here means the two copies were emitted before either was
+        # processed — the first sync, where neither had a link yet. This is
+        # what makes that race converge on one journal.
+        journal_id_for_identity = await self._find_journal_by_external_identity(
+            user_id=journal_data["user_id"],
+            external_identity=payload.external_identity,
+        )
+        if journal_id_for_identity is not None:
+            logger.info(
+                "Event already journalled under another calendar, "
+                "linking instead of duplicating",
+                external_event_id=external_event_id,
+                calendar_id=calendar_id,
+                existing_journal_id=journal_id_for_identity,
+            )
+            event.event_data["existing_journal_id"] = journal_id_for_identity
+            return await self._process_journal_updated(event)
+
         # Build the journal entity
         journal = self._build_journal_from_data(journal_data)
 
@@ -339,6 +366,7 @@ class JournalOutboxEventProcessor:
             external_event_id=external_event_id,
             etag=etag,
             recurring_event_id=payload.recurring_event_id,
+            external_identity=payload.external_identity,
         )
 
         # Auto-link recurring instances into a journal series
@@ -502,6 +530,7 @@ class JournalOutboxEventProcessor:
                 external_event_id=external_event_id,
                 etag=etag,
                 recurring_event_id=payload.recurring_event_id,
+                external_identity=payload.external_identity,
             )
             # Refetch the link so merge logic sees the correct updated_at
             existing_link = await self._find_external_event_link(
@@ -585,6 +614,7 @@ class JournalOutboxEventProcessor:
             external_event_id=external_event_id,
             etag=etag,
             recurring_event_id=payload.recurring_event_id,
+            external_identity=payload.external_identity,
         )
 
         # Auto-link recurring instances into a journal series (backfill path)
@@ -885,6 +915,12 @@ class JournalOutboxEventProcessor:
         """
         if linked.link_sync_status == ExternalEventLinkSyncStatus.CANCELLED.value:
             return False
+        # A de-duplicated event is one journal several calendars link to.
+        # Deleting it because one calendar dropped the instance would take
+        # the other calendars' links with it (ON DELETE CASCADE) and lose an
+        # event they still hold.
+        if await self._has_other_live_links(linked.journal_id, linked.calendar_id):
+            return False
         if linked.event_date_range_start is None:
             return False
         if linked.event_date_range_start <= datetime.now(UTC) + _SERIES_DELETION_BUFFER:
@@ -947,6 +983,13 @@ class JournalOutboxEventProcessor:
         The ``'synced'`` writes elsewhere in this processor are still literals;
         converting those is a tidy-up of its own and no cancellation decision
         reads them.
+
+        **The journal is only cancelled once no calendar still holds the
+        event.** A de-duplicated event is one journal linked to several
+        calendars, so removing it from one of them says nothing about the
+        others — declining a meeting on a personal calendar must not cancel
+        the copy still sitting on a work calendar. The link is always marked;
+        the journal follows only when the last one goes.
         """
         await self.connection.execute(
             text("""
@@ -964,6 +1007,14 @@ class JournalOutboxEventProcessor:
             },
         )
 
+        if await self._has_live_links(journal_id):
+            logger.info(
+                "Link cancelled but the event lives on in another calendar",
+                journal_id=journal_id,
+                calendar_id=str(calendar_id),
+            )
+            return
+
         await self.connection.execute(
             text("""
                 UPDATE journal_calendar_info
@@ -977,6 +1028,50 @@ class JournalOutboxEventProcessor:
                 "now": datetime.now(UTC),
             },
         )
+
+    async def _has_other_live_links(self, journal_id: int, calendar_id: UUID) -> bool:
+        """Whether a calendar *other than this one* still holds the event.
+
+        Asked before the cancelled link has been marked, so this one is
+        excluded explicitly rather than by its status.
+        """
+        result = await self.connection.execute(
+            text("""
+                SELECT 1
+                FROM journal_external_event_links
+                WHERE journal_id = :journal_id
+                  AND calendar_id <> :calendar_id
+                  AND sync_status <> :cancelled
+                LIMIT 1
+            """),
+            {
+                "journal_id": journal_id,
+                "calendar_id": calendar_id,
+                "cancelled": ExternalEventLinkSyncStatus.CANCELLED.value,
+            },
+        )
+        return result.fetchone() is not None
+
+    async def _has_live_links(self, journal_id: int) -> bool:
+        """Whether any calendar still holds this event.
+
+        Read after the cancelled link has been marked, so a lone link that
+        was just cancelled correctly reports nothing live.
+        """
+        result = await self.connection.execute(
+            text("""
+                SELECT 1
+                FROM journal_external_event_links
+                WHERE journal_id = :journal_id
+                  AND sync_status <> :cancelled
+                LIMIT 1
+            """),
+            {
+                "journal_id": journal_id,
+                "cancelled": ExternalEventLinkSyncStatus.CANCELLED.value,
+            },
+        )
+        return result.fetchone() is not None
 
     async def _ensure_series_membership(
         self,
@@ -1464,6 +1559,15 @@ class JournalOutboxEventProcessor:
     ) -> None:
         """Save calendar info for a journal using raw SQL.
 
+        The journal's calendar is set when the row is first written and
+        never reassigned afterwards. A journal holds exactly one
+        ``journal_calendar_info`` row — the calendar it is displayed in —
+        but since events are de-duplicated across calendars it may be linked
+        to several. Letting each sync write the calendar it came from would
+        make a shared event flip between calendars depending on which one
+        synced last. First calendar to see the event keeps it; the others
+        contribute a link and nothing more.
+
         Deliberately does **not** mark the journal as changed, even though this
         alters what a read of it returns. ``journals.updated_at`` is also the
         merge-protection signal — an inbound sync compares it against the
@@ -1487,7 +1591,6 @@ class JournalOutboxEventProcessor:
                     (:journal_id, :calendar_id, :is_all_day, :location,
                      :start_time, :end_time, :event_state)
                 ON CONFLICT (journal_id) DO UPDATE SET
-                    calendar_id = :calendar_id,
                     is_all_day = :is_all_day,
                     location = :location,
                     start_time = :start_time,
@@ -1523,25 +1626,26 @@ class JournalOutboxEventProcessor:
         external_event_id: str,
         etag: str | None,
         recurring_event_id: str | None = None,
+        external_identity: str | None = None,
     ) -> None:
         """Create an external event link for tracking sync state.
 
         Uses ON CONFLICT DO UPDATE so retries of journal_event.created
         don't fail on the composite PK (journal_id, calendar_id).
-        COALESCE keeps an already-stored recurring id when a payload
-        omits it.
+        COALESCE keeps an already-stored recurring id — and identity —
+        when a payload omits it.
         """
         now = datetime.now(UTC)
         await self.connection.execute(
             text("""
                 INSERT INTO journal_external_event_links
                     (journal_id, calendar_id, external_event_id,
-                     external_version, recurring_event_id,
+                     external_version, recurring_event_id, external_identity,
                      sync_capability, sync_status,
                      created_at, updated_at)
                 VALUES
                     (:journal_id, :calendar_id, :external_event_id,
-                     :etag, :recurring_event_id,
+                     :etag, :recurring_event_id, :external_identity,
                      'bidirectional', 'synced',
                      :now, :now)
                 ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
@@ -1550,6 +1654,10 @@ class JournalOutboxEventProcessor:
                     recurring_event_id = COALESCE(
                         :recurring_event_id,
                         journal_external_event_links.recurring_event_id
+                    ),
+                    external_identity = COALESCE(
+                        :external_identity,
+                        journal_external_event_links.external_identity
                     ),
                     sync_status = 'synced',
                     updated_at = :now
@@ -1560,6 +1668,7 @@ class JournalOutboxEventProcessor:
                 "external_event_id": external_event_id,
                 "etag": etag,
                 "recurring_event_id": recurring_event_id,
+                "external_identity": external_identity,
                 "now": now,
             },
         )
@@ -1632,12 +1741,51 @@ class JournalOutboxEventProcessor:
         )
         return result.fetchone()
 
+    async def _find_journal_by_external_identity(
+        self,
+        user_id: str,
+        external_identity: str | None,
+    ) -> int | None:
+        """Find the journal already linked to this same real-world thing.
+
+        ``external_identity`` is opaque here: it is compared for equality
+        and never interpreted. Whatever the source packed into it, two links
+        carrying the same token describe one thing, so they belong to one
+        journal.
+
+        Scoped to the user, because a token only means something within one
+        person's own calendars — two people invited to the same meeting hold
+        their own copies, and their journals must stay their own. A null
+        token matches nothing: "no identity" is not an identity to share.
+        """
+        if not external_identity:
+            return None
+
+        result = await self.connection.execute(
+            text("""
+                SELECT l.journal_id
+                FROM journal_external_event_links l
+                JOIN journals j ON j.id = l.journal_id
+                WHERE j.user_id = :user_id
+                  AND l.external_identity = :external_identity
+                ORDER BY l.created_at, l.journal_id
+                LIMIT 1
+            """),
+            {
+                "user_id": str(user_id),
+                "external_identity": external_identity,
+            },
+        )
+        row = result.fetchone()
+        return int(row.journal_id) if row else None
+
     async def _update_external_event_link_etag(
         self,
         calendar_id: UUID,
         external_event_id: str,
         etag: str | None,
         recurring_event_id: str | None = None,
+        external_identity: str | None = None,
     ) -> None:
         """Update the ETag on an external event link after successful sync.
 
@@ -1652,6 +1800,9 @@ class JournalOutboxEventProcessor:
                     recurring_event_id = COALESCE(
                         :recurring_event_id, recurring_event_id
                     ),
+                    external_identity = COALESCE(
+                        :external_identity, external_identity
+                    ),
                     sync_status = 'synced'
                 WHERE calendar_id = :calendar_id
                   AND external_event_id = :external_event_id
@@ -1661,6 +1812,7 @@ class JournalOutboxEventProcessor:
                 "calendar_id": calendar_id,
                 "external_event_id": external_event_id,
                 "recurring_event_id": recurring_event_id,
+                "external_identity": external_identity,
                 "now": datetime.now(UTC),
             },
         )

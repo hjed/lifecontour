@@ -109,6 +109,18 @@ class JournalSyncEventData(BaseModel):
             "recurring series (drives journal series auto-linking)"
         ),
     )
+    external_identity: str | None = Field(
+        default=None,
+        max_length=512,
+        description=(
+            "Opaque token, built and understood only by the source "
+            "integration, that is equal for every copy of the same "
+            "real-world event however many calendars hold it. Consumers "
+            "compare it for equality and nothing else: two links sharing a "
+            "token for one user are the same thing, so they belong to the "
+            "same journal. Null when the source has no such identity."
+        ),
+    )
 
 
 class JournalStatusEventData(BaseModel):

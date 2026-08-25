@@ -21,6 +21,7 @@ class SeriesLinkedJournal:
 
     journal_id: int
     user_id: str
+    calendar_id: UUID
     external_event_id: str | None
     recurring_event_id: str | None
     link_sync_status: str | None
@@ -89,6 +90,7 @@ _TYPE_DATA_EXISTS_SQL = " OR ".join(
 _LINKED_JOURNAL_SELECT = """
     SELECT l.journal_id,
            j.user_id,
+           l.calendar_id,
            l.external_event_id,
            l.recurring_event_id,
            l.sync_status AS link_sync_status,
@@ -105,6 +107,7 @@ def _row_to_linked_journal(row: Any) -> SeriesLinkedJournal:
     return SeriesLinkedJournal(
         journal_id=row.journal_id,
         user_id=row.user_id,
+        calendar_id=row.calendar_id,
         external_event_id=row.external_event_id,
         recurring_event_id=row.recurring_event_id,
         link_sync_status=row.link_sync_status,

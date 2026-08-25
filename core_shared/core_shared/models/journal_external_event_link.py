@@ -40,7 +40,15 @@ class ExternalEventLinkSyncStatus(StrEnum):
 
 
 class JournalExternalEventLink(Base):
-    """Per-calendar external event link metadata for EVENT journals."""
+    """Per-calendar external event link metadata for EVENT journals.
+
+    ``external_event_id`` identifies the event within one calendar.
+    ``external_identity`` is an **opaque token supplied by the integration
+    worker** that is equal for every copy of the same real-world event,
+    however many calendars it appears in. Nothing outside the worker
+    interprets it: the only rule here is that two links sharing a token for
+    the same user describe the same thing, and so belong to one journal.
+    """
 
     __tablename__ = "journal_external_event_links"
 
@@ -59,6 +67,7 @@ class JournalExternalEventLink(Base):
     external_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     recurring_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_identity: Mapped[str | None] = mapped_column(String(512), nullable=True)
     sync_capability: Mapped[str] = mapped_column(String(32), nullable=False)
     sync_status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -84,6 +93,11 @@ class JournalExternalEventLink(Base):
             "calendar_id",
             "recurring_event_id",
             postgresql_where=text("recurring_event_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_journal_external_event_links_identity",
+            "external_identity",
+            postgresql_where=text("external_identity IS NOT NULL"),
         ),
         CheckConstraint(
             "sync_capability IN ('outbound', 'bidirectional')",

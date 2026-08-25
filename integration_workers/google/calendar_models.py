@@ -79,6 +79,22 @@ class GoogleEvent(BaseModel):
         alias="recurringEventId",
         description="The ID of the recurring master event",
     )
+    ical_uid: str | None = Field(
+        None,
+        alias="iCalUID",
+        description=(
+            "RFC5545 identifier, shared by every copy of this event across "
+            "calendars — and by every instance of a recurring series"
+        ),
+    )
+    original_start_time: GoogleEventStartEnd | None = Field(
+        None,
+        alias="originalStartTime",
+        description=(
+            "When a recurring instance was scheduled to start; absent on "
+            "single events. Separates instances that share an iCalUID"
+        ),
+    )
     etag: str | None = Field(None, description="ETag of the resource")
     attendees: list[GoogleEventAttendee] = Field(
         default_factory=list, description="The attendees of the event"
