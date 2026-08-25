@@ -23,10 +23,19 @@ import type {
   HistoryListResponse,
   HistoryResource,
 } from '@/types/history';
+import type { HistoryEntity } from '@/lib/history-display';
 import { ActivityItem } from './ActivityItem';
 
-/** The entity whose history is being displayed. Drives empty-state copy. */
-export type HistoryEntity = 'contact' | 'journal';
+/**
+ * The entity whose history is being displayed.
+ *
+ * It drives the empty-state copy, and — since ITER18-003 Phase 9 — reaches
+ * each entry, because a task's contact-membership row reads one way on the
+ * task's own history and another on the person's. Re-exported from
+ * `lib/history-display`, where the wording that depends on it lives, so the
+ * two cannot list different entities.
+ */
+export type { HistoryEntity };
 
 /**
  * Data hook contract the feed depends on. The shape is a structural subset of a
@@ -53,6 +62,17 @@ interface ActivityFeedProps {
   readonly className?: string;
   /** Initial page size (default: 10) */
   readonly pageSize?: number;
+  /**
+   * The card's heading, or `null` to render no header at all.
+   *
+   * `null` exists for the feed a journal's task row embeds. That page already
+   * has an "Activity" heading of its own, and a journal holding five open task
+   * rows would otherwise present six identically-named `h3`s nested inside a
+   * list — indistinguishable to anyone navigating by heading, which is exactly
+   * what the row's trigger label exists to prevent. A headerless feed is
+   * labelled by the disclosure that opened it instead.
+   */
+  readonly title?: string | null;
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -130,6 +150,7 @@ export function ActivityFeed({
   entity = 'contact',
   className,
   pageSize = DEFAULT_PAGE_SIZE,
+  title = 'Activity',
 }: ActivityFeedProps) {
   const [state, dispatch] = useReducer(activitiesReducer, {
     activities: [],
@@ -180,12 +201,14 @@ export function ActivityFeed({
 
   return (
     <Card className={className} data-testid='activity-feed'>
-      <CardHeader>
-        <CardTitle className='flex items-center gap-2'>
-          <Clock className='h-5 w-5' />
-          Activity
-        </CardTitle>
-      </CardHeader>
+      {title !== null && (
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <Clock className='h-5 w-5' />
+            {title}
+          </CardTitle>
+        </CardHeader>
+      )}
       <CardContent>
         {/* Loading state */}
         {isLoading && (
@@ -217,7 +240,11 @@ export function ActivityFeed({
           <TooltipProvider>
             <div className='space-y-1'>
               {state.activities.map(activity => (
-                <ActivityItem key={activity.id} activity={activity} />
+                <ActivityItem
+                  key={activity.id}
+                  activity={activity}
+                  entity={entity}
+                />
               ))}
 
               {/* Load More button */}

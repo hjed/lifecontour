@@ -32,6 +32,29 @@ export interface ContactCreateRequest {
   }>;
 }
 
+/**
+ * A task, which can only exist anchored to two journals.
+ *
+ * `dueJournalId` must name a journal dated **after today**, and "today" for the
+ * e2e user is a **UTC** day: they have no configured timezone, so backend day
+ * boundaries fall on UTC midnight and a fixture built from local wall-clock
+ * noon can read as tomorrow — or as future when a past journal was intended.
+ * Build the anchors with {@link TestDataManager.createTaskAnchorJournals},
+ * which does the arithmetic in UTC.
+ */
+export interface TaskCreateRequest {
+  creatingJournalId: string;
+  dueJournalId: string;
+  text: string;
+  /** Contacts to link at creation time. Omitted means none. */
+  contactIds?: string[];
+}
+
+export interface TestTask {
+  id: string;
+  text: string;
+}
+
 export interface TagCreateRequest {
   name: string;
   color?: string;
@@ -90,6 +113,10 @@ export class TestDataManager {
   private createdTagIds: string[] = []; // Contact tags
   private createdJournalTagIds: string[] = []; // Journal tags
   private createdJournalIds: string[] = [];
+  // Deleted before journals: a journal that anchors a task cannot be deleted
+  // (ITER18-002 refuses it with a 409), so leaving tasks behind would leak
+  // every journal a task fixture created.
+  private createdTaskIds: string[] = [];
   private createdGearItemIds: string[] = [];
   private createdTemplateIds: string[] = [];
   private readonly createdCalendars: string[] = [];
@@ -1095,6 +1122,107 @@ export class TestDataManager {
   }
 
   /**
+   * The two journals every task needs, dated in **UTC**.
+   *
+   * A task is anchored to the journal it arose in and the journal it is due
+   * in, and the due journal must be dated after today. The e2e user has no
+   * configured timezone, so the backend resolves "today" against UTC — which
+   * is why these offsets are applied to a UTC instant rather than to a local
+   * wall-clock time.
+   *
+   * Returns `[creating, due]`.
+   */
+  async createTaskAnchorJournals(
+    titlePrefix: string
+  ): Promise<[TestJournal, TestJournal]> {
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const range = (offsetDays: number) => {
+      const start = new Date(now + offsetDays * day).toISOString();
+      const end = new Date(
+        now + offsetDays * day + 60 * 60 * 1000
+      ).toISOString();
+      return { start, end };
+    };
+
+    const creating = await this.createJournal({
+      title: `${titlePrefix} created in`,
+      content: 'Task anchor seeded for e2e testing',
+      event_date_range: range(0),
+    });
+    const due = await this.createJournal({
+      title: `${titlePrefix} due in`,
+      content: 'Task anchor seeded for e2e testing',
+      event_date_range: range(7),
+    });
+
+    return [creating, due];
+  }
+
+  /**
+   * Create a task via the API and return its id.
+   *
+   * Created through the API rather than the UI so a spec that is *about* the
+   * task's history does not depend on the creation dialog to arrange it.
+   */
+  async createTask(taskData: TaskCreateRequest): Promise<TestTask> {
+    console.debug(`📝 [Data Manager] Creating task: ${taskData.text}`);
+
+    const response = await this.page.request.post(
+      `/api/journals/${taskData.creatingJournalId}/tasks`,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({
+          data: {
+            type: 'tasks',
+            attributes: {
+              text: taskData.text,
+              due_journal_id: Number(taskData.dueJournalId),
+              ...(taskData.contactIds?.length
+                ? { contact_ids: taskData.contactIds.map(Number) }
+                : {}),
+            },
+          },
+        }),
+      }
+    );
+
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to create task: ${response.status()} ${await response.text()}`
+      );
+    }
+
+    const id = String((await response.json()).data.id);
+    this.createdTaskIds.push(id);
+
+    return { id, text: taskData.text };
+  }
+
+  /**
+   * Link a contact to an existing task.
+   *
+   * A plain reference — no relationship type, role or attendance status — so
+   * the body is a resource identifier and nothing else.
+   */
+  async linkTaskToContact(taskId: string, contactId: string): Promise<void> {
+    const response = await this.page.request.post(
+      `/api/tasks/${taskId}/relationships/contacts`,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({ data: { type: 'contacts', id: contactId } }),
+      }
+    );
+
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to link task ${taskId} to contact ${contactId}: ` +
+          `${response.status()} ${await response.text()}`
+      );
+    }
+  }
+
+  /**
    * Create multiple test journals
    */
   async createJournals(
@@ -1460,6 +1588,9 @@ export class TestDataManager {
     // Instead, we explicitly delete the items this DataManager created.
     await this.fallbackIndividualCleanup();
 
+    // Before the journals: both anchors are ON DELETE RESTRICT, so a journal
+    // anchoring a task refuses deletion until the task is gone.
+    await this.cleanupSpecificItems(this.createdTaskIds, '/api/tasks', 'task');
     await this.cleanupSpecificItems(
       this.createdJournalIds,
       '/api/journals',
@@ -1498,6 +1629,7 @@ export class TestDataManager {
     this.createdTagIds = [];
     this.createdJournalTagIds = [];
     this.createdJournalIds = [];
+    this.createdTaskIds = [];
     this.createdGearItemIds = [];
     this.createdTemplateIds = [];
     // Note: createdCalendars is readonly, so we can't reassign it

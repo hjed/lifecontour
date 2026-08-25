@@ -885,6 +885,27 @@ Conventions this surface pins down:
   a record of the past is not a third one: there is no `/api/tasks/history`, no
   filter, and no way to reach a task through this route that you did not already
   have the id of.
+- **`GET /api/contacts/{contact_id}/history` also answers with task rows**
+  (ITER18-003 Phase 9). A task linked to a person surfaces on their activity
+  history as a read-only record of the link: an entry with
+  `entity_type: "task"`, `entity_id` the task's id, `field_name` `contact:{id}`
+  and the `source` / `changed_by` the link was made with. Four things about it
+  are contractual. It records **the link, plus the task's deletion** — a task's
+  text, status and retarget rows stay on the task's own history, because a
+  contact page is not a place to work through commitments, but a hard delete is
+  the end of the thing the record points at rather than progress on it. It
+  **survives the task being unlinked or deleted**, because the aggregate reaches
+  those rows by field name rather than through `task_contacts`. Each such entry
+  carries **`entity_label`**, the task's name, because both of the row's own
+  values are the contact's id and a task has no route of its own to link to; it
+  is resolved from `field_history` (so a deleted task is still named), and is
+  `null` on every row that names itself and on a task whose history has not been
+  projected yet. And it adds **no new authorisation surface**: the rows are
+  reached through a contact the caller can already read, and the endpoint's
+  shape, pagination and JSON:API resource type are unchanged.
+  Contact history has no MCP tool of its own; the count inside
+  `get_contact(include_history=true)` includes these records, and an agent
+  reading the task's side uses `get_task_history`.
 - **Detaching does not require the journal to still exist**, the same asymmetry
   the contact link carries and for the same reason:
   `task_intermediate_journals` cascades from the journal side, and the

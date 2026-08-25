@@ -14,6 +14,8 @@ from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
 )
 
+_TASK_ENTITY_TYPE = "task"
+
 
 class ContactHistoryService:
     """Read-only service for contact field-level history."""
@@ -28,8 +30,31 @@ class ContactHistoryService:
         offset: int = 0,
         _transaction: AsyncConnection | None = None,
     ) -> list[ContactFieldHistoryEntry]:
-        """Get field history for a specific contact with pagination."""
-        return await self.history_repo.get_contact_history(contact_id, limit, offset)
+        """Get field history for a specific contact with pagination.
+
+        Task rows on this feed are **named** before they are returned. A task
+        linked to this person is recorded on the *task* (ITER18-003 Phase 9), so
+        the row that reaches a contact's page carries the reader's own id in
+        both of its values and nothing that identifies the commitment. Without
+        the name the entry reads "Linked to a task" and points at nothing — and
+        a task has no route of its own to link to instead.
+
+        One extra query, and only when the page actually holds task rows.
+        """
+        entries = await self.history_repo.get_contact_history(contact_id, limit, offset)
+        await self._name_the_tasks(entries)
+        return entries
+
+    async def _name_the_tasks(self, entries: list[ContactFieldHistoryEntry]) -> None:
+        """Stamp ``entity_label`` on the task rows of one page, in place."""
+        task_ids = {e.entity_id for e in entries if e.entity_type == _TASK_ENTITY_TYPE}
+        if not task_ids:
+            return
+
+        labels = await self.history_repo.get_task_labels(sorted(task_ids))
+        for entry in entries:
+            if entry.entity_type == _TASK_ENTITY_TYPE:
+                entry.entity_label = labels.get(entry.entity_id)
 
     async def get_contact_history_count(
         self,

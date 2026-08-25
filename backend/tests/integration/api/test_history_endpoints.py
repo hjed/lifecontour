@@ -272,3 +272,379 @@ class TestContactHistoryEndpoints:
         assert idx_summary < idx_sync
         assert idx_sync < idx_mcp
         assert idx_mcp < idx_ui
+
+
+@pytest.mark.integration
+class TestATaskAppearsOnAContactsHistoryEndpoint:
+    """The read-only record the specification's *Contacts on tasks* asks for.
+
+    The row is written by the projection onto the **task**; the contact
+    aggregate reaches it by field name. These tests seed the read model directly
+    for the reason the tests above give — projection is asynchronous and the
+    end-to-end chain is asserted in
+    ``tests/integration/infrastructure/events/test_task_history_projection_e2e.py``.
+    """
+
+    async def _seed_link_row(
+        self,
+        async_connection,
+        *,
+        task_id: int,
+        contact_id: int,
+        source,
+        changed_by: str,
+        linked: bool = True,
+    ) -> None:
+        from app.core.history.adapters.sql.field_history_repository import (
+            SqlFieldHistoryRepository,
+        )
+        from app.core.history.models import FieldHistoryEntry
+        from app.core.tasks.models.events import contact_field_name
+
+        await SqlFieldHistoryRepository(async_connection).record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=contact_field_name(contact_id),
+                old_value=None if linked else str(contact_id),
+                new_value=str(contact_id) if linked else None,
+                changed_by=changed_by,
+                source=source,
+                event_id=f"evt-{task_id}-{contact_id}-{changed_by}",
+                user_id="test-user-123",
+            )
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_record_is_returned_with_its_provenance(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        """Provenance is first-class: the entry says where the link came from."""
+        from core_shared.models.history import Provenance
+
+        from app.core.tasks.models.events import contact_field_name
+        from tests.integration.tasks.task_seeding import create_task
+
+        contact = await contact_factory.create_contact(
+            first_name="Task", last_name="Linked"
+        )
+        contact_id = int(contact["id"])
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        entries = response.json()["data"]
+        task_entries = [e for e in entries if e["attributes"]["entity_type"] == "task"]
+        assert len(task_entries) == 1
+        attrs = task_entries[0]["attributes"]
+        assert attrs["entity_id"] == task_id
+        assert attrs["field_name"] == contact_field_name(contact_id)
+        assert attrs["source"] == "ui"
+        assert attrs["changed_by"] == "ui"
+
+    @pytest.mark.asyncio
+    async def test_an_assistants_link_is_distinguishable_from_the_users(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        """``source`` and ``changed_by`` are separate facts and stay separate."""
+        from core_shared.models.history import Provenance
+
+        from tests.integration.tasks.task_seeding import create_task
+
+        contact = await contact_factory.create_contact(
+            first_name="Both", last_name="Origins"
+        )
+        contact_id = int(contact["id"])
+        creating_id, due_id = task_anchors
+        ui_task = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mcp_task = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="ask the assistant",
+        )
+
+        await self._seed_link_row(
+            async_connection,
+            task_id=ui_task,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await self._seed_link_row(
+            async_connection,
+            task_id=mcp_task,
+            contact_id=contact_id,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        entries = response.json()["data"]
+        by_task = {
+            e["attributes"]["entity_id"]: e["attributes"]
+            for e in entries
+            if e["attributes"]["entity_type"] == "task"
+        }
+        assert by_task[ui_task]["source"] == "ui"
+        assert by_task[mcp_task]["source"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_task_linked_to_someone_else_stays_off_this_contact(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        from core_shared.models.history import Provenance
+
+        from tests.integration.tasks.task_seeding import create_task
+
+        mine = await contact_factory.create_contact(first_name="Mine", last_name="Own")
+        theirs = await contact_factory.create_contact(
+            first_name="Someone", last_name="Else"
+        )
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=int(theirs["id"]),
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{mine['id']}/history")
+
+        assert response.status_code == 200
+        entries = response.json()["data"]
+        assert [e for e in entries if e["attributes"]["entity_type"] == "task"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_pagination_meta_counts_the_task_record(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        """The count and the list share a predicate, so they share an answer.
+
+        A branch that reached the list but not the count would advertise a
+        "Load More" that returns nothing.
+        """
+        from core_shared.models.history import Provenance
+
+        from tests.integration.tasks.task_seeding import create_task
+
+        contact = await contact_factory.create_contact(
+            first_name="Paged", last_name="Task"
+        )
+        contact_id = int(contact["id"])
+        baseline = await authenticated_client.get(
+            f"/api/contacts/{contact_id}/history?page=1&limit=10"
+        )
+        assert baseline.status_code == 200
+        before = baseline.json()["meta"]["total_count"]
+
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(
+            f"/api/contacts/{contact_id}/history?page=1&limit=10"
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        # Pinned against a measured baseline rather than against the length of
+        # the list beside it: ``total == len(data)`` is satisfied by a count and
+        # a list that are wrong in the same way, which is exactly what a branch
+        # reaching only one of the two statements produces.
+        assert body["meta"]["total_count"] == before + 1
+        assert len(body["data"]) == before + 1
+        task_entries = [
+            e for e in body["data"] if e["attributes"]["entity_type"] == "task"
+        ]
+        assert len(task_entries) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_record_names_the_task_it_is_about(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        """Without a name the entry points at nothing the reader can identify.
+
+        Both of the row's values are this contact's own id, and a task has no
+        route of its own to link to instead, so the name is the only thing that
+        makes the record a record *of something*.
+        """
+        from core_shared.models.history import Provenance
+
+        from app.core.history.adapters.sql.field_history_repository import (
+            SqlFieldHistoryRepository,
+        )
+        from app.core.history.models import CREATED_MARKER, FieldHistoryEntry
+        from tests.integration.tasks.task_seeding import create_task
+
+        contact = await contact_factory.create_contact(
+            first_name="Named", last_name="Task"
+        )
+        contact_id = int(contact["id"])
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await SqlFieldHistoryRepository(async_connection).record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=CREATED_MARKER,
+                old_value=None,
+                new_value="Return the borrowed harness",
+                source=Provenance.UI,
+                event_id=f"evt-created-{task_id}",
+            )
+        )
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        entries = response.json()["data"]
+        task_entries = [e for e in entries if e["attributes"]["entity_type"] == "task"]
+        assert len(task_entries) == 1
+        assert (
+            task_entries[0]["attributes"]["entity_label"]
+            == "Return the borrowed harness"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_contacts_own_row_carries_no_label(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+    ):
+        """The field exists for rows whose subject is not the aggregate read.
+
+        A contact's own row names itself, so a label there would be the reader
+        telling themselves who they are.
+        """
+        from core_shared.models.history import Provenance
+
+        from app.core.contacts.adapters.sql.contact_field_history_repository import (
+            SqlContactFieldHistoryRepository,
+        )
+        from app.core.contacts.models.repositories import ContactFieldHistoryEntry
+
+        contact = await contact_factory.create_contact(
+            first_name="Plain", last_name="Row"
+        )
+        contact_id = int(contact["id"])
+        await SqlContactFieldHistoryRepository(async_connection).record_change(
+            ContactFieldHistoryEntry(
+                entity_type="contact",
+                entity_id=contact_id,
+                field_name="first_name",
+                old_value="Plain",
+                new_value="Plainer",
+                changed_by="ui",
+                source=Provenance.UI,
+                event_id=f"evt-plain-{contact_id}",
+            )
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        entries = response.json()["data"]
+        assert entries
+        for entry in entries:
+            if entry["attributes"]["entity_type"] != "task":
+                assert entry["attributes"]["entity_label"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_task_with_nothing_naming_it_yet_still_answers(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        """Projection lags, so the link can land before the creation marker."""
+        from core_shared.models.history import Provenance
+
+        from tests.integration.tasks.task_seeding import create_task
+
+        contact = await contact_factory.create_contact(
+            first_name="Unnamed", last_name="Yet"
+        )
+        contact_id = int(contact["id"])
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        task_entries = [
+            e
+            for e in response.json()["data"]
+            if e["attributes"]["entity_type"] == "task"
+        ]
+        assert len(task_entries) == 1
+        assert task_entries[0]["attributes"]["entity_label"] is None

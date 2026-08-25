@@ -618,6 +618,17 @@ class ContactHistoryAttributes(BaseModel):
     created_at: datetime | None = Field(
         default=None, description="Timestamp when the change was recorded"
     )
+    entity_label: str | None = Field(
+        default=None,
+        description=(
+            "The name of the entity this entry is about, when the entry's own "
+            "values do not carry it. Populated for the task rows a linked task "
+            "puts on this feed — both of their values are this contact's id, "
+            "and a task has no route of its own to link to. Null for every row "
+            "that names itself, and for a task whose history has not been "
+            "projected yet."
+        ),
+    )
 
 
 class ContactHistoryResource(BaseModel):

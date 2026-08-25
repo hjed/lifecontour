@@ -368,3 +368,134 @@ describe('formatActivityDescription', () => {
     expect(result).toBe('Removed Last Name: "Smith"');
   });
 });
+
+describe('ActivityItem — task entries', () => {
+  const taskEntry = (
+    id: string,
+    field_name: string,
+    old_value: string | null,
+    new_value: string | null,
+    source = 'ui'
+  ): HistoryResource => ({
+    type: 'task_history',
+    id,
+    attributes: {
+      entity_type: 'task',
+      entity_id: 42,
+      field_name,
+      old_value,
+      new_value,
+      changed_by: source,
+      source,
+      created_at: '2024-01-15T10:30:00Z',
+    },
+  });
+
+  const renderItem = (
+    activity: HistoryResource,
+    entity: 'contact' | 'journal' | 'task' = 'task'
+  ) =>
+    render(
+      <TooltipProvider>
+        <ActivityItem activity={activity} entity={entity} />
+      </TooltipProvider>
+    );
+
+  it('opens a task history with what the task was', () => {
+    renderItem(taskEntry('1', '__created__', null, 'Book the venue'));
+
+    expect(
+      screen.getByText(/Task created: “Book the venue”/)
+    ).toBeInTheDocument();
+  });
+
+  it('renders the delete marker as a deletion rather than an empty change', () => {
+    renderItem(taskEntry('2', '__deleted__', null, null));
+
+    expect(screen.getByText('Task deleted')).toBeInTheDocument();
+  });
+
+  it('renders a status move in the app’s own status wording', () => {
+    renderItem(taskEntry('3', 'status', 'not_done', 'done'));
+
+    expect(
+      screen.getByText('Status changed from Not done to Done')
+    ).toBeInTheDocument();
+  });
+
+  it('renders a contact link from the task’s point of view', () => {
+    renderItem(taskEntry('4', 'contact:12', null, '12'));
+
+    expect(screen.getByText('Linked a contact')).toBeInTheDocument();
+  });
+
+  it('renders the same row from the contact’s point of view', () => {
+    renderItem(taskEntry('5', 'contact:12', null, '12'), 'contact');
+
+    expect(screen.getByText('Linked to a task')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['ui', 'Updated via Web Interface'],
+    ['mcp', 'Updated via AI Assistant'],
+    ['system', 'Updated by System'],
+  ])('carries %s provenance with its hover text', (source, label) => {
+    renderItem(taskEntry('6', 'status', 'not_done', 'done', source));
+
+    const trigger = screen.getByTestId(`provenance-trigger-${source}`);
+    expect(trigger).toBeInTheDocument();
+    expect(getProvenanceLabel(source)).toBe(label);
+  });
+
+  it('offers no action on a task entry, on either feed', () => {
+    // The specification's *Where tasks appear* allows two working surfaces and
+    // says a record of the past is not a third: entries "are not actionable
+    // from there". The provenance trigger is a button by necessity (it carries
+    // the tooltip), so the assertion is about everything else.
+    for (const entity of ['task', 'contact'] as const) {
+      const { unmount } = renderItem(
+        taskEntry('7', 'contact:12', null, '12'),
+        entity
+      );
+
+      const actionable = screen
+        .queryAllByRole('button')
+        .filter(
+          button =>
+            button.getAttribute('data-testid') !== 'provenance-trigger-ui'
+        );
+      expect(actionable).toHaveLength(0);
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+      expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+      unmount();
+    }
+  });
+
+  it('leaves a contact’s own entry worded exactly as before', () => {
+    // The task wording is gated on entity_type, so widening it must not
+    // relabel the rows the contact feed already renders.
+    render(
+      <TooltipProvider>
+        <ActivityItem
+          activity={{
+            type: 'contact_history',
+            id: '8',
+            attributes: {
+              entity_type: 'contact',
+              entity_id: 5,
+              field_name: 'status',
+              old_value: null,
+              new_value: 'created',
+              changed_by: 'ui',
+              source: 'ui',
+              created_at: '2024-01-15T10:30:00Z',
+            },
+          }}
+          entity='contact'
+        />
+      </TooltipProvider>
+    );
+
+    expect(screen.getByText('Added Status: "created"')).toBeInTheDocument();
+  });
+});

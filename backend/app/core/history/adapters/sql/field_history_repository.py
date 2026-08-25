@@ -1,5 +1,6 @@
 """SQL implementation of the entity-agnostic FieldHistoryRepository."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from core_shared.models.history import Provenance
@@ -7,9 +8,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.history.models import (
+    CREATED_MARKER,
     FieldHistoryEntry,
     FieldHistoryRepository,
     get_aggregation_strategy,
+    resolve_task_label,
 )
 
 _SELECT_COLUMNS = (
@@ -214,7 +217,15 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
     async def get_history_for_aggregate(
         self, root_type: str, root_id: int, limit: int = 50, offset: int = 0
     ) -> list[FieldHistoryEntry]:
-        """Get paginated history for an aggregate root via its strategy."""
+        """Get paginated history for an aggregate root via its strategy.
+
+        Both ``:root_id`` and ``:root_id_text`` are always bound, whether or not
+        the strategy names the second: the contact predicate builds a
+        ``field_name`` from the root id, and reusing the integer bind inside a
+        string concatenation would ask PostgreSQL to infer two types for one
+        parameter. Supplied unconditionally rather than per strategy so the two
+        aggregate statements cannot disagree about what a predicate may use.
+        """
         strategy = get_aggregation_strategy(root_type)
         query = text(
             f"""
@@ -226,7 +237,13 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             """
         )
         result = await self.conn.execute(
-            query, {"root_id": root_id, "limit": limit, "offset": offset}
+            query,
+            {
+                "root_id": root_id,
+                "root_id_text": str(root_id),
+                "limit": limit,
+                "offset": offset,
+            },
         )
         return [self._row_to_entry(row) for row in result.fetchall()]
 
@@ -242,9 +259,50 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             WHERE {strategy.where_clause}
             """
         )
-        result = await self.conn.execute(query, {"root_id": root_id})
+        result = await self.conn.execute(
+            query, {"root_id": root_id, "root_id_text": str(root_id)}
+        )
         row = result.fetchone()
         return row.total if row else 0
+
+    async def get_task_labels(self, task_ids: Sequence[int]) -> dict[int, str]:
+        """Name each task from its own history rows, in one query.
+
+        Only the two naming field names are fetched, and the ordering is done in
+        Python by :func:`resolve_task_label` rather than in SQL: the rule for
+        which row names a task — newest reword, else the creation marker, with a
+        blank reword falling through — is a product decision, and a
+        ``DISTINCT ON`` re-spelling it would be a second definition of it.
+        """
+        if not task_ids:
+            return {}
+
+        query = text(
+            """
+            SELECT entity_id, field_name, new_value, created_at
+            FROM field_history
+            WHERE entity_type = 'task'
+              AND field_name IN (:created_marker, 'text')
+              AND entity_id = ANY(:task_ids)
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {"created_marker": CREATED_MARKER, "task_ids": list(task_ids)},
+        )
+
+        rows_by_task: dict[int, list[tuple[str, str | None, datetime | None]]] = {}
+        for row in result.fetchall():
+            rows_by_task.setdefault(row.entity_id, []).append(
+                (row.field_name, row.new_value, row.created_at)
+            )
+
+        labels = {
+            task_id: resolve_task_label(rows) for task_id, rows in rows_by_task.items()
+        }
+        return {
+            task_id: label for task_id, label in labels.items() if label is not None
+        }
 
     async def get_history_owner(self, entity_type: str, entity_id: int) -> str | None:
         """Return the owner recorded on an entity's history rows, if any.

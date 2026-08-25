@@ -1,6 +1,6 @@
 """Integration tests for the generalised SqlFieldHistoryRepository."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from core_shared.models.history import Provenance
@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
-from app.core.history.models import FieldHistoryEntry, UnknownAggregationRootError
+from app.core.history.models import (
+    CREATED_MARKER,
+    DELETED_MARKER,
+    FieldHistoryEntry,
+    UnknownAggregationRootError,
+)
+from app.core.tasks.models.events import contact_field_name, journal_field_name
+from tests.integration.tasks.task_seeding import create_task
 
 
 @pytest.mark.integration
@@ -537,3 +544,650 @@ class TestSqlFieldHistoryRepositoryIntegration:
         # is the transaction time, unreliable to compare against wall clock under
         # the savepoint fixture, so we assert it is a populated datetime.
         assert isinstance(stored, datetime)
+
+
+@pytest.mark.integration
+class TestAContactsFeedCarriesTheirTaskRecords:
+    """A task reaches a person's activity history through the field name.
+
+    Task events project onto the **task** — ``entity_type='task'``,
+    ``entity_id=task_id`` — and a contact's membership of one is recorded under
+    ``contact:{id}``. ITER18-003 Phase 9 widens the contact aggregate to reach
+    those rows, so a linked task appears on the contact's history as a read-only
+    record of the link.
+
+    The predicate deliberately never joins ``task_contacts`` or ``tasks``, and
+    the two survival tests below are what say so in a way a join would fail.
+    """
+
+    @pytest.fixture
+    def history_repo(
+        self, clean_database: AsyncConnection
+    ) -> SqlFieldHistoryRepository:
+        return SqlFieldHistoryRepository(clean_database)
+
+    async def _contact(self, conn: AsyncConnection, first_name: str) -> int:
+        result = await conn.execute(
+            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
+            {"n": first_name},
+        )
+        return int(result.scalar_one())
+
+    async def _link_row(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        *,
+        task_id: int,
+        contact_id: int,
+        linked: bool = True,
+        source: Provenance = Provenance.UI,
+        changed_by: str = "ui",
+        created_at: datetime | None = None,
+    ) -> None:
+        """The row the projection writes for a link (or an unlink)."""
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=contact_field_name(contact_id),
+                old_value=None if linked else str(contact_id),
+                new_value=str(contact_id) if linked else None,
+                changed_by=changed_by,
+                source=source,
+                event_id=f"evt-{task_id}-{contact_id}-{'link' if linked else 'unlink'}",
+                created_at=created_at,
+            )
+        )
+
+    async def test_the_link_row_appears_on_the_contacts_feed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Linked")
+
+        await self._link_row(history_repo, task_id=task_id, contact_id=contact_id)
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert [(e.entity_type, e.entity_id) for e in entries] == [("task", task_id)]
+        assert entries[0].field_name == contact_field_name(contact_id)
+        assert entries[0].source == Provenance.UI
+        assert entries[0].changed_by == "ui"
+
+    async def test_the_unlink_row_appears_too(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Both halves of the pair, or the feed shows a removal with no addition."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Unlinked")
+
+        await self._link_row(history_repo, task_id=task_id, contact_id=contact_id)
+        await self._link_row(
+            history_repo, task_id=task_id, contact_id=contact_id, linked=False
+        )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert len(entries) == 2
+        assert {(e.old_value, e.new_value) for e in entries} == {
+            (None, str(contact_id)),
+            (str(contact_id), None),
+        }
+
+    async def test_the_tasks_own_rows_stay_off_the_contacts_feed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Open decision 3: the contact entry records the link, and its end.
+
+        A task's text, status, retarget and journal-link rows belong to the
+        task's own history. Folding them in would make a person's page a place
+        to watch commitments progress, which the specification's *Where tasks
+        appear* rules out as a third working surface. The **delete marker** is
+        the one exception and has its own class below: a hard delete is not
+        progress, it is the end of the thing the record points at.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Quiet")
+        await self._link_row(history_repo, task_id=task_id, contact_id=contact_id)
+
+        for field, old, new in (
+            ("__created__", None, "print the permit"),
+            ("text", "print the permit", "print two permits"),
+            ("status", "not_done", "done"),
+            ("due_journal_id", str(due_id), str(creating_id)),
+            (journal_field_name(creating_id), None, str(creating_id)),
+        ):
+            await history_repo.record_change(
+                FieldHistoryEntry(
+                    entity_type="task",
+                    entity_id=task_id,
+                    field_name=field,
+                    old_value=old,
+                    new_value=new,
+                    event_id=f"evt-{task_id}-{field}",
+                )
+            )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert [e.field_name for e in entries] == [contact_field_name(contact_id)]
+
+    async def test_another_contacts_link_row_stays_off_this_feed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        mine = await self._contact(clean_database, "Mine")
+        theirs = await self._contact(clean_database, "Theirs")
+
+        await self._link_row(history_repo, task_id=task_id, contact_id=mine)
+        await self._link_row(history_repo, task_id=task_id, contact_id=theirs)
+
+        entries = await history_repo.get_history_for_aggregate("contact", mine)
+
+        assert [e.field_name for e in entries] == [contact_field_name(mine)]
+
+    async def test_a_contact_whose_id_is_a_prefix_of_another_is_not_confused(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """``contact:1`` must not match ``contact:12``.
+
+        The obvious wrong predicate is a ``LIKE 'contact:%'`` or a prefix test;
+        both would put every task in the database on contact 1's feed the moment
+        contact 12 was linked to one. Equality is what makes the branch safe, and
+        this is the test that fails if it is ever relaxed.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Prefixed")
+
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=f"{contact_field_name(contact_id)}9",
+                old_value=None,
+                new_value="9",
+                event_id=f"evt-{task_id}-decoy",
+            )
+        )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert entries == []
+
+    async def test_the_record_survives_the_task_being_deleted(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A hard-deleted task is still part of the person's past.
+
+        This is the test a ``task_contacts`` join fails: the link row cascades
+        away with the task, so a joined predicate would quietly empty the feed
+        of everything that person ever committed to.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Remembered")
+        await self._link_row(history_repo, task_id=task_id, contact_id=contact_id)
+
+        await clean_database.execute(
+            text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
+        )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert [(e.entity_type, e.entity_id) for e in entries] == [("task", task_id)]
+
+    async def test_the_record_survives_the_link_being_removed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Unlinking records a second entry; it does not erase the first."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Departed")
+        await clean_database.execute(
+            text("INSERT INTO task_contacts (task_id, contact_id) VALUES (:t, :c)"),
+            {"t": task_id, "c": contact_id},
+        )
+        await self._link_row(history_repo, task_id=task_id, contact_id=contact_id)
+
+        await clean_database.execute(
+            text("DELETE FROM task_contacts WHERE task_id = :t AND contact_id = :c"),
+            {"t": task_id, "c": contact_id},
+        )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert len(entries) == 1
+
+    async def test_the_count_agrees_with_the_list(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The two statements share a predicate, so they have to share an answer.
+
+        Pagination is computed from the count and rendered from the list; if the
+        branch reached only one of them, a contact's feed would advertise a
+        "Load More" that returns nothing.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Counted")
+        await self._link_row(history_repo, task_id=task_id, contact_id=contact_id)
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="contact",
+                entity_id=contact_id,
+                field_name="first_name",
+                old_value="Counted",
+                new_value="Recounted",
+                event_id=f"evt-contact-{contact_id}",
+            )
+        )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        count = await history_repo.get_history_for_aggregate_count(
+            "contact", contact_id
+        )
+
+        assert count == 2
+        assert len(entries) == 2
+
+    async def test_task_and_contact_rows_interleave_most_recent_first(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """One ordering across both kinds of row, not two lists stapled together."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Ordered")
+        base = datetime(2024, 5, 1, 9, 0, tzinfo=UTC)
+
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="contact",
+                entity_id=contact_id,
+                field_name="first_name",
+                old_value="Ordered",
+                new_value="Reordered",
+                event_id=f"evt-contact-early-{contact_id}",
+                created_at=base,
+            )
+        )
+        await self._link_row(
+            history_repo,
+            task_id=task_id,
+            contact_id=contact_id,
+            created_at=base + timedelta(minutes=5),
+        )
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="contact",
+                entity_id=contact_id,
+                field_name="last_name",
+                old_value=None,
+                new_value="Late",
+                event_id=f"evt-contact-late-{contact_id}",
+                created_at=base + timedelta(minutes=10),
+            )
+        )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert [e.field_name for e in entries] == [
+            "last_name",
+            contact_field_name(contact_id),
+            "first_name",
+        ]
+
+
+@pytest.mark.integration
+class TestADeletedTaskClosesItsOwnStoryOnTheContactsFeed:
+    """The delete marker of a task the contact was linked to reaches their feed.
+
+    Without it the feed keeps a "linked to a task" line for a task that no
+    longer exists, and the only entry the person has about it reads as a
+    commitment still standing.
+    """
+
+    @pytest.fixture
+    def history_repo(
+        self, clean_database: AsyncConnection
+    ) -> SqlFieldHistoryRepository:
+        return SqlFieldHistoryRepository(clean_database)
+
+    @staticmethod
+    async def _contact(conn: AsyncConnection, first_name: str) -> int:
+        result = await conn.execute(
+            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
+            {"n": first_name},
+        )
+        return int(result.scalar_one())
+
+    @staticmethod
+    async def _row(
+        repo: SqlFieldHistoryRepository,
+        *,
+        task_id: int,
+        field_name: str,
+        new_value: str | None = None,
+        created_at: datetime | None = None,
+    ) -> None:
+        await repo.record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=field_name,
+                old_value=None,
+                new_value=new_value,
+                event_id=f"evt-{task_id}-{field_name}",
+                created_at=created_at,
+            )
+        )
+
+    async def test_the_delete_marker_reaches_a_linked_contacts_feed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Bereaved")
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name=contact_field_name(contact_id),
+            new_value=str(contact_id),
+        )
+        await self._row(history_repo, task_id=task_id, field_name=DELETED_MARKER)
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert sorted(e.field_name for e in entries) == sorted(
+            [contact_field_name(contact_id), DELETED_MARKER]
+        )
+
+    async def test_it_does_not_reach_the_feed_of_a_contact_never_linked(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Otherwise every deleted task would land on every contact's page."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        linked = await self._contact(clean_database, "Linked")
+        stranger = await self._contact(clean_database, "Stranger")
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name=contact_field_name(linked),
+            new_value=str(linked),
+        )
+        await self._row(history_repo, task_id=task_id, field_name=DELETED_MARKER)
+
+        entries = await history_repo.get_history_for_aggregate("contact", stranger)
+
+        assert entries == []
+
+    async def test_it_survives_the_tasks_row_being_gone(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Which is the only state this branch exists to serve."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Remembering")
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name=contact_field_name(contact_id),
+            new_value=str(contact_id),
+        )
+        await self._row(history_repo, task_id=task_id, field_name=DELETED_MARKER)
+        await clean_database.execute(
+            text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
+        )
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+
+        assert DELETED_MARKER in {e.field_name for e in entries}
+
+    async def test_it_is_counted_as_well_as_listed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Counted")
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name=contact_field_name(contact_id),
+            new_value=str(contact_id),
+        )
+        await self._row(history_repo, task_id=task_id, field_name=DELETED_MARKER)
+
+        count = await history_repo.get_history_for_aggregate_count(
+            "contact", contact_id
+        )
+
+        assert count == 2
+
+
+@pytest.mark.integration
+class TestNamingTheTaskAHistoryRowIsAbout:
+    """``get_task_labels`` resolves a task's name from history, in one query."""
+
+    @pytest.fixture
+    def history_repo(
+        self, clean_database: AsyncConnection
+    ) -> SqlFieldHistoryRepository:
+        return SqlFieldHistoryRepository(clean_database)
+
+    @staticmethod
+    async def _row(
+        repo: SqlFieldHistoryRepository,
+        *,
+        task_id: int,
+        field_name: str,
+        new_value: str | None,
+        created_at: datetime,
+    ) -> None:
+        await repo.record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=field_name,
+                old_value=None,
+                new_value=new_value,
+                event_id=f"evt-{task_id}-{field_name}-{created_at.isoformat()}",
+                created_at=created_at,
+            )
+        )
+
+    async def test_a_task_is_named_by_its_creation_marker(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name=CREATED_MARKER,
+            new_value="Book the venue",
+            created_at=datetime(2024, 6, 1, 9, 0, tzinfo=UTC),
+        )
+
+        assert await history_repo.get_task_labels([task_id]) == {
+            task_id: "Book the venue"
+        }
+
+    async def test_a_reworded_task_is_named_by_its_latest_wording(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        base = datetime(2024, 6, 1, 9, 0, tzinfo=UTC)
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name=CREATED_MARKER,
+            new_value="Book the venue",
+            created_at=base,
+        )
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name="text",
+            new_value="Book the other venue",
+            created_at=base + timedelta(hours=1),
+        )
+
+        assert await history_repo.get_task_labels([task_id]) == {
+            task_id: "Book the other venue"
+        }
+
+    async def test_a_deleted_tasks_name_is_still_resolvable(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The state the whole design exists for."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await self._row(
+            history_repo,
+            task_id=task_id,
+            field_name=CREATED_MARKER,
+            new_value="Return the harness",
+            created_at=datetime(2024, 6, 1, 9, 0, tzinfo=UTC),
+        )
+        await clean_database.execute(
+            text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
+        )
+
+        assert await history_repo.get_task_labels([task_id]) == {
+            task_id: "Return the harness"
+        }
+
+    async def test_a_task_with_nothing_naming_it_is_simply_absent(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Projection lags, so a task linked a second ago has no rows yet."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        assert await history_repo.get_task_labels([task_id]) == {}
+
+    async def test_no_ids_asks_the_database_nothing(
+        self, history_repo: SqlFieldHistoryRepository
+    ) -> None:
+        assert await history_repo.get_task_labels([]) == {}
+
+    async def test_several_tasks_resolve_in_one_call(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A page of history holds many task rows; it must not cost a query each."""
+        creating_id, due_id = task_anchors
+        base = datetime(2024, 6, 1, 9, 0, tzinfo=UTC)
+        ids = []
+        for i in range(3):
+            task_id = await create_task(
+                clean_database,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text=f"task {i}",
+            )
+            ids.append(task_id)
+            await self._row(
+                history_repo,
+                task_id=task_id,
+                field_name=CREATED_MARKER,
+                new_value=f"Task number {i}",
+                created_at=base,
+            )
+
+        assert await history_repo.get_task_labels(ids) == {
+            task_id: f"Task number {i}" for i, task_id in enumerate(ids)
+        }
