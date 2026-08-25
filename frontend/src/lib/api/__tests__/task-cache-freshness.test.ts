@@ -26,7 +26,8 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
-import { taskHistoryKeys, taskKeys } from '../tasks';
+import { taskHistoryKeys, taskKeys, useUpdateTask } from '../tasks';
+import { TaskStatus } from '@/types/tasks';
 import {
   useDeleteJournal,
   useMergeJournal,
@@ -260,5 +261,48 @@ describe('a task history cache is not collateral damage', () => {
     expect(taskHistoryKeys.list('1').slice(0, taskKeys.all.length)).not.toEqual(
       [...taskKeys.all]
     );
+  });
+});
+
+describe('a task write refreshes the history the user is looking at', () => {
+  it('invalidates the key a mounted disclosure actually holds', async () => {
+    // The point of this test is that an exact-key assertion cannot make it.
+    // A query-key filter matches by deep-partial equality, so the tempting
+    // `taskHistoryKeys.list(taskId)` — which carries
+    // `{ page: undefined, limit: undefined }` — matches no mounted query and
+    // invalidates nothing, while a test comparing invalidated keys to that same
+    // value passes. So this seeds the key the journal row's feed really uses
+    // and asks the cache whether it was reached.
+    const mountedKey = taskHistoryKeys.list('1', 1, 5);
+    queryClient.setQueryData(mountedKey, { data: [], meta: undefined });
+    expect(queryClient.getQueryState(mountedKey)?.isInvalidated).toBe(false);
+
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ taskId: '1', status: TaskStatus.DONE });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(mountedKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it('leaves another task’s history alone', async () => {
+    const other = taskHistoryKeys.list('2', 1, 5);
+    queryClient.setQueryData(other, { data: [], meta: undefined });
+
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: createWrapper,
+    });
+
+    result.current.mutate({ taskId: '1', status: TaskStatus.DONE });
+
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryState(taskHistoryKeys.list('1', 1, 5))
+      ).toBeUndefined();
+    });
+    expect(queryClient.getQueryState(other)?.isInvalidated).toBe(false);
   });
 });

@@ -796,7 +796,7 @@ async def get_contact_history(
     request: Request,
     contact_service: FromDishka[ContactService],
     history_service: FromDishka[ContactHistoryService],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
     page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
     limit: Annotated[
         int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
@@ -819,15 +819,19 @@ async def get_contact_history(
     offset = (page - 1) * limit
 
     # Get paginated history entries from database
+    # The reader is passed to both, and to both for the same reason: this feed
+    # carries a linked task's rows, a task is owned, and a contact is not.
     history_entries = await history_service.get_contact_history(
         contact_id=contact_id,
         limit=limit,
         offset=offset,
+        reader_user_id=user.id,
     )
 
     # Get total count for pagination metadata
     total_count = await history_service.get_contact_history_count(
         contact_id=contact_id,
+        reader_user_id=user.id,
     )
 
     # Convert to resources

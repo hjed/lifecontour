@@ -749,7 +749,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
-          taskHistoryKeys.list('1'),
+          taskHistoryKeys.forTask('1'),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task marked done');
@@ -1171,7 +1171,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
-          taskHistoryKeys.list('1'),
+          taskHistoryKeys.forTask('1'),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith(
@@ -1328,7 +1328,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
-          taskHistoryKeys.list('1'),
+          taskHistoryKeys.forTask('1'),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Contact linked successfully');
@@ -1349,7 +1349,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
-          taskHistoryKeys.list('1'),
+          taskHistoryKeys.forTask('1'),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith(

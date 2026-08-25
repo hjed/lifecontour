@@ -215,16 +215,27 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         return int(row.moved_count) if row else 0
 
     async def get_history_for_aggregate(
-        self, root_type: str, root_id: int, limit: int = 50, offset: int = 0
+        self,
+        root_type: str,
+        root_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        reader_user_id: str | None = None,
     ) -> list[FieldHistoryEntry]:
         """Get paginated history for an aggregate root via its strategy.
 
-        Both ``:root_id`` and ``:root_id_text`` are always bound, whether or not
-        the strategy names the second: the contact predicate builds a
+        ``:root_id``, ``:root_id_text`` and ``:reader_user_id`` are **all** bound,
+        whether or not the strategy names them, so the listing and the count
+        cannot disagree about what a predicate may use.
+
+        ``:root_id_text`` exists because the contact predicate builds a
         ``field_name`` from the root id, and reusing the integer bind inside a
         string concatenation would ask PostgreSQL to infer two types for one
-        parameter. Supplied unconditionally rather than per strategy so the two
-        aggregate statements cannot disagree about what a predicate may use.
+        parameter. ``:reader_user_id`` scopes the owned rows the contact
+        aggregate reaches — a task's — and defaults to ``None``, which matches
+        nothing: forgetting to say who is asking costs those rows rather than
+        exposing them.
         """
         strategy = get_aggregation_strategy(root_type)
         query = text(
@@ -241,6 +252,7 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             {
                 "root_id": root_id,
                 "root_id_text": str(root_id),
+                "reader_user_id": reader_user_id,
                 "limit": limit,
                 "offset": offset,
             },
@@ -248,7 +260,7 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
         return [self._row_to_entry(row) for row in result.fetchall()]
 
     async def get_history_for_aggregate_count(
-        self, root_type: str, root_id: int
+        self, root_type: str, root_id: int, *, reader_user_id: str | None = None
     ) -> int:
         """Get the total history count for an aggregate root via its strategy."""
         strategy = get_aggregation_strategy(root_type)
@@ -260,12 +272,19 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             """
         )
         result = await self.conn.execute(
-            query, {"root_id": root_id, "root_id_text": str(root_id)}
+            query,
+            {
+                "root_id": root_id,
+                "root_id_text": str(root_id),
+                "reader_user_id": reader_user_id,
+            },
         )
         row = result.fetchone()
         return row.total if row else 0
 
-    async def get_task_labels(self, task_ids: Sequence[int]) -> dict[int, str]:
+    async def get_task_labels(
+        self, task_ids: Sequence[int], *, reader_user_id: str | None = None
+    ) -> dict[int, str]:
         """Name each task from its own history rows, in one query.
 
         Only the two naming field names are fetched, and the ordering is done in
@@ -282,13 +301,18 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
             SELECT entity_id, field_name, new_value, created_at
             FROM field_history
             WHERE entity_type = 'task'
+              AND user_id = :reader_user_id
               AND field_name IN (:created_marker, 'text')
               AND entity_id = ANY(:task_ids)
             """
         )
         result = await self.conn.execute(
             query,
-            {"created_marker": CREATED_MARKER, "task_ids": list(task_ids)},
+            {
+                "created_marker": CREATED_MARKER,
+                "task_ids": list(task_ids),
+                "reader_user_id": reader_user_id,
+            },
         )
 
         rows_by_task: dict[int, list[tuple[str, str | None, datetime | None]]] = {}

@@ -17,7 +17,7 @@ from app.core.history.models import (
     UnknownAggregationRootError,
 )
 from app.core.tasks.models.events import contact_field_name, journal_field_name
-from tests.integration.tasks.task_seeding import create_task
+from tests.integration.tasks.task_seeding import OTHER_USER_ID, USER_ID, create_task
 
 
 @pytest.mark.integration
@@ -230,7 +230,7 @@ class TestSqlFieldHistoryRepositoryIntegration:
             "contact", contact_id, limit=50, offset=0
         )
         count = await history_repo.get_history_for_aggregate_count(
-            "contact", contact_id
+            "contact", contact_id, reader_user_id=USER_ID
         )
 
         keys = {(e.entity_type, e.entity_id) for e in entries}
@@ -583,6 +583,7 @@ class TestAContactsFeedCarriesTheirTaskRecords:
         source: Provenance = Provenance.UI,
         changed_by: str = "ui",
         created_at: datetime | None = None,
+        owner: str = USER_ID,
     ) -> None:
         """The row the projection writes for a link (or an unlink)."""
         await history_repo.record_change(
@@ -596,6 +597,7 @@ class TestAContactsFeedCarriesTheirTaskRecords:
                 source=source,
                 event_id=f"evt-{task_id}-{contact_id}-{'link' if linked else 'unlink'}",
                 created_at=created_at,
+                user_id=owner,
             )
         )
 
@@ -613,7 +615,9 @@ class TestAContactsFeedCarriesTheirTaskRecords:
 
         await self._link_row(history_repo, task_id=task_id, contact_id=contact_id)
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert [(e.entity_type, e.entity_id) for e in entries] == [("task", task_id)]
         assert entries[0].field_name == contact_field_name(contact_id)
@@ -638,7 +642,9 @@ class TestAContactsFeedCarriesTheirTaskRecords:
             history_repo, task_id=task_id, contact_id=contact_id, linked=False
         )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert len(entries) == 2
         assert {(e.old_value, e.new_value) for e in entries} == {
@@ -683,10 +689,13 @@ class TestAContactsFeedCarriesTheirTaskRecords:
                     old_value=old,
                     new_value=new,
                     event_id=f"evt-{task_id}-{field}",
+                    user_id=USER_ID,
                 )
             )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert [e.field_name for e in entries] == [contact_field_name(contact_id)]
 
@@ -706,7 +715,9 @@ class TestAContactsFeedCarriesTheirTaskRecords:
         await self._link_row(history_repo, task_id=task_id, contact_id=mine)
         await self._link_row(history_repo, task_id=task_id, contact_id=theirs)
 
-        entries = await history_repo.get_history_for_aggregate("contact", mine)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", mine, reader_user_id=USER_ID
+        )
 
         assert [e.field_name for e in entries] == [contact_field_name(mine)]
 
@@ -737,10 +748,13 @@ class TestAContactsFeedCarriesTheirTaskRecords:
                 old_value=None,
                 new_value="9",
                 event_id=f"evt-{task_id}-decoy",
+                user_id=USER_ID,
             )
         )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert entries == []
 
@@ -767,7 +781,9 @@ class TestAContactsFeedCarriesTheirTaskRecords:
             text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
         )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert [(e.entity_type, e.entity_id) for e in entries] == [("task", task_id)]
 
@@ -794,7 +810,9 @@ class TestAContactsFeedCarriesTheirTaskRecords:
             {"t": task_id, "c": contact_id},
         )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert len(entries) == 1
 
@@ -827,9 +845,11 @@ class TestAContactsFeedCarriesTheirTaskRecords:
             )
         )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
         count = await history_repo.get_history_for_aggregate_count(
-            "contact", contact_id
+            "contact", contact_id, reader_user_id=USER_ID
         )
 
         assert count == 2
@@ -878,7 +898,9 @@ class TestAContactsFeedCarriesTheirTaskRecords:
             )
         )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert [e.field_name for e in entries] == [
             "last_name",
@@ -928,6 +950,7 @@ class TestADeletedTaskClosesItsOwnStoryOnTheContactsFeed:
                 new_value=new_value,
                 event_id=f"evt-{task_id}-{field_name}",
                 created_at=created_at,
+                user_id=USER_ID,
             )
         )
 
@@ -950,7 +973,9 @@ class TestADeletedTaskClosesItsOwnStoryOnTheContactsFeed:
         )
         await self._row(history_repo, task_id=task_id, field_name=DELETED_MARKER)
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert sorted(e.field_name for e in entries) == sorted(
             [contact_field_name(contact_id), DELETED_MARKER]
@@ -977,7 +1002,9 @@ class TestADeletedTaskClosesItsOwnStoryOnTheContactsFeed:
         )
         await self._row(history_repo, task_id=task_id, field_name=DELETED_MARKER)
 
-        entries = await history_repo.get_history_for_aggregate("contact", stranger)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", stranger, reader_user_id=USER_ID
+        )
 
         assert entries == []
 
@@ -1004,7 +1031,9 @@ class TestADeletedTaskClosesItsOwnStoryOnTheContactsFeed:
             text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
         )
 
-        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
 
         assert DELETED_MARKER in {e.field_name for e in entries}
 
@@ -1028,7 +1057,7 @@ class TestADeletedTaskClosesItsOwnStoryOnTheContactsFeed:
         await self._row(history_repo, task_id=task_id, field_name=DELETED_MARKER)
 
         count = await history_repo.get_history_for_aggregate_count(
-            "contact", contact_id
+            "contact", contact_id, reader_user_id=USER_ID
         )
 
         assert count == 2
@@ -1052,6 +1081,7 @@ class TestNamingTheTaskAHistoryRowIsAbout:
         field_name: str,
         new_value: str | None,
         created_at: datetime,
+        owner: str = USER_ID,
     ) -> None:
         await repo.record_change(
             FieldHistoryEntry(
@@ -1062,6 +1092,7 @@ class TestNamingTheTaskAHistoryRowIsAbout:
                 new_value=new_value,
                 event_id=f"evt-{task_id}-{field_name}-{created_at.isoformat()}",
                 created_at=created_at,
+                user_id=owner,
             )
         )
 
@@ -1083,9 +1114,9 @@ class TestNamingTheTaskAHistoryRowIsAbout:
             created_at=datetime(2024, 6, 1, 9, 0, tzinfo=UTC),
         )
 
-        assert await history_repo.get_task_labels([task_id]) == {
-            task_id: "Book the venue"
-        }
+        assert await history_repo.get_task_labels(
+            [task_id], reader_user_id=USER_ID
+        ) == {task_id: "Book the venue"}
 
     async def test_a_reworded_task_is_named_by_its_latest_wording(
         self,
@@ -1113,9 +1144,9 @@ class TestNamingTheTaskAHistoryRowIsAbout:
             created_at=base + timedelta(hours=1),
         )
 
-        assert await history_repo.get_task_labels([task_id]) == {
-            task_id: "Book the other venue"
-        }
+        assert await history_repo.get_task_labels(
+            [task_id], reader_user_id=USER_ID
+        ) == {task_id: "Book the other venue"}
 
     async def test_a_deleted_tasks_name_is_still_resolvable(
         self,
@@ -1139,9 +1170,9 @@ class TestNamingTheTaskAHistoryRowIsAbout:
             text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
         )
 
-        assert await history_repo.get_task_labels([task_id]) == {
-            task_id: "Return the harness"
-        }
+        assert await history_repo.get_task_labels(
+            [task_id], reader_user_id=USER_ID
+        ) == {task_id: "Return the harness"}
 
     async def test_a_task_with_nothing_naming_it_is_simply_absent(
         self,
@@ -1155,12 +1186,14 @@ class TestNamingTheTaskAHistoryRowIsAbout:
             clean_database, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
-        assert await history_repo.get_task_labels([task_id]) == {}
+        assert (
+            await history_repo.get_task_labels([task_id], reader_user_id=USER_ID) == {}
+        )
 
     async def test_no_ids_asks_the_database_nothing(
         self, history_repo: SqlFieldHistoryRepository
     ) -> None:
-        assert await history_repo.get_task_labels([]) == {}
+        assert await history_repo.get_task_labels([], reader_user_id=USER_ID) == {}
 
     async def test_several_tasks_resolve_in_one_call(
         self,
@@ -1188,6 +1221,206 @@ class TestNamingTheTaskAHistoryRowIsAbout:
                 created_at=base,
             )
 
-        assert await history_repo.get_task_labels(ids) == {
+        assert await history_repo.get_task_labels(ids, reader_user_id=USER_ID) == {
             task_id: f"Task number {i}" for i, task_id in enumerate(ids)
         }
+
+
+@pytest.mark.integration
+class TestAContactIsSharedButTheirTasksAreNot:
+    """The one asymmetry this aggregate has to hold.
+
+    ``contacts`` has no owner column and the contact history read authorises by
+    existence alone, so any authenticated user can read any contact. Task rows
+    *are* owned — and since ITER18-003 Phase 9 names them, an unscoped branch
+    would hand one user another user's commitments **and their text** through a
+    contact they happen to share.
+    """
+
+    @pytest.fixture
+    def history_repo(
+        self, clean_database: AsyncConnection
+    ) -> SqlFieldHistoryRepository:
+        return SqlFieldHistoryRepository(clean_database)
+
+    @staticmethod
+    async def _contact(conn: AsyncConnection, first_name: str) -> int:
+        result = await conn.execute(
+            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
+            {"n": first_name},
+        )
+        return int(result.scalar_one())
+
+    async def _theirs(
+        self,
+        repo: SqlFieldHistoryRepository,
+        *,
+        task_id: int,
+        contact_id: int,
+    ) -> None:
+        """A whole task record belonging to somebody else."""
+        for field_name, new_value in (
+            (CREATED_MARKER, "Their private commitment"),
+            (contact_field_name(contact_id), str(contact_id)),
+            (DELETED_MARKER, None),
+        ):
+            await repo.record_change(
+                FieldHistoryEntry(
+                    entity_type="task",
+                    entity_id=task_id,
+                    field_name=field_name,
+                    old_value=None,
+                    new_value=new_value,
+                    event_id=f"evt-other-{task_id}-{field_name}",
+                    user_id=OTHER_USER_ID,
+                )
+            )
+
+    async def test_another_users_task_stays_off_a_shared_contacts_feed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+        contact_id = await self._contact(clean_database, "Shared")
+        await self._theirs(history_repo, task_id=task_id, contact_id=contact_id)
+
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
+
+        assert entries == []
+
+    async def test_their_delete_marker_stays_off_it_too(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The delete branch's *subquery* is scoped, not just its outer filter.
+
+        Narrowing "which tasks was this contact linked to" by another user's
+        link rows would leak exactly what the outer filter refuses.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+        contact_id = await self._contact(clean_database, "Shared")
+        await self._theirs(history_repo, task_id=task_id, contact_id=contact_id)
+
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
+
+        assert DELETED_MARKER not in {e.field_name for e in entries}
+
+    async def test_the_count_refuses_them_as_well_as_the_list(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A count over a wider set is a disclosure of its own — and a broken page."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+        contact_id = await self._contact(clean_database, "Shared")
+        await self._theirs(history_repo, task_id=task_id, contact_id=contact_id)
+
+        count = await history_repo.get_history_for_aggregate_count(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
+
+        assert count == 0
+
+    async def test_their_task_is_not_nameable_either(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The name is the task's text, so the naming query is scoped in its own right."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+        contact_id = await self._contact(clean_database, "Shared")
+        await self._theirs(history_repo, task_id=task_id, contact_id=contact_id)
+
+        assert (
+            await history_repo.get_task_labels([task_id], reader_user_id=USER_ID) == {}
+        )
+
+    async def test_the_owner_still_sees_their_own(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The positive control: the filter must not empty the feed for everyone."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+        contact_id = await self._contact(clean_database, "Shared")
+        await self._theirs(history_repo, task_id=task_id, contact_id=contact_id)
+
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=OTHER_USER_ID
+        )
+
+        assert {e.field_name for e in entries} == {
+            contact_field_name(contact_id),
+            DELETED_MARKER,
+        }
+        assert await history_repo.get_task_labels(
+            [task_id], reader_user_id=OTHER_USER_ID
+        ) == {task_id: "Their private commitment"}
+
+    async def test_a_read_that_does_not_say_who_is_asking_sees_no_task_rows(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Forgetting the reader costs the rows; it never exposes them.
+
+        ``user_id = NULL`` is never true, so the default is fail-closed by
+        construction rather than by a check somebody has to remember to write.
+        """
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        contact_id = await self._contact(clean_database, "Anonymous")
+        await self._theirs(history_repo, task_id=task_id, contact_id=contact_id)
+
+        entries = await history_repo.get_history_for_aggregate("contact", contact_id)
+        count = await history_repo.get_history_for_aggregate_count(
+            "contact", contact_id
+        )
+
+        assert entries == []
+        assert count == 0
+        assert await history_repo.get_task_labels([task_id]) == {}

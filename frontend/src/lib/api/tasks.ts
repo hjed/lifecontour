@@ -172,8 +172,18 @@ export const taskKeys = {
  */
 export const taskHistoryKeys = {
   all: ['task-history'] as const,
+  /**
+   * Every page of one task's history — the key an invalidation names.
+   *
+   * `list(...)` is **not** usable as a filter: a query-key filter matches by
+   * deep-partial equality, so `{ page: undefined, limit: undefined }` does not
+   * match a mounted `{ page: 1, limit: 5 }`. Passing it to `invalidateQueries`
+   * silently matches nothing and leaves the open disclosure stale for its whole
+   * cache lifetime. Filters name this; only `useQuery` names `list`.
+   */
+  forTask: (taskId: string) => [...taskHistoryKeys.all, taskId] as const,
   list: (taskId: string, page?: number, limit?: number) =>
-    [...taskHistoryKeys.all, taskId, { page, limit }] as const,
+    [...taskHistoryKeys.forTask(taskId), { page, limit }] as const,
 };
 
 /**
@@ -484,7 +494,7 @@ function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
     { queryKey: taskKeys.detail(taskId) },
     { queryKey: taskKeys.journalLists() },
     { queryKey: taskKeys.upcoming() },
-    { queryKey: taskHistoryKeys.list(taskId) }
+    { queryKey: taskHistoryKeys.forTask(taskId) }
   );
 }
 

@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.core.tasks.models.events import contact_field_name
 from tests.integration.conftest import ContactFactory
 
 
@@ -543,6 +544,9 @@ class TestATaskAppearsOnAContactsHistoryEndpoint:
                 new_value="Return the borrowed harness",
                 source=Provenance.UI,
                 event_id=f"evt-created-{task_id}",
+                # Stamped as the projection stamps it: the naming query is
+                # owner-scoped, because the name is the task's own text.
+                user_id="test-user-123",
             )
         )
         await self._seed_link_row(
@@ -648,3 +652,68 @@ class TestATaskAppearsOnAContactsHistoryEndpoint:
         ]
         assert len(task_entries) == 1
         assert task_entries[0]["attributes"]["entity_label"] is None
+
+    @pytest.mark.asyncio
+    async def test_another_users_task_stays_off_a_shared_contacts_feed(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        """Contacts are shared; the commitments people make about them are not.
+
+        The endpoint authorises by the contact *existing*, because ``contacts``
+        has no owner column — so this is the one row on the feed that has to
+        carry its own scope. Since the entry now names the task, an unscoped
+        branch would leak its text too.
+        """
+        from core_shared.models.history import Provenance
+
+        from app.core.history.adapters.sql.field_history_repository import (
+            SqlFieldHistoryRepository,
+        )
+        from app.core.history.models import CREATED_MARKER, FieldHistoryEntry
+        from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_task
+
+        contact = await contact_factory.create_contact(
+            first_name="Shared", last_name="Person"
+        )
+        contact_id = int(contact["id"])
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            user_id=OTHER_USER_ID,
+        )
+        repo = SqlFieldHistoryRepository(async_connection)
+        for field_name, new_value in (
+            (CREATED_MARKER, "Their private commitment"),
+            (contact_field_name(contact_id), str(contact_id)),
+        ):
+            await repo.record_change(
+                FieldHistoryEntry(
+                    entity_type="task",
+                    entity_id=task_id,
+                    field_name=field_name,
+                    old_value=None,
+                    new_value=new_value,
+                    changed_by="ui",
+                    source=Provenance.UI,
+                    event_id=f"evt-foreign-{task_id}-{field_name}",
+                    user_id=OTHER_USER_ID,
+                )
+            )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert [
+            e for e in body["data"] if e["attributes"]["entity_type"] == "task"
+        ] == []
+        assert "Their private commitment" not in response.text
+        # The count is scoped too: a total that included it would both leak the
+        # existence of the row and advertise a page the list will not return.
+        assert body["meta"]["total_count"] == len(body["data"])

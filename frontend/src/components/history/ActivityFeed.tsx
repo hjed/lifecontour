@@ -86,6 +86,28 @@ type ActivitiesState = {
   activities: HistoryResource[];
   entityId: string;
   page: number;
+  /**
+   * A fingerprint of the page already folded in.
+   *
+   * It has to satisfy two things at once, and the obvious implementations each
+   * satisfy only one.
+   *
+   * **It must change when the content changes**, not merely when the ids do: a
+   * task reworded between two reads comes back on the same link-row ids
+   * carrying a new `entity_label`, and a key built from `page` + ids left the
+   * feed rendering the old name until some other row moved or it remounted.
+   *
+   * **And it must be stable across renders of equal content.** Comparing the
+   * response object by reference looks right — structural sharing hands back
+   * the same object when the payload is deeply equal — but the contract here is
+   * an injected hook, and a hook that returns a fresh literal each call (every
+   * test double, and any caller that forgets to memoise) then makes the effect
+   * dispatch on every render, which is an infinite loop rather than a stale
+   * label.
+   *
+   * Serialising the page does both. It is bounded by `pageSize` and computed
+   * only when the effect runs.
+   */
   processedDataKey: string | null;
 };
 
@@ -173,20 +195,13 @@ export function ActivityFeed({
   useEffect(() => {
     if (!data) return;
 
-    const currentDataKey = `${state.page}-${data.data.map(a => a.id).join(',')}`;
+    // The whole page, not just its ids — see `processedDataKey`.
+    const dataKey = `${state.page}-${JSON.stringify(data.data)}`;
 
     if (state.page === 1) {
-      dispatch({
-        type: 'SET_ACTIVITIES',
-        activities: data.data,
-        dataKey: currentDataKey,
-      });
+      dispatch({ type: 'SET_ACTIVITIES', activities: data.data, dataKey });
     } else {
-      dispatch({
-        type: 'APPEND_ACTIVITIES',
-        activities: data.data,
-        dataKey: currentDataKey,
-      });
+      dispatch({ type: 'APPEND_ACTIVITIES', activities: data.data, dataKey });
     }
   }, [data, state.page]);
 

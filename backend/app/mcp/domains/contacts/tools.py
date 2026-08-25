@@ -205,8 +205,11 @@ async def _build_contact_response(
 
     # Add history context if requested
     if include_history:
+        # ``user_id`` is resolved above for the Immich link; it is passed here
+        # because this feed carries a linked task's rows and a task is owned
+        # while a contact is not.
         history = await contact_service.get_contact_history(
-            contact_id, limit=DEFAULT_HISTORY_LIMIT
+            contact_id, limit=DEFAULT_HISTORY_LIMIT, reader_user_id=user_id
         )
         history_summary = (
             f"Recent changes: {len(history)} field updates recorded"

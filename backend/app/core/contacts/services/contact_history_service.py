@@ -29,6 +29,8 @@ class ContactHistoryService:
         limit: int = 50,
         offset: int = 0,
         _transaction: AsyncConnection | None = None,
+        *,
+        reader_user_id: str | None = None,
     ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific contact with pagination.
 
@@ -40,18 +42,35 @@ class ContactHistoryService:
         a task has no route of its own to link to instead.
 
         One extra query, and only when the page actually holds task rows.
+
+        ``reader_user_id`` reaches both the aggregate read and the naming query.
+        A task is owned and a contact is not, so it is what stops a shared
+        contact from handing one user another user's commitments — and, because
+        the name *is* the task's text, from handing over their contents. It
+        defaults to ``None``, which matches no task row, so a caller that does
+        not say who is asking gets a feed without task entries rather than one
+        carrying somebody else's.
         """
-        entries = await self.history_repo.get_contact_history(contact_id, limit, offset)
-        await self._name_the_tasks(entries)
+        entries = await self.history_repo.get_contact_history(
+            contact_id, limit, offset, reader_user_id=reader_user_id
+        )
+        await self._name_the_tasks(entries, reader_user_id=reader_user_id)
         return entries
 
-    async def _name_the_tasks(self, entries: list[ContactFieldHistoryEntry]) -> None:
+    async def _name_the_tasks(
+        self,
+        entries: list[ContactFieldHistoryEntry],
+        *,
+        reader_user_id: str | None,
+    ) -> None:
         """Stamp ``entity_label`` on the task rows of one page, in place."""
         task_ids = {e.entity_id for e in entries if e.entity_type == _TASK_ENTITY_TYPE}
         if not task_ids:
             return
 
-        labels = await self.history_repo.get_task_labels(sorted(task_ids))
+        labels = await self.history_repo.get_task_labels(
+            sorted(task_ids), reader_user_id=reader_user_id
+        )
         for entry in entries:
             if entry.entity_type == _TASK_ENTITY_TYPE:
                 entry.entity_label = labels.get(entry.entity_id)
@@ -60,9 +79,17 @@ class ContactHistoryService:
         self,
         contact_id: int,
         _transaction: AsyncConnection | None = None,
+        *,
+        reader_user_id: str | None = None,
     ) -> int:
-        """Get total count of history entries for a specific contact."""
-        return await self.history_repo.get_contact_history_count(contact_id)
+        """Get total count of history entries for a specific contact.
+
+        Must be given the same reader as the listing: a count computed over a
+        wider set would advertise a "Load More" that returns nothing.
+        """
+        return await self.history_repo.get_contact_history_count(
+            contact_id, reader_user_id=reader_user_id
+        )
 
     async def get_entity_history(
         self,

@@ -469,13 +469,31 @@ class ContactFieldHistoryRepository(FieldHistoryRepository):
 
     @abstractmethod
     async def get_contact_history(
-        self, contact_id: int, limit: int = 50, offset: int = 0
+        self,
+        contact_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        reader_user_id: str | None = None,
     ) -> list[FieldHistoryEntry]:
-        """Get field history for a specific contact with pagination."""
+        """Get field history for a specific contact with pagination.
+
+        ``reader_user_id`` scopes the one kind of row on this aggregate that has
+        an owner: a linked task's. Contacts themselves have none, so without it
+        a shared contact would hand one user another user's commitments. It
+        defaults to ``None``, which matches no row — forgetting it costs those
+        entries rather than exposing them.
+        """
 
     @abstractmethod
-    async def get_contact_history_count(self, contact_id: int) -> int:
-        """Get total count of history entries for a specific contact."""
+    async def get_contact_history_count(
+        self, contact_id: int, *, reader_user_id: str | None = None
+    ) -> int:
+        """Get total count of history entries for a specific contact.
+
+        Must be passed the same ``reader_user_id`` as the listing, or the count
+        would advertise a page the list will not return.
+        """
 
 
 class ContactEditEventRepository(ABC):

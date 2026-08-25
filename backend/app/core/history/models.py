@@ -133,10 +133,18 @@ class HistoryAggregationStrategy:
     every ``(entity_type, entity_id)`` belonging to the root, parameterised on the
     ``:root_id`` bind parameter.
 
-    A second bind, ``:root_id_text``, carries the same id as text. Both are always
-    supplied by the repository. It exists because the contact predicate has to build
-    a ``field_name`` from the root id, and reusing the integer bind inside a string
-    concatenation would ask PostgreSQL to infer two types for one parameter.
+    Two further binds are always supplied by the repository, whether or not a
+    strategy names them.
+
+    ``:root_id_text`` carries the same id as text, because the contact predicate has
+    to build a ``field_name`` from the root id and reusing the integer bind inside a
+    string concatenation would ask PostgreSQL to infer two types for one parameter.
+
+    ``:reader_user_id`` is **who is asking**. It exists because the contact aggregate
+    reaches rows that are owned — a task's — while contacts themselves are not, and
+    it defaults to ``None``. That default is deliberate and is what makes the design
+    safe: ``user_id = NULL`` is never true in SQL, so a caller that forgets to say
+    who is reading loses the owned rows rather than exposing them.
     """
 
     root_type: str
@@ -175,16 +183,23 @@ class HistoryAggregationStrategy:
 # before it was deleted — the unlink entry already stands above it, and the pair
 # reads as a sequence rather than as a contradiction.
 #
-# **This branch carries no owner filter, and the assumption is stated rather than
-# left implicit.** Every other branch reaches contact-domain rows, which have no
-# owner: ``contacts`` has no ``user_id`` column and neither does the read that
-# serves this predicate. Task rows are the one kind that *does* carry one
-# (``field_history.user_id``, stamped by ``HistoryService._owner_for``), so in a
-# multi-tenant deployment this branch would surface another user's task on a
-# shared contact's feed. It cannot be narrowed here — the strategy is
-# parameterised on the root id alone, and the contact history read has no user to
-# thread through — so scoping it means giving the contact domain an owner first.
-# Recorded as a follow-up on ITER18-003 Phase 9.
+# **Both task branches are owner-scoped, and they are the only branches here that
+# are.** Every other branch reaches contact-domain rows, which have no owner:
+# ``contacts`` has no ``user_id`` column and neither does the read that serves this
+# predicate, so a contact is readable by any authenticated user. Task rows are the
+# one kind that *does* carry an owner (``field_history.user_id``, stamped by
+# ``HistoryService._owner_for``) — which means that without a filter, a shared
+# contact would hand one user another user's commitments, and since ITER18-003
+# Phase 9 names them, their text as well.
+#
+# ``:reader_user_id`` defaults to ``None`` at the repository, and that is the
+# safety property rather than an oversight: ``user_id = NULL`` is never true, so a
+# caller that does not say who is asking sees **no** task rows at all. The failure
+# mode of forgetting is an incomplete feed, never a disclosure.
+#
+# The delete branch's *subquery* is scoped too. Narrowing "which tasks was this
+# contact linked to" by another user's link rows would leak exactly what the outer
+# filter refuses.
 _CONTACT_AGGREGATION_WHERE = f"""
     (entity_type = 'contact' AND entity_id = :root_id)
     OR (entity_type = 'contact_method' AND entity_id IN (SELECT id FROM contact_methods WHERE contact_id = :root_id))
@@ -194,10 +209,13 @@ _CONTACT_AGGREGATION_WHERE = f"""
     OR (entity_type = 'contact_relationship' AND entity_id IN (SELECT id FROM contact_relationships WHERE from_contact_id = :root_id OR to_contact_id = :root_id))
     OR (entity_type = 'contact_important_date' AND entity_id IN (SELECT id FROM contact_important_dates WHERE contact_id = :root_id))
     OR (entity_type = 'contact_summary' AND entity_id = :root_id)
-    OR (entity_type = 'task' AND field_name = '{CONTACT_FIELD_PREFIX}' || :root_id_text)
-    OR (entity_type = 'task' AND field_name = '{DELETED_MARKER}' AND entity_id IN (
+    OR (entity_type = 'task' AND user_id = :reader_user_id
+        AND field_name = '{CONTACT_FIELD_PREFIX}' || :root_id_text)
+    OR (entity_type = 'task' AND user_id = :reader_user_id
+        AND field_name = '{DELETED_MARKER}' AND entity_id IN (
         SELECT link.entity_id FROM field_history AS link
         WHERE link.entity_type = 'task'
+          AND link.user_id = :reader_user_id
           AND link.field_name = '{CONTACT_FIELD_PREFIX}' || :root_id_text))
 """
 
@@ -277,15 +295,31 @@ class FieldHistoryRepository(ABC):
 
     @abstractmethod
     async def get_history_for_aggregate(
-        self, root_type: str, root_id: int, limit: int = 50, offset: int = 0
+        self,
+        root_type: str,
+        root_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        reader_user_id: str | None = None,
     ) -> list[FieldHistoryEntry]:
-        """Get paginated history for an aggregate root using its strategy."""
+        """Get paginated history for an aggregate root using its strategy.
+
+        ``reader_user_id`` says who is asking. Only the contact aggregate uses it,
+        because only it reaches rows belonging to another aggregate that *is*
+        owned. Omitting it is safe by construction — the owned rows drop out.
+        """
 
     @abstractmethod
     async def get_history_for_aggregate_count(
-        self, root_type: str, root_id: int
+        self, root_type: str, root_id: int, *, reader_user_id: str | None = None
     ) -> int:
-        """Get the total history count for an aggregate root using its strategy."""
+        """Get the total history count for an aggregate root using its strategy.
+
+        Takes ``reader_user_id`` for the same reason the listing does, and must
+        always be passed the same value: a count computed over a wider set than
+        the list would advertise a "Load More" that returns nothing.
+        """
 
     @abstractmethod
     async def get_entity_history(
@@ -294,7 +328,9 @@ class FieldHistoryRepository(ABC):
         """Get field history for a single entity."""
 
     @abstractmethod
-    async def get_task_labels(self, task_ids: Sequence[int]) -> dict[int, str]:
+    async def get_task_labels(
+        self, task_ids: Sequence[int], *, reader_user_id: str | None = None
+    ) -> dict[int, str]:
         """Name each of these tasks from its own history rows.
 
         Resolved from ``field_history`` rather than from ``tasks`` because a
@@ -304,6 +340,12 @@ class FieldHistoryRepository(ABC):
         that is an ordinary state and the caller renders its unnamed wording.
 
         One query for the whole page — a contact's feed can hold many task rows.
+
+        Owner-scoped on the same ``reader_user_id`` the aggregate read uses. The
+        ids reaching here have already been filtered by that read, so this is
+        defence in depth rather than the only guard — but a name is the most
+        revealing thing this module can return, and it should not depend on the
+        caller having filtered first.
         """
 
     @abstractmethod

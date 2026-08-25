@@ -1037,7 +1037,7 @@ class TestATaskReachesTheContactsOwnFeed:
         conn: AsyncConnection, contact_id: int
     ) -> list[FieldHistoryEntry]:
         return await SqlFieldHistoryRepository(conn).get_history_for_aggregate(
-            "contact", contact_id
+            "contact", contact_id, reader_user_id=USER_ID
         )
 
     @pytest.mark.asyncio

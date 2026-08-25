@@ -23,13 +23,22 @@ class SqlContactFieldHistoryRepository(
     """SQL contact history repository backed by the shared field-history repository."""
 
     async def get_contact_history(
-        self, contact_id: int, limit: int = 50, offset: int = 0
+        self,
+        contact_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        reader_user_id: str | None = None,
     ) -> list[ContactFieldHistoryEntry]:
         """Get field history for a specific contact with pagination."""
         return await self.get_history_for_aggregate(
-            _CONTACT_ROOT, contact_id, limit, offset
+            _CONTACT_ROOT, contact_id, limit, offset, reader_user_id=reader_user_id
         )
 
-    async def get_contact_history_count(self, contact_id: int) -> int:
+    async def get_contact_history_count(
+        self, contact_id: int, *, reader_user_id: str | None = None
+    ) -> int:
         """Get total count of history entries for a specific contact."""
-        return await self.get_history_for_aggregate_count(_CONTACT_ROOT, contact_id)
+        return await self.get_history_for_aggregate_count(
+            _CONTACT_ROOT, contact_id, reader_user_id=reader_user_id
+        )
