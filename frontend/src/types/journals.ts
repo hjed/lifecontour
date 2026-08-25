@@ -506,6 +506,15 @@ export interface JournalAttributes {
   // Review information
   has_pending_reviews?: boolean;
   review_items?: ReviewSuggestion[];
+  /**
+   * How many not-done tasks are due in this journal, excluding lapsed ones.
+   *
+   * `null` (or absent) means **not computed**, which is not the same fact as
+   * zero: only the list endpoint runs the count, so a journal reached through
+   * search or through a contact answers null rather than claiming it has
+   * nothing due. Both render nothing — see `JournalListItem`.
+   */
+  tasks_due_count?: number | null;
 }
 
 // Journal Relationships

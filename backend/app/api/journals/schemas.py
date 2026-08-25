@@ -808,6 +808,22 @@ class JournalAttributes(BaseModel):
         description="Pending review suggestions (only populated on detail view)",
     )
 
+    # Task indicators
+    tasks_due_count: int | None = Field(
+        default=None,
+        description=(
+            "How many not-done tasks are due in this journal, excluding lapsed "
+            "ones — a task whose due journal has passed or been cancelled. This "
+            "is the journal list's 'tasks due' indicator; the detail view shows "
+            "the tasks themselves. **Null means not computed, which is not the "
+            "same as zero**: only the list endpoint runs the count, so a journal "
+            "reached through search or through a contact answers null rather "
+            "than claiming it has nothing due. A surface renders nothing for "
+            "null and nothing for zero, so the distinction costs a reader "
+            "nothing and stops the payload asserting something it did not check."
+        ),
+    )
+
 
 class JournalRelationships(BaseModel):
     """Journal relationships to other resources."""

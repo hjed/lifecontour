@@ -146,6 +146,11 @@ from app.core.journal.services.outdoor_dashboard_service import (
 )
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.search.exceptions import SearchServiceUnavailableError
+
+# The tasks domain's **read** service, never ``TaskService``: the journal list
+# needs to know how many commitments a journal is waiting on, and must not be
+# handed the ability to change one to find out.
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
@@ -1030,6 +1035,7 @@ async def _build_journal_list_resources(
     tag_repo: JournalTagRepository,
     route_repo: RouteRepository,
     pending_review_journal_ids: set[int] | None = None,
+    tasks_due_counts: dict[int, int] | None = None,
 ) -> list[JournalResource]:
     """Helper to consistently build journal list responses with enriched data.
 
@@ -1124,11 +1130,26 @@ async def _build_journal_list_resources(
         )
         journal_resources.append(resource)
 
-    # Set has_pending_reviews indicator
+    # Set the list-level indicators, both of them read once for the whole page
+    # and zipped on here rather than fetched per row.
     review_ids = pending_review_journal_ids or set()
     for resource in journal_resources:
         journal_id_int = int(resource.id)
         resource.attributes.has_pending_reviews = journal_id_int in review_ids
+        # **The two `None`s have to agree.** ``tasks_due_count`` is nullable
+        # precisely so a payload nobody ran the count for says so instead of
+        # claiming zero — so a caller that passed no mapping must leave the
+        # field alone rather than stamp a zero on every row. An `or {}` here
+        # would collapse "not computed" into "computed, nothing due" and
+        # reintroduce the false claim the nullable field exists to prevent.
+        #
+        # Within a mapping that *was* computed, a missing key really does mean
+        # none: the count read omits journals with nothing due rather than
+        # returning a zero for each, so a page holding no tasks costs no rows.
+        if tasks_due_counts is not None:
+            resource.attributes.tasks_due_count = tasks_due_counts.get(
+                journal_id_int, 0
+            )
 
     # Populate contact names
     contact_cache: dict[int, dict[str, str | None]] = {}
@@ -1173,6 +1194,7 @@ async def list_journals(
     route_repo: FromDishka[RouteRepository],
     contact_repo: FromDishka[ContactRepository],
     review_item_repo: FromDishka[ReviewItemRepository],
+    task_read_service: FromDishka[TaskReadService],
     user: FromDishka[SessionUser],  # Require authentication
     page: Annotated[int, Query(description="Page number", ge=1)] = 1,
     limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
@@ -1255,6 +1277,13 @@ async def list_journals(
         await review_item_repo.find_pending_journal_ids_by_user(user.id)
     )
 
+    # And the tasks-due indicator, for this page's journals only. The read is
+    # given the journals rather than their ids because judging whether a
+    # journal's commitments have lapsed needs its date, which is already loaded
+    # here — and it costs a single statement when nothing is due, which is what
+    # nearly every page will find.
+    tasks_due_counts = await task_read_service.due_task_counts(user.id, journals)
+
     # Convert to resources with enriched data
     journal_resources = await _build_journal_list_resources(
         journals=journals,
@@ -1291,6 +1320,7 @@ async def list_journals(
         tag_repo=tag_repo,
         route_repo=route_repo,
         pending_review_journal_ids=pending_review_journal_ids,
+        tasks_due_counts=tasks_due_counts,
     )
 
     meta = create_pagination_meta(total_count, page, limit)

@@ -37,6 +37,8 @@ export interface DisplayJournal {
   depth?: number | null;
   // Review indicators
   has_pending_reviews?: boolean;
+  // Task indicators
+  tasks_due_count?: number | null;
 }
 
 /**
@@ -86,5 +88,9 @@ export function transformJournalForDisplay(
     children_count: journal.attributes.children_count ?? null,
     depth: journal.attributes.depth ?? null,
     has_pending_reviews: journal.attributes.has_pending_reviews,
+    // Passed through rather than defaulted: null or absent means the endpoint
+    // did not compute a count, which the row must not turn into a claim that
+    // the journal has nothing due.
+    tasks_due_count: journal.attributes.tasks_due_count,
   };
 }

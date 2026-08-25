@@ -264,3 +264,18 @@ const REMOVABLE_LINK_ROLES: Record<TaskLinkRole, boolean> = {
 export function linkRemovable(role: TaskLinkRole): boolean {
   return REMOVABLE_LINK_ROLES[role] ?? false;
 }
+
+/**
+ * The accessible name for a journal row's "tasks due" indicator.
+ *
+ * The badge's visible text is deliberately short — `2 due` — because it sits in
+ * a row already crowded with type icons, a title, a cancelled marker and a
+ * needs-review marker. That reads unambiguously *because* the journal it
+ * belongs to is visible beside it, which is exactly what a screen reader
+ * meeting the badge on its own does not have. So the announced name carries the
+ * subject the layout supplies, and is pure here so a test can assert the
+ * singular and the plural without rendering a row.
+ */
+export function tasksDueWording(count: number): string {
+  return `${count} task${count === 1 ? '' : 's'} due in this journal`;
+}

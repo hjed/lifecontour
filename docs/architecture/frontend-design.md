@@ -724,6 +724,131 @@ carries only id, display name and photo.
   user edits the date and the task section below goes on claiming the task is
   fine for the whole five-minute `staleTime`.
 
+#### Task writes invalidate `journalKeys.lists()`
+
+The mirror of the rule above, and it arrived with the journal list's tasks-due
+badge: the list row now embeds a fact derived from tasks, so a task write
+reaches a journal namespace and has to name it. `useCreateTask`,
+`useUpdateTask`, `useRetargetTask` and `useDeleteTask` name
+`journalKeys.lists()`; without it a user who ticks a task done on a journal and
+returns to the list is told it is still waiting on one, for the whole
+five-minute `staleTime`.
+
+- **`lists()` is the reachable set exactly**, not `journalKeys.all`. Only the
+  list endpoint computes the count — search and a contact's journals leave it
+  null and render no badge — so invalidating those would refetch pages whose
+  answer cannot have changed. `lists()` covers the infinite lists too, since
+  their key is built from it.
+- **Two task mutations are deliberately excluded**, and that is what makes the
+  rule a rule rather than a sweep: linking a **contact** and attaching a
+  **mention** both leave `journalKeys.lists()` alone, because the count reads
+  the *due* anchor only. Each is asserted by name, beside the exhaustive
+  key-set match that would already have caught it.
+- `useUpdateTask` names it even though a **text-only** edit cannot move a count:
+  the same PATCH carries the status, and the hook would have to read its
+  variables back to tell the two apart. One redundant refetch is the right side
+  to err on against a badge that lies for five minutes.
+- **A timezone change invalidates it too.** The count's lapse verdict is
+  reached in the user's *configured* zone, so `useUpdateTimezone` names
+  `journalKeys.lists()` and `taskKeys.all` alongside its own namespace —
+  otherwise correcting your timezone leaves you looking at badges and lapse
+  markers decided in the old one for five minutes. The task half of that was a
+  pre-existing gap; the journal half arrived with this badge. `journal-keys.ts`
+  is what makes it expressible: `journals.ts` imports `settings.ts`, so naming
+  the key from there would close the same cycle again.
+- **Crossing local midnight is *not* handled, deliberately.** A journals page
+  left open and focused across midnight can keep rendering a badge for a task
+  that has just lapsed, until the next refetch. Nothing fires at midnight, so
+  there is no mutation to hang an invalidation off, and the alternative — a
+  `today` term in `journalKeys.list()` — would rewrite the key every journal
+  list query is built on to fix a staleness the whole app shares: the lapse
+  marker on task rows and the dashboard's upcoming window have the same
+  property, for the same reason. The server stays the authority and the view
+  self-corrects on the next refetch. **Recorded as a follow-up**, to be solved
+  once for every date-derived read rather than piecemeal for this badge.
+- **`journalKeys` moved to `lib/api/journal-keys.ts`**, re-exported from
+  `journals.ts` so no call site changed. The obvious version of this — having
+  `tasks.ts` import `journalKeys` straight from `journals.ts`, which already
+  imports `taskKeys` back — closes a **runtime import cycle**, and it does not
+  survive contact with the suite: a test that partially mocks the journal client
+  through `jest.requireActual` re-enters `journals.ts` while its own top-level
+  `const`s are in the temporal dead zone, and the whole file fails to run with
+  `Cannot access 'calendarKeys' before initialization`. The reasoning that the
+  cycle was safe "because both directions are only used inside functions" was
+  wrong: what matters is when the *modules* are evaluated, not when the
+  functions are called. Keys have no dependencies of their own, so lifting them
+  out removes the cycle instead of arguing about it.
+
+#### The journal list's tasks-due indicator
+
+`JournalListItem` renders a `tasks-due-badge` beside the row's existing
+list-level indicators, from the `tasks_due_count` the list endpoint carries. It
+is the specification's "lightweight indicator that a journal has tasks due in
+it, consistent with the other list-level indicators".
+
+- **Consistent means the same vocabulary, not a new one.** Same `Badge`, same
+  `ml-2 px-1 py-0 text-[10px] leading-none font-bold uppercase` as the cancelled
+  and needs-review markers beside it, and the same slot in the `CardTitle`.
+  `variant='secondary'` rather than `destructive`: a journal with commitments in
+  it is information, not a problem — `destructive` is what *needs review* means,
+  and a row wearing both should not say the same thing twice.
+- **Not computed is not zero, and the schema has to say so.** `tasks_due_count`
+  is **nullable** on the wire and the transform passes `null` and `undefined`
+  through rather than defaulting them. This is load-bearing rather than
+  fastidious: only `list_journals` runs the count, so a non-nullable field
+  defaulting to `0` would have the *search* payload state that a journal with
+  two tasks genuinely due in it has none — an affirmative false claim, not a
+  missing one, on the very surface the `/journals` page switches to when the
+  user types. Both `null` and `0` render nothing, so the distinction costs the
+  viewer nothing; it exists so the payload never asserts something no query
+  checked. An integration test reads a journal with two tasks due back through
+  the detail endpoint and requires `null`.
+- **The short form is for the eye and the long one for the ear.** The badge
+  reads `2 due`, which is unambiguous *because the journal it sits on is visible
+  beside it* — exactly what a screen reader meeting the badge on its own does
+  not have. So the visible span is `aria-hidden` and an `sr-only` sibling
+  carries `tasksDueWording(count)`: `2 tasks due in this journal`. A shadcn
+  `Badge` is a plain `div` with no role, so what this changes is its announced
+  **text content**, not an accessible *name* — and it is why an `aria-label` on
+  the span was rejected rather than used: `aria-label` needs a role to attach
+  to. A test asserts the `aria-hidden` itself, because without it the badge
+  announces "2 due 2 tasks due in this journal" and every other assertion here
+  goes on passing. **Recorded as a follow-up:** this row's hierarchy and sync
+  indicators put `aria-label` on the lucide `<svg>` itself and have the same
+  weakness.
+- **The wording lives in `lib/task-display.ts`**, beside `lapseWording` and
+  `statusWording`, so the singular and the plural are asserted without rendering
+  a row — and so the one module that decides how a task is worded goes on being
+  the only one.
+- **Four surfaces show a journal row and only one carries a computed count.**
+  Only `list_journals` *passes* the counts, so a row from
+  `GET /api/journals/search` (the `/journals` page in search mode) or from a
+  contact's journals shows **no** indicator — and neither does a journal nested
+  under its parent, which `JournalChildrenList` renders from
+  `attributes.children`, a `ChildJournalSummary` that carries no count at all.
+  The contact endpoint is worth naming because it is **the same helper**:
+  `_build_journal_list_resources` is imported by
+  `app/api/contacts/controllers.py` and called without the mapping, so it is a
+  live caller relying on the nullable guard to leave its rows uncomputed rather
+  than stamp a zero on each. Without that guard the contact view would be a
+  second surface making the false claim.
+  So one journal can show the badge as a top-level row and not as a child. That
+  is not an oversight: *Needs Review* is missing from those same rows for the
+  same reason, so the **rows** are consistent with the sibling indicator. The
+  **payloads** deliberately are not — `has_pending_reviews` is a non-nullable
+  `bool` defaulting to `false`, so it tells those same clients that a journal
+  has no pending review when nothing ever checked, which is precisely what the
+  nullable rule above stops `tasks_due_count` doing. **Two follow-ups
+  recorded:** widening the count to those endpoints needs the same batched read
+  there, and `has_pending_reviews` wants the same nullable treatment; neither
+  is done here, where it would double the surface under test.
+- **Lapsed tasks are excluded server-side, and must be.** The specification is
+  explicit that a lapsed task produces "no overdue section, no counter, no badge
+  and no notification": the user is meant to meet it on the journal, not be
+  chased by the listing. The row therefore renders whatever count it is given
+  and makes no lapse judgement of its own — the browser's clock is not the zone
+  the verdict was reached in, and a second opinion here could only disagree.
+
 ### TypeScript Integration
 
 - Define interfaces for all component props

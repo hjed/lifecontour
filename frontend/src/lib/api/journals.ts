@@ -41,6 +41,7 @@ import {
 } from '@/lib/constants';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { taskKeys } from './tasks';
+import { journalKeys } from './journal-keys';
 import { getDefaultTimezone, useUserSettings } from './settings';
 import {
   addDaysToIsoDate,
@@ -70,31 +71,11 @@ const FUTURE_PAGE_LIMIT = 100;
 const FUTURE_WINDOW_SLACK_DAYS = 1;
 
 // Query Keys
-export const journalKeys = {
-  all: ['journals'] as const,
-  lists: () => [...journalKeys.all, 'list'] as const,
-  list: (filters: JournalFilters) => [...journalKeys.lists(), filters] as const,
-  infiniteLists: () => [...journalKeys.lists(), 'infinite'] as const,
-  infiniteList: (
-    filters: JournalFilters,
-    options?: { chunkDays?: number; anchorDate?: string }
-  ) => [...journalKeys.infiniteLists(), filters, options] as const,
-  details: () => [...journalKeys.all, 'detail'] as const,
-  detail: (id: string) => [...journalKeys.details(), id] as const,
-  search: (query: string) => [...journalKeys.all, 'search', query] as const,
-  /**
-   * The future-journal options behind a due-journal picker.
-   *
-   * `today` and `timezone` are part of the key rather than incidental inputs:
-   * the answer is "which journals are still ahead of the user", so a result
-   * cached yesterday, or judged in a zone they have since changed, is a
-   * different answer to a different question.
-   */
-  future: (params: { search: string; today: string; timezone: string }) =>
-    [...journalKeys.all, 'future', params] as const,
-  contactJournals: (contactId: string, filters?: ContactJournalsFilters) =>
-    [...journalKeys.all, 'contact', contactId, filters] as const,
-};
+//
+// `journalKeys` lives in `./journal-keys` so `tasks.ts` can name a journal
+// namespace without importing this module — see that file for the cycle it
+// removes. Re-exported here so every existing import keeps working.
+export { journalKeys };
 
 // Contact Journals Filters
 export interface ContactJournalsFilters {

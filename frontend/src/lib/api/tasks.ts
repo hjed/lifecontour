@@ -53,6 +53,10 @@ import {
 } from '@/lib/constants';
 import { statusChangeWording } from '@/lib/task-display';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
+// From `./journal-keys`, never from `./journals`. This module is imported *by*
+// the journal client, so reaching back into it would close a runtime cycle that
+// breaks partial-mock tests — see the header of `journal-keys.ts`.
+import { journalKeys } from './journal-keys';
 
 /**
  * The refusal a *done* task's retarget draws when the reopen was not confirmed.
@@ -435,17 +439,55 @@ function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
 }
 
 /**
+ * A change that can move a journal's `tasks_due_count`, and so the badge the
+ * journal *list* renders from it.
+ *
+ * This is the "names only the namespaces its change can reach" rule pointing
+ * the same way `useUpdateJournal` already points at `taskKeys`: the journal
+ * list's row now embeds a fact derived from tasks, so a task write reaches a
+ * journal namespace and has to say so. Without it the list keeps the old badge
+ * for the app-wide five-minute `staleTime` — a user who ticks a task done on a
+ * journal and goes back to the list is told it is still waiting on one.
+ *
+ * **`lists()` is the reachable set exactly**, not `journalKeys.all`. Only the
+ * list endpoint computes the count; search and a contact's journals leave it
+ * null and render no badge, so invalidating those would refetch pages whose
+ * answer cannot have changed. `lists()` covers the infinite lists too, since
+ * their key is built from it.
+ *
+ * Kept apart from {@link refreshTask} rather than folded into it because two of
+ * that function's callers — linking and unlinking a **contact** — cannot move a
+ * count, and the rule is only worth stating if it is applied narrowly.
+ */
+function refreshTaskAndDueCounts(
+  queryClient: QueryClient,
+  taskId: string
+): Promise<void> {
+  return invalidateAfterMutation(
+    queryClient,
+    { queryKey: taskKeys.detail(taskId) },
+    { queryKey: taskKeys.journalLists() },
+    { queryKey: taskKeys.upcoming() },
+    { queryKey: journalKeys.lists() }
+  );
+}
+
+/**
  * A task appearing or disappearing.
  *
  * No detail key: a task being created has no id to have cached anything under,
  * and a deleted one's detail is *dropped* rather than invalidated — see
  * `forgetTask`.
+ *
+ * Always moves a journal's due count by one, so `journalKeys.lists()` is
+ * unconditional here where {@link refreshTaskAndDueCounts} is the opt-in form.
  */
 function refreshTaskCollections(queryClient: QueryClient): Promise<void> {
   return invalidateAfterMutation(
     queryClient,
     { queryKey: taskKeys.journalLists() },
-    { queryKey: taskKeys.upcoming() }
+    { queryKey: taskKeys.upcoming() },
+    { queryKey: journalKeys.lists() }
   );
 }
 
@@ -826,7 +868,13 @@ export function useUpdateTask() {
     // applied from a snapshot that may itself be stale, so the refetch is worth
     // as much on that path as on the happy one.
     onSettled: (_data, _error, { taskId }) => {
-      void refreshTask(queryClient, taskId);
+      // The due counts go in the same call because a PATCH may carry a status,
+      // and a status change is exactly what adds a commitment to a journal's
+      // badge or takes it away. A text-only edit over-invalidates the journal
+      // lists by one refetch; the hook cannot know which it was without reading
+      // the variables back, and getting this wrong the other way leaves the
+      // badge lying for five minutes.
+      void refreshTaskAndDueCounts(queryClient, taskId);
     },
   });
 }
@@ -846,7 +894,9 @@ export function useRetargetTask() {
     ...NO_RETRY,
     mutationFn: retargetTask,
     onSuccess: (_, { taskId }) => {
-      void refreshTask(queryClient, taskId);
+      // A retarget moves the count on **two** journals — one down, one up — and
+      // both can be on the same page of the list.
+      void refreshTaskAndDueCounts(queryClient, taskId);
       toast.success(SUCCESS_MESSAGES.TASK_RETARGETED);
     },
     onError: (error: Error) => {

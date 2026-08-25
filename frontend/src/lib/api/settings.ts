@@ -13,6 +13,10 @@ import { toast } from 'sonner';
 import type { JsonApiErrorResponse } from '@/types/api';
 import type { UserSettingsResponse } from '@/types/settings';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
+// `journalKeys` comes from `./journal-keys` rather than `./journals`, which
+// imports *this* module — see that file's header for the cycle it removes.
+import { journalKeys } from './journal-keys';
+import { taskKeys } from './tasks';
 
 const USER_SETTINGS_ENDPOINT = '/api/user-settings';
 
@@ -99,9 +103,26 @@ export function useUpdateTimezone() {
     mutationFn: updateTimezone,
     onSuccess: response => {
       cacheTimezone(response.data.attributes.timezone);
-      void invalidateAfterMutation(queryClient, {
-        queryKey: userSettingsKeys.all,
-      });
+      // **Changing the zone changes what the server thinks "today" is**, and
+      // two answers are derived from that rather than stored: whether a task
+      // has *lapsed*, and the journal list's `tasks_due_count`, which is the
+      // same rule applied to a whole page. Both are already cached under the
+      // app-wide five-minute `staleTime`, so without naming them here a user
+      // who corrects their timezone keeps being shown verdicts reached in the
+      // old one — including a badge for a commitment that has just lapsed.
+      //
+      // `journalKeys.lists()` is the reachable set on the journal side: only
+      // the list endpoint computes the count. `taskKeys.all` is the whole task
+      // side, because every task read carries `lapsed` and `lapse_reason`.
+      //
+      // One call rather than three: the key sets must all be cancelled before
+      // any is invalidated, or the later ones stay exposed to the #1203 race.
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: userSettingsKeys.all },
+        { queryKey: journalKeys.lists() },
+        { queryKey: taskKeys.all }
+      );
       toast.success('Timezone saved');
     },
     onError: (error: Error) => {
