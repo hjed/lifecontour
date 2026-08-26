@@ -703,3 +703,122 @@ class TestTheSharedJournalStaysCoherent:
         assert await _title(async_connection, created["journal_id"]) == (
             "Physio — rescheduled"
         )
+
+
+class TestARecurringEventSharedByTwoCalendars:
+    """A de-duplicated instance belongs to one series, not one per calendar.
+
+    Series are keyed by ``(calendar_id, recurring_event_id)``, which was
+    right when each calendar had its own journals. Now that the two share a
+    journal, letting the second calendar create its own series would leave
+    the user two series for one weekly meeting, both listing the same
+    journals.
+    """
+
+    async def _series_rows(self, connection: AsyncConnection) -> list[Any]:
+        result = await connection.execute(
+            text("""
+                SELECT s.id, s.calendar_id, s.recurring_event_id,
+                       count(m.journal_id) AS member_count
+                FROM journal_series s
+                LEFT JOIN journal_series_members m ON m.series_id = s.id
+                GROUP BY s.id, s.calendar_id, s.recurring_event_id
+                ORDER BY s.created_at
+            """)
+        )
+        return list(result.fetchall())
+
+    async def test_one_series_covers_the_shared_instance(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        processor = build_processor(async_connection)
+        work = await create_calendar(async_connection, name="Work")
+        personal = await create_calendar(async_connection, name="Personal")
+
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="work-master_20260320T100000Z",
+                recurring_event_id="work-master",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="personal-master_20260320T100000Z",
+                recurring_event_id="personal-master",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+        series = await self._series_rows(async_connection)
+        assert len(series) == 1
+        assert str(series[0].calendar_id) == work
+        assert series[0].recurring_event_id == "work-master"
+        assert created["journal_id"] is not None
+
+    async def test_the_journal_is_not_a_member_of_two_series(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Two series listing the same journal is what the user would see."""
+        processor = build_processor(async_connection)
+        work = await create_calendar(async_connection, name="Work")
+        personal = await create_calendar(async_connection, name="Personal")
+
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="work-master_20260320T100000Z",
+                recurring_event_id="work-master",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="personal-master_20260320T100000Z",
+                recurring_event_id="personal-master",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+        result = await async_connection.execute(
+            text("""
+                SELECT count(*) FROM journal_series_members
+                WHERE journal_id = :journal_id
+            """),
+            {"journal_id": created["journal_id"]},
+        )
+        assert result.scalar() == 1
+
+    async def test_a_single_calendar_series_is_unaffected(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The ordinary recurring event still gets its series."""
+        processor = build_processor(async_connection)
+        work = await create_calendar(async_connection, name="Work")
+
+        await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="work-master_20260320T100000Z",
+                recurring_event_id="work-master",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+        series = await self._series_rows(async_connection)
+        assert len(series) == 1
+        assert series[0].member_count == 1

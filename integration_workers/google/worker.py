@@ -34,6 +34,9 @@ from core_shared.logging import (
 )
 from core_shared.metrics import MetricsCollector
 from core_shared.models.contacts.serialization import serialize_contact
+from core_shared.models.journal_external_event_link import (
+    ExternalEventLinkSyncCapability,
+)
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import SyncJobRepository
@@ -2202,9 +2205,45 @@ async def _process_journal_upsert_event(
             }
             event_payload["end"] = {"dateTime": row.event_date_range_end.isoformat()}
 
-        # Fetch and prune any orphaned links from other calendars (e.g. if the journal was moved)
+        # Fetch and prune any orphaned links from other calendars (e.g. if the
+        # journal was moved).
+        #
+        # Pruning deletes the event from that calendar in Google, which is
+        # right for an event *we* put there: the journal has moved on, and the
+        # copy this push created is left behind. Those are exactly the links
+        # this push writes, and it never records an identity token on them.
+        #
+        # A link the *inbound* sync has touched is the opposite: it exists
+        # because that calendar returned the event, so the event is there
+        # independently of anything we pushed, and deleting it would destroy
+        # something real on the user's other calendar. Since de-duplication
+        # that is the ordinary shape of an event held by two calendars.
+        #
+        # Two marks record that, and a link needs neither to be spared:
+        #
+        # - ``sync_capability = 'bidirectional'`` is written only by the
+        #   inbound link writer, and never changed afterwards.
+        # - ``external_identity`` is written only when the inbound sync
+        #   matched the link to an event by identity.
+        #
+        # Both are needed. A token alone would not do: tokens arrive by
+        # backfill on a calendar's next poll, and an event with no iCalUID
+        # never gets one — so a real, inbound-created link can carry none.
+        # And the capability alone would not do either: a link this push
+        # created stays ``'outbound'`` even after the inbound sync later
+        # matches it and gives it a token.
+        #
+        # The rule is about the link's own marks rather than whether a
+        # sibling link shares its token: reassigning a journal's calendar
+        # deletes the *old* calendar's link, and that is the sibling a shared
+        # event was recognised by — a sibling comparison would lose the
+        # protection in the same move that needs it most.
         links_stmt = text("""
-            SELECT jeel.external_event_id, c.google_calendar_id, jeel.calendar_id
+            SELECT jeel.external_event_id,
+                   c.google_calendar_id,
+                   jeel.calendar_id,
+                   jeel.external_identity,
+                   jeel.sync_capability
             FROM journal_external_event_links jeel
             JOIN calendars c ON jeel.calendar_id = c.id
             WHERE jeel.journal_id = :journal_id
@@ -2214,7 +2253,12 @@ async def _process_journal_upsert_event(
         from googleapiclient.errors import HttpError
 
         for link_row in existing_links:
-            if link_row.calendar_id != row.calendar_id:
+            never_confirmed_upstream = (
+                link_row.external_identity is None
+                and link_row.sync_capability
+                == ExternalEventLinkSyncCapability.OUTBOUND.value
+            )
+            if link_row.calendar_id != row.calendar_id and never_confirmed_upstream:
                 if not link_row.external_event_id:
                     del_link_stmt = text("""
                         DELETE FROM journal_external_event_links

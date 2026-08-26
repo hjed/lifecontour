@@ -1073,6 +1073,24 @@ class JournalOutboxEventProcessor:
         )
         return result.fetchone() is not None
 
+    async def _is_display_calendar(self, journal_id: int, calendar_id: UUID) -> bool:
+        """Whether this is the calendar the journal is displayed in.
+
+        A journal holds exactly one ``journal_calendar_info`` row; the other
+        calendars linked to it hold the same event but do not own the
+        journal.
+        """
+        result = await self.connection.execute(
+            text("""
+                SELECT 1
+                FROM journal_calendar_info
+                WHERE journal_id = :journal_id
+                  AND calendar_id = :calendar_id
+            """),
+            {"journal_id": journal_id, "calendar_id": calendar_id},
+        )
+        return result.fetchone() is not None
+
     async def _ensure_series_membership(
         self,
         journal_id: int,
@@ -1087,8 +1105,24 @@ class JournalOutboxEventProcessor:
         named after the event on first creation, never renamed by sync — and
         adds the journal as a member (idempotent). No-op for non-recurring
         events.
+
+        **Only the journal's display calendar establishes a series.** A
+        recurring event held by two calendars is one journal per instance,
+        but each calendar names the series after its own master id — so
+        letting the second one through would key a second series on
+        ``(its calendar, its master id)`` and leave the user two series for
+        one weekly meeting, both listing the same journals. Same rule as the
+        calendar assignment itself: the calendar the journal is displayed in
+        owns it, and the others contribute a link and nothing more.
         """
         if not recurring_event_id:
+            return
+        if not await self._is_display_calendar(journal_id, calendar_id):
+            logger.info(
+                "Skipping series membership: not the journal's calendar",
+                journal_id=journal_id,
+                calendar_id=str(calendar_id),
+            )
             return
         series = await self.series_repo.get_or_create_by_recurrence(
             user_id=user_id,

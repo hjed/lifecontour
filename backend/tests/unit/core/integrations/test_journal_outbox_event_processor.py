@@ -217,6 +217,17 @@ def _assert_marked_cancelled(mock_connection: AsyncMock) -> None:
     _call_writing_to(mock_connection, "journal_calendar_info")
 
 
+def _mock_is_display_calendar() -> MagicMock:
+    """``_is_display_calendar`` answering yes.
+
+    The ordinary case: the calendar being synced is the one the journal is
+    displayed in, so series membership goes ahead. A de-duplicated event's
+    *second* calendar answers no, which is what keeps one weekly meeting
+    from acquiring a series per calendar.
+    """
+    return _mock_fetchone(MagicMock())
+
+
 def _mock_empty_result() -> MagicMock:
     """Build a mock DB result with no rows."""
     result = MagicMock()
@@ -2585,6 +2596,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
+            _mock_is_display_calendar(),  # _is_display_calendar
         ]
 
         result = await processor.process_event(event)
@@ -2648,6 +2660,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
             _mock_empty_result(),  # _find_calendar_info (private_description)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
+            _mock_is_display_calendar(),  # _is_display_calendar
         ]
 
         result = await processor.process_event(event)
@@ -2679,6 +2692,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
             _mock_empty_result(),  # _find_calendar_info (private_description)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _update_external_event_link_etag
+            _mock_is_display_calendar(),  # _is_display_calendar
         ]
 
         await processor.process_event(event)
@@ -2800,6 +2814,7 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
                 _make_link_row(recurring_event_id=None)
             ),  # _find_external_event_link (same etag, unbackfilled)
             _mock_empty_result(),  # _update_external_event_link_etag (backfill)
+            _mock_is_display_calendar(),  # _is_display_calendar
         ]
 
         result = await processor.process_event(event)
