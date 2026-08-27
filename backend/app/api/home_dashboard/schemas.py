@@ -194,6 +194,16 @@ class AgendaEntrySchema(BaseModel):
     location: str | None = Field(
         default=None, description="Where it is, when the event says"
     )
+    calendar_color: str | None = Field(
+        default=None,
+        description=(
+            "The colour of the calendar this event belongs to, as a hex string "
+            "— what a surface keys the row's accent to. Null when the calendar "
+            "has none, so a surface needs its own fallback. Like a tag's "
+            "colour, it is decoration: it must not be the only thing carrying "
+            "meaning in the row."
+        ),
+    )
     is_cancelled: bool = Field(
         ...,
         description=(
@@ -367,6 +377,7 @@ def _agenda_entry(entry: AgendaEntry) -> AgendaEntrySchema:
         end_time=entry.end_time,
         timezone=entry.timezone,
         location=entry.location,
+        calendar_color=entry.calendar_color,
         is_cancelled=entry.is_cancelled,
         tags=[
             AgendaTagSchema(id=tag.id, name=tag.name, color=tag.color)

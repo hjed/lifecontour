@@ -97,11 +97,16 @@ _ENTRIES_QUERY = text(
         jci.end_time AS end_time,
         jci.location AS location,
         jci.timezone AS timezone,
+        cal.color AS calendar_color,
         jci.event_state AS event_state,
         COALESCE(tags.items, '[]'::json)::text AS tags,
         COALESCE(attendees.items, '[]'::json)::text AS participants
     FROM journals j
     JOIN journal_calendar_info jci ON jci.journal_id = j.id
+    -- LEFT rather than INNER: the FK is NOT NULL, but a row's accent colour is
+    -- decoration and an unexpectedly missing calendar must not drop an event
+    -- off somebody's day.
+    LEFT JOIN calendars cal ON cal.id = jci.calendar_id
     LEFT JOIN LATERAL (
         SELECT json_agg(
                    json_build_object('id', t.id, 'name', t.name, 'color', t.color)
@@ -183,6 +188,7 @@ def _to_entry(row: Any) -> AgendaEntry:
         end_time=row["end_time"],
         location=row["location"],
         timezone=row["timezone"],
+        calendar_color=row["calendar_color"],
         is_cancelled=row["event_state"] == EventState.CANCELLED.value,
         tags=tuple(
             AgendaTag(id=str(tag["id"]), name=tag["name"], color=tag["color"])

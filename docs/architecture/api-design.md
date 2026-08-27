@@ -477,7 +477,7 @@ rather than this API's taste:
   nothing is scheduled today — which is why the section stays `ready` rather
   than reporting `unavailable`. An entry is
   `{journal_id, title, is_all_day, starts_at, ends_at, start_time, end_time,
-  timezone, location, is_cancelled, tags[], participants[]}`.
+  timezone, location, calendar_color, is_cancelled, tags[], participants[]}`.
 
   | Rule | What it means on the wire |
   |---|---|

@@ -8840,9 +8840,9 @@ non-mutation of the input, and the empty case. No integration, no e2e: nothing c
 ##### Phase 5b: Agenda — The One-Query Read and the Wire ✅ COMPLETE
 
 **Prerequisites:** Phase 5a.
-**Estimated diff:** ~230 production → **~920 tracked** (×4) · **Actual:** 449 production →
-**~1,460 tracked** (1,629 insertions, 105 deletions across 20 files, of which 169 insertions are this
-document: 449 production, 978 tests, 33 other documentation). **~1.6× the estimate, and the miss is in
+**Estimated diff:** ~230 production → **~920 tracked** (×4) · **Actual:** 470 production →
+**~1,630 tracked** (1,859 insertions, 105 deletions across 20 files, of which 231 insertions are this
+document: 470 production, 1,120 tests, 38 other documentation). **~1.6× the estimate, and the miss is in
 the production figure rather than the multiplier** — ×3.3 against production is *better* than the ×4
 budgeted, so the test estimate was sound and the production one was not. Two things were undercounted, both visible at planning time:
 a **port ABC costs roughly as much as its adapter** in a codebase that documents every abstract
@@ -8883,7 +8883,7 @@ tests (`TestTheAgendaSection` in `tests/unit/dashboard/test_home_dashboard_servi
 tests (`TestTheAgendaSection` in `tests/unit/api/test_home_dashboard_serialisation.py`) and 18
 integration tests in `tests/integration/api/test_home_dashboard_agenda.py`.
 
-**Delivery rule 3 was breached, and the rule needs restating rather than quietly re-read.** 5b is ~1,540
+**Delivery rule 3 was breached, and the rule needs restating rather than quietly re-read.** 5b is ~1,760
 changed lines against a 500-line cap. Calibration rule 16 restates that cap as ~1,500 for a phase that
 adds an entry point, and keeps 500 for one that does not — and this phase adds **no** new entry point,
 so 500 is the figure that applies to it and it is over by nearly 3×. The split was the right call and it
@@ -8973,6 +8973,13 @@ the defect. The other four pass either way and are guards: the eastern side that
 convention that already worked, the multi-day span, and the timed-event separation. Recorded because a
 reviewer counting tests would otherwise read five proofs where there is one proof and four fences.
 
+- **Two payload fields were added in review, and both were the same kind of miss.** `timezone` and
+  `calendar_color` were each *reachable from a row the query already read* and each needed by a
+  wireframe element the card cannot draw without it — the clock times are uninterpretable without the
+  zone they are in, and **W17**'s accent bar is keyed to the calendar's colour. The pattern to carry
+  forward: when a phase's acceptance criteria enumerate payload fields, check the enumeration against
+  the wireframe elements the payload has to serve, because an enumeration written before the query
+  exists will not know what the query turns out to have in its hands.
 - **The Phase 1 SAVEPOINT test is now proved by a real query.**
   `TestASqlErrorDoesNotPoisonTheRemainingSections` had to monkeypatch a harmless query into
   `_load_agenda` so that some section ran SQL after the broken one. The agenda now issues one of its
@@ -9020,14 +9027,11 @@ the empty line, and accessible list labelling. E2E in Phase 17.
 
 **Payload gaps left for this phase, recorded by Phase 5b so they are not discovered late:**
 
-- **The accent colour (W17) and the type glyph (W14) are not in the agenda payload.** Phase 5's
-  acceptance criteria enumerate the fields the query returns — title, all-day flag, times, location,
-  tags, participants, `event_state` — and a colour is not among them, so 5b did not add one rather than
-  widening a phase already over its estimate. The calendar row is **already joined**
-  (`journal_calendar_info` → `calendars`, which carries `color` and `name`), so this is a few lines of
-  SQL plus a field inside the existing payload — exactly the "later phases add fields inside a payload"
-  change Phase 1's contract was designed to absorb. Journal *types* are not joined at all and are the
-  larger of the two if the glyph is wanted.
+- **The accent colour (W17) is supplied; the type glyph (W14) is not.** Phase 5's acceptance criteria
+  enumerate the fields the query returns and a colour was not among them, so 5b left it out — until
+  review pointed out that the accent then had no source, and it was added as `calendar_color` off a
+  `LEFT JOIN calendars`. Journal *types* are not joined at all and are the larger of the two if the
+  glyph is wanted; this phase still owns that decision.
 - **`start_time` is a clock value in the *event's* timezone, not the reader's.** The column is a bare
   `TIME` beside `journal_calendar_info.timezone`, and this is what the existing calendar surface renders
   (`toCalendarEvent`, `frontend/src/lib/calendarEventHelpers.ts`), so the agenda matches it deliberately

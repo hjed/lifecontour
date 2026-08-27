@@ -70,6 +70,7 @@ COFFEE = AgendaEntry(
     end_time=datetime.time(10, 0),
     timezone="Australia/Sydney",
     location="The good place",
+    calendar_color="#336699",
     tags=(AgendaTag(id="tag-1", name="social", color="#ff0000"),),
     participants=(AgendaParticipant(contact_id=7, name="Sam Taylor"),),
 )
@@ -371,6 +372,7 @@ class TestTheAgendaSection:
                 "end_time": "10:00:00",
                 "timezone": "Australia/Sydney",
                 "location": "The good place",
+                "calendar_color": "#336699",
                 "is_cancelled": False,
                 "tags": [{"id": "tag-1", "name": "social", "color": "#ff0000"}],
                 "participants": [{"contact_id": 7, "name": "Sam Taylor"}],
@@ -471,6 +473,7 @@ class TestTheAgendaSection:
         entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
         assert entry["location"] is None
         assert entry["timezone"] is None
+        assert entry["calendar_color"] is None
         assert entry["tags"] == []
         assert entry["participants"] == []
 
