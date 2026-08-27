@@ -32,6 +32,10 @@ export const API_ENDPOINTS = {
       `/api/journals/incomplete-outdoor-activities/${journalId}/undismiss`,
     OUTDOOR_DASHBOARD: '/api/journals/outdoor-dashboard',
   },
+  // The home dashboard is a top-level singleton, not a journal-scoped
+  // projection like the outdoor one: it reads across journals, tasks,
+  // contacts and the summary, so it does not hang off /api/journals.
+  HOME_DASHBOARD: '/api/home-dashboard',
   // Tasks hang off a journal path to create and list, but are reached by their
   // own id for everything else — there is deliberately no task collection.
   TASKS: {

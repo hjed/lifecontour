@@ -18,6 +18,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Users,
   BookOpen,
+  Home,
   ChevronDown,
   ChevronRight,
   Star,
@@ -124,6 +125,12 @@ function isActiveLink(
   }
   if (href === '/integrations') {
     return pathname === '/integrations' || pathname === '/integrations/';
+  }
+  // The home dashboard matches exactly, and it is the one entry that *must*:
+  // every path starts with '/', so the prefix rule below would light Home up
+  // on every page in the app.
+  if (href === '/') {
+    return pathname === '/';
   }
   return pathname.startsWith(href);
 }
@@ -514,6 +521,66 @@ function SidebarContent({ onNavigate }: SidebarContentProps) {
 }
 
 /**
+ * One navigation link, in the sidebar's item idiom.
+ *
+ * Extracted so the top-level Home entry and the items inside the collapsible
+ * sections are the same control — same padding, same hover, same focus ring,
+ * same `aria-current` and test id — rather than two copies that drift.
+ */
+function NavItemLink({
+  label,
+  href,
+  icon: ItemIcon,
+  isActive,
+  onNavigate,
+}: {
+  readonly label: string;
+  readonly href: Route;
+  readonly icon?: React.ComponentType<{ className?: string }>;
+  readonly isActive: boolean;
+  readonly onNavigate?: () => void;
+}) {
+  return (
+    <Button
+      variant='ghost'
+      size='sm'
+      className={cn(
+        'h-auto w-full justify-start px-2 py-1.5 font-normal',
+        'hover:bg-accent hover:text-accent-foreground',
+        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
+        isActive && 'bg-accent text-accent-foreground font-medium'
+      )}
+      asChild
+    >
+      <Link
+        href={href}
+        onClick={onNavigate}
+        aria-current={isActive ? 'page' : undefined}
+        data-testid={`nav-link-${label.toLowerCase()}`}
+      >
+        {ItemIcon && <ItemIcon className='mr-2 h-3 w-3' aria-hidden='true' />}
+        {label}
+      </Link>
+    </Button>
+  );
+}
+
+/**
+ * The home dashboard's navigation entry (wireframe gap 4).
+ *
+ * A top-level link rather than a section, because every section here is
+ * collapsible and one that collapsed to hide its only item would be a worse
+ * affordance than a plain link. The specification asks for the home page to be
+ * reachable from the primary navigation as the post-sign-in default, so it must
+ * not be something a user can fold away.
+ */
+const HOME_NAV_ITEM = {
+  label: 'Home',
+  href: '/' as Route,
+  icon: Home,
+} as const;
+
+/**
  * Inner sidebar content component with shared rendering logic
  */
 function SidebarContentInner({
@@ -536,13 +603,22 @@ function SidebarContentInner({
         role='navigation'
         aria-label='Main navigation'
       >
-        {navigationSections.map((section, sectionIndex) => {
+        <NavItemLink
+          {...HOME_NAV_ITEM}
+          isActive={isActiveLink(HOME_NAV_ITEM.href)}
+          onNavigate={onNavigate}
+        />
+
+        {navigationSections.map(section => {
           const isExpanded = expandedSections[section.label];
           const SectionIcon = section.icon;
 
           return (
             <div key={section.label} className='space-y-1'>
-              {sectionIndex > 0 && <Separator className='my-2' />}
+              {/* Every section is preceded by a rule: the first one now
+                  follows the top-level Home link rather than starting the
+                  navigation. */}
+              <Separator className='my-2' />
 
               {/* Section Header */}
               <Button
@@ -624,34 +700,14 @@ function SidebarContentInner({
                     }
 
                     return (
-                      <Button
+                      <NavItemLink
                         key={itemKey}
-                        variant='ghost'
-                        size='sm'
-                        className={cn(
-                          'h-auto w-full justify-start px-2 py-1.5 font-normal',
-                          'hover:bg-accent hover:text-accent-foreground',
-                          'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
-                          isActive &&
-                            'bg-accent text-accent-foreground font-medium'
-                        )}
-                        asChild
-                      >
-                        <Link
-                          href={item.href}
-                          onClick={onNavigate}
-                          aria-current={isActive ? 'page' : undefined}
-                          data-testid={`nav-link-${item.label.toLowerCase()}`}
-                        >
-                          {ItemIcon && (
-                            <ItemIcon
-                              className='mr-2 h-3 w-3'
-                              aria-hidden='true'
-                            />
-                          )}
-                          {item.label}
-                        </Link>
-                      </Button>
+                        label={item.label}
+                        href={item.href}
+                        icon={ItemIcon}
+                        isActive={Boolean(isActive)}
+                        onNavigate={onNavigate}
+                      />
                     );
                   })}
 

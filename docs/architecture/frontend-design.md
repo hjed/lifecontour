@@ -1014,6 +1014,76 @@ it, consistent with the other list-level indicators".
 - Support metric units and measurements
 - Provide Australian-specific help text and examples
 
+## Home Dashboard Page
+
+The home page (`src/app/page.tsx`) is the user's daily briefing, replacing the
+placeholder card grid it used to render. Its layout contract is the
+[Home Dashboard Wireframe](../design/home-dashboard-wireframe.md), whose
+elements are numbered **W1**–**W33**.
+
+- **API adapter**: `src/lib/api/home-dashboard.ts` — a single TanStack Query
+  hook (`useHomeDashboard`) over the singleton `GET /api/home-dashboard`
+  resource, typing the whole payload: the four sections in their
+  `{status, data}` envelopes, and `meta.anchor`. The specification requires the
+  four sections to be retrievable together, one round trip rather than four.
+  Everything the hook returns comes from **one** query key, so any number of
+  concurrent callers dedupe into a single fetch — asserted directly, with four
+  simultaneous mounts issuing one request.
+
+  As the shell stands, `page.tsx` is the only caller: the header takes its day
+  as a prop (which keeps it a pure function of the anchor, testable without a
+  query) and the section cards render nothing from the payload yet. The cards
+  call the hook themselves as their phases land, rather than being handed props
+  from the page, because that is what makes a section's loading and unavailable
+  states its own — the per-section resilience the specification asks for. The
+  dedupe guarantee is what makes that free.
+- **Section availability**: a section reports `ready` (an empty payload is a
+  real answer — nothing scheduled, nothing due) or `unavailable`, where `data`
+  is `null`. *Unavailable* covers both "could not be read" and "there is none",
+  a distinction deliberately absent from the wire, so surfaces render it as
+  "nothing to show here" rather than as an error. One section failing never
+  fails the request or the others.
+- **The date comes from the server, never the browser.** Every window is
+  anchored on today in the user's *configured* timezone, server-side, and
+  `meta.anchor.date` is what the header labels the page with
+  (`DashboardPageHeader`, **W2**). The browser's today can differ from it, and
+  labelling server-gathered evidence with a client-derived day would put the
+  wrong date on the whole page. Until the anchor arrives the header shows no
+  date at all — a wrong date is worse than none. `formatIsoDateLong` in
+  `src/lib/date-utils.ts` writes it (`EEEE, d MMMM yyyy`, en-AU), parsing the
+  anchor as a *local calendar date* so an already-resolved day is never shifted
+  again.
+- **Page frame**: the page adds no chrome and no container of its own (**W1**).
+  The root layout already supplies `main.md:pl-64 > .container.mx-auto.px-4.py-6`,
+  and a container nested inside that one is the likeliest source of horizontal
+  overflow at mobile widths.
+- **Section grid**: `grid-cols-1 lg:grid-cols-3 items-start gap-4` beneath the
+  summary (**W3**). `items-start` lets the columns size independently, so a
+  short Upcoming-dates card does not stretch to match a tall Agenda; below `lg`
+  the three stack in DOM order — Agenda → Tasks → Upcoming dates.
+- **Section semantics**: `DashboardSection` wraps each card in a
+  `<section aria-labelledby>` whose `h2` is `sr-only`, with the visible title
+  supplied by the card header (**W4**). Hiding the heading rather than dropping
+  it gives the page real landmarks to jump between without drawing the title
+  twice.
+- **Section cards**: `AgendaCard`, `TasksCard` and `UpcomingDatesCard`
+  (**W11**, **W21**, **W30**) are thin — each supplies its wireframe copy to
+  the shared `DashboardSectionCard` shell, which draws the icon chip, title,
+  description, a labelled `<ul>` for the entries and the empty state. The list
+  is rendered whether or not it has entries, and deliberately **not**
+  `empty:hidden`: a `display:none` list is out of the accessibility tree, and
+  **W4** asks for a labelled list per section regardless. Empty states reuse
+  `WidgetEmptyState`, which is already **W29**'s idiom — a centred muted icon
+  over one line that reads as a good outcome rather than an error.
+- **Navigation**: the sidebar carries a top-level **Home** link to `/`
+  (`nav-link-home`), a deliberate addition to the wireframe, which shows only
+  the header logo link (wireframe gap 4). It is a plain link rather than a
+  collapsible section because the specification makes the dashboard the
+  post-sign-in default, and a section that folded away its only item would be a
+  worse affordance. `isActiveLink` matches `/` **exactly**: every path starts
+  with `/`, so the shared prefix rule would otherwise mark Home current on
+  every page in the app.
+
 ## Outdoor Logbook Overview Page
 
 The Outdoor Logbook overview page (`src/app/journals/outdoor-logbook/page.tsx`)

@@ -2,7 +2,12 @@
  * Tests for date utility functions.
  */
 
-import { formatDateOnly, formatDateRange, formatIsoDate } from '../date-utils';
+import {
+  formatDateOnly,
+  formatDateRange,
+  formatIsoDate,
+  formatIsoDateLong,
+} from '../date-utils';
 
 describe('formatDateOnly', () => {
   it('formats a date as YYYY-MM-DD', () => {
@@ -89,5 +94,27 @@ describe('formatIsoDate', () => {
   it('does not shift a date that has already been resolved', () => {
     expect(formatIsoDate('2026-01-01')).toBe('1 Jan 2026');
     expect(formatIsoDate('2026-12-31')).toBe('31 Dec 2026');
+  });
+});
+
+describe('formatIsoDateLong', () => {
+  it('writes the full localised date the dashboard header carries', () => {
+    // W2's form: weekday, then day before month, en-AU throughout.
+    expect(formatIsoDateLong('2026-07-29')).toBe('Wednesday, 29 July 2026');
+  });
+
+  /**
+   * Same contract as {@link formatIsoDate}, and it matters more here: the
+   * dashboard's date is the server's anchor, already resolved in the user's
+   * configured zone. Parsing it as an instant would shift it a day in any zone
+   * behind UTC and label the page with yesterday.
+   */
+  it('does not shift a date that has already been resolved', () => {
+    expect(formatIsoDateLong('2026-01-01')).toBe('Thursday, 1 January 2026');
+    expect(formatIsoDateLong('2026-12-31')).toBe('Thursday, 31 December 2026');
+  });
+
+  it('handles a leap day', () => {
+    expect(formatIsoDateLong('2024-02-29')).toBe('Thursday, 29 February 2024');
   });
 });

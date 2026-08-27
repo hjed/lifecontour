@@ -1,0 +1,319 @@
+/**
+ * @jest-environment jsdom
+ *
+ * The home dashboard's page shell (ITER18-004 Phase 3).
+ *
+ * These tests render the page over the **real** query hook against a routed
+ * `fetch` mock rather than a mocked `useHomeDashboard`, because two of the
+ * things the shell promises are only true at that level: that the page reads
+ * its date from the server's anchor, and that the whole page costs one request
+ * however many sections mount.
+ */
+
+import { screen, waitFor, within } from '@testing-library/react';
+import { renderWithProviders } from '@/test-utils';
+import HomePage from '@/app/page';
+import {
+  DashboardSectionStatus,
+  DashboardSummaryState,
+} from '@/lib/api/home-dashboard';
+import type { HomeDashboardResponse } from '@/lib/api/home-dashboard';
+
+// jest.setup.ts mocks @/lib/constants but omits the home-dashboard endpoint;
+// use the real constants rather than re-declaring the whole mock.
+jest.mock('@/lib/constants', () => jest.requireActual('@/lib/constants'));
+
+// Note: Next.js navigation is mocked globally in jest.setup.ts.
+
+globalThis.fetch = jest.fn();
+const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
+
+const DASHBOARD_URL = '/api/home-dashboard';
+
+/**
+ * The anchor every test renders against.
+ *
+ * Deliberately a fixed day in the past, so a shell that derived its date from
+ * the browser's clock instead of `meta.anchor.date` could not pass.
+ */
+const ANCHOR_DATE = '2026-07-29';
+const ANCHOR_DISPLAY = 'Wednesday, 29 July 2026';
+
+function dashboardDocument(): HomeDashboardResponse {
+  return {
+    data: {
+      type: 'home-dashboards',
+      id: 'user-1',
+      attributes: {
+        summary: {
+          status: DashboardSectionStatus.READY,
+          data: {
+            state: DashboardSummaryState.GENERATED,
+            summary_text: 'A quiet Wednesday.',
+            journal_count: 3,
+            event_count: 2,
+            contact_count: 4,
+            mood_average: 7.5,
+          },
+        },
+        agenda: { status: DashboardSectionStatus.READY, data: {} },
+        tasks: { status: DashboardSectionStatus.READY, data: {} },
+        upcoming_dates: { status: DashboardSectionStatus.READY, data: {} },
+      },
+    },
+    meta: { anchor: { date: ANCHOR_DATE, timezone: 'Australia/Sydney' } },
+  };
+}
+
+const AUTHENTICATED_SESSION = {
+  authenticated: true,
+  user: {
+    id: '1',
+    email: 'test@example.com',
+    name: 'Test User',
+  },
+};
+
+/**
+ * Route `fetch` by URL: the dashboard gets `dashboard`, everything else — the
+ * `AuthProvider`'s session check — gets an authenticated user.
+ */
+function routeFetch(dashboard: () => Promise<Response>) {
+  mockFetch.mockImplementation((input: RequestInfo | URL) => {
+    if (String(input) === DASHBOARD_URL) {
+      return dashboard();
+    }
+    return Promise.resolve({
+      ok: true,
+      json: async () => AUTHENTICATED_SESSION,
+    } as Response);
+  });
+}
+
+function respondWithDashboard() {
+  routeFetch(() =>
+    Promise.resolve({
+      ok: true,
+      json: async () => dashboardDocument(),
+    } as Response)
+  );
+}
+
+/** Render the page and wait for the shell to be on screen. */
+async function renderHomePage() {
+  renderWithProviders(<HomePage />);
+  return screen.findByTestId('home-dashboard-ready');
+}
+
+/** The three evidence sections, in the order the DOM holds them. */
+function sectionNames(): string[] {
+  return screen
+    .getAllByRole('region')
+    .map(
+      section => section.getAttribute('aria-label') ?? headingTextOf(section)
+    )
+    .filter((name): name is string => Boolean(name));
+}
+
+function headingTextOf(section: HTMLElement): string | null {
+  const labelledBy = section.getAttribute('aria-labelledby');
+  if (!labelledBy) {
+    return null;
+  }
+  return document.getElementById(labelledBy)?.textContent ?? null;
+}
+
+describe('HomePage — the dashboard shell', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFetch.mockReset();
+    respondWithDashboard();
+  });
+
+  describe('Page header (W2)', () => {
+    it('is headed "Today"', async () => {
+      await renderHomePage();
+
+      const heading = screen.getByRole('heading', { level: 1 });
+      expect(heading).toHaveTextContent('Today');
+    });
+
+    it("shows the server's anchor day in full, not the browser's today", async () => {
+      await renderHomePage();
+
+      expect(
+        await screen.findByText(new RegExp(ANCHOR_DISPLAY))
+      ).toBeInTheDocument();
+    });
+
+    it('carries the framing line that says what the page is for', async () => {
+      await renderHomePage();
+
+      expect(
+        await screen.findByText(
+          /your day, what is coming up, and what you said you would do/i
+        )
+      ).toBeInTheDocument();
+    });
+
+    it('has exactly one level-1 heading', async () => {
+      await renderHomePage();
+
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    });
+  });
+
+  describe('Section grid (W3, W4)', () => {
+    it('renders the three evidence sections in wireframe order', async () => {
+      await renderHomePage();
+
+      expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+
+    it('labels each section with a visually hidden heading', async () => {
+      await renderHomePage();
+
+      for (const name of ['Agenda', 'Tasks', 'Upcoming dates']) {
+        const heading = screen.getByRole('heading', { level: 2, name });
+        expect(heading).toHaveClass('sr-only');
+      }
+    });
+
+    it('gives each section a labelled list container', async () => {
+      await renderHomePage();
+
+      for (const name of [
+        "Today's agenda",
+        'Tasks due in the next seven days',
+        'Upcoming contact dates',
+      ]) {
+        expect(screen.getByRole('list', { name })).toBeInTheDocument();
+      }
+    });
+
+    it('stacks to one column below lg and sizes its columns independently', async () => {
+      const ready = await renderHomePage();
+
+      const grid = ready.querySelector('[data-testid="dashboard-sections"]');
+      expect(grid).toHaveClass(
+        'grid',
+        'grid-cols-1',
+        'lg:grid-cols-3',
+        'items-start'
+      );
+    });
+
+    it('adds no container of its own inside the layout chrome (W1)', async () => {
+      // The root layout already supplies `.container.mx-auto.px-4.py-6`; a
+      // second container nested inside it is the likeliest source of the
+      // horizontal overflow W3 forbids.
+      const ready = await renderHomePage();
+
+      expect(ready.querySelector('.container')).toBeNull();
+      expect(ready).not.toHaveClass('container');
+    });
+  });
+
+  describe('The retired placeholder', () => {
+    it.each([
+      'Calendar',
+      'Photos',
+      'AI Integration',
+      'System Status',
+      'Personal Management System',
+      'Your personal CRM and journal with AI integration',
+      'Monitor system health and integration status.',
+      'MCP protocol support for AI assistants to access and manage your data.',
+    ])('no longer renders the placeholder text %s', async text => {
+      await renderHomePage();
+
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('One round trip', () => {
+    it('fetches the dashboard once for the whole page', async () => {
+      await renderHomePage();
+
+      await waitFor(() =>
+        expect(screen.getByText(new RegExp(ANCHOR_DISPLAY))).toBeInTheDocument()
+      );
+
+      const dashboardCalls = mockFetch.mock.calls.filter(
+        ([input]) => String(input) === DASHBOARD_URL
+      );
+      expect(dashboardCalls).toHaveLength(1);
+    });
+  });
+
+  describe('Shell resilience', () => {
+    it('renders its header and all three sections while the dashboard is still loading', async () => {
+      routeFetch(() => new Promise<Response>(() => {}));
+
+      await renderHomePage();
+
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+        'Today'
+      );
+      expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+
+    it('renders the sections when the dashboard request fails', async () => {
+      // Per-section unavailable states are Phase 16's; what this pins is that
+      // a failed request does not take the page down with it.
+      routeFetch(() =>
+        Promise.resolve({
+          ok: false,
+          json: async () => ({ errors: [{ detail: 'Session expired' }] }),
+        } as Response)
+      );
+
+      await renderHomePage();
+
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+        'Today'
+      );
+      expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+  });
+
+  describe('Section cards', () => {
+    it('each card carries its own wireframe header', async () => {
+      await renderHomePage();
+
+      const [agenda, tasks, dates] = screen.getAllByRole('region');
+
+      // The visible title is the card's own heading, one level below the
+      // section's hidden h2 — W4's "visible title provided by the card header".
+      expect(
+        within(agenda).getByRole('heading', { level: 3, name: 'Agenda' })
+      ).toBeInTheDocument();
+      expect(
+        within(agenda).getByText(
+          "Today's schedule in time order, all-day items first."
+        )
+      ).toBeInTheDocument();
+
+      expect(
+        within(tasks).getByRole('heading', { level: 3, name: 'Tasks' })
+      ).toBeInTheDocument();
+      expect(
+        within(tasks).getByText(
+          'Due in the next seven days, soonest first. Tick them off here.'
+        )
+      ).toBeInTheDocument();
+
+      expect(
+        within(dates).getByRole('heading', {
+          level: 3,
+          name: 'Upcoming dates',
+        })
+      ).toBeInTheDocument();
+      expect(
+        within(dates).getByText(
+          'Important dates for your contacts over the next seven days.'
+        )
+      ).toBeInTheDocument();
+    });
+  });
+});
