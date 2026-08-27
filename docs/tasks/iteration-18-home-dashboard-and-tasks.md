@@ -6654,6 +6654,20 @@ rendering fields the client has never been able to see.
       was on. **Carry-forward: a link whose target can equal the current route is a navigation that
       may be a no-op, and inside a controlled modal a no-op navigation is a trap. Check whether an
       id the server hands back can be the id already on screen.**
+      **A second review pass caught the remedy copy, and it reached further than this phase.** Both
+      the dialog and `_describe_blockage` — so the REST `detail` and the MCP message with it — told
+      the caller to *"cancel, complete or retarget"* and try again. Completing or cancelling releases
+      nothing: refusal-regardless-of-status is this guard's first rule, and this phase's own e2e
+      demonstrates it. Retargeting only helps a **due** anchor; a **creating** anchor cannot be moved
+      at all, because no service method other than `create_task` accepts a creating journal, so
+      deleting the task is its only release. The remedy is now stated per role, on all three
+      surfaces, and pinned by unit tests on both sides. Fixing only the frontend would have put the
+      dialog and the MCP message into open disagreement, which ITER18-002's *"the same failure over
+      REST and MCP"* criterion forbids — so the ~10-line `core_shared` change is part of this phase
+      rather than a follow-up. **Carry-forward: when a guard refuses on a structural fact, the prose
+      remedy must be derived from what actually releases the structure. "Try again after X" is a
+      testable claim, and the test is whether X changes the thing the guard reads — here it never
+      did, and the wording survived four phases and two reviews before anyone checked.**
 - [x] The dialog continues to steer toward cancelling the journal rather than deleting it. — and it
       **names the control**, per the Phase 4 note below: an EVENT journal is pointed at *Event
       Status → Cancelled*, and a journal without the EVENT type is told plainly that it has no

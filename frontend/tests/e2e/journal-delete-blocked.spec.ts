@@ -98,6 +98,10 @@ test.describe('Journal Delete Guard', () => {
     await expect(blocker).toContainText(text);
     await expect(blocker).toContainText('Not done');
     await expect(blocker).toContainText('due in this journal');
+    // The remedy is the one that matches the anchor: this task is *due* here,
+    // so moving the due anchor releases the journal. Completing or cancelling
+    // it would not, which the cancelled-task test below proves.
+    await expect(blocker).toContainText('Retarget it onto another journal');
 
     // The steer names the control, because "cancel it instead" is only
     // actionable if the user knows where the cancelled state lives.
@@ -171,6 +175,11 @@ test.describe('Journal Delete Guard', () => {
     await expect(bothRow).toContainText(both.text);
     await expect(bothRow).toContainText('created in this journal');
     await expect(bothRow).toContainText('due in this journal');
+    // Holding the creating anchor decides the remedy: a retarget would move
+    // the due anchor and leave this journal blocked all the same, and nothing
+    // moves a creating anchor.
+    await expect(bothRow).toContainText('only deleting the task');
+    await expect(bothRow).not.toContainText('Retarget it');
 
     // Both its anchors are the journal being deleted, so there is no other
     // journal to send the user to. A link would target the route already open

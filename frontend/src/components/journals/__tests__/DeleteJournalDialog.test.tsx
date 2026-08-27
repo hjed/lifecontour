@@ -227,6 +227,60 @@ describe('DeleteJournalDialog', () => {
       expect(link).toHaveTextContent('Monday Planning');
     });
 
+    it('does not offer a status change as a way out', async () => {
+      // The deletion is refused *whatever* the task's status — this guard's
+      // first rule, and the `still refuses once the task is cancelled` e2e
+      // proves it. Telling the user to complete or cancel the task would send
+      // them through two actions that cannot succeed.
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      renderDialog();
+
+      await confirmDelete(user);
+
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent(/will not release the journal/i);
+      expect(dialog).not.toHaveTextContent(/complete, cancel or retarget/i);
+    });
+
+    it('offers the remedy that matches the anchor a task blocks in', async () => {
+      // Only two things release an anchor. A retarget moves the *due* one; a
+      // creating anchor cannot be moved at all — no service method other than
+      // `create_task` accepts one — so deleting the task is the only way out.
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValueOnce(
+        refusal(
+          blocker({ task_id: 7, blocking_roles: ['due'] }),
+          blocker({
+            task_id: 8,
+            text: 'book the ferry',
+            blocking_roles: ['creating'],
+          }),
+          blocker({
+            task_id: 9,
+            text: 'pack the ropes',
+            blocking_roles: ['creating', 'due'],
+          })
+        )
+      );
+      renderDialog();
+
+      await confirmDelete(user);
+
+      expect(
+        await screen.findByTestId('journal-delete-blocker-7')
+      ).toHaveTextContent(/retarget it onto another journal/i);
+
+      // Holding the creating anchor is what decides it, with or without the
+      // due one: a retarget would move the due anchor and leave this blocked.
+      for (const taskId of [8, 9]) {
+        const row = screen.getByTestId(`journal-delete-blocker-${taskId}`);
+        expect(row).toHaveTextContent(/can’t be changed/i);
+        expect(row).toHaveTextContent(/only deleting the task/i);
+        expect(row).not.toHaveTextContent(/retarget/i);
+      }
+    });
+
     it('offers to stay put when the task is actionable on this journal', async () => {
       // A task created *and* due here is anchored to this journal twice, so
       // the only journal left to send the user to is the one they are on. A

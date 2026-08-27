@@ -29,6 +29,16 @@
  * malformed refusal degrades to today's behaviour instead of rendering an
  * explanation with a dead link in it.
  *
+ * **The remedy is stated against the anchor, not the status.** The deletion is
+ * refused whatever a task's status, so telling the user to complete or cancel
+ * it would send them through two actions that cannot succeed — which is the
+ * rule the `still refuses once the task is cancelled` e2e exists to hold. Each
+ * row says what would actually clear it, and that differs by role: a task due
+ * here can be retargeted away, while a task created here can only be deleted,
+ * because nothing moves a creating anchor. The same correction is made to the
+ * backend's prose, so REST, MCP and this dialog do not disagree about what to
+ * do next.
+ *
  * One case earns a control rather than a link: a task created **and** due in
  * this journal is anchored to it twice, so `action_anchor_for` resolves to the
  * creating journal, which is this same one. The payload is right — the deletion
@@ -80,6 +90,27 @@ const ROLE_WORDS: Record<TaskAnchorRole, string> = {
  */
 function describeRoles(roles: readonly TaskAnchorRole[]): string {
   return roles.map(role => ROLE_WORDS[role] ?? role).join(' and ');
+}
+
+/**
+ * What would actually release this journal's hold on one task.
+ *
+ * Not a status change: the deletion is refused whatever a task's status, so
+ * "complete or cancel it and try again" is advice that cannot work. Only two
+ * things release an anchor, and the role decides which:
+ *
+ * - **due** — a retarget moves the due anchor onto another journal and leaves
+ *   this one behind as an intermediate link, which never blocks;
+ * - **creating** — nothing moves it. No service method other than `create_task`
+ *   accepts a creating journal, so deleting the task is the only way out.
+ *
+ * A task holding *both* is decided by the creating anchor: a retarget would
+ * move the due one and leave the deletion blocked all the same.
+ */
+function describeRemedy(roles: readonly TaskAnchorRole[]): string {
+  return roles.includes('creating')
+    ? 'A task’s creating journal can’t be changed, so only deleting the task would clear this.'
+    : 'Retarget it onto another journal, or delete it, to clear this.';
 }
 
 export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
@@ -171,8 +202,8 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {blockers.length === 1
-                  ? 'One task is anchored to this journal, and a task can never exist without both of its journals. Complete, cancel or retarget it, then delete again.'
-                  : `${blockers.length} tasks are anchored to this journal, and a task can never exist without both of its journals. Complete, cancel or retarget them, then delete again.`}
+                  ? 'One task is anchored to this journal, and a task can never exist without both of its journals. Completing or cancelling it will not release the journal — only the anchor itself will.'
+                  : `${blockers.length} tasks are anchored to this journal, and a task can never exist without both of its journals. Completing or cancelling them will not release the journal — only the anchors themselves will.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
 
@@ -190,6 +221,9 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
                   <div className='text-muted-foreground mt-1'>
                     {statusWording(task.status)} ·{' '}
                     {describeRoles(task.blocking_roles)}
+                  </div>
+                  <div className='text-muted-foreground mt-1'>
+                    {describeRemedy(task.blocking_roles)}
                   </div>
                   {String(task.action_journal_id) === journal.id ? (
                     <button

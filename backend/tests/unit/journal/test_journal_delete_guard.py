@@ -183,6 +183,26 @@ class TestJournalHasAnchoredTasksError:
 
         assert "cancel" in error.message.lower()
 
+    def test_it_does_not_offer_a_status_change_as_a_way_out(self):
+        """The remedy has to be true, and "cancel or complete it and try again"
+        is not: the deletion is refused *whatever* the task's status, which is
+        this guard's first rule. A message that says otherwise sends a caller
+        through actions that cannot succeed — and an agent reading it over MCP
+        has nothing but the prose to go on."""
+        error = JournalHasAnchoredTasksError(DELETED, (make_blocking_task(),))
+
+        assert "Completing or cancelling a task does not release it" in error.message
+
+    def test_it_names_the_remedy_that_matches_each_anchor(self):
+        """The two anchors have different ways out, and only one of them exists
+        for a creating anchor: `retarget_due_journal` moves the due journal, and
+        no service method other than `create_task` accepts a creating one. So a
+        task created here can be released only by deleting it."""
+        error = JournalHasAnchoredTasksError(DELETED, (make_blocking_task(),))
+
+        assert "retargeted onto another journal" in error.message
+        assert "created here can only be deleted" in error.message
+
     def test_it_names_every_blocker_in_order(self):
         blockers = tuple(
             make_blocking_task(task_id=i, text=f"task {i}") for i in (1, 2, 3)
