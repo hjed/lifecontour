@@ -153,6 +153,13 @@ class AgendaEntry:
     all-day event, and may be ``None`` for a timed one whose times were never
     filled in.
 
+    ``calendar_color`` is the colour of the calendar the event belongs to, which
+    is what **W17** keys the row's accent bar to. It travels with the entry
+    because the accent is per row: a card that fetched calendars separately would
+    have to join them back up itself, and the calendar is already reachable from
+    the row the query reads. The journal's *type* glyph (**W14**) is a separate
+    join and is not here — see the note against Phase 7.
+
     ``is_cancelled`` is derived from ``CalendarInfo.event_state`` at the edge, so
     nothing downstream has to know the rest of that vocabulary. It is carried
     rather than filtered on because the specification requires a cancelled event
@@ -168,6 +175,7 @@ class AgendaEntry:
     start_time: time | None = None
     end_time: time | None = None
     location: str | None = None
+    calendar_color: str | None = None
     is_cancelled: bool = False
     tags: tuple[AgendaTag, ...] = ()
     participants: tuple[AgendaParticipant, ...] = ()
