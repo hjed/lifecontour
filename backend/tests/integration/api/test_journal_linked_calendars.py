@@ -167,6 +167,126 @@ class TestReadingAnOrdinaryEvent:
         assert attributes["calendar"] is None
 
 
+class TestACalendarThatNoLongerHoldsTheEvent:
+    """Declining one copy removes that calendar, not the event.
+
+    The sync keeps the link and marks it cancelled, so it remembers the
+    calendar without the calendar holding the event any more — that is how
+    the journal survives being declined in one place. The read models have
+    to agree with that, or the event goes on claiming to be somewhere it
+    is not.
+    """
+
+    async def _shared_event_declined_in_personal(
+        self, connection: AsyncConnection
+    ) -> tuple[int, str, str]:
+        work = await create_calendar(connection, "Work", WORK_COLOUR)
+        personal = await create_calendar(connection, "Personal", PERSONAL_COLOUR)
+        journal_id = await create_event_journal(
+            connection, title="Physio appointment", display_calendar_id=work
+        )
+        await link_calendar(
+            connection,
+            journal_id=journal_id,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+        )
+        await link_calendar(
+            connection,
+            journal_id=journal_id,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            sync_status="cancelled",
+        )
+        return journal_id, work, personal
+
+    async def test_it_is_not_reported_as_a_calendar_of_the_event(
+        self,
+        authenticated_client: Any,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        journal_id, work, _personal = await self._shared_event_declined_in_personal(
+            async_connection
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{journal_id}")
+
+        assert response.status_code == 200
+        calendars = _attributes(response.json())["calendars"]
+        assert [calendar["id"] for calendar in calendars] == [work]
+
+    async def test_filtering_by_it_no_longer_finds_the_event(
+        self,
+        authenticated_client: Any,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        _journal_id, _work, personal = await self._shared_event_declined_in_personal(
+            async_connection
+        )
+
+        response = await authenticated_client.get(
+            f"/api/journals?calendar_id={personal}&limit=50"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+
+    async def test_the_calendar_that_still_holds_it_is_unaffected(
+        self,
+        authenticated_client: Any,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        journal_id, work, _personal = await self._shared_event_declined_in_personal(
+            async_connection
+        )
+
+        response = await authenticated_client.get(
+            f"/api/journals?calendar_id={work}&limit=50"
+        )
+
+        assert [int(item["id"]) for item in response.json()["data"]] == [journal_id]
+
+    async def test_a_declined_display_calendar_still_shows_the_journal(
+        self,
+        authenticated_client: Any,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Where a journal is *displayed* is this app's choice, not Google's.
+
+        Cancelling the display calendar's copy says the event is gone from
+        that calendar upstream; it does not move the journal somewhere
+        else, and nothing does. Dropping it here would leave the journal
+        claiming a display calendar that its own calendar list denies.
+        """
+        work = await create_calendar(async_connection, "Work", WORK_COLOUR)
+        personal = await create_calendar(async_connection, "Personal", PERSONAL_COLOUR)
+        journal_id = await create_event_journal(
+            async_connection, title="Physio appointment", display_calendar_id=work
+        )
+        await link_calendar(
+            async_connection,
+            journal_id=journal_id,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            sync_status="cancelled",
+        )
+        await link_calendar(
+            async_connection,
+            journal_id=journal_id,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{journal_id}")
+
+        calendars = _attributes(response.json())["calendars"]
+        assert [calendar["id"] for calendar in calendars] == [work, personal]
+
+
 class TestTheJournalList:
     async def test_the_list_reports_linked_calendars_too(
         self,

@@ -315,6 +315,7 @@ class SqlJournalRepository(JournalRepository):
                     SELECT 1 FROM journal_external_event_links jeel_cal
                     WHERE jeel_cal.journal_id = j.id
                       AND jeel_cal.calendar_id = :calendar_id
+                      AND jeel_cal.sync_status <> 'cancelled'
                 )
             )"""
             if not (journal_type and journal_type.upper() == "EVENT"):

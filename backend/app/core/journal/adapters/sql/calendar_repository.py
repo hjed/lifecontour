@@ -64,6 +64,14 @@ class SqlCalendarRepository(CalendarRepository):
         list in order without comparing ids. A journal with no links at all
         — a hand-made event — still yields its own calendar; a journal that
         is not an event yields nothing.
+
+        A cancelled link is skipped. The sync keeps it when the event is
+        removed from one calendar while another still holds it, so it
+        records a calendar that no longer has the event — reporting it
+        would have the event claim to be somewhere it is not. The display
+        calendar is exempt: it comes from ``journal_calendar_info``, which
+        is this app's choice of where the journal lives and is not moved
+        by anything upstream.
         """
         query = text(
             """
@@ -76,6 +84,7 @@ class SqlCalendarRepository(CalendarRepository):
                    ON jci.calendar_id = c.id AND jci.journal_id = :journal_id
             LEFT JOIN journal_external_event_links jeel
                    ON jeel.calendar_id = c.id AND jeel.journal_id = :journal_id
+                  AND jeel.sync_status <> 'cancelled'
             WHERE jci.journal_id IS NOT NULL OR jeel.journal_id IS NOT NULL
             ORDER BY is_display_calendar DESC, c.name ASC
             """

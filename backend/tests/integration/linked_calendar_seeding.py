@@ -95,20 +95,28 @@ async def link_calendar(
     journal_id: int,
     calendar_id: str,
     external_event_id: str,
+    sync_status: str = "synced",
 ) -> None:
-    """The link a synced calendar holds for this event."""
+    """The link a synced calendar holds for this event.
+
+    ``sync_status='cancelled'`` is the shape left behind when the event is
+    removed from *this* calendar while another still holds it: the link
+    stays so the sync remembers the calendar, but the calendar no longer
+    holds the event.
+    """
     await connection.execute(
         text("""
             INSERT INTO journal_external_event_links
                 (journal_id, calendar_id, external_event_id,
                  sync_capability, sync_status)
             VALUES (:journal_id, :calendar_id, :external_event_id,
-                    'bidirectional', 'synced')
+                    'bidirectional', :sync_status)
         """),
         {
             "journal_id": journal_id,
             "calendar_id": calendar_id,
             "external_event_id": external_event_id,
+            "sync_status": sync_status,
         },
     )
 
