@@ -264,7 +264,7 @@ class TestWhatReachesTheAgenda:
         assert entry["location"] == "The good place"
         assert entry["is_cancelled"] is False
         assert entry["tags"] == [
-            {"id": str(tag_id), "name": "social", "colour": "#ff0000"}
+            {"id": str(tag_id), "name": "social", "color": "#ff0000"}
         ]
         assert entry["participants"] == [
             {"contact_id": contact_id, "name": "Sam Taylor"}
