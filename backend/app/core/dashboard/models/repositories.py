@@ -22,6 +22,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from core_shared.models.journals import EventDateRange
 
     from app.core.dashboard.models.sections import AgendaEntry
@@ -32,14 +34,22 @@ class AgendaRepository(ABC):
 
     @abstractmethod
     async def list_entries_in_window(
-        self, user_id: str, *, window: EventDateRange
+        self, user_id: str, *, window: EventDateRange, anchor: date
     ) -> list[AgendaEntry]:
-        """The user's event journals overlapping ``window``.
+        """The user's event journals on the day ``window`` and ``anchor`` describe.
 
-        **Overlap, not containment.** An event that began before the window and
-        ends after it is inside the window in the only sense the agenda cares
-        about: it is happening. The same semantics the outdoor dashboard's
-        upcoming query uses.
+        **Two parameters for one day, because timed and all-day events are asked
+        about differently.** A timed event happens at instants, so it is matched
+        by **overlap** against ``window``: one that began before the day and ends
+        after it is inside it in the only sense the agenda cares about — it is
+        happening. That is the outdoor dashboard's semantics.
+
+        An all-day event happens on a *date* and has no meaningful instants, so
+        it is matched against ``anchor`` by date. Matching it by instant reads
+        the wrong day: a date-only event synced from Google is stored at midnight
+        UTC, which for a user west of UTC falls in the previous local day's
+        window. See the adapter for how the stored bounds are resolved back to
+        the date they were written as.
 
         Only journals with calendar info are returned — a journal has the EVENT
         type exactly when a ``journal_calendar_info`` row exists for it, so a
@@ -54,7 +64,10 @@ class AgendaRepository(ABC):
 
         Args:
             user_id: The acting user. Implementations must scope on it.
-            window: The instants the day covers, from ``local_day_window``.
+            window: The instants the day covers, from ``local_day_window`` —
+                the span timed events are matched against.
+            anchor: The day itself, in the user's timezone — the date all-day
+                events are matched against.
 
         Returns:
             The matching entries with their tags and participants already

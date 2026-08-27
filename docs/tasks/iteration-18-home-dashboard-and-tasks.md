@@ -9446,75 +9446,51 @@ phase carries a migration of existing code alongside new work, the migration is 
   far-east/far-west pair already in `test_home_dashboard_api.py` is a valid discriminator for an
   *anchor date*, and not one for *window membership*.
 
-**Discovered and deliberately NOT fixed here — all-day events have two storage conventions, and the
-agenda is the first surface where a user reads the consequence:**
+**All-day events had two storage conventions, and the agenda read the wrong day for half the world.**
 
-An all-day event has no time, so what identifies it is a *date* — but the schema stores only instants,
-and the two writers disagree about which instant means "this date":
+An all-day event happens on a *date*, but the schema stores only instants — and the two writers disagree
+about which instant means that date:
 
-| Writer | What it stores for an all-day event on 27 Aug |
-|---|---|
-| Google worker (`integration_workers/google/event_transformer.py`, `_parse_all_day_date` and the exclusive-end adjustment) | `datetime(2026, 8, 27, tzinfo=UTC)` — **midnight UTC**, for both bounds |
-| The app (`JournalCreateForm.tsx` supplies the range as `values.dateRange.from.toISOString()`; `type-editors/EventTypeEditor.tsx` supplies `is_all_day` and `timezone`) | midnight in the **browser's** zone, converted to UTC — with `timezone` defaulted to the user's configured zone |
+| Writer | What it stores for an all-day event on 27 Aug | `journal_calendar_info.timezone` |
+|---|---|---|
+| Google worker (`integration_workers/google/event_transformer.py`, `_parse_all_day_date` plus the exclusive-end adjustment) | `datetime(2026, 8, 27, tzinfo=UTC)` — **midnight UTC**, both bounds | `NULL` — `_extract_timezone` returns None for a date-only event |
+| The app (`JournalCreateForm.tsx` supplies the range as `values.dateRange.from.toISOString()`; `type-editors/EventTypeEditor.tsx` supplies `is_all_day` and `timezone`) | midnight in the **browser's** zone, converted to UTC | the user's configured zone, via `getDefaultTimezone()` |
 
-An instant-overlap window — which is what the acceptance criterion asks for, and what the outdoor
-dashboard has always used — cannot satisfy both. For a user **west of UTC**, a Google-synced all-day
-event on 27 August is the instant `2026-08-27T00:00Z`, which falls in their **26 August** local day: the
-W12 "ALL DAY" row (public holidays, synced OOO days, birthdays) is absent from today's agenda and
-present on yesterday's. For a user east of UTC, the same instant lands correctly. App-created all-day
-events behave the other way round.
+Under instant overlap — the semantics the acceptance criterion names, and the ones the outdoor dashboard
+has always used — a Google-synced all-day event on 27 August is the instant `2026-08-27T00:00Z`, which
+for a user **west of UTC** falls in their **26 August** window. Their synced public holidays,
+out-of-office days and birthdays showed on yesterday's agenda and never on today's. East of UTC it was
+correct, which is why it survived the first round of tests: every all-day fixture was UTC and the
+day-boundary test deliberately used only `Pacific/Kiritimati`.
 
-**A first draft of this note claimed the fix needed a backfill and changes in two other domains. That
-was wrong, and the correction is the useful part.** A *naive UTC-date* comparison would indeed fix
-Google's rows and break the app's — but a **zone-aware** one fixes both, and it is not a new rule:
-`event_date_in_timezone` (`core_shared/models/journals/calendar_info.py`) already exists, migration 0045
-already derives the clock columns `AT TIME ZONE jci.timezone`, and `SqlCalendarInfoRepository` already
-reads rows that way. Applied to an all-day row —
-`(j.event_date_range_start AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date` compared against the
-anchor date — it lands both conventions on the intended day:
+**The fix, and why it is not a new convention.** All-day rows are matched by **date** rather than by
+instant, with the bounds read back **in the zone they were written in**:
+`(event_date_range_start AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date` against the anchor, and the
+same on `end` so a multi-day all-day event overlaps in date space. This is the rule the codebase already
+has — `event_date_in_timezone` (`core_shared/models/journals/calendar_info.py`), and migration 0045 for
+the clock columns. Google's rows carry no zone so they are read as UTC, which is what they are; the
+app's carry the user's, so local midnight reads back as midnight. Timed rows keep instant overlap, and a
+test holds that separation shut: a far-western user's midday is on the *following* UTC date, so a timed
+event matched by date would vanish.
 
-- **Google's rows carry no zone.** `_extract_timezone` returns `None` for date-only events
-  (`event_transformer.py`), so `COALESCE` reads the instant as UTC, which is what it is. Correct for a
-  user on either side of UTC.
-- **The app's rows carry the user's zone.** `EventTypeEditor` defaults `timezone` to
-  `getDefaultTimezone()`, so the browser-local midnight instant read back in that zone is midnight
-  again. Correct.
+**Recorded honestly: an earlier draft of this note deferred the fix on the grounds that it needed a
+backfill and changes in two other domains.** That was wrong. A *naive UTC-date* comparison would indeed
+have fixed Google's rows and broken the app's, but the zone-aware one serves both, and it costs one
+predicate in this query.
 
-So the cost is a predicate in *this* phase's query — no backfill, no Google-worker change, no journal
-write-path change.
+**One case is knowingly not served.** An app-created all-day row whose `timezone` was **cleared**
+(`EventTypeEditor` sends `e.target.value || null`) has a local-midnight instant and no zone to read it
+in, so it is read as UTC and lands a day early for a user east of UTC. Under instant overlap that row
+was correct, so this is a trade rather than a pure win — taken deliberately, because the losing case
+needs a deliberate edit to a rarely-touched field while the winning case was every west-of-UTC user's
+synced holidays. **Follow-up:** default the zone at the journal write path when it is cleared, and the
+case disappears; that touches the write path, which is why it is not here.
 
-**Why it is still not applied here, and this is a product call rather than a cost one.** The change is
-not a pure win: it has a regression case. An app-created all-day row whose `timezone` was **cleared**
-(`EventTypeEditor` sends `e.target.value || null`) currently lands *correctly* under instant overlap —
-its instant is local midnight, which is the first instant of the local-day window — and would land a day
-early for an east-of-UTC user under the date rule. So the choice is not "broken versus fixed" but
-"wrong for every west-of-UTC user's synced holidays and OOO days" versus "wrong for anyone who
-deliberately cleared the zone field". The first is far more common and the trade is almost certainly
-worth taking — but it is a behaviour change with a loser, in a phase already three times its line
-budget, and it belongs to somebody making it deliberately rather than to a windowing phase making it in
-passing.
+**Of the five all-day tests, only one fails without the fix** — the far-western Google case, which is
+the defect. The other four pass either way and are guards: the eastern side that already worked, the app
+convention that already worked, the multi-day span, and the timed-event separation. Recorded because a
+reviewer counting tests would otherwise read five proofs where there is one proof and four fences.
 
-**Follow-up, with the approach settled rather than open:** apply the zone-aware date comparison to
-`is_all_day` rows (date-space overlap for a multi-day all-day event: `start_date <= anchor <= end_date`),
-leave timed rows on instant overlap, and pin it with a test for a user on each side of UTC plus one for
-the cleared-zone case. Consider also defaulting a cleared `timezone` at the write path so the residual
-case disappears. Until then, **ITER18-004 Phase 7 must not paper over it in the card**, and Phase 17's
-e2e ordering fixtures should use timed events so they are not silently asserting the broken case.
-- **Attendees are deduplicated, because taking two relationship types makes that
-  possible.** `journal_contact_relationships` is keyed on *(journal, contact, type)*, so one contact can
-  hold both `PARTICIPANT` and `INVITEE` on one journal — and a **contact merge reaches that state on its
-  own**, since its own dedupe is per relationship type
-  (`journal_contact_relationship_repository.py`). Without `DISTINCT` the avatar stack would draw the same
-  face twice and inflate its `+N`. Found in review, fixed, and pinned by
-  `test_one_contact_holding_both_roles_appears_once`.
-- **The entry carries `timezone` beside the clock times, which 5a's model did not.** Migration 0045
-  derives `start_time`/`end_time` as `(event_date_range_start AT TIME ZONE jci.timezone)::time` — the
-  **event's** wall time, not the reader's — so `09:00` alone is uninterpretable: a Sydney reader's agenda
-  can hold a New York meeting whose stored clock value says nine in the morning while the entry sorts
-  into their evening. The journals API already sends the same field beside the same two values
-  (`app/api/journals/schemas.py`), so this is consistency rather than a new idea. 5a's stated rationale
-  for carrying both representations ("carrying one would force a later phase to re-derive the other")
-  was right but incomplete — reconciling them needs a third value, and it is now there.
 - **The Phase 1 SAVEPOINT test is now proved by a real query.**
   `TestASqlErrorDoesNotPoisonTheRemainingSections` had to monkeypatch a harmless query into
   `_load_agenda` so that some section ran SQL after the broken one. The agenda now issues one of its
@@ -9560,7 +9536,7 @@ journal appears flagged, not omitted; tomorrow's window is the user's local tomo
 **Required Test Coverage:** unit (RTL) — ordering as rendered, each entry element, the cancelled treatment,
 the empty line, and accessible list labelling. E2E in Phase 17.
 
-**Two payload gaps left for this phase, recorded by Phase 5b so they are not discovered late:**
+**Payload gaps left for this phase, recorded by Phase 5b so they are not discovered late:**
 
 - **The accent colour (W17) and the type glyph (W14) are not in the agenda payload.** Phase 5's
   acceptance criteria enumerate the fields the query returns — title, all-day flag, times, location,
