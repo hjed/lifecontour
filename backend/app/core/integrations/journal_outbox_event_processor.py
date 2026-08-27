@@ -508,10 +508,9 @@ class JournalOutboxEventProcessor:
                 and existing_link.external_identity is None
             )
             if needs_recurring_id or needs_identity:
-                await self._update_external_event_link_etag(
+                await self._backfill_external_event_link_metadata(
                     calendar_id=UUID(calendar_id),
                     external_event_id=external_event_id,
-                    etag=etag,
                     recurring_event_id=payload.recurring_event_id,
                     external_identity=payload.external_identity,
                 )
@@ -1934,6 +1933,45 @@ class JournalOutboxEventProcessor:
         )
         row = result.fetchone()
         return int(row.journal_id) if row else None
+
+    async def _backfill_external_event_link_metadata(
+        self,
+        calendar_id: UUID,
+        external_event_id: str,
+        recurring_event_id: str | None = None,
+        external_identity: str | None = None,
+    ) -> None:
+        """Give a link metadata it predates, and change nothing else.
+
+        This runs for an event that has *not* changed, so it must not
+        pretend a sync happened. Writing ``sync_status`` would clear an
+        unresolved conflict the user still has to deal with, and bumping
+        ``updated_at`` would tell the field-protection merge that the link
+        is newer than a local edit it should be protecting. The etag is
+        already what the payload carries — that is why this event was
+        skipped — so there is nothing to write there either.
+
+        COALESCE keeps a stored value when the payload omits one.
+        """
+        await self.connection.execute(
+            text("""
+                UPDATE journal_external_event_links
+                SET recurring_event_id = COALESCE(
+                        :recurring_event_id, recurring_event_id
+                    ),
+                    external_identity = COALESCE(
+                        :external_identity, external_identity
+                    )
+                WHERE calendar_id = :calendar_id
+                  AND external_event_id = :external_event_id
+            """),
+            {
+                "calendar_id": calendar_id,
+                "external_event_id": external_event_id,
+                "recurring_event_id": recurring_event_id,
+                "external_identity": external_identity,
+            },
+        )
 
     async def _update_external_event_link_etag(
         self,

@@ -1224,6 +1224,43 @@ class TestFlaggingDuplicatesThatAlreadyExist:
         )
         assert history.scalar() == 0
 
+    async def test_a_backfill_does_not_resolve_a_conflict(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Handing over a token is not a successful sync.
+
+        A conflicted link is waiting on the user. The event has not
+        changed — it is promoted only to carry the token — so marking the
+        link synced would clear a conflict nobody resolved, and the
+        classifier that decides to promote it never looks at sync_status,
+        so every conflicted link predating the token would be swept.
+        """
+        processor, work, _personal, first, _second = await self._duplicate_pair(
+            async_connection
+        )
+        await async_connection.execute(
+            text("""UPDATE journal_external_event_links
+                    SET sync_status = 'conflicted'
+                    WHERE external_event_id = 'work-copy-1'"""),
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+
+        status = await async_connection.execute(
+            text(
+                "SELECT sync_status FROM journal_external_event_links "
+                "WHERE external_event_id = 'work-copy-1'"
+            )
+        )
+        assert status.scalar() == "conflicted"
+
     async def test_a_de_duplicated_event_is_not_flagged(
         self,
         async_connection: AsyncConnection,
