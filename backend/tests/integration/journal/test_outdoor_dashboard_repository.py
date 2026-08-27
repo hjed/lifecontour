@@ -17,6 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.outdoor_dashboard_repository import (
     SqlOutdoorDashboardRepository,
 )
+from app.core.journal.services.journal_date_resolver import (
+    JournalDateResolver,
+)
 from app.core.journal.services.outdoor_dashboard_service import (
     OutdoorDashboardService,
 )
@@ -70,7 +73,7 @@ async def service(
 ) -> OutdoorDashboardService:
     return OutdoorDashboardService(
         dashboard_repo=dashboard_repository,
-        user_settings_repo=user_settings_repository,
+        date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
     )
 
 

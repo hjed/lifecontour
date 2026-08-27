@@ -24,7 +24,6 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.dashboard.models.sections import AgendaSectionData
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
 from app.core.journal.adapters.sql.daily_summary_repository import (
     SqlJournalDailySummaryRepository,
@@ -131,10 +130,12 @@ class TestTheSectionEnvelope:
         assert document["data"]["id"] == USER_ID
         attributes = document["data"]["attributes"]
         assert set(attributes) == set(SECTIONS)
-        # This user has no summary row, so that section reports unavailable —
-        # the three Phases 5-6, 11 and 13 have yet to fill answer with nothing.
+        # This user has no summary row, so that section reports unavailable.
+        # The agenda answers with an empty day — its own suite covers a populated
+        # one — and the two Phases 11 and 13 have yet to fill answer with nothing.
         assert attributes["summary"] == {"status": "unavailable", "data": None}
-        for name in ("agenda", "tasks", "upcoming_dates"):
+        assert attributes["agenda"] == {"status": "ready", "data": {"entries": []}}
+        for name in ("tasks", "upcoming_dates"):
             assert attributes[name] == {"status": "ready", "data": {}}, name
 
     async def test_the_resource_links_to_itself(
@@ -284,10 +285,10 @@ class TestASqlErrorDoesNotPoisonTheRemainingSections:
     machinery on the promise that the phases adding queries would prove it; the
     summary is the first query, so it is proved here.
 
-    The proof needs a section that runs SQL *after* the broken one, which is why
-    the agenda is given a harmless real query for the duration: without it, the
-    three empty sections would report ready on an aborted transaction and the
-    test would pass whether or not the rollback happened.
+    The proof needs a section that runs SQL *after* the broken one. The agenda
+    now issues a real query of its own, which is what this test was waiting for:
+    it is read straight after the summary, so if the rollback did not happen it
+    is the section that would fail with "current transaction is aborted".
     """
 
     @pytest.fixture
@@ -300,15 +301,7 @@ class TestASqlErrorDoesNotPoisonTheRemainingSections:
             assert self.connection is not None
             await self.connection.execute(text("SELECT 1 / 0"))
 
-        async def real_query(
-            self: HomeDashboardService, *_args: object, **_kwargs: object
-        ) -> AgendaSectionData:
-            assert self.connection is not None
-            await self.connection.execute(text("SELECT 1"))
-            return AgendaSectionData()
-
         monkeypatch.setattr(HomeDashboardService, "_load_summary", divide_by_zero)
-        monkeypatch.setattr(HomeDashboardService, "_load_agenda", real_query)
 
     async def test_the_broken_section_reports_unavailable(
         self,
@@ -328,10 +321,15 @@ class TestASqlErrorDoesNotPoisonTheRemainingSections:
         authenticated_client: AsyncClient,
         summary_read_fails_in_the_database: None,
     ) -> None:
-        """Without the rollback this is "current transaction is aborted"."""
+        """Without the rollback this is "current transaction is aborted".
+
+        The agenda is the later section with a query of its own, and it is read
+        immediately after the broken one — so its reaching *ready* at all is the
+        assertion, whatever this user's empty day puts in it.
+        """
         attributes = (await authenticated_client.get(URL)).json()["data"]["attributes"]
 
-        assert attributes["agenda"] == {"status": "ready", "data": {}}
+        assert attributes["agenda"] == {"status": "ready", "data": {"entries": []}}
 
     async def test_the_anchor_and_the_untouched_sections_survive(
         self,

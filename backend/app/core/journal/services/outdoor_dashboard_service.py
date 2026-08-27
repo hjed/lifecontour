@@ -2,14 +2,22 @@
 
 Computes the upcoming-activities and activity-totals widgets from the
 dashboard repository's windowed rows. Window arithmetic mirrors the journal
-date-window browsing semantics — windows run from midnight on their first day
-to end-of-day (``time.max``) on their last, compared with an overlap predicate so
-multi-day trips straddling a boundary still count — but the boundaries (and
-the default "today" anchor) are computed in the **user's configured
-timezone** (``UserSettingsRepository.get_timezone``, UTC fallback), matching
-``DailySummaryInputAssembler``: an AEST user's dashboard day starts at their
-midnight, not UTC's. Read-only — no unit of work, matching
+date-window browsing semantics — windows run from midnight on their first day to
+the final microsecond of their last, compared with an overlap predicate so
+multi-day trips straddling a boundary still count — but the boundaries (and the
+default "today" anchor) are computed in the **user's configured timezone**,
+matching ``DailySummaryInputAssembler``: an AEST user's dashboard day starts at
+their midnight, not UTC's. Read-only — no unit of work, matching
 ``IncompleteOutdoorActivityService``.
+
+Both of those come from ``journal_date_resolver``: ``local_window`` for the
+boundaries and ``JournalDateResolver.timezone_for`` for the zone. This service
+had private copies of each, written before that module existed, and ITER18-001
+Phase 3 recorded their collapse as a follow-up for the first phase with a reason
+to open this file — the home dashboard's agenda, which windows the same way.
+The one behavioural difference is a fix: ``local_window`` builds a day's end from
+the *next* day's midnight rather than from ``time.max``, so a zone whose clocks
+go back at midnight no longer loses the repeated hour.
 
 Also computes the checked-out-gear and templates-done widgets. Checked-out
 gear compares instants (the resolved checkout window is timestamped), so it
@@ -28,7 +36,6 @@ import datetime
 from typing import TYPE_CHECKING
 
 from core_shared.models.journals import (
-    EventDateRange,
     OutdoorActivityTotals,
     TemplatesDoneSummary,
     checked_out_gear,
@@ -37,38 +44,21 @@ from core_shared.models.journals import (
     templates_done_by_type,
 )
 
-from app.core.settings.timezone_utils import resolve_timezone
+from app.core.journal.services.journal_date_resolver import local_window, today_in
 
 if TYPE_CHECKING:
-    from zoneinfo import ZoneInfo
-
     from core_shared.models.journals import (
         CheckedOutGearItem,
         UpcomingOutdoorActivity,
     )
 
     from app.core.journal.models.repositories import OutdoorDashboardRepository
-    from app.core.settings.models import UserSettingsRepository
+    from app.core.journal.services.journal_date_resolver import JournalDateResolver
 
 UPCOMING_DAYS_FORWARD = 30
 UPCOMING_CAP = 10
 TOTALS_WINDOW_DAYS = (30, 365)
 TEMPLATES_RECENT_DAYS = 30
-
-
-def _window(
-    start_day: datetime.date, end_day: datetime.date, tz: ZoneInfo
-) -> EventDateRange:
-    """An inclusive window from midnight on ``start_day`` to end-of-day on ``end_day``, in ``tz``.
-
-    ``time.max`` (23:59:59.999999) covers the final fractional second, like
-    ``compute_search_window``'s full-day bounds — timestamps have microsecond
-    precision, so nothing on ``end_day`` can fall past it.
-    """
-    return EventDateRange(
-        start=datetime.datetime.combine(start_day, datetime.time.min, tz),
-        end=datetime.datetime.combine(end_day, datetime.time.max, tz),
-    )
 
 
 class OutdoorDashboardService:
@@ -77,14 +67,10 @@ class OutdoorDashboardService:
     def __init__(
         self,
         dashboard_repo: OutdoorDashboardRepository,
-        user_settings_repo: UserSettingsRepository,
+        date_resolver: JournalDateResolver,
     ) -> None:
         self.dashboard_repo = dashboard_repo
-        self.user_settings_repo = user_settings_repo
-
-    async def _user_timezone(self, user_id: str) -> ZoneInfo:
-        """The user's configured timezone (UTC when unset or invalid)."""
-        return resolve_timezone(await self.user_settings_repo.get_timezone(user_id))
+        self.date_resolver = date_resolver
 
     async def list_upcoming_activities(
         self, user_id: str, anchor: datetime.date | None = None
@@ -95,9 +81,9 @@ class OutdoorDashboardService:
         ``UPCOMING_DAYS_FORWARD`` days from ``anchor`` (default: today in the
         user's timezone, which also anchors the window boundaries).
         """
-        tz = await self._user_timezone(user_id)
-        anchor = anchor or datetime.datetime.now(tz).date()
-        window = _window(
+        tz = await self.date_resolver.timezone_for(user_id)
+        anchor = anchor or today_in(tz)
+        window = local_window(
             anchor, anchor + datetime.timedelta(days=UPCOMING_DAYS_FORWARD), tz
         )
         upcoming = await self.dashboard_repo.list_upcoming_journals(
@@ -122,10 +108,10 @@ class OutdoorDashboardService:
         separately because a journal with two independent subtypes lands in two
         per-type buckets while remaining a single logged activity.
         """
-        tz = await self._user_timezone(user_id)
-        anchor = anchor or datetime.datetime.now(tz).date()
+        tz = await self.date_resolver.timezone_for(user_id)
+        anchor = anchor or today_in(tz)
         windows = {
-            days: _window(anchor - datetime.timedelta(days=days), anchor, tz)
+            days: local_window(anchor - datetime.timedelta(days=days), anchor, tz)
             for days in TOTALS_WINDOW_DAYS
         }
         facts = await self.dashboard_repo.list_outdoor_type_facts(
@@ -181,9 +167,9 @@ class OutdoorDashboardService:
         anchoring the activity totals use, so the two headline numbers agree
         about where "the last 30 days" starts.
         """
-        tz = await self._user_timezone(user_id)
-        anchor = anchor or datetime.datetime.now(tz).date()
-        recent_window = _window(
+        tz = await self.date_resolver.timezone_for(user_id)
+        anchor = anchor or today_in(tz)
+        recent_window = local_window(
             anchor - datetime.timedelta(days=TEMPLATES_RECENT_DAYS), anchor, tz
         )
         references = await self.dashboard_repo.list_template_references(user_id)

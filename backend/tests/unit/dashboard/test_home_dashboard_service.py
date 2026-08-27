@@ -23,6 +23,7 @@ from core_shared.models.journals.daily_summary import JournalDailySummary
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.dashboard.models.sections import (
+    AgendaEntry,
     AgendaSectionData,
     DashboardSummaryState,
     HomeDashboard,
@@ -90,15 +91,37 @@ def connection() -> MagicMock:
     return connection
 
 
+def agenda_entry(journal_id: int, hour: int, *, all_day: bool = False) -> AgendaEntry:
+    """One entry on 31 July 2026, written as the hour a reader sees."""
+    starts_at = datetime.datetime(2026, 7, 31, hour, tzinfo=datetime.UTC)
+    return AgendaEntry(
+        journal_id=journal_id,
+        title=f"Event {journal_id}",
+        is_all_day=all_day,
+        starts_at=starts_at,
+        ends_at=starts_at + datetime.timedelta(hours=1),
+    )
+
+
+@pytest.fixture
+def mock_agenda_repo() -> AsyncMock:
+    """An agenda repository answering with one ordinary timed entry."""
+    repo = AsyncMock()
+    repo.list_entries_in_window.return_value = [agenda_entry(1, 9)]
+    return repo
+
+
 @pytest.fixture
 def service(
     date_resolver: JournalDateResolver,
     mock_summary_repo: AsyncMock,
+    mock_agenda_repo: AsyncMock,
     connection: MagicMock,
 ) -> HomeDashboardService:
     return HomeDashboardService(
         date_resolver=date_resolver,
         summary_repo=mock_summary_repo,
+        agenda_repo=mock_agenda_repo,
         connection=connection,
     )
 
@@ -244,12 +267,16 @@ class TestPerSectionIsolation:
         assert nested.commit.await_count == len(SECTIONS) - 1
 
     async def test_a_missing_connection_is_tolerated(
-        self, date_resolver: JournalDateResolver, mock_summary_repo: AsyncMock
+        self,
+        date_resolver: JournalDateResolver,
+        mock_summary_repo: AsyncMock,
+        mock_agenda_repo: AsyncMock,
     ) -> None:
         """``savepoint(None)`` no-ops, so the guard is still the guard."""
         service = HomeDashboardService(
             date_resolver=date_resolver,
             summary_repo=mock_summary_repo,
+            agenda_repo=mock_agenda_repo,
             connection=None,
         )
 
@@ -393,3 +420,103 @@ class TestTheSummarySection:
 
         touched = {name for name, _args, _kwargs in mock_summary_repo.mock_calls}
         assert touched == {"find_by_user_and_date"}
+
+
+class TestTheAgendaSection:
+    """What the service asks the agenda repository for, and what it does with it.
+
+    The window is the subject here rather than the SQL: a query that is right
+    about journals can still be asking about UTC's day, and near local midnight
+    those are different days with different events in them.
+    """
+
+    async def test_asks_for_the_users_local_day_not_utcs(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        window = mock_agenda_repo.list_entries_in_window.await_args.kwargs["window"]
+        sydney = ZoneInfo("Australia/Sydney")
+        assert window.start == datetime.datetime(2026, 7, 31, tzinfo=sydney)
+        assert JUST_PAST_SYDNEY_MIDNIGHT.date() == datetime.date(2026, 7, 30)
+
+    async def test_the_window_ends_at_the_last_microsecond_of_the_local_day(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        """Inclusive at both ends, so an event at 23:59 is still today's.
+
+        Built from the *next* day's midnight rather than ``time.max``, which is
+        what ``local_day_window`` exists to get right in a zone whose clocks go
+        back at midnight.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        window = mock_agenda_repo.list_entries_in_window.await_args.kwargs["window"]
+        sydney = ZoneInfo("Australia/Sydney")
+        next_midnight = datetime.datetime(2026, 8, 1, tzinfo=sydney)
+        assert window.end == next_midnight - datetime.timedelta(microseconds=1)
+
+    async def test_asks_only_about_the_acting_user(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        await service.dashboard(USER_ID)
+
+        assert mock_agenda_repo.list_entries_in_window.await_args.args[0] == USER_ID
+
+    async def test_returns_the_entries_in_the_agendas_order(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        """The repository's order is not the card's; the service applies the rule.
+
+        Handed back deliberately jumbled, so a service that passed the rows
+        through untouched would fail here rather than in an e2e three phases on.
+        """
+        mock_agenda_repo.list_entries_in_window.return_value = [
+            agenda_entry(1, 17),
+            agenda_entry(2, 9),
+            agenda_entry(3, 0, all_day=True),
+        ]
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.data is not None
+        assert [e.journal_id for e in dashboard.agenda.data.entries] == [3, 2, 1]
+
+    async def test_a_day_with_nothing_on_it_is_ready_and_empty(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        """Empty is an answer, and it must not read as *unavailable*.
+
+        The card renders one quiet line for an empty day and a different quiet
+        line when the section could not be read, so the two have to arrive
+        differently.
+        """
+        mock_agenda_repo.list_entries_in_window.return_value = []
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.status is SectionStatus.READY
+        assert dashboard.agenda.data is not None
+        assert dashboard.agenda.data.entries == ()
+
+    async def test_a_failing_query_costs_only_the_agenda(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        mock_agenda_repo.list_entries_in_window.side_effect = RuntimeError("db is down")
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.status is SectionStatus.UNAVAILABLE
+        assert dashboard.agenda.data is None
+        for name in ("summary", "tasks", "upcoming_dates"):
+            assert getattr(dashboard, name).status is SectionStatus.READY, name
