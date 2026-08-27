@@ -9261,20 +9261,117 @@ error does not throw the page. E2E in Phase 17.
 `backend/app/core/journal/services/journal_date_resolver.py`; use `local_day_window` for the day window
 and `JournalDateResolver.today` for the anchor, and migrate `OutdoorDashboardService._window` onto it
 while you are here, per Phase 3's recorded follow-up).
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4). **Split at planning time into 5a and 5b —
+see below**; the original single-phase estimate was low by roughly 2×.
 
 **Acceptance Criteria:**
 
 - [ ] A repository query returns today's event journals for the user with everything the section needs —
       title, all-day flag, start/end times, location, tags, participants, `event_state` — in **one query**,
-      not one per journal.
+      not one per journal. *(5b)*
 - [ ] The service orders them **all-day first, then timed ascending by start** (**W12**, **W13**), windowed
       on the user's local day with the `EventDateRange` overlap semantics the outdoor dashboard uses.
-- [ ] The section reports empty distinctly from unavailable, so the UI can show one line.
+      *(the rule in 5a, the windowing in 5b)*
+- [ ] The section reports empty distinctly from unavailable, so the UI can show one line. *(5b)*
 
 **Required Test Coverage:** unit — ordering with several all-day items, a multi-day journal overlapping
 today, and the empty case. Integration — the query against real journals with calendar info; day-boundary
 anchoring for a non-UTC user; a query-count assertion for the nested tags/participants. No e2e.
+
+**Split recorded before work started (delivery rule 3, and Phase 2's retrospective):**
+
+Phase 2 concluded that *"a phase whose plan already estimates past 500 should be split at planning time,
+and the seam is usually the one calibration rule 4 names."* This is the first phase to which that applies
+prospectively. Planning the work file by file put production at **~300–340 lines**, not ~150 — domain
+models, a repository port, a SQL adapter, a pure ordering module, service wiring, the JSON:API section
+fields *and* the outdoor `_window` migration the prerequisite line asks for — which is ~1,200–1,400
+tracked. The seam calibration rule 4 names is exactly available here: the ordering rule is tested domain
+logic that needs no caller.
+
+| | Deliverable | Estimated production → tracked |
+|---|---|---|
+| **5a** | Agenda domain models (`AgendaEntry`, `AgendaTag`, `AgendaParticipant`, `AgendaSectionData.entries`) and the pure ordering rule, with its unit tests. Mergeable alone. | ~95 → **~570** (×6 — rule 14: the deliverable is a *rule*, and its acceptance criteria read as a matrix) |
+| **5b** | Repository port + SQL adapter (one query), DI wiring, `_load_agenda`, the JSON:API agenda fields, the integration suite, and the `OutdoorDashboardService._window` migration. | ~230 → **~920** (×4 — wires an existing rule to an existing surface, no new entry point) |
+
+**Scope note carried into 5b — `is_cancelled` reaches the wire in Phase 5, not Phase 6.** The first
+acceptance criterion above requires the query to return `event_state`, and there is no honest way to
+fetch it and then withhold it: a payload that carried a cancelled event without saying so would present
+it as active, which the specification forbids. So the entry carries a derived `is_cancelled` and it
+serialises here. **Phase 6 keeps** tomorrow's entries, the collapsed event count, and the presentation
+rules for cancellation (**W18**), and its own estimate should come down accordingly.
+
+##### Phase 5a: Agenda — Domain Models and the Ordering Rule ✅ COMPLETE
+
+**Prerequisites:** Phase 1.
+**Estimated diff:** ~95 production → **~570 tracked** (×6) · **Actual:** 130 production → **460 tracked**
+(130 production, 261 tests, 70 documentation). The first estimate in this iteration to come in *under*,
+and by a margin worth understanding rather than celebrating: ×6 was chosen because rule 14 catches
+rule-defining phases, and this is one. What rule 14 did not account for is that a rule stated as a
+**sort key** costs almost nothing to write once its boundaries are known — the whole ordering is six
+lines — so the multiplier lands on a production figure that is mostly *docstrings for dataclasses*
+rather than logic. 17 tests against 6 lines of rule is the same test-per-boundary discipline Phase 3
+recorded; it just had less production to multiply. **Suggested refinement:** apply ×6 to a rule-defining
+phase's *rule*, and ×2–3 to the data it operates on, rather than one multiplier over both.
+
+**Acceptance Criteria:**
+
+- [x] `AgendaEntry` and its nested `AgendaTag` / `AgendaParticipant` carry everything the section needs:
+      title and journal id, the all-day flag, the stored instants *and* the clock times, location,
+      cancellation, tags and participants. — `app/core/dashboard/models/sections.py`. Both time
+      representations are carried deliberately: the instants are the window and ordering key and the only
+      way to see that an entry began before today, while `start_time`/`end_time` are the
+      `journal_calendar_info` `TIME` columns the existing calendar surface renders and **W13** draws.
+- [x] `AgendaSectionData` carries an ordered `entries` tuple that defaults to empty, so a ready section
+      with nothing in it stays distinguishable from an unavailable one. — Defaults to `()`, asserted
+      against an unavailable section in `test_dashboard_sections.py`.
+- [x] A pure ordering rule pins all-day entries above timed ones (**W12**) and ascends timed ones by
+      start (**W13**), deterministically, with no database and no caller. —
+      `order_agenda_entries` in `app/core/dashboard/services/agenda_section.py`.
+
+**Required Test Coverage:** unit only — several all-day items, a multi-day journal overlapping today, ties,
+non-mutation of the input, and the empty case. No integration, no e2e: nothing calls it yet. —
+**Delivered:** 11 tests in `tests/unit/dashboard/test_agenda_ordering.py` and 4 in
+`test_dashboard_sections.py`.
+
+**Decisions taken (Phase 5a):**
+
+- **All-day is a pin, not a tie-break.** An all-day entry outranks every timed one however early the
+  timed one starts, because an all-day item is not a thing happening at 00:00 — it is a thing true of the
+  whole day, and the card marks it `ALL DAY` in place of a time. Pinned by
+  `test_an_all_day_entry_precedes_a_timed_one_that_starts_earlier`, so an "improvement" that sorts
+  everything by one key fails.
+- **Timed entries sort by the stored instant, not by the clock time the card draws.** A journal that
+  began yesterday and runs through today carries a `start_time` belonging to another day, so ordering by
+  that component would interleave it with today's entries at an hour that never happened today. The
+  instant is also the quantity the day window compares against, so the list is ordered by the same
+  measure that decided which entries are on it. Ties fall back to the journal id, so two events that
+  really do start at once render identically on every request.
+- **The rule is a module-level function, not a service method.** It is the whole product of this phase,
+  it is only meaningful at its boundaries, and a function over a sequence is the shape those boundaries
+  can be asserted at with no database and no caller — which is what makes 5a mergeable on its own
+  (calibration rule 4).
+
+##### Phase 5b: Agenda — The One-Query Read and the Wire
+
+**Prerequisites:** Phase 5a.
+**Estimated diff:** ~230 production → **~920 tracked** (×4)
+
+**Acceptance Criteria:**
+
+- [ ] One query returns today's event journals for the acting user with their tags and participants
+      aggregated, not one query per journal, scoped on `journals.user_id`.
+- [ ] `HomeDashboardService._load_agenda` windows on the user's local day through `local_day_window`,
+      with the outdoor dashboard's `EventDateRange` overlap semantics, and applies 5a's ordering rule.
+- [ ] The agenda section serialises its entries, and an empty day serialises as `ready` with an empty
+      list rather than as unavailable.
+- [ ] `OutdoorDashboardService._window` / `._user_timezone` are migrated onto `journal_date_resolver`,
+      discharging ITER18-001 Phase 3's recorded follow-up.
+
+**Required Test Coverage:** unit — the local-day window the repository is asked for, the ordered result,
+the empty day, a repository failure costing only this section, and the serialised shape. Integration —
+real journals with calendar info, tags and participants; overlap and non-overlap; day-boundary anchoring
+for a non-UTC user; another user's journal absent; a cancelled event flagged rather than omitted; and a
+statement-count assertion proving the nested reads do not become N+1. No e2e.
 
 #### Phase 6: Agenda — Cancelled Events and Tomorrow
 

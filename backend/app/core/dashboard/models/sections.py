@@ -19,7 +19,7 @@ meaningful says so with a ready payload instead; both kinds are in use, and whic
 a section is belongs to the section, not to this envelope.
 
 The payload types are declared here from the outset and filled by their own
-phases. Summary is filled; agenda, tasks and upcoming dates are still empty,
+phases. Summary and agenda are filled; tasks and upcoming dates are still empty,
 which serialises as ``{}`` — ready, holding nothing — until the phases that give
 them fields land.
 """
@@ -27,7 +27,7 @@ them fields land.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time
 from enum import StrEnum
 
 
@@ -108,8 +108,80 @@ class SummarySectionData:
 
 
 @dataclass(frozen=True)
+class AgendaTag:
+    """One of a journal's tags, as the agenda row draws it.
+
+    The colour travels with the name because the card renders a colour-coded
+    badge (**W15**) and a badge whose colour arrived separately from its label
+    is one refactor away from showing the wrong one.
+    """
+
+    id: str
+    name: str
+    colour: str | None = None
+
+
+@dataclass(frozen=True)
+class AgendaParticipant:
+    """A contact taking part in an event, for the avatar stack (**W16**).
+
+    ``name`` is the whole display name rather than its parts: the stack shows
+    initials and needs a readable label behind them, and deriving either from
+    first/last would put that rule in the card instead of here.
+    """
+
+    contact_id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class AgendaEntry:
+    """One event journal on the agenda.
+
+    **Both the instants and the clock times are carried, and they answer
+    different questions.** ``starts_at``/``ends_at`` are the journal's stored
+    ``event_date_range`` — the quantity the day window compares against, the key
+    the entries are ordered by, and the only way to tell that an entry began
+    before today. ``start_time``/``end_time`` are the ``TIME`` columns
+    ``journal_calendar_info`` stores, which is what the existing calendar surface
+    renders and what **W13** draws as ``HH:MM - HH:MM``; they are ``None`` for an
+    all-day event, and may be ``None`` for a timed one whose times were never
+    filled in.
+
+    ``is_cancelled`` is derived from ``CalendarInfo.event_state`` at the edge, so
+    nothing downstream has to know the rest of that vocabulary. It is carried
+    rather than filtered on because the specification requires a cancelled event
+    to be *shown clearly marked* rather than silently dropped (**W18**) — but it
+    is carried precisely so that no surface can present one as still happening.
+    """
+
+    journal_id: int
+    title: str
+    is_all_day: bool
+    starts_at: datetime
+    ends_at: datetime
+    start_time: time | None = None
+    end_time: time | None = None
+    location: str | None = None
+    is_cancelled: bool = False
+    tags: tuple[AgendaTag, ...] = ()
+    participants: tuple[AgendaParticipant, ...] = ()
+
+
+@dataclass(frozen=True)
 class AgendaSectionData:
-    """Today's event journals, and tomorrow's. Filled by Phases 5 and 6."""
+    """Today's event journals, in the order the card draws them.
+
+    ``entries`` defaults to empty because a day with nothing scheduled is an
+    answer this section can give: *ready* holding no entries, which the card
+    renders as one quiet line, and which no caller can confuse with the section
+    having failed to answer at all.
+
+    Tomorrow's entries and their collapsed count (**W19**) land in Phase 6, as a
+    field beside this one.
+    """
+
+    entries: tuple[AgendaEntry, ...] = ()
 
 
 @dataclass(frozen=True)
