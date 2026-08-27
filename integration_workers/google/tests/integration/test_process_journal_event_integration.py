@@ -500,3 +500,247 @@ class TestProcessJournalEventIntegration:
         assert result["status"] == "ignored"
         assert result["reason"] == "concurrent_create"
         mock_google_client.create_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestOutboundPushKeepsDeDuplicatedLinks:
+    """A journal linked to two calendars is not a journal that moved.
+
+    The outbound push prunes links pointing at a calendar other than the
+    journal's own — the trace a journal leaves when a user moves it between
+    calendars — by deleting the event from that calendar in Google. Since
+    de-duplication, a second link can instead mean the event genuinely lives
+    in that calendar too, because one calendar invited the other. Pruning
+    that one would delete a real event off the user's other calendar.
+    """
+
+    async def _seed(
+        self,
+        db_session,
+        *,
+        second_link_identity: str | None,
+        display_identity: str | None = "widget-7f3a::instance-0",
+        second_link_capability: str = "bidirectional",
+    ):
+        """A journal displayed in Cal 2, with a second link on Cal 1."""
+        user_id = str(uuid.uuid4())
+        google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+        other_calendar = str(uuid.uuid4())
+        display_calendar = str(uuid.uuid4())
+
+        await db_session.execute(
+            text(
+                "INSERT INTO user_google_auth (user_id, google_account_email,"
+                " encrypted_access_token, encrypted_refresh_token, expires_at,"
+                " created_at, updated_at) VALUES (:user_id, :email, :token,"
+                " :refresh, now() + interval '1 hour', now(), now())"
+            ),
+            {
+                "user_id": user_id,
+                "email": google_email,
+                "token": b"fake_token",
+                "refresh": b"fake_refresh",
+            },
+        )
+        for calendar_id, name in (
+            (other_calendar, "Personal"),
+            (display_calendar, "Work"),
+        ):
+            await db_session.execute(
+                text(
+                    "INSERT INTO calendars (id, user_id, name, color,"
+                    " is_synced_to_google) VALUES (:id, :user_id, :name,"
+                    " '#FF0000', true)"
+                ),
+                {"id": calendar_id, "user_id": user_id, "name": name},
+            )
+
+        event_start = datetime.now(UTC)
+        result = await db_session.execute(
+            text(
+                "INSERT INTO journals (user_id, title, content,"
+                " event_date_range_start, event_date_range_end)"
+                " VALUES (:user_id, 'Physio', 'Content', :start, :end)"
+                " RETURNING id"
+            ),
+            {
+                "user_id": user_id,
+                "start": event_start,
+                "end": event_start + timedelta(hours=1),
+            },
+        )
+        journal_id = result.scalar()
+
+        await db_session.execute(
+            text(
+                "INSERT INTO journal_calendar_info (journal_id, calendar_id,"
+                " is_all_day, location) VALUES (:journal_id, :calendar_id,"
+                " false, 'Loc')"
+            ),
+            {"journal_id": journal_id, "calendar_id": display_calendar},
+        )
+        for calendar_id, external_event_id, identity, capability in (
+            (display_calendar, "work-copy-1", display_identity, "bidirectional"),
+            (
+                other_calendar,
+                "personal-copy-9",
+                second_link_identity,
+                second_link_capability,
+            ),
+        ):
+            await db_session.execute(
+                text(
+                    "INSERT INTO journal_external_event_links (journal_id,"
+                    " calendar_id, external_event_id, external_identity,"
+                    " sync_capability, sync_status, created_at, updated_at)"
+                    " VALUES (:journal_id, :calendar_id, :external_event_id,"
+                    " :identity, :capability, 'synced', now(), now())"
+                ),
+                {
+                    "journal_id": journal_id,
+                    "calendar_id": calendar_id,
+                    "external_event_id": external_event_id,
+                    "identity": identity,
+                    "capability": capability,
+                },
+            )
+        await db_session.commit()
+        return journal_id, other_calendar, google_email
+
+    async def _push_update(self, db_session, journal_id):
+        from worker import process_journal_event
+
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        mock_google_client = AsyncMock()
+        mock_google_auth_service = AsyncMock()
+        mock_google_auth_service.get_access_token.return_value = "token"
+        mock_google_client.update_event.return_value = {"id": "work-copy-1"}
+        mock_google_client.create_event.return_value = {"id": "work-copy-1"}
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        ):
+            await process_journal_event(
+                ctx={
+                    "session_factory": mock_session_factory,
+                    "job_id": "test_dedupe_push",
+                },
+                event_type="JournalUpdated",
+                event_data={
+                    "journal_id": journal_id,
+                    "changed_fields": {"title": ["Old", "New"]},
+                },
+            )
+        return mock_google_client
+
+    async def _link_exists(self, db_session, journal_id, calendar_id) -> bool:
+        result = await db_session.execute(
+            text(
+                "SELECT 1 FROM journal_external_event_links"
+                " WHERE journal_id = :journal_id AND calendar_id = :calendar_id"
+            ),
+            {"journal_id": journal_id, "calendar_id": calendar_id},
+        )
+        return result.fetchone() is not None
+
+    async def test_the_other_calendars_event_is_not_deleted_from_google(
+        self, db_session
+    ):
+        """Editing a shared event must not remove it from the other calendar."""
+        journal_id, other_calendar, _ = await self._seed(
+            db_session, second_link_identity="widget-7f3a::instance-0"
+        )
+
+        client = await self._push_update(db_session, journal_id)
+
+        client.delete_event.assert_not_called()
+        assert await self._link_exists(db_session, journal_id, other_calendar)
+
+    async def test_a_link_this_push_created_is_still_pruned(self, db_session):
+        """A journal genuinely moved between calendars still tidies up.
+
+        An outbound link with no token is an event this push put there and
+        no inbound sync has ever seen: exactly what pruning is for.
+        """
+        journal_id, other_calendar, _ = await self._seed(
+            db_session,
+            second_link_identity=None,
+            second_link_capability="outbound",
+        )
+
+        client = await self._push_update(db_session, journal_id)
+
+        client.delete_event.assert_called_once()
+        assert not await self._link_exists(db_session, journal_id, other_calendar)
+
+    async def test_a_tokenless_inbound_link_is_not_deleted(self, db_session):
+        """A link the sync created before tokens existed is still real.
+
+        Tokens arrive by backfill on a calendar's next poll, and an event
+        with no iCalUID never gets one at all — so "no token" cannot mean
+        "not confirmed upstream". A bidirectional link is the sync's own
+        record that the calendar returned this event, whatever its token
+        says, and deleting it would destroy something real.
+        """
+        journal_id, other_calendar, _ = await self._seed(
+            db_session,
+            second_link_identity=None,
+            second_link_capability="bidirectional",
+        )
+
+        client = await self._push_update(db_session, journal_id)
+
+        client.delete_event.assert_not_called()
+        assert await self._link_exists(db_session, journal_id, other_calendar)
+
+    async def test_a_link_the_sync_vouched_for_is_never_deleted(self, db_session):
+        """A token is evidence the calendar really holds an event.
+
+        Only the inbound sync sets one, and it does so by matching the link
+        to an event the calendar actually returned. Whatever the journal has
+        since done, deleting that event would destroy something real — so a
+        different token protects the link just as a matching one does.
+        """
+        journal_id, other_calendar, _ = await self._seed(
+            db_session, second_link_identity="widget-7f3a::instance-1"
+        )
+
+        client = await self._push_update(db_session, journal_id)
+
+        client.delete_event.assert_not_called()
+        assert await self._link_exists(db_session, journal_id, other_calendar)
+
+    async def test_the_shared_event_survives_the_journal_moving_calendars(
+        self, db_session
+    ):
+        """Moving the journal must not delete the event off a third calendar.
+
+        Reassigning a journal's calendar deletes the *old* calendar's link —
+        and that was the link carrying the token its de-duplicated sibling
+        was recognised by. A rule that protected a link only by comparing it
+        against its siblings would lose the sibling and the protection in the
+        same move, and delete a real event off the user's other calendar.
+        """
+        journal_id, other_calendar, _ = await self._seed(
+            db_session, second_link_identity="widget-7f3a::instance-0"
+        )
+        # The move: the display calendar's link goes, as
+        # CalendarInfoRepository.save does when the calendar changes.
+        await db_session.execute(
+            text(
+                "DELETE FROM journal_external_event_links"
+                " WHERE journal_id = :journal_id AND external_event_id ="
+                " 'work-copy-1'"
+            ),
+            {"journal_id": journal_id},
+        )
+        await db_session.commit()
+
+        client = await self._push_update(db_session, journal_id)
+
+        client.delete_event.assert_not_called()
+        assert await self._link_exists(db_session, journal_id, other_calendar)

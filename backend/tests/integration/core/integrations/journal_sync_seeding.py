@@ -85,6 +85,7 @@ def sync_event(
     etag: str = '"etag-1"',
     existing_journal_id: int | None = None,
     recurring_event_id: str | None = None,
+    external_identity: str | None = None,
 ) -> OutboxEvent:
     """A `journal_event.created` / `.updated` / `.cancelled` outbox event.
 
@@ -116,6 +117,7 @@ def sync_event(
         "existing_journal_id": existing_journal_id,
         "contact_relationships": [],
         "recurring_event_id": recurring_event_id,
+        "external_identity": external_identity,
     }
     return OutboxEvent(
         id=uuid.uuid4(),
@@ -145,7 +147,10 @@ def series_cancelled_event(calendar_id: str, master_id: str = MASTER_ID) -> Outb
 
 
 async def create_calendar(
-    connection: AsyncConnection, *, user_id: str = USER_ID
+    connection: AsyncConnection,
+    *,
+    user_id: str = USER_ID,
+    name: str = "Sync Test Calendar",
 ) -> str:
     """A calendar row for the synced journals to belong to, as a string uuid."""
     calendar_id = uuid.uuid4()
@@ -153,10 +158,10 @@ async def create_calendar(
         text(
             """
             INSERT INTO calendars (id, user_id, name, color)
-            VALUES (:id, :user_id, 'Sync Test Calendar', '#336699')
+            VALUES (:id, :user_id, :name, '#336699')
             """
         ),
-        {"id": calendar_id, "user_id": user_id},
+        {"id": calendar_id, "user_id": user_id, "name": name},
     )
     return str(calendar_id)
 

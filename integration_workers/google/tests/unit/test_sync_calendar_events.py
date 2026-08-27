@@ -20,6 +20,8 @@ def _make_google_event(
     start_dt: str = "2026-03-20T10:00:00Z",
     end_dt: str = "2026-03-20T11:00:00Z",
     recurring_event_id: str | None = None,
+    ical_uid: str | None = None,
+    original_start_dt: str | None = None,
 ) -> dict[str, Any]:
     """Build a raw Google Calendar event response dict."""
     event: dict[str, Any] = {
@@ -33,6 +35,10 @@ def _make_google_event(
     }
     if recurring_event_id is not None:
         event["recurringEventId"] = recurring_event_id
+    if ical_uid is not None:
+        event["iCalUID"] = ical_uid
+    if original_start_dt is not None:
+        event["originalStartTime"] = {"dateTime": original_start_dt}
     return event
 
 
@@ -1030,3 +1036,305 @@ class TestMasterCancellationLegacyLinks:
         assert "recurring_event_id IS NULL" in sql_text
         assert "LIKE :instance_prefix" in sql_text
         assert series_check_call[0][1]["instance_prefix"] == "master-1\\_%"
+
+
+class TestCrossCalendarDeDupe:
+    """The same event in two calendars must become one journal.
+
+    Google gives each calendar's copy its own event id, so the per-calendar
+    link lookup can never see the other copy. The identity token is what
+    joins them up.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
+            yield mock_mc
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    @pytest.fixture
+    def mock_ctx(self, mock_session: AsyncMock) -> dict[str, Any]:
+        factory = MagicMock()
+        factory.return_value = mock_session
+        return make_arq_ctx(session_factory=factory, redis=make_mock_redis())
+
+    @staticmethod
+    async def _run_sync(
+        mock_ctx: dict[str, Any], items: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        from worker import sync_calendar_events
+
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(
+            return_value={"items": items, "nextSyncToken": "new-sync-token"}
+        )
+        with patch("worker._create_google_client", return_value=mock_client):
+            return await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+    @staticmethod
+    def _queue(mock_session: AsyncMock, *results: Any) -> None:
+        """Queue the ordered execute() results for one calendar's sync."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        mock_session.execute.side_effect = [
+            cal_result,  # synced calendars
+            token_result,  # sync token
+            *results,
+            MagicMock(),  # sync token save
+        ]
+
+    @staticmethod
+    def _no_link() -> MagicMock:
+        result = MagicMock()
+        result.fetchone.return_value = None
+        return result
+
+    @staticmethod
+    def _identity_match(journal_id: int) -> MagicMock:
+        row = MagicMock()
+        row.journal_id = journal_id
+        result = MagicMock()
+        result.fetchone.return_value = row
+        return result
+
+    @pytest.mark.asyncio
+    async def test_new_event_carries_its_identity_token(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A created event tells the backend how to recognise its twin."""
+        self._queue(mock_session, self._no_link(), self._no_link())
+
+        result = await self._run_sync(
+            mock_ctx,
+            [_make_google_event(ical_uid="shared-uid@google.com")],
+        )
+
+        assert result["status"] == "success"
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.created"
+        assert outbox_event.event_data["external_identity"] == (
+            "google:shared-uid@google.com:"
+        )
+
+    @pytest.mark.asyncio
+    async def test_recurring_instance_token_includes_its_start(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Instances share a uid, so the token has to separate them."""
+        self._queue(mock_session, self._no_link(), self._no_link())
+
+        result = await self._run_sync(
+            mock_ctx,
+            [
+                _make_google_event(
+                    event_id="master-1_20260320T100000Z",
+                    recurring_event_id="master-1",
+                    ical_uid="series-uid@google.com",
+                    original_start_dt="2026-03-20T10:00:00Z",
+                )
+            ],
+        )
+
+        assert result["status"] == "success"
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_data["external_identity"] == (
+            "google:series-uid@google.com:2026-03-20T10:00:00+00:00"
+        )
+
+    @pytest.mark.asyncio
+    async def test_event_without_a_uid_carries_no_token(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """No trustworthy identity means the old per-calendar path, not a guess."""
+        self._queue(mock_session, self._no_link())
+
+        result = await self._run_sync(mock_ctx, [_make_google_event()])
+
+        assert result["status"] == "success"
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_data["external_identity"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_uidless_event_is_not_looked_up_by_identity(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Without a token there is nothing to match on, so we don't ask."""
+        self._queue(mock_session, self._no_link())
+
+        await self._run_sync(mock_ctx, [_make_google_event()])
+
+        queries = [str(call[0][0].text) for call in mock_session.execute.call_args_list]
+        assert not any(
+            "external_identity = :external_identity" in query for query in queries
+        )
+
+    @pytest.mark.asyncio
+    async def test_second_calendars_copy_updates_the_existing_journal(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """The whole point: one journal, not two.
+
+        The personal calendar's copy has its own event id, so the
+        per-calendar lookup misses. The token finds the journal the work
+        calendar already created, and the event becomes an update against
+        it — which is what makes the backend add a second link rather than
+        a second journal.
+        """
+        self._queue(mock_session, self._no_link(), self._identity_match(42))
+
+        result = await self._run_sync(
+            mock_ctx,
+            [
+                _make_google_event(
+                    event_id="personal-copy-9",
+                    ical_uid="shared-uid@google.com",
+                )
+            ],
+        )
+
+        assert result["status"] == "success"
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.updated"
+        assert outbox_event.event_data["existing_journal_id"] == 42
+        # The link it creates must belong to the calendar being synced, not
+        # to the one that already holds a link.
+        assert outbox_event.event_data["calendar_id"] == str(TEST_CALENDAR_UUID)
+        assert outbox_event.event_data["external_event_id"] == "personal-copy-9"
+
+    @pytest.mark.asyncio
+    async def test_identity_lookup_is_scoped_to_the_user_and_other_calendars(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A token is only meaningful within one user's own calendars."""
+        self._queue(mock_session, self._no_link(), self._no_link())
+
+        await self._run_sync(
+            mock_ctx,
+            [_make_google_event(ical_uid="shared-uid@google.com")],
+        )
+
+        identity_call = mock_session.execute.call_args_list[3]
+        sql_text = str(identity_call[0][0].text)
+        assert "external_identity = :external_identity" in sql_text
+        assert "user_id = :user_id" in sql_text
+        assert identity_call[0][1]["external_identity"] == (
+            "google:shared-uid@google.com:"
+        )
+        assert identity_call[0][1]["user_id"] == "user-1"
+
+
+class TestIdentityBackfill:
+    """Links made before the token existed have to acquire one.
+
+    Nothing else would ever give them one: an unchanged event is skipped on
+    its ETag, so without a nudge the de-dupe would only ever work for events
+    synced after the feature shipped.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
+            yield mock_mc
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    @pytest.fixture
+    def mock_ctx(self, mock_session: AsyncMock) -> dict[str, Any]:
+        factory = MagicMock()
+        factory.return_value = mock_session
+        return make_arq_ctx(session_factory=factory, redis=make_mock_redis())
+
+    @staticmethod
+    def _existing_link(external_identity: str | None) -> MagicMock:
+        link = MagicMock()
+        link.external_version = '"etag-abc"'
+        link.sync_capability = "bidirectional"
+        link.journal_id = 42
+        link.recurring_event_id = None
+        link.external_identity = external_identity
+        result = MagicMock()
+        result.fetchone.return_value = link
+        return result
+
+    async def _run(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock, link: MagicMock
+    ) -> dict[str, Any]:
+        from worker import sync_calendar_events
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        mock_session.execute.side_effect = [
+            cal_result,
+            token_result,
+            link,
+            MagicMock(),  # sync token save
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(
+            return_value={
+                "items": [
+                    _make_google_event(
+                        etag='"etag-abc"',  # unchanged: normally skipped
+                        ical_uid="shared-uid@google.com",
+                    )
+                ],
+                "nextSyncToken": "new-sync-token",
+            }
+        )
+        with patch("worker._create_google_client", return_value=mock_client):
+            return await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_tokenless_link_is_resynced_once(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """An unchanged event is re-emitted so the token can be stored."""
+        result = await self._run(mock_ctx, mock_session, self._existing_link(None))
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.updated"
+        assert outbox_event.event_data["existing_journal_id"] == 42
+        assert outbox_event.event_data["external_identity"] == (
+            "google:shared-uid@google.com:"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_link_that_already_has_a_token_stays_skipped(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """The backfill fires once, not on every sync forever."""
+        result = await self._run(
+            mock_ctx,
+            mock_session,
+            self._existing_link("google:shared-uid@google.com:"),
+        )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_not_called()
+        assert result["events_skipped"] == 1

@@ -34,6 +34,9 @@ from core_shared.logging import (
 )
 from core_shared.metrics import MetricsCollector
 from core_shared.models.contacts.serialization import serialize_contact
+from core_shared.models.journal_external_event_link import (
+    ExternalEventLinkSyncCapability,
+)
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import SyncJobRepository
@@ -2202,9 +2205,45 @@ async def _process_journal_upsert_event(
             }
             event_payload["end"] = {"dateTime": row.event_date_range_end.isoformat()}
 
-        # Fetch and prune any orphaned links from other calendars (e.g. if the journal was moved)
+        # Fetch and prune any orphaned links from other calendars (e.g. if the
+        # journal was moved).
+        #
+        # Pruning deletes the event from that calendar in Google, which is
+        # right for an event *we* put there: the journal has moved on, and the
+        # copy this push created is left behind. Those are exactly the links
+        # this push writes, and it never records an identity token on them.
+        #
+        # A link the *inbound* sync has touched is the opposite: it exists
+        # because that calendar returned the event, so the event is there
+        # independently of anything we pushed, and deleting it would destroy
+        # something real on the user's other calendar. Since de-duplication
+        # that is the ordinary shape of an event held by two calendars.
+        #
+        # Two marks record that, and a link needs neither to be spared:
+        #
+        # - ``sync_capability = 'bidirectional'`` is written only by the
+        #   inbound link writer, and never changed afterwards.
+        # - ``external_identity`` is written only when the inbound sync
+        #   matched the link to an event by identity.
+        #
+        # Both are needed. A token alone would not do: tokens arrive by
+        # backfill on a calendar's next poll, and an event with no iCalUID
+        # never gets one — so a real, inbound-created link can carry none.
+        # And the capability alone would not do either: a link this push
+        # created stays ``'outbound'`` even after the inbound sync later
+        # matches it and gives it a token.
+        #
+        # The rule is about the link's own marks rather than whether a
+        # sibling link shares its token: reassigning a journal's calendar
+        # deletes the *old* calendar's link, and that is the sibling a shared
+        # event was recognised by — a sibling comparison would lose the
+        # protection in the same move that needs it most.
         links_stmt = text("""
-            SELECT jeel.external_event_id, c.google_calendar_id, jeel.calendar_id
+            SELECT jeel.external_event_id,
+                   c.google_calendar_id,
+                   jeel.calendar_id,
+                   jeel.external_identity,
+                   jeel.sync_capability
             FROM journal_external_event_links jeel
             JOIN calendars c ON jeel.calendar_id = c.id
             WHERE jeel.journal_id = :journal_id
@@ -2214,7 +2253,12 @@ async def _process_journal_upsert_event(
         from googleapiclient.errors import HttpError
 
         for link_row in existing_links:
-            if link_row.calendar_id != row.calendar_id:
+            never_confirmed_upstream = (
+                link_row.external_identity is None
+                and link_row.sync_capability
+                == ExternalEventLinkSyncCapability.OUTBOUND.value
+            )
+            if link_row.calendar_id != row.calendar_id and never_confirmed_upstream:
                 if not link_row.external_event_id:
                     del_link_stmt = text("""
                         DELETE FROM journal_external_event_links
@@ -3217,6 +3261,45 @@ async def _fetch_all_calendar_events(
     return all_raw_events, new_sync_token
 
 
+async def _find_journal_by_event_identity(
+    session: Any,
+    user_id: str | int,
+    external_identity: str,
+    calendar_id: Any,
+) -> int | None:
+    """Find the journal another calendar already holds for this same event.
+
+    ``external_event_id`` is unique only within one calendar, so when a
+    calendar we sync has been invited to an event owned by another calendar
+    we sync, its copy looks brand new. The identity token is equal across
+    those copies, so a hit here means the event is already journalled and
+    this calendar needs a link to it rather than a journal of its own.
+
+    Scoped to the user, because a token means nothing across accounts, and
+    to *other* calendars, because a hit in this one would have been found by
+    the per-calendar lookup already.
+    """
+    result = await session.execute(
+        text("""
+            SELECT l.journal_id
+            FROM journal_external_event_links l
+            JOIN calendars c ON c.id = l.calendar_id
+            WHERE c.user_id = :user_id
+              AND l.external_identity = :external_identity
+              AND l.calendar_id <> :calendar_id
+            ORDER BY l.created_at ASC, l.journal_id ASC
+            LIMIT 1
+        """),
+        {
+            "user_id": str(user_id),
+            "external_identity": external_identity,
+            "calendar_id": calendar_id,
+        },
+    )
+    row = result.fetchone()
+    return int(row.journal_id) if row else None
+
+
 async def _save_calendar_sync_token(
     session: Any,
     new_sync_token: str,
@@ -3313,6 +3396,7 @@ async def sync_calendar_events(
     from core_shared.models.outbox import OutboxEvent
 
     from calendar_models import GoogleEvent
+    from event_identity import build_event_identity
     from event_transformer import GoogleEventTransformer
     from inbound_sync import InboundSyncAction, InboundSyncClassifier
 
@@ -3451,7 +3535,8 @@ async def sync_calendar_events(
                         # Lookup existing link
                         link_stmt = text("""
                             SELECT journal_id, external_event_id, external_version,
-                                   sync_capability, sync_status, recurring_event_id
+                                   sync_capability, sync_status, recurring_event_id,
+                                   external_identity
                             FROM journal_external_event_links
                             WHERE calendar_id = :calendar_id
                             AND external_event_id = :external_event_id
@@ -3511,6 +3596,40 @@ async def sync_calendar_events(
                             has_series_links=has_series_links,
                         )
 
+                        # Cross-calendar de-dupe. When one calendar invites
+                        # another, both copies are real events with their own
+                        # ids, so the lookup above legitimately found nothing
+                        # and this reads as a brand-new event. The identity
+                        # token is what the two copies share: a hit means the
+                        # event is already journalled, and this calendar wants
+                        # a link to that journal rather than a journal of its
+                        # own. Turning the create into an update is what gets
+                        # the backend to add the second link.
+                        external_identity = build_event_identity(google_event)
+                        deduped_journal_id: int | None = None
+                        if (
+                            action == InboundSyncAction.CREATE_JOURNAL
+                            and external_identity
+                        ):
+                            deduped_journal_id = await _find_journal_by_event_identity(
+                                session,
+                                user_id,
+                                external_identity,
+                                calendar_id,
+                            )
+                            if deduped_journal_id is not None:
+                                logger.info(
+                                    "Event already journalled from another "
+                                    "calendar, linking instead of duplicating",
+                                    external_event_id=google_event.id,
+                                    journal_id=deduped_journal_id,
+                                    calendar_id=str(calendar_id),
+                                )
+                                action = InboundSyncAction.UPDATE_JOURNAL
+                                metrics["events_deduplicated"] = (
+                                    metrics.get("events_deduplicated", 0) + 1
+                                )
+
                         if action == InboundSyncAction.SKIP_UNCHANGED:
                             contact_relationships = (
                                 transformer.extract_contact_relationships(google_event)
@@ -3556,6 +3675,21 @@ async def sync_calendar_events(
                             and google_event.recurring_event_id
                             and existing_link is not None
                             and existing_link.recurring_event_id is None
+                        ):
+                            action = InboundSyncAction.UPDATE_JOURNAL
+
+                        # Same, for links made before events carried an
+                        # identity token. Nothing else would ever give them
+                        # one — an unchanged event is skipped on its ETag —
+                        # so the de-dupe would otherwise only work for events
+                        # first synced after this shipped. Once the backend
+                        # stores the token the link stops qualifying, so this
+                        # fires once per link rather than every sync.
+                        if (
+                            action == InboundSyncAction.SKIP_UNCHANGED
+                            and external_identity
+                            and existing_link is not None
+                            and existing_link.external_identity is None
                         ):
                             action = InboundSyncAction.UPDATE_JOURNAL
 
@@ -3698,7 +3832,9 @@ async def sync_calendar_events(
                             continue
 
                         existing_journal_id = (
-                            existing_link.journal_id if existing_link else None
+                            existing_link.journal_id
+                            if existing_link
+                            else deduped_journal_id
                         )
 
                         # Create outbox event
@@ -3713,6 +3849,7 @@ async def sync_calendar_events(
                             existing_journal_id=existing_journal_id,
                             contact_relationships=contact_relationships,
                             recurring_event_id=google_event.recurring_event_id,
+                            external_identity=external_identity,
                         )
                         session.add(outbox_event)
                         metrics["events_processed"] += 1

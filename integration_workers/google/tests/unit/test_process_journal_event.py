@@ -302,6 +302,11 @@ class TestProcessJournalEvent:
             mock_link_row.calendar_id = "test-cal-id-old"
             mock_link_row.external_event_id = "old_event_id"
             mock_link_row.google_calendar_id = "test-google-cal-id-old"
+            # An event this push put on the old calendar and no inbound sync
+            # has ever confirmed — which is what makes it a link the push
+            # should prune.
+            mock_link_row.external_identity = None
+            mock_link_row.sync_capability = "outbound"
             mock_links_result.fetchall.return_value = [mock_link_row]
 
             mock_session.execute.side_effect = [
