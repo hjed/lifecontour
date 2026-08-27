@@ -477,7 +477,7 @@ rather than this API's taste:
   nothing is scheduled today — which is why the section stays `ready` rather
   than reporting `unavailable`. An entry is
   `{journal_id, title, is_all_day, starts_at, ends_at, start_time, end_time,
-  location, is_cancelled, tags[], participants[]}`.
+  timezone, location, is_cancelled, tags[], participants[]}`.
 
   | Rule | What it means on the wire |
   |---|---|
@@ -486,6 +486,7 @@ rather than this API's taste:
   | Overlap, not containment | Matched on `event_date_range_end >= start AND event_date_range_start <= end`, so a multi-day trip running through today is on today's agenda. |
   | Order | Every all-day entry first, then timed ones ascending by `starts_at`, ties broken on `journal_id`. Applied in the service, not in SQL. |
   | Two time representations | `starts_at`/`ends_at` are the journal's stored instants — the ordering key, and the only way to see that an entry began before today. `start_time`/`end_time` are the calendar info's clock values, `null` for an all-day event. |
+  | …and the zone they are in | `timezone` is the IANA zone `start_time`/`end_time` are expressed in — the **event's**, not the reader's, since migration 0045 derives them `AT TIME ZONE jci.timezone`. Render the clock values against it rather than against `meta.anchor.timezone`; `null` means UTC. Without it a 09:00 New York meeting on a Sydney reader's agenda reads as a morning event that sorts into their evening. The journals API sends the same field beside the same two values. |
   | Cancellation | Returned **flagged**, never filtered: the specification requires a cancelled event to be shown clearly marked, and a surface cannot mark an entry it was never sent. |
   | Participants | Contacts linked as `PARTICIPANT` **or** `INVITEE` — both ways of being at an event, and the type the Google worker writes synced attendees as. `MENTION` and `ABOUT` are people the journal is about and are not attendees. |
 
