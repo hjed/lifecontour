@@ -114,11 +114,16 @@ class AgendaTag:
     The colour travels with the name because the card renders a colour-coded
     badge (**W15**) and a badge whose colour arrived separately from its label
     is one refactor away from showing the wrong one.
+
+    Spelled ``color`` against this document's usual Australian English, because
+    it is the name the column, the tags API and the frontend's own tag type all
+    use. A second spelling for one field would mean the same tag arriving under
+    two names from two endpoints.
     """
 
     id: str
     name: str
-    colour: str | None = None
+    color: str | None = None
 
 
 @dataclass(frozen=True)

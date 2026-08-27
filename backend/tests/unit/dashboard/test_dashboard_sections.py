@@ -94,7 +94,7 @@ class TestTheAgendaPayload:
 
     def test_an_entry_carries_what_the_card_renders(self) -> None:
         """Everything W12-W18 draws, and nothing pre-formatted for it."""
-        tag = AgendaTag(id="t-1", name="social", colour="#ff0000")
+        tag = AgendaTag(id="t-1", name="social", color="#ff0000")
         entry = AgendaEntry(
             journal_id=42,
             title="Coffee with Sam",
