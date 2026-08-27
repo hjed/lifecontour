@@ -104,6 +104,7 @@ class TestTheAgendaPayload:
             start_time=datetime.time(9, 0),
             end_time=datetime.time(10, 0),
             location="The good place",
+            calendar_color="#336699",
             is_cancelled=False,
             tags=(tag,),
             participants=(AgendaParticipant(contact_id=7, name="Sam Taylor"),),
@@ -112,6 +113,7 @@ class TestTheAgendaPayload:
         assert entry.tags == (tag,)
         assert entry.participants[0].name == "Sam Taylor"
         assert entry.location == "The good place"
+        assert entry.calendar_color == "#336699"
 
     def test_an_entry_defaults_to_the_plainest_event_there_is(self) -> None:
         """Only the journal and its instants are required; the rest are absences."""
@@ -126,6 +128,7 @@ class TestTheAgendaPayload:
         assert entry.start_time is None
         assert entry.end_time is None
         assert entry.location is None
+        assert entry.calendar_color is None
         assert entry.is_cancelled is False
         assert entry.tags == ()
         assert entry.participants == ()

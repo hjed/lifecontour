@@ -8791,7 +8791,7 @@ and by a margin worth understanding rather than celebrating: ×6 was chosen beca
 rule-defining phases, and this is one. What rule 14 did not account for is that a rule stated as a
 **sort key** costs almost nothing to write once its boundaries are known — the whole ordering is six
 lines — so the multiplier lands on a production figure that is mostly *docstrings for dataclasses*
-rather than logic. 17 tests against 6 lines of rule is the same test-per-boundary discipline Phase 3
+rather than logic. 15 tests against 6 lines of rule is the same test-per-boundary discipline Phase 3
 recorded; it just had less production to multiply. **Suggested refinement:** apply ×6 to a rule-defining
 phase's *rule*, and ×2–3 to the data it operates on, rather than one multiplier over both.
 
@@ -8799,7 +8799,8 @@ phase's *rule*, and ×2–3 to the data it operates on, rather than one multipli
 
 - [x] `AgendaEntry` and its nested `AgendaTag` / `AgendaParticipant` carry everything the section needs:
       title and journal id, the all-day flag, the stored instants *and* the clock times, location,
-      cancellation, tags and participants. — `app/core/dashboard/models/sections.py`. Both time
+      the calendar colour **W17** keys the accent bar to, cancellation, tags and participants. —
+      `app/core/dashboard/models/sections.py`. Both time
       representations are carried deliberately: the instants are the window and ordering key and the only
       way to see that an entry began before today, while `start_time`/`end_time` are the
       `journal_calendar_info` `TIME` columns the existing calendar surface renders and **W13** draws.
