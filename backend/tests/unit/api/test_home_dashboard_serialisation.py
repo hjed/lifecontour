@@ -70,7 +70,7 @@ COFFEE = AgendaEntry(
     end_time=datetime.time(10, 0),
     timezone="Australia/Sydney",
     location="The good place",
-    tags=(AgendaTag(id="tag-1", name="social", colour="#ff0000"),),
+    tags=(AgendaTag(id="tag-1", name="social", color="#ff0000"),),
     participants=(AgendaParticipant(contact_id=7, name="Sam Taylor"),),
 )
 
@@ -372,7 +372,7 @@ class TestTheAgendaSection:
                 "timezone": "Australia/Sydney",
                 "location": "The good place",
                 "is_cancelled": False,
-                "tags": [{"id": "tag-1", "name": "social", "colour": "#ff0000"}],
+                "tags": [{"id": "tag-1", "name": "social", "color": "#ff0000"}],
                 "participants": [{"contact_id": 7, "name": "Sam Taylor"}],
             }
         ]

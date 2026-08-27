@@ -78,7 +78,7 @@ _ENTRIES_QUERY = text(
     JOIN journal_calendar_info jci ON jci.journal_id = j.id
     LEFT JOIN LATERAL (
         SELECT json_agg(
-                   json_build_object('id', t.id, 'name', t.name, 'colour', t.color)
+                   json_build_object('id', t.id, 'name', t.name, 'color', t.color)
                    ORDER BY t.name, t.id
                ) AS items
         FROM journal_tag_assignments a
@@ -151,7 +151,7 @@ def _to_entry(row: Any) -> AgendaEntry:
         timezone=row["timezone"],
         is_cancelled=row["event_state"] == EventState.CANCELLED.value,
         tags=tuple(
-            AgendaTag(id=str(tag["id"]), name=tag["name"], colour=tag["colour"])
+            AgendaTag(id=str(tag["id"]), name=tag["name"], color=tag["color"])
             for tag in json.loads(row["tags"])
         ),
         participants=tuple(

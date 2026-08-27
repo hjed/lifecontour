@@ -114,12 +114,14 @@ class AgendaTagSchema(BaseModel):
 
     id: str = Field(..., description="The tag's id")
     name: str = Field(..., description="The tag's name, as the badge's label")
-    colour: str | None = Field(
+    color: str | None = Field(
         default=None,
         description=(
             "The tag's own colour as a hex string, or null when it has none. A "
             "surface must not rely on it alone to convey anything: the name is "
-            "the label, and the colour is decoration on top of it."
+            "the label, and the colour is decoration on top of it. Spelled "
+            "`color` to match the tags API and the column, not this document's "
+            "usual Australian English."
         ),
     )
 
@@ -367,7 +369,7 @@ def _agenda_entry(entry: AgendaEntry) -> AgendaEntrySchema:
         location=entry.location,
         is_cancelled=entry.is_cancelled,
         tags=[
-            AgendaTagSchema(id=tag.id, name=tag.name, colour=tag.colour)
+            AgendaTagSchema(id=tag.id, name=tag.name, color=tag.color)
             for tag in entry.tags
         ],
         participants=[
