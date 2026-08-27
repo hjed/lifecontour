@@ -5630,32 +5630,120 @@ with reasons.** Both are about the count being *derived* from the user's day rat
   granularity. **Recorded as a follow-up** to be solved once for every date-derived read. The server
   remains the authority and the view self-corrects on the next refetch.
 
-#### Phase 22: E2E — The Journal Task Surface
+#### Phase 22: E2E — The Journal Task Surface ✅ COMPLETE
 
 **Prerequisites:** Phases 16–21.
-**Estimated diff:** ~160 production → **~640 tracked** (×4)
+**Estimated diff:** ~160 production → **~640 tracked** (×4) · **Overrun recorded before work started
+(delivery rule 3): ~900 tracked.** The ×4 multiplier does not describe this phase, because the phase
+ships **no production lines at all** — every line of it is test infrastructure or spec, so there is
+nothing for the multiplier to multiply and the figure has to be estimated directly. Three things the
+original number does not price. The fixture helpers are not one addition but **two families**: task
+helpers, and the future / past / cancelled journal helpers the lapsed recipe needs, of which
+`cancelJournal` and `moveJournalToPast` reach two different endpoints that no existing helper touches.
+`TestDataManager.cleanup()` needs a **new ordering constraint** rather than another tracking array —
+ITER18-002 Phase 1 makes `DELETE /api/journals/{id}` a 409 for any journal anchoring a task, so tracked
+tasks must be deleted before journals or every task spec leaks its journals into the next test, and the
+`clearFutureJournals` the no-future-journals spec needs has to resolve that 409 by deleting the blocking
+tasks the error body names. And the acceptance criteria list **seven** scenarios, each of which must
+build its own journals from scratch — the criteria forbid sharing state between them — so the fixture
+setup is paid seven times over rather than once. **Not split**, and the reason is rule 9 rather than
+convenience: half the specs would leave the iteration's e2e coverage claiming the surface is tested
+when the lapsed and no-future-journals paths — the two the criteria single out as the ones no API
+produces directly — were the half deferred.
 
-**Acceptance Criteria:**
+· **Actual:** 0 production → **~1,137 tracked** (577 lines of new spec, 472 of fixture helpers, 88 of
+guide) plus this entry, against the pre-recorded ~900 — low by **26%**. The pre-record named all three
+drivers correctly and mispriced two things. The *eighth* scenario: the criteria list seven, and the
+cancelled-due-journal lapse is an eighth, added because the specification names two causes of a lapse
+and a phase that tested only one would leave the wording rule — the two markers must stay
+distinguishable — asserted nowhere outside a unit test. And the **guide**, estimated at nothing: a
+fixture family whose central recipe is "mutate the journal, because no task call can do this" is not
+discoverable from the helper names, so `FIXTURE_SYSTEM_GUIDE.md` gained a section as long as the
+helpers' own docstrings. *(An earlier draft of this line said ~1,019 with "18 of docs" — the guide was
+counted at a fifth of its real size, and the self-assessment of "low by 13%" was computed from that
+wrong figure. Corrected in review, and recorded rather than quietly amended, because the point of
+rule 1's actuals is that they are checkable.)*
 
-- [ ] `TestDataManager` gains deterministic helpers for tasks and for future / past / cancelled journals,
-      reused rather than ad-hoc API calls in specs.
-- [ ] **The lapsed fixture recipe is stated explicitly, because no API path produces a lapsed task
+**Acceptance criteria, ticked:**
+
+- [x] `TestDataManager` gains deterministic helpers for tasks and for future / past / cancelled journals,
+      reused rather than ad-hoc API calls in specs. — `createTask`, `attachTaskMention`, `deleteTask`;
+      `createFutureJournal`, `createPastJournal` and `createRelativeJournal` over one signed-offset
+      builder; `cancelJournal`, `moveJournalToPast` and `clearFutureJournals`. Every date in the spec
+      comes from the exported `utcDayOffset`; no spec calls `page.request` directly. **Every helper is
+      exercised by a spec** — review caught `createPastJournal` and `attachTaskMention` shipping unused,
+      which is a fixture helper asserting nothing about itself; both now build the lapsed test's
+      intermediate journal, which is also what closed the coverage gap noted below.
+- [x] **The lapsed fixture recipe is stated explicitly, because no API path produces a lapsed task
       directly:** create a future journal, create the task against it, then either cancel that journal or
       move its `event_date_range` into the past through the existing journal update endpoint — which
       deliberately does not re-validate task invariants (Phase 4). The spec asserts that non-revalidation
-      so the recipe cannot silently stop working.
-- [ ] **Fixture dates account for the e2e user having no configured timezone**, so backend day boundaries
-      are UTC: a journal created at "today local noon" can read as tomorrow (or as future when a *past*
-      journal was intended). Build fixtures from explicit UTC offsets, not local wall-clock times.
-- [ ] Separate deterministic specs, each building its own fixtures: create a task and see it grouped as
+      so the recipe cannot silently stop working. — Both causes ship, as two tests. Each **asserts the
+      mutation's status is 200** rather than firing it and moving on, which is what makes a future
+      re-validation fail here loudly instead of quietly turning both lapsed tests into assertions about
+      a task that never lapsed. The recipe is written out in `moveJournalToPast`'s docstring, where the
+      next person to need it will be standing.
+- [x] **Fixture dates account for the e2e user having no configured timezone**, so backend day boundaries
+      are UTC. — `utcDayOffset(days, hour = 12)` is the only source of a date in the spec, and a test of
+      its own pins that it moves in whole UTC days and lands at the hour it says. Midday, so a fixture is
+      as far from either end of its day as it can be.
+- [x] Separate deterministic specs, each building its own fixtures: create a task and see it grouped as
       *created* / *due*; tick it done; retarget it and see the previous journal appear as *mentioned*;
       attach an existing task as a mention and detach it; resurrect a lapsed task; the no-future-journals
-      message; the journal list indicator.
-- [ ] No conditional logic on data state, no skips, no multi-outcome assertions.
-- [ ] Green on both e2e projects (`firefox`, `Mobile Chrome`).
+      message; the journal list indicator. — All seven, plus the second lapse cause, in
+      `frontend/tests/e2e/journal-tasks.spec.ts`.
+- [x] No conditional logic on data state, no skips, no multi-outcome assertions. — No `if`, no
+      `test.skip`, no `try`/`catch` and no `||` anywhere in the file. The one test that needs the
+      *absence* of data clears the window instead of hoping for it.
+- [x] Green on both e2e projects (`firefox`, `Mobile Chrome`). — 10/10 on each, and 28/28 over
+      `--repeat-each 3` on Mobile Chrome, which runs `retries: 0`.
 
 **Required Test Coverage:** this phase *is* the e2e coverage for ITER18-001; unit and integration coverage
-landed in Phases 1–21.
+landed in Phases 1–21. Both were re-run as a regression check and are green (2,202 frontend unit tests;
+634 backend task unit tests; 672 task integration tests).
+
+**Decisions taken (Phase 22):**
+
+- **Cleanup deletes tasks before journals, and that ordering is the phase's one real bug fix.**
+  `TestDataManager.cleanup()` deletes journals, and ITER18-002 Phase 1 made
+  `DELETE /api/journals/{id}` a 409 for any journal anchoring a task **whatever its status**. Without
+  the reordering every task spec would leak its journals into the next test — and into the pickers and
+  listings those tests assert on, which is exactly the kind of shared-state failure the criteria's
+  determinism rule exists to prevent. Journals are additionally deleted **task-aware**, because the
+  tracked-task pass only knows about tasks the *manager* created: a task the test created through the
+  UI anchors those journals just as firmly.
+- **`clearFutureJournals` reads its blockers out of the 409 body.** Tasks have no listing of their own
+  by design — delivery rule 8 forbids one — so the refusal's `meta.blocking_tasks[].task_id` is the
+  only route to the ids of the tasks standing in the way. The delete guard's machine-readable half,
+  shipped for agents, turns out to be what makes the empty-picker fixture possible at all.
+- **The picker is driven by searching a unique title, then clicking the option by id.** Either alone is
+  weaker: the id addresses exactly the right journal, and the search is what guarantees it is on the
+  page, since the picker reads a 90-day window and the shared e2e user can hold more journals in it
+  than one page returns.
+- **Every combobox interaction is one `toPass` around fill-then-click.** Following
+  `journals-merge.spec.ts`: on mobile a touch-blur can dismiss the option list between the two steps,
+  and retrying half the sequence retries the wrong half. Safe because each step is idempotent — the
+  hazard that rule exists for is a `toPass` wrapping a click that is not.
+- **The done-status test reloads before its final assertion.** The status flips optimistically, so an
+  assertion made straight after the click is satisfied by the drawing rather than by the write. The
+  reload is what makes it a test of persistence.
+- **A lapsed task is asserted on a journal other than the one it was written in.** The specification
+  says a lapsed task "remains visible on every journal they are linked to — creating, due, and
+  intermediate", and the first draft asserted the marker only on the creating journal, which is the
+  one place the user is *least* likely to meet it again. The lapsed test now attaches the task to a
+  past journal as a mention and asserts the marker there too.
+- **`clearAllJournals` was left with the same 409 hole this phase fixed in `cleanup`, and that was an
+  oversight rather than a scoping decision.** It swallowed every non-ok delete, so after Phase 5 made
+  tasks creatable it would leave an anchored journal behind while telling its callers the slate was
+  clean — and its callers (`outdoor-logbook`, `strava-route-display`, and two shared fixtures) read
+  the name as a guarantee. It now goes through the same task-aware deletion. Found in review, by
+  asking what *else* the ordering bug applied to.
+- **Two environment faults were found and cleared, neither caused by this phase, both worth recording
+  because the next person will hit them.** A stale MeiliSearch volume (1.38 data under a 1.52 engine)
+  fails the container and takes the backend down with it — `docker volume rm
+  pms_test_<n>_meilisearch_data`. And the first run after a cold stack start can fail `auth.setup` with
+  the login page still reading *"Loading providers…"*: the health gate passes before the backend serves
+  its first request. Re-run warm.
 
 ### ITER18-002: Journal Anchor Integrity — Delete, Merge, Cancellation
 

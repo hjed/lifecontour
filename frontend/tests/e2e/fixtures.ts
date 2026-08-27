@@ -60,6 +60,22 @@ export interface TestJournal {
   tags?: Array<{ id: number; name: string; color: string }>;
 }
 
+/**
+ * A task as the fixtures created it.
+ *
+ * Both anchors are carried because a task is meaningless without them — a
+ * commitment is always *created in* one journal and *due in* another (possibly
+ * the same one), and a spec asserting where a task appears needs to know which
+ * journal it is looking at.
+ */
+export interface TestTask {
+  id: string;
+  text: string;
+  status: string;
+  creatingJournalId: string;
+  dueJournalId: string;
+}
+
 export interface TestFixtures {
   // Authentication fixtures
   authenticatedPage: Page;

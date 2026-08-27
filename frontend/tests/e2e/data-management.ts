@@ -5,15 +5,34 @@
  * Provides deterministic data setup for fixtures.
  */
 
-import { Page } from '@playwright/test';
+import { APIResponse, Page } from '@playwright/test';
 
-import { TestContact, TestJournal } from './fixtures';
+import { TestContact, TestJournal, TestTask } from './fixtures';
 
 /**
  * Utility function to generate realistic phone numbers
  */
 function generatePhoneNumber(): string {
   return `+1-555-${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`;
+}
+
+/**
+ * An ISO instant `days` whole days from today, at a fixed hour **in UTC**.
+ *
+ * Fixtures that reason about "future" and "past" must be built from explicit UTC
+ * offsets rather than local wall-clock times. The e2e user has no configured
+ * timezone, so the backend judges a journal's date by UTC days — which means a
+ * journal built from a local midday can land on the *next* UTC day, and a
+ * journal meant to be safely in the past can read as today.
+ *
+ * Midday is the default hour for the same reason: it is the furthest a fixture
+ * can sit from either end of its own day.
+ */
+export function utcDayOffset(days: number, hour: number = 12): string {
+  const moment = new Date();
+  moment.setUTCDate(moment.getUTCDate() + days);
+  moment.setUTCHours(hour, 0, 0, 0);
+  return moment.toISOString();
 }
 
 export interface ContactCreateRequest {
@@ -48,11 +67,6 @@ export interface TaskCreateRequest {
   text: string;
   /** Contacts to link at creation time. Omitted means none. */
   contactIds?: string[];
-}
-
-export interface TestTask {
-  id: string;
-  text: string;
 }
 
 export interface TagCreateRequest {
@@ -97,6 +111,19 @@ export interface JournalCreateRequest {
   parent_id?: number;
 }
 
+/**
+ * A journal placed relative to today, which is how every task fixture dates one.
+ *
+ * `cancellable` gives the journal the EVENT type so its `event_state` can later
+ * be set to cancelled — the second of the two ways a task lapses.
+ */
+export interface RelativeJournalRequest {
+  title: string;
+  content?: string;
+  exactTitle?: boolean;
+  cancellable?: boolean;
+}
+
 export interface ReviewItemCreateRequest {
   source_journal_id: number;
   candidate_journal_id: number;
@@ -120,6 +147,8 @@ export class TestDataManager {
   private createdGearItemIds: string[] = [];
   private createdTemplateIds: string[] = [];
   private readonly createdCalendars: string[] = [];
+  /** The calendar cancellable EVENT journals are filed in; created on demand. */
+  private fixtureCalendarId: string | undefined;
 
   constructor(private readonly page: Page) {}
 
@@ -1160,46 +1189,6 @@ export class TestDataManager {
   }
 
   /**
-   * Create a task via the API and return its id.
-   *
-   * Created through the API rather than the UI so a spec that is *about* the
-   * task's history does not depend on the creation dialog to arrange it.
-   */
-  async createTask(taskData: TaskCreateRequest): Promise<TestTask> {
-    console.debug(`📝 [Data Manager] Creating task: ${taskData.text}`);
-
-    const response = await this.page.request.post(
-      `/api/journals/${taskData.creatingJournalId}/tasks`,
-      {
-        headers: { 'Content-Type': 'application/json' },
-        data: JSON.stringify({
-          data: {
-            type: 'tasks',
-            attributes: {
-              text: taskData.text,
-              due_journal_id: Number(taskData.dueJournalId),
-              ...(taskData.contactIds?.length
-                ? { contact_ids: taskData.contactIds.map(Number) }
-                : {}),
-            },
-          },
-        }),
-      }
-    );
-
-    if (!response.ok()) {
-      throw new Error(
-        `Failed to create task: ${response.status()} ${await response.text()}`
-      );
-    }
-
-    const id = String((await response.json()).data.id);
-    this.createdTaskIds.push(id);
-
-    return { id, text: taskData.text };
-  }
-
-  /**
    * Link a contact to an existing task.
    *
    * A plain reference — no relationship type, role or attendance status — so
@@ -1237,6 +1226,391 @@ export class TestDataManager {
 
     return journals;
   }
+
+  /**
+   * Create a journal dated `daysAhead` days from today, in UTC.
+   *
+   * The helper a task's **due** anchor comes from: a task's due journal must be
+   * dated after today at the moment it is set, and the only way to satisfy that
+   * deterministically is to say how far ahead in whole UTC days.
+   *
+   * Pass `cancellable` when the journal is going to be cancelled later.
+   * Cancelling is an edit to an EVENT journal's `event_state`, so the journal
+   * has to carry the EVENT type from the start — and EVENT type data requires a
+   * calendar, which {@link ensureCalendar} supplies.
+   */
+  async createFutureJournal(
+    options: RelativeJournalRequest & { daysAhead?: number }
+  ): Promise<TestJournal> {
+    const { daysAhead = 2, ...rest } = options;
+    return this.createRelativeJournal({ ...rest, dayOffset: daysAhead });
+  }
+
+  /**
+   * Create a journal dated `daysAgo` days before today, in UTC.
+   *
+   * Nothing can be made *due* in one — the service refuses a past anchor when it
+   * is set — so this exists for the other side of the model: the journal a
+   * commitment arose in, which has no date rule of its own.
+   */
+  async createPastJournal(
+    options: RelativeJournalRequest & { daysAgo?: number }
+  ): Promise<TestJournal> {
+    const { daysAgo = 2, ...rest } = options;
+    return this.createRelativeJournal({ ...rest, dayOffset: -daysAgo });
+  }
+
+  /**
+   * Create a journal dated relative to today, in whole UTC days.
+   *
+   * `dayOffset` is signed, so this is the one builder behind
+   * {@link createFutureJournal} and {@link createPastJournal}; `0` is today.
+   */
+  async createRelativeJournal(
+    options: RelativeJournalRequest & { dayOffset: number }
+  ): Promise<TestJournal> {
+    const {
+      title,
+      content = 'Created by the journal task e2e fixtures.',
+      dayOffset,
+      cancellable = false,
+      exactTitle,
+    } = options;
+
+    const eventType = cancellable
+      ? {
+          types: ['event'],
+          type_data: {
+            event: {
+              calendar_id: await this.ensureCalendar(),
+              is_all_day: false,
+              sync_invitees: false,
+            },
+          },
+        }
+      : { types: ['note'] };
+
+    return this.createJournal({
+      title,
+      ...(exactTitle === undefined ? {} : { exactTitle }),
+      content,
+      event_date_range: {
+        start: utcDayOffset(dayOffset),
+        end: utcDayOffset(dayOffset, 13),
+      },
+      ...eventType,
+    });
+  }
+
+  /**
+   * Cancel a journal, which lapses every not-done task due in it.
+   *
+   * Cancellation is not an endpoint of its own: it is `event_state` on an EVENT
+   * journal's type data, so the journal must have been created with
+   * `cancellable: true`.
+   *
+   * The response is **returned rather than asserted here**, because whether the
+   * cancellation was accepted is part of what the lapsed specs are testing —
+   * see {@link moveJournalToPast} for why that matters.
+   */
+  async cancelJournal(journalId: string): Promise<APIResponse> {
+    console.debug(`🚫 [Data Manager] Cancelling journal ${journalId}`);
+
+    return this.page.request.put(
+      `/api/journals/${journalId}/types/EVENT/data`,
+      {
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        data: JSON.stringify({
+          data: {
+            type: 'journal-type-data',
+            attributes: { event_state: 'cancelled' },
+          },
+        }),
+      }
+    );
+  }
+
+  /**
+   * Move a journal's event date range into the past.
+   *
+   * **This is half of the lapsed-task fixture recipe, and there is no other
+   * way.** A task's due journal must be future-dated at the moment it is set,
+   * and both write paths — create and retarget — enforce it, so no sequence of
+   * task calls can produce a lapsed task. The journal has to move instead: the
+   * journal update endpoint deliberately does not re-validate task invariants,
+   * because a task whose due journal has drifted into the past is *lapsed*, not
+   * invalid.
+   *
+   * The response is returned so the calling spec can **assert** that the update
+   * succeeded. That assertion is the point: if journal update ever learned to
+   * re-check task invariants, this recipe would stop producing lapsed tasks and
+   * the specs built on it would quietly test nothing. Asserting the 2xx makes
+   * that failure loud.
+   */
+  async moveJournalToPast(
+    journalId: string,
+    daysAgo: number
+  ): Promise<APIResponse> {
+    console.debug(
+      `⏪ [Data Manager] Moving journal ${journalId} ${daysAgo} day(s) into the past`
+    );
+
+    return this.page.request.patch(`/api/journals/${journalId}`, {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: {
+          type: 'journals',
+          id: journalId,
+          attributes: {
+            event_date_range: {
+              start: utcDayOffset(-daysAgo),
+              end: utcDayOffset(-daysAgo, 13),
+            },
+          },
+        },
+      }),
+    });
+  }
+
+  /**
+   * Delete every journal that has not already ended, so no future journal exists.
+   *
+   * The empty-picker spec needs the *absence* of future journals, which no
+   * fixture can create by adding data — the e2e user is shared and a journal
+   * another spec left behind would fill the picker this one asserts is empty.
+   *
+   * **This deletes journals it did not create, so it is destructive to the
+   * shared account and safe only while the suite runs serially.** The filter is
+   * `event_date_range.end >= today`, which is deliberately generous: it also
+   * removes a journal that *started* weeks ago and merely runs past today,
+   * because such a journal is still ahead of the picker's boundary in one
+   * direction and would keep the window non-empty. `playwright.config.ts` pins
+   * `workers: 1`; under parallel workers this would delete another test's live
+   * fixtures, so call it only from a spec that can assume that.
+   *
+   * A journal anchoring a task refuses deletion with 409
+   * `JOURNAL_HAS_ANCHORED_TASKS`, and the refusal names its blockers, so the
+   * blocking tasks are deleted and the journal retried. That is the only route
+   * available: tasks have no listing of their own by design, so the error body
+   * is where their ids come from.
+   */
+  async clearFutureJournals(): Promise<void> {
+    console.debug(
+      `🧹 [Data Manager] Clearing journals dated today or later...`
+    );
+
+    const today = utcDayOffset(0).slice(0, 10);
+
+    // Bounded by **progress**, not by a round count. A fixed number of rounds
+    // silently caps how much this can clear — five pages of 100 is 500 journals,
+    // and an account past that would be left holding future journals while the
+    // caller was told the window was empty, which is the one thing an
+    // empty-state fixture must never do. Looping while each round deletes
+    // something has no cap and still cannot spin: a round that deletes nothing
+    // while journals remain means something is refusing or recreating them, and
+    // that is the error worth raising.
+    for (;;) {
+      const journals = await this.listJournalsFrom(today);
+      if (journals.length === 0) {
+        console.debug(`✅ [Data Manager] No future journals remain`);
+        return;
+      }
+
+      let deleted = 0;
+      for (const journal of journals) {
+        await this.deleteJournalAndItsTasks(String(journal.id));
+        deleted++;
+      }
+
+      if (deleted === 0) {
+        throw new Error(
+          `${journals.length} future journal(s) survived a full round of deletion; ` +
+            'something is recreating them or refusing deletion for an unhandled reason'
+        );
+      }
+    }
+  }
+
+  /** One page of the journals whose date range has not ended before `from`. */
+  private async listJournalsFrom(
+    from: string
+  ): Promise<Array<{ id: string | number }>> {
+    const response = await this.page.request.get(
+      `/api/journals?start_date=${from}&limit=100`,
+      { headers: { Accept: 'application/vnd.api+json' } }
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to list journals from ${from}: ${response.status()} ${await response.text()}`
+      );
+    }
+    return (await response.json()).data ?? [];
+  }
+
+  /**
+   * Create a task against a journal.
+   *
+   * The creating journal is the journal it is created *from* and is never
+   * chosen separately, which is why it is part of the route rather than the
+   * body. The due journal must be dated after today; build it with
+   * {@link createFutureJournal}, or take both anchors at once from
+   * {@link createTaskAnchorJournals}.
+   *
+   * Created through the API rather than the UI so a spec that is *about* the
+   * task — its history, or where it appears — does not depend on the creation
+   * dialog to arrange it.
+   */
+  async createTask(taskData: TaskCreateRequest): Promise<TestTask> {
+    console.debug(
+      `📋 [Data Manager] Creating task "${taskData.text}" in journal ${taskData.creatingJournalId}`
+    );
+
+    const response = await this.page.request.post(
+      `/api/journals/${taskData.creatingJournalId}/tasks`,
+      {
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        data: JSON.stringify({
+          data: {
+            type: 'tasks',
+            attributes: {
+              text: taskData.text,
+              due_journal_id: Number.parseInt(taskData.dueJournalId, 10),
+              ...(taskData.contactIds
+                ? {
+                    contact_ids: taskData.contactIds.map(id =>
+                      Number.parseInt(id, 10)
+                    ),
+                  }
+                : {}),
+            },
+          },
+        }),
+      }
+    );
+
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to create task: ${response.status()} ${await response.text()}`
+      );
+    }
+
+    const resource = (await response.json()).data;
+    // Tracked so cleanup can remove it *before* its journals — see
+    // performCleanup, where the ordering is the whole point.
+    this.createdTaskIds.push(String(resource.id));
+
+    console.debug(`✅ [Data Manager] Created task ${resource.id}`);
+
+    return {
+      id: String(resource.id),
+      text: resource.attributes.text,
+      status: resource.attributes.status,
+      creatingJournalId: String(resource.attributes.creating_journal_id),
+      dueJournalId: String(resource.attributes.due_journal_id),
+    };
+  }
+
+  /**
+   * Link a task to a journal as an intermediate journal — a *mention*.
+   *
+   * The explicit half of the intermediate model: the automatic half is the
+   * previous due journal a retarget leaves behind, and no fixture can ask for
+   * that directly.
+   */
+  async attachTaskMention(taskId: string, journalId: string): Promise<void> {
+    const response = await this.page.request.post(
+      `/api/tasks/${taskId}/relationships/intermediate-journals`,
+      {
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        data: JSON.stringify({
+          data: { type: 'journals', id: String(journalId) },
+        }),
+      }
+    );
+
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to attach journal ${journalId} to task ${taskId}: ` +
+          `${response.status()} ${await response.text()}`
+      );
+    }
+
+    console.debug(
+      `🔗 [Data Manager] Attached journal ${journalId} to task ${taskId} as a mention`
+    );
+  }
+
+  /** Delete a task, and stop tracking it for cleanup. */
+  async deleteTask(taskId: string): Promise<void> {
+    const response = await this.page.request.delete(`/api/tasks/${taskId}`);
+
+    // A task the test itself deleted through the UI is already gone, and that
+    // is a success for this helper's purpose rather than something to raise on.
+    if (!response.ok() && response.status() !== 404) {
+      throw new Error(
+        `Failed to delete task ${taskId}: ${response.status()} ${await response.text()}`
+      );
+    }
+
+    this.createdTaskIds = this.createdTaskIds.filter(id => id !== taskId);
+    console.debug(`🗑️ [Data Manager] Deleted task ${taskId}`);
+  }
+
+  /**
+   * Delete one journal, clearing the tasks anchored to it if it refuses.
+   *
+   * The 409's `meta.blocking_tasks` is the machine-readable half of the
+   * delete-guard failure ITER18-002 ships, and it carries each blocker's
+   * `task_id` — which is what makes this recoverable without a task listing.
+   */
+  private async deleteJournalAndItsTasks(journalId: string): Promise<void> {
+    const first = await this.page.request.delete(`/api/journals/${journalId}`);
+    // 404 is a journal the test already removed itself — the outcome this asks
+    // for, reached by another route.
+    if (first.ok() || first.status() === 404) return;
+
+    if (first.status() !== 409) {
+      throw new Error(
+        `Failed to delete journal ${journalId}: ${first.status()} ${await first.text()}`
+      );
+    }
+
+    const body = await first.json();
+    const blockers = body.errors?.[0]?.meta?.blocking_tasks ?? [];
+    console.debug(
+      `🔗 [Data Manager] Journal ${journalId} anchors ${blockers.length} task(s); removing them first`
+    );
+
+    for (const blocker of blockers) {
+      await this.deleteTask(String(blocker.task_id));
+    }
+
+    const retry = await this.page.request.delete(`/api/journals/${journalId}`);
+    if (!retry.ok()) {
+      throw new Error(
+        `Journal ${journalId} still refused deletion after clearing its tasks: ` +
+          `${retry.status()} ${await retry.text()}`
+      );
+    }
+  }
+
+  /**
+   * The calendar EVENT journals are filed in, created once per manager.
+   *
+   * Every cancellable journal needs one and none of them care which, so a
+   * second calendar per journal would be cleanup this manager has to do for no
+   * test's benefit.
+   */
+  private async ensureCalendar(): Promise<string> {
+    if (this.fixtureCalendarId) return this.fixtureCalendarId;
+
+    const [calendar] = await this.createCalendars([
+      { name: `TaskFixtures_${this.generateUniqueId()}`, color: '#3B82F6' },
+    ]);
+    this.fixtureCalendarId = calendar.id;
+    return calendar.id;
+  }
+
   /**
    * Create a GPX route attached to a journal via API.
    *
@@ -1473,56 +1847,76 @@ export class TestDataManager {
   }
 
   /**
-   * Clear all journals (for test setup)
+   * Clear all journals (for test setup).
+   *
+   * Pages until the listing comes back empty. It used to read one page at the
+   * endpoint's default size and stop, so an account holding more than twenty
+   * journals kept the rest while callers — who read this name as a guarantee —
+   * went on to assert an empty list.
+   *
+   * **It raises rather than reporting a success it did not achieve.** Callers
+   * like `emptyJournalsPage` build their whole assertion on this having worked,
+   * so a listing that failed or a journal that would not go has to stop the
+   * setup where it happened. A test that proceeds on leftovers fails later, on
+   * an assertion that describes the symptom rather than the cause. In teardown
+   * this is harmless: the `testCleanup` fixture runs each task in its own
+   * try/catch, so the failure is logged rather than replacing the verdict.
    */
   async clearAllJournals(): Promise<void> {
     console.debug(`🧹 [Data Manager] Clearing all journals...`);
 
-    try {
-      // Get all journals
-      const response = await this.page.request.get('/api/journals', {
-        headers: {
-          Accept: 'application/vnd.api+json',
-        },
+    // Bounded by progress rather than by a page count, for the reason
+    // `clearFutureJournals` is: a fixed number of rounds is a silent cap on
+    // how much this can actually clear.
+    for (;;) {
+      const response = await this.page.request.get('/api/journals?limit=100', {
+        headers: { Accept: 'application/vnd.api+json' },
       });
 
       if (!response.ok()) {
-        console.debug(
-          `⚠️ [Data Manager] Failed to fetch journals: ${response.status()}`
+        throw new Error(
+          `Failed to list journals while clearing them: ` +
+            `${response.status()} ${await response.text()}`
         );
-        return;
       }
 
-      const data = await response.json();
-      const journals = data.data || [];
+      const journals = (await response.json()).data || [];
+      if (journals.length === 0) break;
 
       console.debug(
         `🧹 [Data Manager] Found ${journals.length} journals to delete`
       );
 
-      // Delete each journal
+      // Delete each journal, tasks and all. A plain DELETE is refused with 409
+      // for any journal anchoring a task, and this helper's callers read its
+      // name as a guarantee: a journal left behind by a swallowed refusal is a
+      // journal they will then assert is not there.
+      const failures: string[] = [];
       for (const journal of journals) {
         try {
-          const deleteResponse = await this.page.request.delete(
-            `/api/journals/${journal.id}`
-          );
-          if (deleteResponse.ok()) {
-            console.debug(
-              `🗑️ [Data Manager] Deleted existing journal ${journal.id}`
-            );
-          }
-        } catch (error) {
+          await this.deleteJournalAndItsTasks(String(journal.id));
           console.debug(
-            `⚠️ [Data Manager] Error deleting journal ${journal.id}:`,
-            error
+            `🗑️ [Data Manager] Deleted existing journal ${journal.id}`
+          );
+        } catch (error) {
+          failures.push(
+            `${journal.id} (${error instanceof Error ? error.message : String(error)})`
           );
         }
       }
 
-      console.debug(`✅ [Data Manager] All journals cleared`);
-    } catch (error) {
-      console.debug(`❌ [Data Manager] Failed to clear journals:`, error);
+      // Every journal on the page refused deletion, so another pass would fetch
+      // the same page and refuse it again. A partial failure is *not* fatal
+      // here — the survivors come back on the next listing, and this is where
+      // they are finally accounted for.
+      if (failures.length === journals.length) {
+        throw new Error(
+          `Could not clear ${journals.length} journal(s): ${failures.join('; ')}`
+        );
+      }
     }
+
+    console.debug(`✅ [Data Manager] All journals cleared`);
   }
 
   /**
@@ -1530,7 +1924,7 @@ export class TestDataManager {
    */
   async cleanup(): Promise<void> {
     console.debug(
-      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, ${this.createdCalendars.length} calendars, ${this.createdGearItemIds.length} gear items, and ${this.createdTemplateIds.length} templates...`
+      `🧹 [Data Manager] Starting cleanup of ${this.createdContactIds.length} contacts, ${this.createdTagIds.length} contact tags, ${this.createdJournalTagIds.length} journal tags, ${this.createdJournalIds.length} journals, ${this.createdTaskIds.length} tasks, ${this.createdCalendars.length} calendars, ${this.createdGearItemIds.length} gear items, and ${this.createdTemplateIds.length} templates...`
     );
 
     // Add timeout to prevent cleanup from hanging
@@ -1550,6 +1944,26 @@ export class TestDataManager {
     } catch (error) {
       console.debug(`⚠️ [Data Manager] Cleanup failed or timed out:`, error);
       // Continue anyway to not block test completion
+    }
+  }
+
+  /**
+   * Delete every journal this manager created, tasks and all.
+   *
+   * Failures are logged rather than raised, as everywhere else in cleanup: a
+   * teardown that throws replaces the test's real verdict with its own.
+   */
+  private async cleanupJournals(): Promise<void> {
+    for (const journalId of this.createdJournalIds) {
+      try {
+        await this.deleteJournalAndItsTasks(journalId);
+        console.debug(`🗑️ [Data Manager] Deleted journal ${journalId}`);
+      } catch (error) {
+        console.debug(
+          `⚠️ [Data Manager] Error deleting journal ${journalId}:`,
+          error
+        );
+      }
     }
   }
 
@@ -1588,14 +2002,19 @@ export class TestDataManager {
     // Instead, we explicitly delete the items this DataManager created.
     await this.fallbackIndividualCleanup();
 
-    // Before the journals: both anchors are ON DELETE RESTRICT, so a journal
-    // anchoring a task refuses deletion until the task is gone.
+    // Tasks go **before** journals, and the order is load-bearing rather than
+    // tidy. Both anchors are ON DELETE RESTRICT, so a journal that is the
+    // creating or due journal of any task refuses deletion with 409
+    // JOURNAL_HAS_ANCHORED_TASKS whatever the task's status — and leaving the
+    // tasks in place would leak this test's journals into every test after it,
+    // and into the pickers and listings they assert on.
     await this.cleanupSpecificItems(this.createdTaskIds, '/api/tasks', 'task');
-    await this.cleanupSpecificItems(
-      this.createdJournalIds,
-      '/api/journals',
-      'journal'
-    );
+
+    // Task-aware, because the pass above only knows about tasks this manager
+    // created through the API. A task the *test* created through the UI is
+    // anchored to these journals just as firmly, and would refuse their
+    // deletion the same way.
+    await this.cleanupJournals();
     await this.cleanupSpecificItems(
       this.createdTagIds,
       '/api/tags',
@@ -1632,6 +2051,9 @@ export class TestDataManager {
     this.createdTaskIds = [];
     this.createdGearItemIds = [];
     this.createdTemplateIds = [];
+    // The cached calendar was deleted with the rest; keeping its id would hand
+    // the next cancellable journal a calendar that no longer exists.
+    this.fixtureCalendarId = undefined;
     // Note: createdCalendars is readonly, so we can't reassign it
     // The array will be cleared when the TestDataManager instance is destroyed
 
