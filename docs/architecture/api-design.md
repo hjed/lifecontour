@@ -472,6 +472,26 @@ rather than this API's taste:
   Regeneration is `POST /api/journals/daily-summary/{date}/regenerate`, and the
   date it needs is `meta.anchor.date`, which is present even when the section is
   not.
+- **The `agenda` section is the user's local day, read in one query.** Its
+  payload is `{entries: [...]}`, and an **empty list is a real answer** —
+  nothing is scheduled today — which is why the section stays `ready` rather
+  than reporting `unavailable`. An entry is
+  `{journal_id, title, is_all_day, starts_at, ends_at, start_time, end_time,
+  location, is_cancelled, tags[], participants[]}`.
+
+  | Rule | What it means on the wire |
+  |---|---|
+  | Which journals | Journals with a `journal_calendar_info` row — the EVENT type — belonging to the acting user. A journal without one is a note about the day, not something on it. |
+  | Which day | `local_day_window(anchor, tz)`: local midnight to the final microsecond of the local day. A large-offset zone's day spans two UTC dates, and the whole of it is returned. |
+  | Overlap, not containment | Matched on `event_date_range_end >= start AND event_date_range_start <= end`, so a multi-day trip running through today is on today's agenda. |
+  | Order | Every all-day entry first, then timed ones ascending by `starts_at`, ties broken on `journal_id`. Applied in the service, not in SQL. |
+  | Two time representations | `starts_at`/`ends_at` are the journal's stored instants — the ordering key, and the only way to see that an entry began before today. `start_time`/`end_time` are the calendar info's clock values, `null` for an all-day event. |
+  | Cancellation | Returned **flagged**, never filtered: the specification requires a cancelled event to be shown clearly marked, and a surface cannot mark an entry it was never sent. |
+  | Participants | Contacts linked as `PARTICIPANT` **or** `INVITEE` — both ways of being at an event, and the type the Google worker writes synced attendees as. `MENTION` and `ABOUT` are people the journal is about and are not attendees. |
+
+  Tags and participants are aggregated in `LATERAL` sub-selects so the read is
+  **one statement whatever the day holds**; an integration test counts them,
+  because an N+1 is functionally invisible.
 - **Sections embed denormalised refs; there is no compound document.**
   `relationships` + `included` is the specification's way to serve related
   resources in one round trip, and it was the live alternative here. It cannot

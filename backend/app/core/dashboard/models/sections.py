@@ -174,6 +174,7 @@ class AgendaEntry:
     ends_at: datetime
     start_time: time | None = None
     end_time: time | None = None
+    timezone: str | None = None
     location: str | None = None
     calendar_color: str | None = None
     is_cancelled: bool = False

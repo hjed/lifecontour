@@ -627,11 +627,11 @@ class JournalProvider(Provider):
     def outdoor_dashboard_service(
         self,
         dashboard_repo: OutdoorDashboardRepository,
-        user_settings_repo: UserSettingsRepository,
+        date_resolver: JournalDateResolver,
     ) -> OutdoorDashboardService:
         """Provide an OutdoorDashboardService instance."""
         return OutdoorDashboardService(
-            dashboard_repo=dashboard_repo, user_settings_repo=user_settings_repo
+            dashboard_repo=dashboard_repo, date_resolver=date_resolver
         )
 
     @provide(scope=Scope.REQUEST)

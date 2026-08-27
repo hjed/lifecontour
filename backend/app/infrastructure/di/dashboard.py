@@ -3,6 +3,8 @@
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.dashboard.adapters.sql.agenda_repository import SqlAgendaRepository
+from app.core.dashboard.models.repositories import AgendaRepository
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
 from app.core.journal.services.daily_summary_repository import (
     JournalDailySummaryRepository,
@@ -28,15 +30,22 @@ class DashboardProvider(Provider):
     """
 
     @provide(scope=Scope.REQUEST)
+    def agenda_repository(self, connection: AsyncConnection) -> AgendaRepository:
+        """Provide an AgendaRepository instance."""
+        return SqlAgendaRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
     def home_dashboard_service(
         self,
         date_resolver: JournalDateResolver,
         summary_repo: JournalDailySummaryRepository,
+        agenda_repo: AgendaRepository,
         connection: AsyncConnection,
     ) -> HomeDashboardService:
         """Provide a HomeDashboardService instance."""
         return HomeDashboardService(
             date_resolver=date_resolver,
             summary_repo=summary_repo,
+            agenda_repo=agenda_repo,
             connection=connection,
         )

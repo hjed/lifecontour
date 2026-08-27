@@ -22,6 +22,9 @@ from core_shared.models.journals import (
     UpcomingOutdoorActivity,
 )
 
+from app.core.journal.services.journal_date_resolver import (
+    JournalDateResolver,
+)
 from app.core.journal.services.outdoor_dashboard_service import (
     UPCOMING_CAP,
     OutdoorDashboardService,
@@ -126,8 +129,14 @@ def mock_settings_repo() -> AsyncMock:
 def service(
     mock_dashboard_repo: AsyncMock, mock_settings_repo: AsyncMock
 ) -> OutdoorDashboardService:
+    """The service over the real date resolver and a stubbed settings row.
+
+    Real rather than mocked so the timezone and window rules under test are the
+    ones that run in production.
+    """
     return OutdoorDashboardService(
-        dashboard_repo=mock_dashboard_repo, user_settings_repo=mock_settings_repo
+        dashboard_repo=mock_dashboard_repo,
+        date_resolver=JournalDateResolver(user_settings_repo=mock_settings_repo),
     )
 
 
