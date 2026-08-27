@@ -13,16 +13,23 @@ missing one are never the same value, so a caller cannot read "nothing scheduled
 today" off a section that has not told it anything.
 """
 
+import datetime
+
 import pytest
 
 from app.core.dashboard.models.sections import (
+    AgendaEntry,
+    AgendaParticipant,
     AgendaSectionData,
+    AgendaTag,
     DashboardSection,
     SectionStatus,
     TasksSectionData,
 )
 
 pytestmark = pytest.mark.unit
+
+NINE_AM = datetime.datetime(2026, 7, 31, 9, tzinfo=datetime.UTC)
 
 
 class TestAReadySection:
@@ -64,6 +71,64 @@ class TestAnUnavailableSection:
 
         assert empty != unavailable
         assert empty.status is not unavailable.status
+
+
+class TestTheAgendaPayload:
+    """The first section whose emptiness is a real answer rather than absence."""
+
+    def test_a_day_with_nothing_on_it_carries_no_entries(self) -> None:
+        assert AgendaSectionData().entries == ()
+
+    def test_an_agenda_with_no_entries_is_ready_not_unavailable(self) -> None:
+        """The distinction the wireframe's single empty line depends on.
+
+        A page cannot say "nothing scheduled today" on the strength of a section
+        that never answered, so an empty day has to be a payload rather than the
+        absence of one.
+        """
+        section = DashboardSection.ready(AgendaSectionData())
+
+        assert section.status is SectionStatus.READY
+        assert section.data is not None
+        assert section.data.entries == ()
+
+    def test_an_entry_carries_what_the_card_renders(self) -> None:
+        """Everything W12-W18 draws, and nothing pre-formatted for it."""
+        tag = AgendaTag(id="t-1", name="social", colour="#ff0000")
+        entry = AgendaEntry(
+            journal_id=42,
+            title="Coffee with Sam",
+            is_all_day=False,
+            starts_at=NINE_AM,
+            ends_at=NINE_AM + datetime.timedelta(hours=1),
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(10, 0),
+            location="The good place",
+            is_cancelled=False,
+            tags=(tag,),
+            participants=(AgendaParticipant(contact_id=7, name="Sam Taylor"),),
+        )
+
+        assert entry.tags == (tag,)
+        assert entry.participants[0].name == "Sam Taylor"
+        assert entry.location == "The good place"
+
+    def test_an_entry_defaults_to_the_plainest_event_there_is(self) -> None:
+        """Only the journal and its instants are required; the rest are absences."""
+        entry = AgendaEntry(
+            journal_id=1,
+            title="A quiet event",
+            is_all_day=True,
+            starts_at=NINE_AM,
+            ends_at=NINE_AM,
+        )
+
+        assert entry.start_time is None
+        assert entry.end_time is None
+        assert entry.location is None
+        assert entry.is_cancelled is False
+        assert entry.tags == ()
+        assert entry.participants == ()
 
 
 class TestTheStatusVocabulary:
