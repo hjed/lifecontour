@@ -1,11 +1,19 @@
 """Integration tests for the journal merge endpoint."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from tests.integration.tasks.task_seeding import (
+    USER_ID,
+    create_journal,
+    create_task,
+    task_events,
+)
 
 
 @pytest.mark.asyncio
@@ -77,6 +85,148 @@ async def test_merge_journal_endpoint_repoints_an_anchored_task(
     assert row.creating_journal_id == target_id
     assert row.due_journal_id == due_id
     assert row.status == "not_done"
+
+
+@pytest.mark.asyncio
+async def test_merge_journal_endpoint_records_the_move_on_the_task(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    task_anchors: tuple[int, int],
+) -> None:
+    """The task the merge moved says so, in the browser's name.
+
+    Asserted at the endpoint rather than only at the service for the reason the
+    re-point itself is: the REST path resolves the merge and the tasks domain's
+    merge service out of the container, and the MCP tool builds both by hand, so
+    neither is evidence for the other. What only this test can catch is a
+    container that wires the merge to something which moves the links without
+    announcing them — exactly the arrangement that shipped before this phase.
+
+    ``ui`` is the whole point of the provenance thread. Before it, every merge's
+    task events would have read ``system``, telling a user that a change they
+    made in the browser was made by a background job.
+    """
+    creating_id, due_id = task_anchors
+
+    target_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Survivor",
+                    "content": "",
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T01:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert target_res.status_code == 201
+    target_id = int(target_res.json()["data"]["id"])
+
+    task_res = await authenticated_client.post(
+        f"/api/journals/{creating_id}/tasks",
+        json={
+            "data": {
+                "type": "tasks",
+                "attributes": {"text": "print the permit", "due_journal_id": due_id},
+            }
+        },
+    )
+    assert task_res.status_code == 201
+    task_id = int(task_res.json()["data"]["id"])
+
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {"source_journal_id": creating_id},
+            }
+        },
+    )
+    assert merge_res.status_code == 200
+
+    repointed = [
+        event
+        for event in await task_events(async_connection, task_id=task_id)
+        if event.event_type == "TaskJournalLinksRepointed"
+    ]
+    assert len(repointed) == 1
+    assert repointed[0].payload["source"] == "ui"
+    assert repointed[0].payload["changed_by"] == "ui"
+    assert repointed[0].payload["changed_fields"] == {
+        "creating_journal_id": [creating_id, target_id]
+    }
+
+
+@pytest.mark.asyncio
+async def test_auto_merge_endpoint_records_the_move_on_the_task(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    journal_repository: Any,
+    task_anchors: tuple[int, int],
+) -> None:
+    """The third merge surface, and the one the phase entry does not name.
+
+    ``auto_merge_review_items`` merges every conflict-free pair in the review
+    queue in **one** unit of work, so it is the only caller that can re-point the
+    same task twice — which is why the event id names the absorbed journal — and
+    the only one where "who did this?" is arguable. It is not arguable: *auto*
+    describes how the pairs were chosen, not who chose to merge them, and a
+    person pressed this button. Without the thread these merges would be the one
+    kind that files a user's own task changes under the system.
+
+    The two journals are built with an identical title, content and date range
+    because that is what "conflict-free" means here — a fixed ``start`` rather
+    than the clock, since two journals seeded a microsecond apart have different
+    ranges and would be skipped as conflicting, leaving a test that passes while
+    merging nothing.
+    """
+    _, due_id = task_anchors
+    matched_start = datetime(2024, 6, 1, tzinfo=UTC)
+    absorbed_id = await create_journal(
+        journal_repository, title="The same outing", start=matched_start
+    )
+    survivor_id = await create_journal(
+        journal_repository, title="The same outing", start=matched_start
+    )
+    task_id = await create_task(
+        async_connection,
+        creating_journal_id=absorbed_id,
+        due_journal_id=due_id,
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_review_items (
+                user_id, source_journal_id, candidate_journal_id,
+                reason, confidence_score, status
+            ) VALUES (
+                :user_id, :source_id, :candidate_id,
+                'duplicate_journal', 0.9, 'pending'
+            )
+        """),
+        {"user_id": USER_ID, "source_id": absorbed_id, "candidate_id": survivor_id},
+    )
+
+    response = await authenticated_client.post("/api/journals/review-items/auto-merge")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["attributes"]["merged_count"] == 1
+    repointed = [
+        event
+        for event in await task_events(async_connection, task_id=task_id)
+        if event.event_type == "TaskJournalLinksRepointed"
+    ]
+    assert len(repointed) == 1
+    assert repointed[0].payload["source"] == "ui"
+    assert repointed[0].payload["changed_by"] == "ui"
+    assert repointed[0].payload["changed_fields"] == {
+        "creating_journal_id": [absorbed_id, survivor_id]
+    }
 
 
 @pytest.mark.asyncio

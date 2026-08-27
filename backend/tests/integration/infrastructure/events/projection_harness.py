@@ -66,6 +66,14 @@ async def relay_and_project(
         stream_name=stream_name,
         consumer_name=consumer_name,
         block_ms=100,
+        # Matched to the relay above, and not left at the production default of
+        # ten. One ``_process_batch()`` reads at most this many messages, so a
+        # scenario that publishes more loses the tail — silently, as a *missing*
+        # history row rather than an error. That is exactly how it was found:
+        # driving a merge through the task lifecycle test added two journal
+        # events, pushed the run to eleven, and the task's delete marker
+        # disappeared with the row count still looking plausible.
+        batch_size=50,
     )
     await stream_client.ensure_consumer_group(stream_name, GROUP_NAME)
 

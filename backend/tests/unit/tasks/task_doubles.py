@@ -46,6 +46,14 @@ NEW_DUE_JOURNAL_ID = 33
 # refuses to write.
 INTERMEDIATE_JOURNAL_ID = 44
 
+# The two journals a merge is between. Named rather than reusing the anchors
+# because a merge is described from the *journals*' point of view — every link a
+# task holds on the absorbed journal moves onto the survivor, whichever role it
+# held — and a payload built over ``DUE_JOURNAL_ID`` would read as correct while
+# describing only the one role that happens to match.
+ABSORBED_JOURNAL_ID = 55
+SURVIVING_JOURNAL_ID = 66
+
 # The people a task can reference. Two of them, because contact membership is
 # carried as one ``changed_fields`` key *per contact* — ``contact:{id}`` — and a
 # single id cannot show that two people produce two keys rather than overwriting

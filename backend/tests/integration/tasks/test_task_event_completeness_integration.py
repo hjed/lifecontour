@@ -17,12 +17,18 @@ list**, which is the requirement the iteration document is explicit about and th
 reason this file exists rather than a class in the events file. A test that
 enumerated service methods would have passed for years while a **journal merge**
 re-pointed task anchors from another domain entirely and published nothing — the
-gap that went unnoticed until a later phase's review. So the inventory below is
+gap that went unnoticed until a later phase's review, and that this file carried
+as a named exclusion until the phase that closed it. So the inventory below is
 anchored to the **repository ports**: every mutating method on
 ``TaskRepository`` and ``TaskAnchorRepository`` must be classified, either as
 reached by a covered path or as a **named exclusion**. Adding a write method to
 either port fails :class:`TestEveryPortWriteIsAccountedFor` until somebody says
 which it is.
+
+**One path is driven from another domain**, and it is the one that vindicates
+the paragraph above: the merge write path calls ``JournalMergeService``, because
+that is where the write is reached from. Every other path goes through
+``TaskService``.
 
 **A separate file from** ``test_task_events_integration.py`` deliberately: that
 file asks "what did *this* operation publish?" one operation at a time, and this
@@ -42,18 +48,24 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.history.services.history_service import _HANDLERS
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.models.repositories import TaskAnchorRepository, TaskRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.history_projection_consumer import (
     TASK_HISTORY_EVENT_TYPES,
 )
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.tasks.task_seeding import (
     FIXED_PAST_INSTANT,
     USER_ID,
@@ -87,6 +99,11 @@ def _fact(event: TaskEventRow) -> str:
             "TaskDueJournalRetargeted": "retargeted",
             "TaskJournalLinked": "journal-linked",
             "TaskJournalUnlinked": "journal-unlinked",
+            # A merge announces one fact however many of the task's links moved:
+            # what happened to the task is that a journal it was on became
+            # another journal. Which links moved is in ``changed_fields``, and
+            # the payload tests are where that belongs.
+            "TaskJournalLinksRepointed": "journals-repointed",
             "TaskDeleted": "deleted",
         }[event.event_type]
 
@@ -156,6 +173,10 @@ class _Fixtures:
     connection: AsyncConnection
     journals: SqlJournalRepository
     anchors: tuple[int, int]
+    # The journal domain's merge, because one write path is reached from there
+    # rather than from ``TaskService`` — which is the whole reason this
+    # inventory keys on repository methods rather than on service methods.
+    merges: JournalMergeService
 
 
 async def _seed_task(
@@ -337,6 +358,37 @@ async def _act_delete(fixtures: _Fixtures, seeded: Seeded) -> None:
     )
 
 
+async def _seed_task_and_a_journal_to_merge_into(fixtures: _Fixtures) -> Seeded:
+    """A task, and a survivor for the journal it is due in to be absorbed into.
+
+    ``journal_id`` carries the survivor here rather than something to link,
+    because the merge names the journal the task is *not* on.
+    """
+    task_id = await _seed_task(fixtures)
+    survivor_id = await create_journal(
+        fixtures.journals, title="The surviving journal", days_offset=30
+    )
+    return Seeded(task_id=task_id, journal_id=survivor_id)
+
+
+async def _act_merge_the_due_journal_away(fixtures: _Fixtures, seeded: Seeded) -> None:
+    """The one action in this inventory performed by another domain.
+
+    A journal merge moves the task's due anchor onto the survivor. It goes
+    through the *journal* service rather than the tasks domain's own merge
+    service, because what this inventory is about is that every write reaching
+    the task tables announces itself — and the write is reached from here.
+    """
+    _, due_id = fixtures.anchors
+    await fixtures.merges.merge_journals(
+        target_id=seeded.journal_id,
+        source_id=due_id,
+        transaction=fixtures.connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+
+
 WRITE_PATHS: list[WritePath] = [
     WritePath(
         name="create",
@@ -420,6 +472,16 @@ WRITE_PATHS: list[WritePath] = [
         act=_act_delete,
         expects=["deleted"],
     ),
+    WritePath(
+        name="journal merge",
+        ports=frozenset({"repoint_journal_links"}),
+        seed=_seed_task_and_a_journal_to_merge_into,
+        act=_act_merge_the_due_journal_away,
+        # One fact, not a retarget's two: a merge moves the anchor and forces
+        # nothing about the status. It is the only entry in this inventory whose
+        # action is performed by another domain.
+        expects=["journals-repointed"],
+    ),
 ]
 
 
@@ -449,16 +511,14 @@ PORT_READ_METHODS = frozenset(
 )
 
 # A write nobody announces, named so it is visible rather than merely absent.
-NAMED_EXCLUSIONS: dict[str, str] = {
-    "repoint_journal_links": (
-        "A journal merge re-points a task's anchors and its intermediate links "
-        "from the journal domain, and publishes nothing task-scoped. It is a "
-        "known gap with a phase of its own (ITER18-003 Phase 10); until that "
-        "lands a merged task's history disagrees with its own row. Recorded "
-        "here because a completeness test that could not see this write is "
-        "exactly how the gap survived unnoticed in the first place."
-    ),
-}
+#
+# **Empty since ITER18-003 Phase 10**, and kept rather than deleted. Its one
+# entry was ``repoint_journal_links`` — the merge write the journal domain
+# performs on tasks — which now has a write path of its own below and an event
+# per task it moves. What the mechanism is for outlives that entry: a write with
+# no event should be *visible* rather than merely absent, and the test below
+# refuses to let the list grow again without somebody choosing to add to it.
+NAMED_EXCLUSIONS: dict[str, str] = {}
 
 
 @pytest.fixture
@@ -474,6 +534,14 @@ def fixtures(
         connection=async_connection,
         journals=journal_repository,
         anchors=task_anchors,
+        merges=JournalMergeService(
+            journal_repo=journal_repository,
+            event_publisher=OutboxEventPublisher(async_connection),
+            task_merge_service=TaskJournalMergeService(
+                task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+                event_publisher=OutboxEventPublisher(async_connection),
+            ),
+        ),
     )
 
 
@@ -705,26 +773,33 @@ class TestEveryPortWriteIsAccountedFor:
 
         assert claimed - declared == set()
 
-    def test_the_merge_repoint_is_the_only_unannounced_write(self) -> None:
-        """One exclusion, so the list cannot quietly grow.
+    def test_no_write_goes_unannounced(self) -> None:
+        """The list is empty, and stays empty by assertion rather than by habit.
 
-        A named exclusion is a debt, and a test that merely allowed any number of
-        them would let the next one be added as easily as this one was recorded.
+        It held one entry for several phases: the merge re-point, the write the
+        journal domain performs on task rows. Now that it publishes, there is no
+        task write left that nothing announces — and a test allowing "a few"
+        exclusions would let the next one be added as easily as that one was.
         """
-        assert set(NAMED_EXCLUSIONS) == {"repoint_journal_links"}
+        assert NAMED_EXCLUSIONS == {}
 
     @pytest.mark.asyncio
-    async def test_a_merge_repoints_a_task_and_publishes_nothing(
+    async def test_a_merge_repoints_a_task_and_says_so(
         self,
         fixtures: _Fixtures,
         async_connection: AsyncConnection,
     ) -> None:
-        """The exclusion asserted **positively**, not left as a comment.
+        """The inverted test, and the reason the gap was written down positively.
 
-        The gap is real and it is this: the re-point moves a task's due anchor to
-        another journal, which is a change to the task's own row, and no task
-        event is published for it. Pinning it means the day Phase 10 fixes it,
-        this test fails and says so — a comment would not have.
+        It used to assert the opposite — that the re-point moved a task's due
+        anchor and its history did not know — so that the day the gap closed,
+        this failed and said so. It did. What it asserts now is the same two
+        halves in agreement: the row moved, **and** the task announced it.
+
+        Driven through the repository directly rather than through the merge,
+        exactly as the negative version was, so the comparison between the two
+        versions of this test is like for like: what changed is the behaviour of
+        the write, not the way it is reached.
         """
         _, due_id = fixtures.anchors
         task_id = await _seed_task(fixtures)
@@ -733,19 +808,22 @@ class TestEveryPortWriteIsAccountedFor:
         )
         before = await _facts(async_connection, task_id)
 
-        await SqlTaskAnchorRepository(async_connection).repoint_journal_links(
-            source_journal_id=due_id, target_journal_id=target_id
+        await fixtures.merges.merge_journals(
+            target_id=target_id,
+            source_id=due_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
         )
 
         # The task really moved...
         _, moved_due_id = await stored_anchors(async_connection, task_id)
         assert moved_due_id == target_id
-        # ...and its history does not know.
-        assert await _facts(async_connection, task_id) == before
-
-    def test_the_exclusion_says_which_phase_owns_it(self) -> None:
-        """A named exclusion without an owner is an excuse."""
-        assert "Phase 10" in NAMED_EXCLUSIONS["repoint_journal_links"]
+        # ...and its history now knows, in one line naming what moved.
+        assert await _facts(async_connection, task_id) == [
+            *before,
+            "journals-repointed",
+        ]
 
 
 @pytest.mark.integration

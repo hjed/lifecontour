@@ -35,10 +35,15 @@ from app.core.history.models import FieldHistoryEntry
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.models.events import JournalUpdated
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
+from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.infrastructure.events.projection_harness import (
@@ -73,6 +78,24 @@ def _task_service(conn: AsyncConnection) -> TaskService:
             user_settings_repo=SqlUserSettingsRepository(conn)
         ),
         event_publisher=OutboxEventPublisher(conn),
+    )
+
+
+def _merge_service(conn: AsyncConnection) -> JournalMergeService:
+    """A real merge over real adapters, on the test's single connection.
+
+    Built by hand rather than resolved from a container for the reason
+    ``_task_service`` is: the publisher has to be the real one on this
+    connection, since what these tests are about is that the merge's own unit of
+    work carries the task events.
+    """
+    return JournalMergeService(
+        journal_repo=SqlJournalRepository(conn),
+        event_publisher=OutboxEventPublisher(conn),
+        task_merge_service=TaskJournalMergeService(
+            task_anchor_repo=SqlTaskAnchorRepository(conn),
+            event_publisher=OutboxEventPublisher(conn),
+        ),
     )
 
 
@@ -426,6 +449,21 @@ class TestTaskProjectionIsIdempotent:
             source=Provenance.UI,
             changed_by="ui",
         )
+        # The seventh type, and the only one no ``TaskService`` call can reach:
+        # the journal domain re-points this task's due anchor by absorbing the
+        # journal it is due in. Driven here so the set below can be asserted as
+        # **equality** — a subset was all this test could claim while the merge
+        # published nothing, and a subset is satisfied by a type nobody drives.
+        merged_into_id = await create_journal(
+            journal_repo, title="Absorbing the deferral", days_offset=21
+        )
+        await _merge_service(async_connection).merge_journals(
+            target_id=merged_into_id,
+            source_id=new_due_journal_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
         await service.delete_task(
             user_id=USER_ID,
             task_id=task.id,
@@ -433,14 +471,10 @@ class TestTaskProjectionIsIdempotent:
             source=Provenance.UI,
             changed_by="ui",
         )
-        # A subset of the module's types rather than all of them: a task's anchors
-        # are also re-pointed by the *journal* domain, and no TaskService call can
-        # publish that. Requiring equality here would fail this idempotency test,
-        # with a message about idempotency, on the day that type is added.
         published = {e.event_type for e in await task_events(async_connection)}
-        assert published <= task_event_types()
-        assert len(published) == 6, (
-            f"the lifecycle above should drive six types, drove {sorted(published)}"
+        assert published == task_event_types(), (
+            f"the lifecycle above should drive every task event type, drove "
+            f"{sorted(published)}"
         )
 
         await relay_and_project(
@@ -449,8 +483,9 @@ class TestTaskProjectionIsIdempotent:
         first_pass = await _task_history(async_connection, task.id)
         # created + the contact it named, the status move, the contact unlink,
         # the anchor move and its reopen, the retained link, the manual attach
-        # and its detach, and the delete marker.
-        assert len(first_pass) == 10
+        # and its detach, the merge moving the due anchor again, and the delete
+        # marker.
+        assert len(first_pass) == 11
 
         await replay_stream_through_projection(
             stream_client, test_stream_name, async_connection, redis_client
@@ -843,6 +878,250 @@ class TestTaskRetargetAndJournalLinkProjection:
             f"journal:{journal_a}",
             f"journal:{manual_journal_id}",
         }
+
+
+@pytest.mark.integration
+class TestAMergeReachesTheMovedTasksHistory:
+    """The one write in this file that no task write path performs.
+
+    A journal merge re-points the links of every task on the journal it absorbs,
+    including the **creating** anchor — the field the specification calls set
+    once and never changed. The change is real and it is the user's; before this
+    phase it reached the two journals' histories and none of the tasks'.
+
+    Driven through the real ``JournalMergeService`` rather than by publishing an
+    event by hand: what is being checked is that the merge's own unit of work
+    puts these rows in the outbox at all, which is the half a hand-built event
+    would assume.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_merged_anchor_is_readable_on_the_task(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        survivor_id = await create_journal(
+            journal_repo, title="Survivor", days_offset=7
+        )
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert task.id is not None
+
+        await _merge_service(async_connection).merge_journals(
+            target_id=survivor_id,
+            source_id=due_journal_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-merge"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        moves = [e for e in entries if e.field_name == "due_journal_id"]
+        assert _values(moves) == {
+            ("due_journal_id", str(due_journal_id), str(survivor_id))
+        }
+        assert moves[0].source is Provenance.UI
+        assert moves[0].user_id == USER_ID
+
+    @pytest.mark.asyncio
+    async def test_a_merged_link_reads_as_a_departure_and_an_arrival(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """And under the same key a manual attach and detach use.
+
+        The task is *mentioned* in the absorbed journal. After the merge it is
+        mentioned in the survivor instead, so its trail has to show the one
+        leaving and the other arriving — otherwise a journal the task really did
+        pass through disappears from its history with nothing to explain the
+        loss.
+        """
+        service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        mentioned_id = await create_journal(
+            journal_repo, title="Mentioned", days_offset=3
+        )
+        survivor_id = await create_journal(
+            journal_repo, title="Survivor", days_offset=4
+        )
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert task.id is not None
+        assert await service.attach_intermediate_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            journal_id=mentioned_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await _merge_service(async_connection).merge_journals(
+            target_id=survivor_id,
+            source_id=mentioned_id,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-merge-link"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        links = [e for e in entries if e.field_name.startswith("journal:")]
+        assert _values(links) == {
+            # The attach, then the merge taking that journal away and giving the
+            # survivor in its place.
+            (f"journal:{mentioned_id}", None, str(mentioned_id)),
+            (f"journal:{mentioned_id}", str(mentioned_id), None),
+            (f"journal:{survivor_id}", None, str(survivor_id)),
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_row_naming_the_absorbed_journal_is_left_as_it_was(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """History is a record of what happened, not of what is true now.
+
+        The task was retargeted onto a journal that a merge later absorbed, so
+        the earlier row names an id that no longer resolves to a journal.
+        Rewriting it to name the survivor would be editing the record: the user
+        really did defer the task into *that* journal, and the merge that
+        removed it has a row of its own immediately after.
+        """
+        service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        absorbed_id = await create_journal(
+            journal_repo, title="Absorbed", days_offset=14
+        )
+        survivor_id = await create_journal(
+            journal_repo, title="Survivor", days_offset=21
+        )
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert task.id is not None
+        await service.retarget_due_journal(
+            user_id=USER_ID,
+            task_id=task.id,
+            due_journal_id=absorbed_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-merge-before"
+        )
+        before = _values(await _task_history(async_connection, task.id))
+
+        await _merge_service(async_connection).merge_journals(
+            target_id=survivor_id,
+            source_id=absorbed_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-merge-after"
+        )
+
+        after = _values(await _task_history(async_connection, task.id))
+        assert before < after
+        assert after - before == {
+            ("due_journal_id", str(absorbed_id), str(survivor_id))
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_merge_that_moved_no_task_projects_nothing(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """Most merges, and the control the assertions above need.
+
+        Without it every one of them is satisfied by a projection that writes a
+        row for any merge at all, and the user's history fills with lines about
+        journals their tasks were never on.
+        """
+        service = _task_service(async_connection)
+        journal_repo = SqlJournalRepository(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        unrelated_id = await create_journal(journal_repo, title="Unrelated")
+        survivor_id = await create_journal(journal_repo, title="Survivor")
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        assert task.id is not None
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-no-merge-1"
+        )
+        before = _values(await _task_history(async_connection, task.id))
+
+        await _merge_service(async_connection).merge_journals(
+            target_id=survivor_id,
+            source_id=unrelated_id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-no-merge-2"
+        )
+
+        assert _values(await _task_history(async_connection, task.id)) == before
+        assert not [
+            event
+            for event in await task_events(async_connection)
+            if event.event_type == "TaskJournalLinksRepointed"
+        ]
 
 
 @pytest.mark.integration

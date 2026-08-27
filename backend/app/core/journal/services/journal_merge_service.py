@@ -3,6 +3,7 @@
 from typing import Any
 
 import structlog
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     FitnessMergeMode,
     Journal,
@@ -22,7 +23,9 @@ from app.core.journal.models.events import (
 )
 from app.core.journal.models.repositories import JournalRepository
 from app.core.journal.services.type_data_coercion import coerce_type_data_override
-from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
@@ -50,11 +53,16 @@ class JournalMergeService:
         self,
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
-        task_anchor_repo: TaskAnchorRepository,
+        task_merge_service: TaskJournalMergeService,
     ):
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
-        self.task_anchor_repo = task_anchor_repo
+        # The tasks domain's own service, not its repository. A merge has to
+        # move task links, and the tasks it moves have to say so in their own
+        # history — so the journal domain asks the tasks domain to do both
+        # rather than performing the write and constructing another domain's
+        # events itself.
+        self.task_merge_service = task_merge_service
         # Column types describe the schema, not any one journal, so they are
         # worth keeping for as long as this service lives.
         self._column_type_cache: dict[str, dict[str, str]] = {}
@@ -92,6 +100,8 @@ class JournalMergeService:
         transaction: AsyncConnection,
         overrides: dict[str, Any] | None = None,
         fitness_merge_mode: FitnessMergeMode = FitnessMergeMode.REPLACE,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> Journal:
         """
         Merge source_id journal into target_id journal.
@@ -102,21 +112,28 @@ class JournalMergeService:
         fitness data. The default treats them as rival descriptions of one
         activity; ``ADDITIVE`` treats them as two parts of one outing, summing
         the metrics and keeping both journals' integration links.
+
+        ``source`` and ``changed_by`` say who is merging. They reach the **task**
+        events step 0 publishes, so a merge performed in the browser and one
+        performed over MCP are distinguishable on the tasks they moved. Every
+        surface passes a real actor; the defaults exist because the alternative
+        is a required argument on a method whose callers are three layers away
+        from the question.
         """
         if target_id == source_id:
             raise JournalMergeConflictError("Cannot merge a journal into itself")
 
         target = await self.journal_repo.find_by_id(target_id)
-        source = await self.journal_repo.find_by_id(source_id)
+        source_journal = await self.journal_repo.find_by_id(source_id)
 
         self._validate_merge_preconditions(
-            target, source, target_id, source_id, transaction
+            target, source_journal, target_id, source_id, transaction
         )
 
-        # for type checking, we can assert target and source are not None here
+        # for type checking, we can assert target and source_journal are not None here
         # because _validate_merge_preconditions raises if they are
         assert target is not None
-        assert source is not None
+        assert source_journal is not None
 
         # Prevent cycles: if target is a descendant of source, reject
         ancestors = await self.journal_repo.get_ancestors(target_id)
@@ -144,18 +161,33 @@ class JournalMergeService:
         # directions (A into B, B into A) could hold each other's target and
         # deadlock. Taking both locks up front, in one order, is what makes the
         # ordering claim true rather than merely intended.
-        await self.task_anchor_repo.repoint_journal_links(
-            source_journal_id=source_id, target_journal_id=target_id
+        #
+        # It also publishes, per task it moved, which is why the tasks domain
+        # owns this call rather than the journal domain calling the anchor
+        # repository directly. Being first makes those events precede the
+        # ``JournalUpdated`` and ``JournalDeleted`` below in the outbox, which is
+        # the order the writes happened in.
+        await self.task_merge_service.repoint_journal_links(
+            source_journal_id=source_id,
+            target_journal_id=target_id,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
         )
 
         # Determine default base survivor based on manual journal precedence
         default_survivor, default_loser = await self._determine_precedence(
-            target_id, source_id, target, source, transaction
+            target_id, source_id, target, source_journal, transaction
         )
 
         # 1. Base Fields (Overrides > Precedence > Concatenate content)
         self._apply_base_field_overrides(
-            target, source, default_survivor, default_loser, overrides, changed_fields
+            target,
+            source_journal,
+            default_survivor,
+            default_loser,
+            overrides,
+            changed_fields,
         )
 
         # Save target core fields regardless to ensure they are updated
@@ -186,7 +218,7 @@ class JournalMergeService:
             target_id,
             source_id,
             default_survivor,
-            source,
+            source_journal,
             overrides,
             changed_fields,
             fitness_merge_mode,
@@ -200,7 +232,7 @@ class JournalMergeService:
 
         # 10. Publish Events & Cleanup Source
         await self._publish_events_and_cleanup(
-            target_id, source_id, source, changed_fields, transaction
+            target_id, source_id, source_journal, changed_fields, transaction
         )
 
         logger.info(

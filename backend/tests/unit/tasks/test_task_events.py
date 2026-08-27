@@ -30,7 +30,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
 
 from app.core.tasks.models.events import (
     TaskCreated,
@@ -38,10 +38,13 @@ from app.core.tasks.models.events import (
     TaskDueJournalRetargeted,
     TaskJournalLinked,
     TaskJournalLinkOrigin,
+    TaskJournalLinksRepointed,
     TaskJournalUnlinked,
     TaskUpdated,
+    journal_field_name,
 )
 from tests.unit.tasks.task_doubles import (
+    ABSORBED_JOURNAL_ID,
     CONTACT_ID,
     CREATING_JOURNAL_ID,
     DUE_JOURNAL_ID,
@@ -49,6 +52,7 @@ from tests.unit.tasks.task_doubles import (
     NEW_DUE_JOURNAL_ID,
     ORIGINAL_TEXT,
     OTHER_CONTACT_ID,
+    SURVIVING_JOURNAL_ID,
     TASK_ID,
     UPDATED_TEXT,
     USER_ID,
@@ -176,6 +180,37 @@ def make_unlinked(
         task_id=TASK_ID,
         user_id=USER_ID,
         journal_id=journal_id,
+        source=source,
+        changed_by=changed_by,
+        transaction=transaction,
+    )
+
+
+def make_repointed(
+    *,
+    task_id: int = TASK_ID,
+    source_journal_id: int = ABSORBED_JOURNAL_ID,
+    target_journal_id: int = SURVIVING_JOURNAL_ID,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+    transaction: AsyncMock | None = None,
+    **facts: bool,
+) -> TaskJournalLinksRepointed:
+    """A ``TaskJournalLinksRepointed`` over the shared task constants.
+
+    The default is the plainest case a merge produces: the absorbed journal was
+    the task's due anchor, and now the survivor is. ``facts`` names whichever
+    others a test is about, so each test reads as the merge outcome it describes
+    rather than as five booleans.
+    """
+    return TaskJournalLinksRepointed(
+        repointing=TaskJournalRepointing(
+            task_id=task_id,
+            user_id=USER_ID,
+            **(facts or {"due_anchor_moved": True}),
+        ),
+        source_journal_id=source_journal_id,
+        target_journal_id=target_journal_id,
         source=source,
         changed_by=changed_by,
         transaction=transaction,
@@ -1026,6 +1061,201 @@ class TestTaskJournalUnlinked:
         assert make_unlinked().transaction is None
 
 
+class TestTaskJournalLinksRepointed:
+    """The event a journal merge publishes about each task it moved.
+
+    **Not a retarget, and that is the first thing to pin.** A merge does not
+    force the task *not done*, it can move the **creating** anchor — the one
+    field the specification calls set once and never changed — and it can
+    *delete* links. Publishing ``TaskDueJournalRetargeted`` would tell a user
+    they deferred a task they never touched.
+
+    **The payload is ``changed_fields``, like the retarget's**, so the
+    projection reuses ``_project_task_updated`` rather than growing a parallel
+    shape for the same kind of fact. What each key means is the merge's own
+    vocabulary: the anchors carry the ``(absorbed, survivor)`` pair, and each
+    intermediate link is a ``journal:{id}`` row in the direction it moved — the
+    same key a manual attach and detach land under, so a merge's removal and a
+    person's removal of the same journal read as the same kind of line.
+    """
+
+    def test_identifies_itself_as_a_repointing_event(self) -> None:
+        event = make_repointed()
+
+        assert event.event_type == "TaskJournalLinksRepointed"
+        assert event.event_id.startswith(
+            f"task_journal_links_repointed_{TASK_ID}_{ABSORBED_JOURNAL_ID}_"
+        )
+
+    def test_aggregate_id_is_the_integer_task_id(self) -> None:
+        """The task, not either journal.
+
+        This is the phase's whole point: the merge already publishes under both
+        journal ids, and that is exactly why the affected tasks' own histories
+        never mention it.
+        """
+        event = make_repointed()
+
+        assert event.aggregate_id == TASK_ID
+        assert type(event.aggregate_id) is int
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """A whole-key comparison, as on every other type in this module.
+
+        The two journal ids are here as well as inside ``changed_fields``
+        because they say *why* the fields moved — this task was caught in a
+        merge of these two journals — which no ``(old, new)`` pair carries on
+        its own.
+        """
+        event = make_repointed()
+
+        assert event.event_data == {
+            "task_id": TASK_ID,
+            "user_id": USER_ID,
+            "source_journal_id": ABSORBED_JOURNAL_ID,
+            "target_journal_id": SURVIVING_JOURNAL_ID,
+            "changed_fields": {
+                "due_journal_id": (ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID)
+            },
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_a_moved_creating_anchor_is_named_as_itself(self) -> None:
+        """The field the specification calls immutable, moving.
+
+        A merge is its sole legitimate exception, which is precisely the kind of
+        exception a history exists to record — so it gets its own key rather
+        than being folded into the due anchor's.
+        """
+        event = make_repointed(creating_anchor_moved=True)
+
+        assert event.event_data["changed_fields"] == {
+            "creating_journal_id": (ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID)
+        }
+
+    def test_both_anchors_moving_produces_both_lines(self) -> None:
+        """A task anchored to the absorbed journal in both roles.
+
+        The specification permits the survivor becoming both, and the two
+        changes are two lines because they are two facts about the task.
+        """
+        event = make_repointed(creating_anchor_moved=True, due_anchor_moved=True)
+
+        assert event.event_data["changed_fields"] == {
+            "creating_journal_id": (ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID),
+            "due_journal_id": (ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID),
+        }
+
+    def test_a_moved_intermediate_link_reads_as_a_departure_and_an_arrival(
+        self,
+    ) -> None:
+        """Two rows, because a link is keyed by the journal it names.
+
+        ``journal:{id}`` is one key per journal — history rows dedup on
+        ``(event_id, entity_type, entity_id, field_name)``, so a shared
+        ``"journals"`` key would drop the second of the pair as a redelivery of
+        the first. The consequence here is that a link *moving* cannot be one
+        row: it is the absorbed journal leaving and the survivor arriving, which
+        is also what actually happened to the rows in the table.
+        """
+        event = make_repointed(source_link_removed=True, target_link_added=True)
+
+        assert event.event_data["changed_fields"] == {
+            journal_field_name(ABSORBED_JOURNAL_ID): (ABSORBED_JOURNAL_ID, None),
+            journal_field_name(SURVIVING_JOURNAL_ID): (None, SURVIVING_JOURNAL_ID),
+        }
+
+    def test_a_link_collapsed_as_a_duplicate_records_only_the_departure(
+        self,
+    ) -> None:
+        """The task was linked to both journals, so nothing arrived.
+
+        The survivor's link was already there and stays; only the absorbed
+        journal's row is gone. Writing an arrival too would put a second
+        "linked" line in a history that already has one, for a link the user
+        never gained.
+        """
+        event = make_repointed(source_link_removed=True)
+
+        assert event.event_data["changed_fields"] == {
+            journal_field_name(ABSORBED_JOURNAL_ID): (ABSORBED_JOURNAL_ID, None)
+        }
+
+    def test_a_link_dropped_as_redundant_reads_as_a_removal(self) -> None:
+        """The survivor became one of the task's anchors, so the weaker claim goes.
+
+        "The task was mentioned in this journal" is what the anchor role already
+        says, more strongly. The link really is deleted, so a task's trail would
+        otherwise lose a journal it passed through with nothing to explain the
+        loss — the third of the three consequences this phase exists to close.
+        """
+        event = make_repointed(due_anchor_moved=True, target_link_removed=True)
+
+        assert event.event_data["changed_fields"] == {
+            "due_journal_id": (ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID),
+            journal_field_name(SURVIVING_JOURNAL_ID): (SURVIVING_JOURNAL_ID, None),
+        }
+
+    def test_a_link_moved_and_then_dropped_records_only_the_departure(self) -> None:
+        """The one case where two statements cancel, and the net effect is the truth.
+
+        The task's link is re-pointed onto the survivor and the redundancy
+        cleanup immediately removes it, because an anchor moved onto the same
+        journal. It never existed on the survivor between two committed states,
+        so announcing an arrival and a removal would invent a link the user
+        never had.
+        """
+        event = make_repointed(due_anchor_moved=True, source_link_removed=True)
+
+        assert event.event_data["changed_fields"] == {
+            "due_journal_id": (ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID),
+            journal_field_name(ABSORBED_JOURNAL_ID): (ABSORBED_JOURNAL_ID, None),
+        }
+
+    def test_the_pairs_are_old_then_new_positionally(self) -> None:
+        """Direction is carried by position and by nothing else.
+
+        ``_rows_from_changed_fields`` reads ``change[0]`` as the old value and
+        never looks at the key, so a pair built the wrong way round renders the
+        merge as having moved the task *out of* the surviving journal, with
+        nothing downstream able to notice.
+        """
+        change = make_repointed().event_data["changed_fields"]["due_journal_id"]
+
+        assert change[0] == ABSORBED_JOURNAL_ID
+        assert change[1] == SURVIVING_JOURNAL_ID
+
+    def test_it_carries_the_provenance_of_the_merge_that_caused_it(self) -> None:
+        """A merge in the browser and one over MCP are distinguishable here.
+
+        The merge is a write the user performed on a *journal*; the tasks it
+        moved are consequences of that action, so they carry the actor who
+        performed it rather than ``system``. Same reasoning as the link a
+        retarget retains.
+        """
+        event = make_repointed(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_provenance_defaults_to_the_system(self) -> None:
+        event = make_repointed()
+
+        assert event.event_data["source"] == Provenance.SYSTEM.value
+        assert event.event_data["changed_by"] == "system"
+
+    def test_carries_the_transaction_it_was_given(self) -> None:
+        transaction = AsyncMock()
+
+        event = make_repointed(transaction=transaction)
+
+        assert event.transaction is transaction
+
+    def test_transaction_defaults_to_none(self) -> None:
+        assert make_repointed().transaction is None
+
+
 class TestTaskDeleted:
     """The event a successful hard delete publishes."""
 
@@ -1108,10 +1338,11 @@ class TestEventIdentity:
             make_retargeted().event_id,
             make_linked().event_id,
             make_unlinked().event_id,
+            make_repointed().event_id,
             make_deleted().event_id,
         }
 
-        assert len(ids) == 6
+        assert len(ids) == 7
 
     def test_an_id_is_separated_from_its_neighbours_by_its_own_timestamp(self) -> None:
         """Two events of one type on one task are told apart by ``occurred_at``.
@@ -1172,6 +1403,32 @@ class TestEventIdentity:
             f"task_journal_unlinked_{TASK_ID}_{INTERMEDIATE_JOURNAL_ID}_"
             f"{event.occurred_at.isoformat()}"
         )
+
+    def test_a_repointing_id_names_the_absorbed_journal_as_well_as_the_task(
+        self,
+    ) -> None:
+        """The second type whose id needs more than the task and the clock.
+
+        One merge publishes at most one of these per task, so the clock would do
+        — but ``auto_merge_review_items`` performs *several* merges in one unit
+        of work, and a task caught in two of them would publish two of these.
+        Each merge absorbs a different journal, so naming the absorbed one
+        removes the question that ``ON CONFLICT DO NOTHING`` over ``event_id``
+        would otherwise answer by dropping one of the two.
+        """
+        event = make_repointed()
+
+        assert event.event_id == (
+            f"task_journal_links_repointed_{TASK_ID}_{ABSORBED_JOURNAL_ID}_"
+            f"{event.occurred_at.isoformat()}"
+        )
+
+    def test_two_merges_touching_one_task_are_told_apart_by_the_id_alone(self) -> None:
+        """Deterministic, as with the link ids: one timestamp, two journals."""
+        event = make_repointed()
+        other = f"task_journal_links_repointed_{TASK_ID}_{ABSORBED_JOURNAL_ID + 1}_"
+
+        assert not event.event_id.startswith(other)
 
     def test_links_to_two_journals_are_told_apart_by_the_id_alone(self) -> None:
         """Deterministic, unlike constructing two and racing the clock.
@@ -1341,3 +1598,28 @@ class TestPayloadSurvivesTheStream:
 
         assert type(arrived) is str
         assert arrived == "retarget"
+
+    def test_a_repointing_reaches_the_stream_with_every_pair_intact(self) -> None:
+        """The busiest payload a merge can produce, in the form it arrives in.
+
+        Both anchors moved and the task's intermediate link departed — three
+        pairs under three keys, one of which is built from a journal id. If the
+        keys collided or a pair arrived as anything but a two-element list, the
+        projection would write fewer rows than the merge performed changes and
+        nothing would report the shortfall.
+        """
+        event = make_repointed(
+            creating_anchor_moved=True,
+            due_anchor_moved=True,
+            source_link_removed=True,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        round_tripped = json.loads(json.dumps(event.event_data))
+
+        assert round_tripped["changed_fields"] == {
+            "creating_journal_id": [ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID],
+            "due_journal_id": [ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID],
+            journal_field_name(ABSORBED_JOURNAL_ID): [ABSORBED_JOURNAL_ID, None],
+        }

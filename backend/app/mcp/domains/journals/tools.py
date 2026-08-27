@@ -184,6 +184,9 @@ from app.core.journal.services.template_application import (
 )
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.journals.converters import (
@@ -3754,10 +3757,17 @@ async def merge_journals(
     if not source or source.user_id != user_id:
         raise JournalNotFoundError(merge_request.source_journal_id)
 
-    # The anchor repository is built here rather than added to the shared journal
-    # tool repositories: merge is the only journal tool that touches task links.
+    # The tasks domain's merge service is built here rather than added to the
+    # shared journal tool repositories: merge is the only journal tool that
+    # touches task links. It owns the anchor repository and publishes an event
+    # per task the merge moves, so the journal domain never constructs one.
     merge_service = JournalMergeService(
-        repos.journal_repo, event_publisher, SqlTaskAnchorRepository(db_connection)
+        repos.journal_repo,
+        event_publisher,
+        TaskJournalMergeService(
+            task_anchor_repo=SqlTaskAnchorRepository(db_connection),
+            event_publisher=event_publisher,
+        ),
     )
 
     merged_journal = await merge_service.merge_journals(
@@ -3766,6 +3776,9 @@ async def merge_journals(
         transaction=db_connection,
         overrides=merge_request.overrides,
         fitness_merge_mode=merge_request.fitness_merge_mode,
+        # An assistant merged these journals, so the tasks it moved say so.
+        source=Provenance.MCP,
+        changed_by="mcp",
     )
 
     # Fetch enriched target

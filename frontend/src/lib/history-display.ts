@@ -96,6 +96,12 @@ export function taskEntryDescription(
   // journal the task moved to is on the row itself, not in its history.
   if (field_name === 'due_journal_id') return 'Due journal changed';
 
+  // Only a journal merge produces this row. The creating journal is set once
+  // and never changed by any task operation, so a merge absorbing it is the
+  // sole way the value moves — and a change to the one field the specification
+  // calls immutable is exactly what a history exists to record.
+  if (field_name === 'creating_journal_id') return 'Creating journal changed';
+
   if (field_name.startsWith(JOURNAL_FIELD_PREFIX)) {
     return new_value ? 'Linked to a journal' : 'Unlinked from a journal';
   }

@@ -21,7 +21,7 @@ Each test builds its own journals and tasks, so what exists is never in doubt.
 
 import pytest
 import pytest_asyncio
-from core_shared.models.tasks import Task, TaskStatus
+from core_shared.models.tasks import Task, TaskJournalRepointing, TaskStatus
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -31,13 +31,18 @@ from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
     create_task,
     link_intermediate_journal,
+    task_events,
 )
 
 _INTERMEDIATE_IDS = (
@@ -59,15 +64,26 @@ async def task_anchor_repository(
 
 
 @pytest_asyncio.fixture
+async def task_merge_service(
+    async_connection: AsyncConnection,
+    task_anchor_repository: SqlTaskAnchorRepository,
+) -> TaskJournalMergeService:
+    return TaskJournalMergeService(
+        task_anchor_repo=task_anchor_repository,
+        event_publisher=OutboxEventPublisher(async_connection),
+    )
+
+
+@pytest_asyncio.fixture
 async def merge_service(
     async_connection: AsyncConnection,
     journal_repository: SqlJournalRepository,
-    task_anchor_repository: SqlTaskAnchorRepository,
+    task_merge_service: TaskJournalMergeService,
 ) -> JournalMergeService:
     return JournalMergeService(
         journal_repo=journal_repository,
         event_publisher=OutboxEventPublisher(async_connection),
-        task_anchor_repo=task_anchor_repository,
+        task_merge_service=task_merge_service,
     )
 
 
@@ -77,6 +93,20 @@ async def merged_pair(journal_repository: SqlJournalRepository) -> tuple[int, in
     target_id = await create_journal(journal_repository, title="Survivor")
     source_id = await create_journal(journal_repository, title="Absorbed")
     return target_id, source_id
+
+
+_PUBLISHED_TYPES = "SELECT event_type FROM outbox_events ORDER BY occurred_at, id"
+
+
+async def _published_types(conn: AsyncConnection) -> list[str]:
+    """Every event in the outbox, in the order the relay will hand them over.
+
+    Not filtered to ``Task%`` like the shared helper: what one of the tests below
+    is about is where the task events sit *relative to the merge's own journal
+    events*, which a task-only read cannot see.
+    """
+    result = await conn.execute(text(_PUBLISHED_TYPES))
+    return [str(row[0]) for row in result.fetchall()]
 
 
 async def _intermediate_ids(conn: AsyncConnection, task_id: int) -> list[int]:
@@ -460,6 +490,481 @@ class TestRepointingDirectly:
         assert reloaded.creating_journal_id == journal_id
         assert reloaded.due_journal_id == other_id
         assert await _intermediate_ids(async_connection, task_id) == [journal_id]
+
+
+@pytest.mark.integration
+class TestTheRepointReportsWhatItMoved:
+    """The return value, which is what the task domain publishes from.
+
+    Asserted against the repository directly rather than through the merge:
+    what a merge *publishes* is the service's business and is tested there, and
+    what is checked here is that four set-based statements can say, per task,
+    which of them touched it. That question only has an answer against a real
+    database — three of the five facts are the ``RETURNING`` of a statement, and
+    two of those statements are deletes whose effect is invisible afterwards.
+
+    The summaries are keyed by task id in these assertions so a test names the
+    task it is about rather than an index into a list.
+    """
+
+    async def test_a_moved_due_anchor_is_reported_as_one(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=source_id,
+        )
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == [
+            TaskJournalRepointing(
+                task_id=task_id, user_id=USER_ID, due_anchor_moved=True
+            )
+        ]
+
+    async def test_a_moved_creating_anchor_is_reported_as_one(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """The role has to be read *before* the update overwrites it.
+
+        Both anchors end up holding the survivor's id, so afterwards there is
+        nothing in the row to say which of them moved — which is why the
+        pre-read carries the roles rather than the statement returning them.
+        """
+        target_id, source_id = merged_pair
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=source_id,
+            due_journal_id=due_id,
+        )
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == [
+            TaskJournalRepointing(
+                task_id=task_id, user_id=USER_ID, creating_anchor_moved=True
+            )
+        ]
+
+    async def test_a_task_anchored_in_both_roles_reports_both(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+    ):
+        target_id, source_id = merged_pair
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=source_id,
+            due_journal_id=source_id,
+        )
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == [
+            TaskJournalRepointing(
+                task_id=task_id,
+                user_id=USER_ID,
+                creating_anchor_moved=True,
+                due_anchor_moved=True,
+            )
+        ]
+
+    async def test_a_moved_link_is_reported_as_a_departure_and_an_arrival(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+        await _link_intermediate(async_connection, task_id, source_id)
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == [
+            TaskJournalRepointing(
+                task_id=task_id,
+                user_id=USER_ID,
+                source_link_removed=True,
+                target_link_added=True,
+            )
+        ]
+
+    async def test_a_collapsed_duplicate_reports_only_the_departure(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """The task was linked to both journals, so it gains nothing.
+
+        Reporting an arrival here would put a second "linked" line in a history
+        that already has one, for a link the user never gained — the failure the
+        net-effect shape exists to prevent.
+        """
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+        await _link_intermediate(async_connection, task_id, source_id, target_id)
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == [
+            TaskJournalRepointing(
+                task_id=task_id, user_id=USER_ID, source_link_removed=True
+            )
+        ]
+
+    async def test_a_link_moved_and_then_dropped_reports_only_the_departure(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """Two statements cancel: the link arrives on the survivor and is deleted.
+
+        The task's due anchor moves onto the survivor as well, so the
+        redundancy cleanup removes the link it has just re-pointed. It never
+        existed on the survivor between two committed states, so the summary
+        must not claim it was gained.
+        """
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=source_id,
+        )
+        await _link_intermediate(async_connection, task_id, source_id)
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == [
+            TaskJournalRepointing(
+                task_id=task_id,
+                user_id=USER_ID,
+                due_anchor_moved=True,
+                source_link_removed=True,
+            )
+        ]
+
+    async def test_a_pre_existing_link_dropped_as_redundant_is_reported_as_lost(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """The mirror direction: an anchor moves onto a journal already linked.
+
+        The link the task loses is one it genuinely held before the merge, so
+        this is the only one of the three link outcomes that reads as a removal
+        of the *survivor*.
+        """
+        target_id, source_id = merged_pair
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=source_id,
+            due_journal_id=due_id,
+        )
+        await _link_intermediate(async_connection, task_id, target_id)
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == [
+            TaskJournalRepointing(
+                task_id=task_id,
+                user_id=USER_ID,
+                creating_anchor_moved=True,
+                target_link_removed=True,
+            )
+        ]
+
+    async def test_a_merge_touching_no_task_reports_nothing(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """Most merges are this one, and it must stay silent.
+
+        A task exists and is untouched, so the emptiness is about the absorbed
+        journal having no task on it rather than about there being no tasks at
+        all — the control the assertion needs to mean anything.
+        """
+        target_id, source_id = merged_pair
+        elsewhere_id = await create_journal(journal_repository, title="Elsewhere")
+        await create_task(
+            async_connection,
+            creating_journal_id=elsewhere_id,
+            due_journal_id=elsewhere_id,
+        )
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert moved == []
+
+    async def test_a_bystander_whose_link_survives_is_not_reported(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """The redundancy cleanup's scope, asserted through the report.
+
+        A task holding an intermediate link to one of its own anchors is a shape
+        retargeting produces without any merge, and the cleanup deliberately
+        leaves it alone. If it did not, this bystander would appear here — which
+        makes the report a second, independent check on that scoping.
+        """
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        bystander_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=target_id,
+            text="unrelated to the merge",
+        )
+        await _link_intermediate(async_connection, bystander_id, target_id)
+        merged_id = await create_task(
+            async_connection,
+            creating_journal_id=source_id,
+            due_journal_id=target_id,
+            text="the one the merge is about",
+        )
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert [summary.task_id for summary in moved] == [merged_id]
+
+    async def test_the_report_is_ordered_by_task_id(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """A total order, because the events are published in this order.
+
+        Without it the two halves of the affected set — anchored tasks and
+        linked ones — arrive in whatever order the union happens to produce, and
+        one merge's outbox rows would be in a different order between runs.
+        """
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        anchored_id = await create_task(
+            async_connection,
+            creating_journal_id=source_id,
+            due_journal_id=due_id,
+            text="anchored to the absorbed journal",
+        )
+        linked_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="merely mentions it",
+        )
+        await _link_intermediate(async_connection, linked_id, source_id)
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        assert [summary.task_id for summary in moved] == sorted(
+            [anchored_id, linked_id]
+        )
+
+    async def test_repointing_a_journal_onto_itself_reports_nothing(
+        self,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """The early return still returns the empty report, not ``None``.
+
+        No merge can reach this case, but the port promises it is a no-op and a
+        caller publishing from the result would otherwise fail on the type.
+        """
+        journal_id = await create_journal(journal_repository, title="Only journal")
+        other_id = await create_journal(journal_repository, title="Somewhere else")
+        await create_task(
+            async_connection,
+            creating_journal_id=journal_id,
+            due_journal_id=other_id,
+        )
+
+        moved = await task_anchor_repository.repoint_journal_links(
+            source_journal_id=journal_id, target_journal_id=journal_id
+        )
+
+        assert moved == []
+
+
+@pytest.mark.integration
+class TestTheMergeAndItsTaskEventsAreOneUnitOfWork:
+    """A merge that fails leaves no task event behind it.
+
+    The events are published from inside ``merge_journals``, which is
+    ``@transactional`` and therefore joins a caller's unit of work rather than
+    committing its own. So the failure staged here is the real one: a request
+    handler that merges and then fails, which is also every merge that trips the
+    cycle check or a foreign key after step 0.
+    """
+
+    async def test_a_rolled_back_merge_leaves_neither_the_move_nor_the_event(
+        self,
+        merge_service: JournalMergeService,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """Both halves, because either one surviving alone is worse than neither.
+
+        An outbox row without the move would put a change in the user's history
+        that never happened to their task; the move without the row is the gap
+        this phase exists to close, quietly reopened for one merge.
+        """
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=source_id,
+        )
+
+        with pytest.raises(RuntimeError):
+            async with unit_of_work(async_connection):
+                await merge_service.merge_journals(
+                    target_id, source_id, async_connection
+                )
+                raise RuntimeError("the caller failed after the journals were merged")
+
+        assert (await _reload(task_repository, task_id)).due_journal_id == source_id
+        assert await task_events(async_connection, task_id=task_id) == []
+
+
+@pytest.mark.integration
+class TestTheEventsGoOutInTheOrderTheWritesHappened:
+    """A merge publishes about three aggregates; the order is not incidental.
+
+    The relay hands events to the stream in ``(occurred_at, id)`` order, so it is
+    the order a consumer rebuilding a timeline sees. The task events come first
+    because the re-point is step 0 of the merge — which it is for a locking
+    reason, not this one, but it does mean each event sits behind the write it
+    announces rather than beside another's.
+    """
+
+    async def test_the_task_events_precede_the_merges_own_journal_events(
+        self,
+        merge_service: JournalMergeService,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=source_id,
+        )
+
+        await merge_service.merge_journals(target_id, source_id, async_connection)
+
+        assert await _published_types(async_connection) == [
+            "TaskJournalLinksRepointed",
+            "JournalUpdated",
+            "JournalDeleted",
+        ]
+
+    async def test_one_event_per_task_in_task_id_order(
+        self,
+        merge_service: JournalMergeService,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+        journal_repository: SqlJournalRepository,
+    ):
+        """Two tasks on the absorbed journal, and a total order over them.
+
+        The repository reports in task-id order for this: without it the two
+        halves of the affected set — anchored tasks and merely-linked ones —
+        arrive in whatever order the plan produced, and one merge's stored events
+        would be in a different order between runs.
+        """
+        target_id, source_id = merged_pair
+        creating_id = await create_journal(journal_repository, title="Arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        anchored_id = await create_task(
+            async_connection,
+            creating_journal_id=source_id,
+            due_journal_id=due_id,
+            text="anchored to the absorbed journal",
+        )
+        linked_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="merely mentions it",
+        )
+        await _link_intermediate(async_connection, linked_id, source_id)
+
+        await merge_service.merge_journals(target_id, source_id, async_connection)
+
+        events = await task_events(async_connection)
+        assert [event.aggregate_id for event in events] == sorted(
+            [anchored_id, linked_id]
+        )
 
 
 @pytest.mark.integration

@@ -61,17 +61,19 @@ _CONTACT_EVENT_TYPES = {
     "ContactSummaryUpdated",
 }
 
-# Task event types the projection maps: the lifecycle set plus the anchor move
-# and the intermediate-journal pair. Every type the tasks domain publishes is
-# projected, which ``test_every_task_event_type_is_subscribed`` asserts against
-# the events module rather than against this list — a list is a thing somebody
-# has to remember to extend.
+# Task event types the projection maps: the lifecycle set, the anchor move, the
+# intermediate-journal pair and the re-point a journal merge performs. Every type
+# the tasks domain publishes is projected, which
+# ``test_every_task_event_type_is_subscribed`` asserts against the events module
+# rather than against this list — a list is a thing somebody has to remember to
+# extend.
 _TASK_EVENT_TYPES = {
     "TaskCreated",
     "TaskUpdated",
     "TaskDueJournalRetargeted",
     "TaskJournalLinked",
     "TaskJournalUnlinked",
+    "TaskJournalLinksRepointed",
     "TaskDeleted",
 }
 

@@ -6,6 +6,7 @@ transaction ownership in the service layer rather than the controller.
 """
 
 import structlog
+from core_shared.models.history import Provenance
 from core_shared.models.journals.review_item import ReviewItem
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -66,6 +67,8 @@ class ReviewItemService:
         self,
         user_id: str,
         transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
     ) -> tuple[int, int, int, list[str]]:
         """Auto-merge all pending review items with no base-field conflicts.
 
@@ -73,6 +76,13 @@ class ReviewItemService:
         no conflicting base fields, merge the source into the candidate. Each
         merge runs inside its own SAVEPOINT so a single failure rolls back only
         that merge and the loop continues.
+
+        ``source`` and ``changed_by`` are forwarded to every merge, and from
+        there onto the task events each one publishes. **"Auto" describes how the
+        pairs were chosen, not who chose to merge them**: a person pressed this,
+        so the tasks it moves carry that person's provenance rather than the
+        system's — the same reading that makes a retarget-derived link the
+        user's.
 
         Returns:
             A tuple of (merged_count, skipped_count, remaining_count, errors).
@@ -124,6 +134,8 @@ class ReviewItemService:
                         target_id=item.candidate_journal_id,
                         source_id=item.source_journal_id,
                         transaction=transaction,
+                        source=source,
+                        changed_by=changed_by,
                     )
                 merged_count += 1
             except Exception as exc:  # noqa: BLE001

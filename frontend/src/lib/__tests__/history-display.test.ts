@@ -70,6 +70,21 @@ describe('taskEntryDescription', () => {
       expect(description).not.toContain('4');
     });
 
+    it('words the creating journal moving, which only a merge can do', () => {
+      // The specification calls the creating journal set once and never
+      // changed; a journal merge is its one exception, so this row exists and
+      // has to read as something. Without the case it falls through to the
+      // generic wording and a user is shown "Creating Journal Id".
+      const description = taskEntryDescription(
+        taskRow('creating_journal_id', '3', '4'),
+        'task'
+      );
+
+      expect(description).toBe('Creating journal changed');
+      expect(description).not.toContain('3');
+      expect(description).not.toContain('4');
+    });
+
     it('words an intermediate journal link and its removal', () => {
       expect(
         taskEntryDescription(taskRow('journal:7', null, '7'), 'task')

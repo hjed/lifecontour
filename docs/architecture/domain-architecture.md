@@ -209,8 +209,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   contacts cost *2N* statements — and the batch is what `TaskService.create_task` and the
   single-contact link surface both use. `remove_contact` stays singular: nothing removes in bulk.
 - **Domain Events**: `TaskCreated`, `TaskUpdated`, `TaskDueJournalRetargeted`, `TaskJournalLinked`,
-  `TaskJournalUnlinked` and `TaskDeleted`
-  (`backend/app/core/tasks/models/events.py`), published by `TaskService` through
+  `TaskJournalUnlinked`, `TaskJournalLinksRepointed` and `TaskDeleted`
+  (`backend/app/core/tasks/models/events.py`), published by `TaskService` — and, for the last of
+  them, by `TaskJournalMergeService` — through
   `OutboxEventPublisher` **inside the same unit of work as the write**, so an event can never exist
   for a write that rolled back and a rejected write publishes nothing — the activity-history
   specification's *integrity by construction*. Each carries `source` (`Provenance`) and `changed_by`,
@@ -258,21 +259,51 @@ the *creating* journal where it arose and the *due* journal where it matters.
   journal it has already left finds it still attached and announces nothing; likewise a repeat
   attach, a detach of a link that is not there, and every refusal. (Links are removable, by
   `detach_intermediate_journal`, by a merge collapsing redundant ones, and by a journal delete
-  cascading; only the first of those publishes anything today.)
+  cascading; the first publishes `TaskJournalUnlinked`, the second is part of the merge's own
+  `TaskJournalLinksRepointed`, and only the cascade still publishes nothing.)
   **`TaskJournalLinked` carries an `origin`** (`manual` or `retarget`) because two writes produce
   the same fact. That is deliberately *not* the same question as provenance: `source` records who
   acted, and a retarget is something the **user** did, so a link derived from one performed in the
   browser is `ui` — the same actor as the retarget event beside it — rather than `system`, which is
-  reserved for writes no person triggered. `TaskJournalUnlinked` carries no `origin`: it has one
-  cause today, and a key with a single possible value would advertise a case that does not exist.
+  reserved for writes no person triggered. `TaskJournalUnlinked` carries no `origin`: a user asking for the
+  link to go is its only cause, since the merge that also removes links announces itself as
+  `TaskJournalLinksRepointed` instead, and a key with a single possible value would advertise a case
+  that does not exist.
+  **A journal merge publishes `TaskJournalLinksRepointed`, one per task it moved.** A merge is never
+  blocked by a task, so before the absorbed journal is deleted every link a task holds on it moves
+  onto the survivor — both anchors included. That makes a merge the **one legitimate exception** to
+  *"the creating journal is set once and never changes"*, which is exactly the kind of exception a
+  history exists to record. The payload is `changed_fields`, so the projection reuses
+  `_project_task_updated`: the anchors carry `(absorbed, survivor)` pairs under
+  `creating_journal_id` / `due_journal_id`, and each intermediate link is a `journal:{id}` row in
+  the direction it moved — the same key a manual attach and detach land under, so a journal a merge
+  took away and one a person detached read as the same kind of line. The facts are **net effect**
+  rather than statement-by-statement: a link that moved is a departure plus an arrival, while one
+  collapsed as a duplicate, or moved and then dropped as redundant with an anchor, is the departure
+  alone, because in both of those the task ends with no link on either journal.
+  **It is deliberately not `TaskDueJournalRetargeted`**: a merge forces no status, can move the
+  creating anchor, and can delete links, so reusing that type would tell a user they deferred a task
+  they never touched. Rows written *before* a merge that name the absorbed journal are left exactly
+  as they are — rewriting them to name the survivor would be editing the record of what happened.
+  **The journal domain does not construct task events.** `JournalMergeService` holds
+  `TaskJournalMergeService` (`backend/app/core/tasks/services/task_journal_merge_service.py`) rather
+  than `TaskAnchorRepository`: the repository reports what it moved per task, and the tasks domain
+  turns that into events. `TaskAnchorRepository.repoint_journal_links` therefore returns
+  `list[TaskJournalRepointing]` instead of `None`, since two of its four statements are deletes and
+  the anchor roles are overwritten by the re-point itself, so no caller can reconstruct the answer
+  afterwards. Provenance is threaded through `merge_journals` from all three merge surfaces — the
+  REST merge endpoint (`ui`), the `merge_journals` MCP tool (`mcp`) and the review-queue auto-merge
+  endpoint (`ui`, because *auto* describes how the pairs were chosen, not who chose to merge them).
+  The re-point is **step 0** of the merge for a locking reason, which also means these events precede
+  the merge's own `JournalUpdated` and `JournalDeleted` in the outbox.
   **Every write path publishes at least one event, and only a retarget publishes two.** That rule is
   pinned by `tests/integration/tasks/test_task_event_completeness_integration.py`, which runs each
   path against a real outbox and compares the facts it published. The inventory is anchored to the
   **repository ports** rather than to `TaskService`'s method list, so a write performed on a task
-  from another domain cannot escape it — there is exactly one such write today, and it is a **named
-  exclusion**: `TaskAnchorRepository.repoint_journal_links`, which a journal merge uses to re-point
-  a task's anchors and links while publishing nothing task-scoped. That gap is asserted positively
-  rather than left implicit, and closing it is its own phase.
+  from another domain cannot escape it — and that is not hypothetical: the merge re-point sat in
+  that file as a **named exclusion** for several phases, asserted positively rather than left
+  implicit, until the phase that gave it an event. The exclusion list is now empty, and a test
+  asserts that it stays empty.
   **The history projection reads every task event.** `HistoryProjectionConsumer` subscribes to all
   six types, and `HistoryService` maps each to `field_history`
   rows under `entity_type='task'`, keyed on the **task id** — an integer, so task history shares the

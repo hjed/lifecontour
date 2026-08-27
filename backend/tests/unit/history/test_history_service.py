@@ -1674,12 +1674,167 @@ class TestTaskJournalUnlinked:
         )
 
 
+class TestTaskJournalLinksRepointed:
+    """A journal merge's effect on one task, as history rows.
+
+    The event carries ``changed_fields``, so it shares ``_project_task_updated``
+    with the reword, the status move, the contact links and the retarget. That
+    reuse is the point rather than a shortcut: "how a task field change becomes
+    a row" already exists, and a second handler would be a second place for it
+    to disagree — the same argument that kept the retarget out of a handler of
+    its own.
+
+    What is asserted here is that a merge's vocabulary survives the shared
+    handler: the anchors read as moves, the intermediate links read under the
+    key a manual attach and detach already use, and nothing about the merge
+    leaks into a field name.
+    """
+
+    def test_a_moved_due_anchor_reads_as_a_change_of_due_journal(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event("TaskJournalLinksRepointed", _repointed_payload())
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            (
+                "task",
+                TASK_ID,
+                "due_journal_id",
+                str(OLD_JOURNAL_ID),
+                str(NEW_JOURNAL_ID),
+            )
+        ]
+        assert rows[0].source == Provenance.UI
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_a_moved_creating_anchor_reads_as_its_own_line(
+        self, service: HistoryService
+    ) -> None:
+        """The field the specification calls set once and never changed.
+
+        A merge is its only legitimate exception, so it gets a line of its own
+        rather than being folded into the due anchor's — which is the whole
+        reason this event exists rather than a ``TaskDueJournalRetargeted``.
+        """
+        rows = service.project_event(
+            _task_event(
+                "TaskJournalLinksRepointed",
+                _repointed_payload(
+                    creating_journal_id=[OLD_JOURNAL_ID, NEW_JOURNAL_ID]
+                ),
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            (
+                "task",
+                TASK_ID,
+                "creating_journal_id",
+                str(OLD_JOURNAL_ID),
+                str(NEW_JOURNAL_ID),
+            )
+        ]
+
+    def test_a_moved_link_lands_under_the_same_keys_a_person_s_would(
+        self, service: HistoryService
+    ) -> None:
+        """The merge's removal and a user's removal have to read as one kind.
+
+        A link that moved is a departure and an arrival, keyed by journal — and
+        those keys are exactly what ``TaskJournalUnlinked`` and
+        ``TaskJournalLinked`` project, so a journal a merge took away and one a
+        person detached sit under the same name in the feed.
+        """
+        rows = service.project_event(
+            _task_event(
+                "TaskJournalLinksRepointed",
+                _repointed_payload(
+                    **{
+                        f"journal:{OLD_JOURNAL_ID}": [OLD_JOURNAL_ID, None],
+                        f"journal:{NEW_JOURNAL_ID}": [None, NEW_JOURNAL_ID],
+                    }
+                ),
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, f"journal:{OLD_JOURNAL_ID}", str(OLD_JOURNAL_ID), None),
+            ("task", TASK_ID, f"journal:{NEW_JOURNAL_ID}", None, str(NEW_JOURNAL_ID)),
+        ]
+
+    def test_it_shares_the_link_field_name_with_a_manual_detach(
+        self, service: HistoryService
+    ) -> None:
+        """Pinned rather than assumed, because two publishers build these keys."""
+        merged = service.project_event(
+            _task_event(
+                "TaskJournalLinksRepointed",
+                _repointed_payload(
+                    **{f"journal:{OLD_JOURNAL_ID}": [OLD_JOURNAL_ID, None]}
+                ),
+            )
+        )
+        detached = service.project_event(
+            _task_event(
+                "TaskJournalUnlinked",
+                {"task_id": TASK_ID, "user_id": "u1", "journal_id": OLD_JOURNAL_ID},
+            )
+        )
+
+        assert merged[0].field_name == detached[0].field_name
+        assert _row_tuple(merged[0]) == _row_tuple(detached[0])
+
+    def test_every_change_a_merge_made_becomes_its_own_row(
+        self, service: HistoryService
+    ) -> None:
+        """The busiest shape: both anchors moved and the link departed.
+
+        Three facts, three rows, distinct field names — which is what stops the
+        projection's ``ON CONFLICT (event_id, entity_type, entity_id,
+        field_name) DO NOTHING`` from discarding two of them as redeliveries of
+        the first.
+        """
+        rows = service.project_event(
+            _task_event(
+                "TaskJournalLinksRepointed",
+                _repointed_payload(
+                    **{
+                        "creating_journal_id": [OLD_JOURNAL_ID, NEW_JOURNAL_ID],
+                        "due_journal_id": [OLD_JOURNAL_ID, NEW_JOURNAL_ID],
+                        f"journal:{OLD_JOURNAL_ID}": [OLD_JOURNAL_ID, None],
+                    }
+                ),
+            )
+        )
+
+        assert len({row.field_name for row in rows}) == 3
+
+    def test_nothing_names_the_merge_itself(self, service: HistoryService) -> None:
+        """No ``merge:`` marker row, deliberately.
+
+        The event says which journals were involved, but a marker keyed on the
+        merge would be a field name no other publisher writes — and the pair a
+        link forms with its later removal only reads as a pair while both sides
+        use the journal's key. What history records is what happened *to the
+        task*; that it happened because of a merge is on the event.
+        """
+        rows = service.project_event(
+            _task_event("TaskJournalLinksRepointed", _repointed_payload())
+        )
+
+        assert all("merge" not in row.field_name for row in rows)
+
+
 class TestEveryTaskEventTypeIsProjected:
     """Nothing this domain publishes may be written and then never read.
 
-    The set is not closed — a journal merge re-points a task's anchors and will
-    publish an event of its own — so the invariant has to be one that *fails*
-    when the next type lands, rather than a list somebody remembers to extend.
+    The set is not closed, and this is the phase that proves it: the invariant
+    was written to *fail* when a journal merge's re-point got an event of its
+    own, and it did — three tests, before a line of the projection existed. It
+    stays a claim about the event classes rather than a list somebody remembers
+    to extend, because the next type after this one will arrive the same way.
     """
 
     def test_every_task_event_class_has_a_handler(self) -> None:
@@ -1720,6 +1875,24 @@ class TestUnknownAndProvenanceDefaults:
 
         assert rows[0].source == Provenance.SYSTEM
         assert rows[0].changed_by == "system"
+
+
+def _repointed_payload(**changed_fields: Any) -> dict[str, Any]:
+    """A merge's payload for one task, defaulting to a moved due anchor.
+
+    Written as the publisher writes it — the pairs are lists, because the event
+    reaches this projection as JSON through the outbox and a Redis stream.
+    """
+    return {
+        "task_id": TASK_ID,
+        "user_id": "u1",
+        "source_journal_id": OLD_JOURNAL_ID,
+        "target_journal_id": NEW_JOURNAL_ID,
+        "changed_fields": changed_fields
+        or {"due_journal_id": [OLD_JOURNAL_ID, NEW_JOURNAL_ID]},
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
 
 
 def _task_payloads_by_type() -> dict[str, dict[str, Any]]:
@@ -1766,6 +1939,7 @@ def _task_payloads_by_type() -> dict[str, dict[str, Any]]:
             "source": Provenance.UI.value,
             "changed_by": "ui",
         },
+        "TaskJournalLinksRepointed": _repointed_payload(),
         "TaskDeleted": {
             "task_id": TASK_ID,
             "user_id": "u1",
@@ -1833,8 +2007,11 @@ class TestTaskHistoryCarriesItsOwner:
     def test_the_owner_set_covers_every_task_event_type(self) -> None:
         """The guard that makes the parametrisation above a claim about the domain.
 
-        Without it, a seventh event type — the journal merge re-point is already
-        scheduled — could land with no owner on its rows and no test would notice.
+        Without it, a seventh event type could land with no owner on its rows and
+        no test would notice. The journal merge re-point is that seventh, and it
+        needs the owner more than most: it reaches a task through a *journal*, so
+        the merge never read the task row and the owner has to travel from the
+        repository's report onto the event.
         """
         assert set(_task_payloads_by_type()) == task_event_types()
 
