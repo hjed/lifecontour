@@ -886,9 +886,15 @@ class TestFlaggingDuplicatesThatAlreadyExist:
         calendar_id: str,
         external_event_id: str,
         journal_id: int,
-        etag: str = '"etag-2"',
+        etag: str = '"etag-1"',
     ) -> None:
-        """The one-shot re-sync that gives an existing link its token."""
+        """The one-shot re-sync that gives an existing link its token.
+
+        The etag defaults to the one the link already carries, because the
+        event has *not* changed — the worker promotes it out of
+        SKIP_UNCHANGED purely to hand over the token. A changed etag would
+        take the ordinary update path and never exercise this.
+        """
         await processor.process_event(
             sync_event(
                 "journal_event.updated",
@@ -1117,6 +1123,106 @@ class TestFlaggingDuplicatesThatAlreadyExist:
         items = await _review_items(async_connection)
         assert len(items) == 1
         assert items[0].status == "dismissed"
+
+    async def test_an_unchanged_event_still_hands_over_its_token(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The re-sync that carries the token changes nothing else.
+
+        This is the whole backfill path: the worker lifts a link out of
+        SKIP_UNCHANGED *because* it has no token, so the event it sends is
+        by definition unchanged and carries the etag already stored. If the
+        etag guard turns it away before the token is written, no link
+        predating the token ever gets one, the worker re-promotes it every
+        sync forever, and nothing is ever flagged.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+
+        assert [
+            link.external_identity for link in await _links(async_connection, first)
+        ] == [SHARED_TOKEN]
+
+    async def test_an_unchanged_resync_flags_the_pair(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Two unchanged events reaching the queue is the point of all this."""
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert {items[0].source_journal_id, items[0].candidate_journal_id} == {
+            first,
+            second,
+        }
+
+    async def test_an_unchanged_resync_leaves_the_journal_alone(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Handing over a token is not an edit.
+
+        The etag guard exists to stop unchanged events rewriting journals
+        and filling the history with no-ops. Backfilling through it must
+        not cost that.
+        """
+        processor, work, _personal, first, _second = await self._duplicate_pair(
+            async_connection
+        )
+        before = await async_connection.execute(
+            text("SELECT title, content FROM journals WHERE id = :id"),
+            {"id": first},
+        )
+        untouched = before.fetchone()
+        assert untouched is not None
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+
+        after = await async_connection.execute(
+            text("SELECT title, content FROM journals WHERE id = :id"), {"id": first}
+        )
+        assert after.fetchone() == untouched
+        history = await async_connection.execute(
+            text("""
+                SELECT count(*) FROM field_history
+                WHERE entity_type = 'journal' AND entity_id = :id
+            """),
+            {"id": first},
+        )
+        assert history.scalar() == 0
 
     async def test_a_de_duplicated_event_is_not_flagged(
         self,

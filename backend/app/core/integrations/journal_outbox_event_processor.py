@@ -487,16 +487,35 @@ class JournalOutboxEventProcessor:
             and existing_link.external_version == etag
         ):
             # Backfill promotion: the worker re-sends unchanged events whose
-            # link predates the series feature, carrying the SAME etag. The
-            # recurring id and series membership must persist before the skip
-            # or the worker re-promotes the instance on every sync, forever.
-            if payload.recurring_event_id and existing_link.recurring_event_id is None:
+            # link predates a feature, carrying the SAME etag. Whatever the
+            # link is missing must persist before the skip or the worker
+            # re-promotes the event on every sync, forever.
+            #
+            # Two things arrive this way, and neither can wait for the event
+            # to change — an event nobody edits would wait forever:
+            # the recurring id that makes an instance part of a series, and
+            # the identity token that makes one event in two calendars one
+            # journal. Both are additions to the link, not edits to the
+            # journal, so they belong on this side of the guard: the skip
+            # still spares the journal a no-op update and its history a
+            # no-op entry.
+            needs_recurring_id = (
+                payload.recurring_event_id is not None
+                and existing_link.recurring_event_id is None
+            )
+            needs_identity = (
+                payload.external_identity is not None
+                and existing_link.external_identity is None
+            )
+            if needs_recurring_id or needs_identity:
                 await self._update_external_event_link_etag(
                     calendar_id=UUID(calendar_id),
                     external_event_id=external_event_id,
                     etag=etag,
                     recurring_event_id=payload.recurring_event_id,
+                    external_identity=payload.external_identity,
                 )
+            if needs_recurring_id:
                 await self._ensure_series_membership(
                     journal_id=existing_journal_id,
                     user_id=existing_journal.user_id,
@@ -508,6 +527,16 @@ class JournalOutboxEventProcessor:
                     "Backfilled recurring id on unchanged event",
                     journal_id=existing_journal_id,
                     recurring_event_id=payload.recurring_event_id,
+                )
+            if needs_identity:
+                await self._flag_duplicate_journals(
+                    journal_id=existing_journal_id,
+                    user_id=existing_journal.user_id,
+                    external_identity=payload.external_identity,
+                )
+                logger.info(
+                    "Backfilled external identity on unchanged event",
+                    journal_id=existing_journal_id,
                 )
             logger.info(
                 "Journal update skipped - ETag unchanged",
@@ -1775,7 +1804,8 @@ class JournalOutboxEventProcessor:
         result = await self.connection.execute(
             text("""
                 SELECT external_version, journal_id, sync_capability,
-                       sync_status, updated_at, recurring_event_id
+                       sync_status, updated_at, recurring_event_id,
+                       external_identity
                 FROM journal_external_event_links
                 WHERE calendar_id = :calendar_id
                   AND external_event_id = :external_event_id
