@@ -308,6 +308,8 @@ class TestWhatReachesTheAgenda:
         assert entry["is_all_day"] is False
         assert entry["start_time"] == "09:00:00"
         assert entry["location"] == "The good place"
+        # W17 keys the row's accent bar to this; the seeded calendar's colour.
+        assert entry["calendar_color"] == "#336699"
         assert entry["is_cancelled"] is False
         assert entry["tags"] == [
             {"id": str(tag_id), "name": "social", "color": "#ff0000"}
