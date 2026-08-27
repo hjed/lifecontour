@@ -46,6 +46,9 @@ OTHER_USER_ID = "test-user-456"
 
 # A large positive offset, so one local day spans two UTC dates.
 FAR_EAST = "Pacific/Kiritimati"  # UTC+14
+# A large negative offset — the side of UTC an all-day event read by instant
+# lands on the wrong day for.
+FAR_WEST = "Pacific/Niue"  # UTC-11
 
 
 def agenda_of(response: Any) -> dict[str, Any]:
@@ -153,6 +156,49 @@ class EventSeeder:
                     "event_state": event_state,
                 },
             )
+        return journal_id
+
+    async def all_day_on(
+        self, day: datetime.date, *, title: str, written_in: str | None = None
+    ) -> int:
+        """An all-day journal for ``day``, in one of the two storage conventions.
+
+        ``written_in=None`` is the **Google** convention: both bounds at midnight
+        UTC and no event timezone, which is what ``_parse_all_day_date`` writes
+        for a date-only event. Passing a zone is the **app** convention: midnight
+        in that zone, with the zone recorded — which is what the create form plus
+        ``EventTypeEditor`` produce.
+        """
+        zone = ZoneInfo(written_in) if written_in else datetime.UTC
+        midnight = datetime.datetime.combine(day, datetime.time.min, zone)
+
+        result = await self.connection.execute(
+            text(
+                """
+                INSERT INTO journals
+                    (user_id, title, content,
+                     event_date_range_start, event_date_range_end)
+                VALUES (:user_id, :title, '', :start, :end)
+                RETURNING id
+                """
+            ),
+            {"user_id": USER_ID, "title": title, "start": midnight, "end": midnight},
+        )
+        journal_id = int(result.scalar_one())
+        await self.connection.execute(
+            text(
+                """
+                INSERT INTO journal_calendar_info
+                    (journal_id, calendar_id, is_all_day, timezone, event_state)
+                VALUES (:journal_id, :calendar_id, true, :timezone, 'confirmed')
+                """
+            ),
+            {
+                "journal_id": journal_id,
+                "calendar_id": await self.calendar(),
+                "timezone": written_in,
+            },
+        )
         return journal_id
 
     async def tag(self, journal_id: int, name: str, colour: str = "#ff0000") -> UUID:
@@ -641,3 +687,136 @@ class TestTheAgendaDoesNotWrite:
             if statement.strip().split()[0].upper() in {"INSERT", "UPDATE", "DELETE"}
         ]
         assert written == []
+
+
+@pytest.mark.asyncio
+class TestAnAllDayEventLandsOnItsOwnDate:
+    """All-day events are matched by date, and instants cannot do that job.
+
+    An all-day event happens on a *date*, but the schema stores only instants and
+    the two writers disagree about which instant means that date: the Google
+    worker writes midnight **UTC** with no event timezone, while the app writes
+    midnight in the browser's zone and records it. Matching by instant therefore
+    reads a synced holiday onto the previous day for every user west of UTC —
+    which is the case these tests exist to hold shut.
+
+    Each test seeds the same event on three consecutive dates and asserts against
+    the anchor the server reports, so a midnight crossing mid-test moves the
+    expectation with the answer rather than failing a correct response.
+    """
+
+    async def seed_three_dates(
+        self, seeder: EventSeeder, timezone: str, *, written_in: str | None
+    ) -> None:
+        for offset in (-1, 0, 1):
+            day = datetime.datetime.now(ZoneInfo(timezone)).date() + (
+                datetime.timedelta(days=offset)
+            )
+            await seeder.all_day_on(
+                day, title=f"Holiday {day.isoformat()}", written_in=written_in
+            )
+
+    @pytest.mark.parametrize("timezone", [FAR_WEST, FAR_EAST])
+    async def test_a_google_written_event_is_read_as_the_date_it_says(
+        self,
+        authenticated_client: AsyncClient,
+        user_settings_repository: SqlUserSettingsRepository,
+        seeder: EventSeeder,
+        timezone: str,
+    ) -> None:
+        """Both sides of UTC, because only one of them was ever broken.
+
+        Under instant matching the far-western user got the previous day's
+        holiday and never today's, while the far-eastern user was correct — so
+        asserting only one side would pass on the bug half the time.
+        """
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=timezone)
+        )
+        await self.seed_three_dates(seeder, timezone, written_in=None)
+
+        response = await authenticated_client.get(URL)
+
+        anchor = response.json()["meta"]["anchor"]["date"]
+        assert [entry["title"] for entry in entries_of(response)] == [
+            f"Holiday {anchor}"
+        ]
+
+    async def test_an_app_written_event_keeps_working(
+        self,
+        authenticated_client: AsyncClient,
+        user_settings_repository: SqlUserSettingsRepository,
+        seeder: EventSeeder,
+    ) -> None:
+        """The convention that was already correct must stay correct.
+
+        Its instant is local midnight and its zone is recorded, so reading the
+        bounds back in that zone returns the same date it was written as.
+        """
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=FAR_WEST)
+        )
+        await self.seed_three_dates(seeder, FAR_WEST, written_in=FAR_WEST)
+
+        response = await authenticated_client.get(URL)
+
+        anchor = response.json()["meta"]["anchor"]["date"]
+        assert [entry["title"] for entry in entries_of(response)] == [
+            f"Holiday {anchor}"
+        ]
+
+    async def test_a_multi_day_all_day_event_covers_every_date_it_spans(
+        self,
+        authenticated_client: AsyncClient,
+        user_settings_repository: SqlUserSettingsRepository,
+        seeder: EventSeeder,
+    ) -> None:
+        """Date-space overlap, matching what instants do for timed events."""
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=FAR_WEST)
+        )
+        today = datetime.datetime.now(ZoneInfo(FAR_WEST)).date()
+        journal_id = await seeder.all_day_on(
+            today - datetime.timedelta(days=1), title="Long weekend"
+        )
+        await seeder.connection.execute(
+            text(
+                """
+                UPDATE journals SET event_date_range_end = :end WHERE id = :id
+                """
+            ),
+            {
+                "id": journal_id,
+                "end": datetime.datetime.combine(
+                    today + datetime.timedelta(days=1),
+                    datetime.time.min,
+                    datetime.UTC,
+                ),
+            },
+        )
+
+        entries = entries_of(await authenticated_client.get(URL))
+
+        assert [entry["journal_id"] for entry in entries] == [journal_id]
+
+    async def test_a_timed_event_is_still_matched_on_instants(
+        self,
+        authenticated_client: AsyncClient,
+        user_settings_repository: SqlUserSettingsRepository,
+        seeder: EventSeeder,
+    ) -> None:
+        """The date rule is for all-day rows only, and must not leak.
+
+        A far-western user's midday is on the *following* UTC date, so a timed
+        event matched by its UTC date rather than its instant would vanish.
+        """
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=FAR_WEST)
+        )
+        journal_id = await seeder.event(
+            title="Far-western midday", timezone=FAR_WEST, hour=12
+        )
+
+        entries = entries_of(await authenticated_client.get(URL))
+
+        assert [entry["journal_id"] for entry in entries] == [journal_id]

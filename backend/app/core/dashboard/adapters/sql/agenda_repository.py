@@ -9,10 +9,34 @@ exactly one row per journal however many tags or attendees it has. An integratio
 test counts the statements, because functionally an N+1 is invisible — the answer
 is right either way and only the number of round trips is wrong.
 
-The window predicate is the outdoor dashboard's, and it is an **overlap**: an
-event that began before the day and ends after it is on today's agenda, because
-it is happening. Containment would silently drop every multi-day trip from the
-day in the middle of it.
+**A timed event is matched by instant overlap; an all-day event is matched by
+date.** The overlap predicate is the outdoor dashboard's: an event that began
+before the day and ends after it is on today's agenda, because it is happening,
+and containment would silently drop every multi-day trip from the day in the
+middle of it.
+
+All-day events cannot use it. They happen on a *date* and the schema stores only
+instants, and the two writers disagree about which instant means that date: the
+Google worker stores midnight **UTC** with no event timezone
+(``_parse_all_day_date``), while the app stores midnight in the **browser's**
+zone with ``timezone`` set to the user's. Under instant overlap a Google-synced
+all-day event on 27 August is the instant ``2026-08-27T00:00Z``, which for a user
+west of UTC falls in their **26 August** window — so synced public holidays and
+out-of-office days show a day early.
+
+Reading the bounds back **in the zone they were written in** —
+``AT TIME ZONE COALESCE(jci.timezone, 'UTC')`` — recovers the intended date from
+both conventions, and it is the rule the codebase already uses elsewhere
+(``event_date_in_timezone``, and migration 0045 for the clock columns). Google's
+rows carry no zone, so they are read as UTC, which is what they are; the app's
+carry the user's, so local midnight reads back as midnight.
+
+**One case is knowingly not served**, and is recorded in the iteration document:
+an app-created all-day row whose ``timezone`` was *cleared* has a local-midnight
+instant and no zone to read it in, so it is read as UTC and lands a day early for
+a user east of UTC. That is narrower than the defect this fixes — it needs a
+deliberate edit to a rarely-touched field — and the follow-up is to default the
+zone at the write path so the case disappears.
 
 Scoped on ``journals.user_id``. Tags and contacts carry no owner of their own in
 this schema, so reachability through the user's own journal is the scope, and the
@@ -38,6 +62,8 @@ from app.core.dashboard.models.sections import (
 )
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from core_shared.models.journals import EventDateRange
     from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -101,8 +127,15 @@ _ENTRIES_QUERY = text(
         ) person
     ) attendees ON TRUE
     WHERE j.user_id = :user_id
-      AND j.event_date_range_end >= :window_start
-      AND j.event_date_range_start <= :window_end
+      AND CASE WHEN jci.is_all_day THEN
+              (j.event_date_range_start
+                   AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date <= :anchor
+              AND (j.event_date_range_end
+                   AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date >= :anchor
+          ELSE
+              j.event_date_range_end >= :window_start
+              AND j.event_date_range_start <= :window_end
+          END
     ORDER BY j.event_date_range_start, j.id
     """
 )
@@ -116,15 +149,16 @@ class SqlAgendaRepository(AgendaRepository):
         self.conn = connection
 
     async def list_entries_in_window(
-        self, user_id: str, *, window: EventDateRange
+        self, user_id: str, *, window: EventDateRange, anchor: date
     ) -> list[AgendaEntry]:
-        """The user's event journals overlapping ``window``, tags and all."""
+        """The user's event journals for the day, tags and all."""
         result = await self.conn.execute(
             _ENTRIES_QUERY,
             {
                 "user_id": user_id,
                 "window_start": window.start,
                 "window_end": window.end,
+                "anchor": anchor,
                 "attending": list(_ATTENDING),
             },
         )
