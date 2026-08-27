@@ -98,6 +98,32 @@ class SqlReviewItemRepository(ReviewItemRepository):
 
         return self._row_to_review_item(row), True
 
+    async def find_by_journal_pair(
+        self, journal_id: int, other_journal_id: int, user_id: str
+    ) -> ReviewItem | None:
+        """Find the review item for a pair of journals, in either order."""
+        query = text(
+            """
+            SELECT id, user_id, source_journal_id, candidate_journal_id,
+                   reason, confidence_score, details, status,
+                   created_at, updated_at
+            FROM journal_review_items
+            WHERE user_id = :user_id
+              AND least(source_journal_id, candidate_journal_id) = :low
+              AND greatest(source_journal_id, candidate_journal_id) = :high
+            ORDER BY created_at, id
+            LIMIT 1
+            """
+        )
+        low, high = sorted((journal_id, other_journal_id))
+        result = await self.conn.execute(
+            query, {"user_id": user_id, "low": low, "high": high}
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        return self._row_to_review_item(row)
+
     async def find_pending_by_journal_id(
         self, journal_id: int, user_id: str
     ) -> list[ReviewItem]:

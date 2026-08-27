@@ -1810,6 +1810,14 @@ class JournalOutboxEventProcessor:
         and (B, A) on the next would leave two rows describing one
         duplicate — and which journal syncs first is not something this
         controls.
+
+        Ordering alone is not enough, because this is not the only thing
+        that queues a pair: match detection records the incoming journal
+        as the source, in whatever order the two were created. That is the
+        same pair this flags — one event means one day and one title,
+        which is exactly what an AI guess is drawn to — so the pair is
+        looked up in either order first, and an existing item, however the
+        user has since dealt with it, stands.
         """
         if not external_identity:
             return
@@ -1831,7 +1839,14 @@ class JournalOutboxEventProcessor:
         )
 
         for row in result.fetchall():
-            source_id, candidate_id = sorted((journal_id, int(row.journal_id)))
+            other_journal_id = int(row.journal_id)
+            already_queued = await self.review_item_repo.find_by_journal_pair(
+                journal_id, other_journal_id, str(user_id)
+            )
+            if already_queued is not None:
+                continue
+
+            source_id, candidate_id = sorted((journal_id, other_journal_id))
             _, created = await self.review_item_repo.create(
                 ReviewItem(
                     user_id=str(user_id),

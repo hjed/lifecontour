@@ -1028,6 +1028,96 @@ class TestFlaggingDuplicatesThatAlreadyExist:
 
         assert len(await _review_items(async_connection)) == 1
 
+    async def test_an_ai_guess_about_the_pair_is_not_duplicated(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A pair the AI already queued is not queued a second time.
+
+        Match detection writes the *incoming* journal as the source and
+        the one it matched against as the candidate, so it records the
+        pair in whichever order the journals were created. This flagging
+        sorts instead. The queue's uniqueness is on the ordered pair, so
+        two producers using two orderings would each insert, and the user
+        would see one duplicate described twice.
+
+        The pair this flags is precisely the pair the AI is most likely to
+        have guessed already — one event, so same day and same title.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        # As match detection leaves it: the newer journal is the source.
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_review_items
+                    (user_id, source_journal_id, candidate_journal_id,
+                     reason, confidence_score, status)
+                VALUES (:user_id, :source, :candidate,
+                        'duplicate_journal', 0.8, 'pending')
+            """),
+            {"user_id": USER_ID, "source": second, "candidate": first},
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert items[0].reason == "duplicate_journal"
+
+    async def test_a_resolved_pair_is_not_raised_again(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Deciding about a pair is not undone by the next sync.
+
+        A dismissed item is the user saying these two are not one thing.
+        Re-flagging it every sync would argue with them.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_review_items
+                    (user_id, source_journal_id, candidate_journal_id,
+                     reason, confidence_score, status)
+                VALUES (:user_id, :source, :candidate,
+                        'duplicate_journal', 0.8, 'dismissed')
+            """),
+            {"user_id": USER_ID, "source": second, "candidate": first},
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert items[0].status == "dismissed"
+
     async def test_a_de_duplicated_event_is_not_flagged(
         self,
         async_connection: AsyncConnection,

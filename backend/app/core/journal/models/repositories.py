@@ -2095,6 +2095,32 @@ class ReviewItemRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_by_journal_pair(
+        self, journal_id: int, other_journal_id: int, user_id: str
+    ) -> ReviewItem | None:
+        """
+        Find the review item describing a pair of journals, in either order.
+
+        The unique constraint is on the ordered pair, so a caller that has
+        no say in which journal is the source cannot use it to tell whether
+        the pair is already queued. Producers record the pair in whichever
+        order suits them: match detection makes the incoming journal the
+        source, while cross-calendar identity sorts by id.
+
+        Args:
+            journal_id: One of the two journals
+            other_journal_id: The other journal
+            user_id: The user who owns both
+
+        Returns:
+            The review item for the pair whichever way round it was
+            recorded, or None if the pair has never been queued. Items the
+            user has already resolved or dismissed are returned too — a
+            decision about the pair is still a decision.
+        """
+        pass
+
+    @abstractmethod
     async def find_pending_by_journal_id(
         self, journal_id: int, user_id: str
     ) -> list[ReviewItem]:
