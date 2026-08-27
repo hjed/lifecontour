@@ -31,6 +31,8 @@ import {
   ContactEventRole,
   DailySummaryResponse,
   AutoMergeResponse,
+  BlockingTask,
+  JournalHasAnchoredTasksMeta,
 } from '@/types/journals';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import type { HistoryFilters, HistoryListResponse } from '@/types/history';
@@ -280,18 +282,104 @@ async function updateJournal(
   return response.json();
 }
 
+/** The error code a journal deletion refused by its anchored tasks carries. */
+export const JOURNAL_HAS_ANCHORED_TASKS = 'JOURNAL_HAS_ANCHORED_TASKS';
+
+/**
+ * A journal deletion the API refused, carrying what the refusal said.
+ *
+ * Modelled on `TaskApiError` in `./tasks`, and deliberately raised by
+ * `deleteJournal` **alone**: it is the one journal call whose refusal a caller
+ * has to act on rather than merely report. Every other function in this file
+ * keeps throwing a plain `Error`, because widening them all would be churn in
+ * service of nothing that reads `code` or `meta`.
+ */
+export class JournalApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly meta?: JsonApiMeta;
+
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    meta?: JsonApiMeta
+  ) {
+    super(message);
+    this.name = 'JournalApiError';
+    this.status = status;
+    this.code = code;
+    this.meta = meta;
+  }
+}
+
+/** One blocker is usable only if every field the explanation renders is there. */
+function isBlockingTask(value: unknown): value is BlockingTask {
+  const task = value as Partial<BlockingTask> | null;
+  return (
+    typeof task === 'object' &&
+    task !== null &&
+    typeof task.task_id === 'number' &&
+    typeof task.text === 'string' &&
+    typeof task.status === 'string' &&
+    Array.isArray(task.blocking_roles) &&
+    task.blocking_roles.length > 0 &&
+    typeof task.action_journal_id === 'number' &&
+    typeof task.action_journal_title === 'string'
+  );
+}
+
+/**
+ * The blocking tasks a refused deletion named, or `null` if it named none.
+ *
+ * `null` covers every way this can fail to be an explanation — a different
+ * error, a different code, a body without `meta`, an empty list, a blocker
+ * missing a field a link needs — so a caller has one branch rather than five,
+ * and falls back to the refusal's prose in all of them. An **empty** list is
+ * `null` on purpose: rendering "these tasks block it" above nothing reads as
+ * though nothing does.
+ */
+export function blockingTasksFrom(error: unknown): BlockingTask[] | null {
+  if (!(error instanceof JournalApiError)) return null;
+  if (error.code !== JOURNAL_HAS_ANCHORED_TASKS) return null;
+
+  const meta = error.meta as Partial<JournalHasAnchoredTasksMeta> | undefined;
+  const blockers = meta?.blocking_tasks;
+  if (!Array.isArray(blockers) || blockers.length === 0) return null;
+  if (!blockers.every(isBlockingTask)) return null;
+
+  return blockers;
+}
+
 async function deleteJournal(id: string): Promise<void> {
   const response = await fetch(API_ENDPOINTS.JOURNALS.BY_ID(id), {
     method: 'DELETE',
     credentials: 'include',
   });
 
-  if (!response.ok) {
+  if (response.ok) return;
+
+  let detail: string | undefined;
+  let code: string | undefined;
+  let meta: JsonApiMeta | undefined;
+
+  try {
     const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
+    const error = errorData.errors?.[0];
+    detail = error?.detail;
+    code = error?.code;
+    meta = error?.meta;
+  } catch {
+    // A gateway page or an empty body. The status is all there is to go on,
+    // and it must still produce a usable message rather than a `SyntaxError`.
   }
+
+  throw new JournalApiError(
+    detail || ERROR_MESSAGES.DELETE_FAILED,
+    response.status,
+    code,
+    meta
+  );
 }
 
 async function mergeJournal(
@@ -1499,6 +1587,11 @@ export function useDeleteJournal() {
       toast.success(SUCCESS_MESSAGES.JOURNAL_DELETED);
     },
     onError: (error: Error) => {
+      // The anchored-tasks refusal is an explanation with links in it, and
+      // the delete dialog renders it in place. Toasting here as well would
+      // both duplicate the prose and put the one actionable part — the
+      // journals to open — somewhere it cannot be clicked before it fades.
+      if (blockingTasksFrom(error)) return;
       toast.error(error.message);
     },
   });

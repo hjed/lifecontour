@@ -6,6 +6,7 @@
  */
 
 import { JsonApiResource, JsonApiLinks, JsonApiMeta } from './api';
+import { TaskStatus } from './tasks';
 
 // Journal Type Enum
 // Values must match backend JournalType enum (lowercase)
@@ -715,4 +716,39 @@ export interface AutoMergeResponse {
     type: 'auto-merge-result';
     attributes: AutoMergeResultAttributes;
   };
+}
+
+/**
+ * The anchor role a task holds in the journal a delete was refused for.
+ *
+ * Values must match the backend `TaskAnchorRole` in
+ * `core_shared/models/journals/task_anchor.py`. Only the two *anchors* appear:
+ * a journal a task merely mentions never blocks its deletion, so no
+ * `mentioned` role can reach this payload.
+ */
+export type TaskAnchorRole = 'creating' | 'due';
+
+/**
+ * One task standing in the way of a journal deletion.
+ *
+ * Mirrors `BlockingTaskAttributes` in `backend/app/api/journals/schemas.py`,
+ * which is published in the OpenAPI document precisely so this shape need not
+ * be recovered by provoking the failure. Each field is load-bearing for the
+ * explanation: the text to recognise the commitment, the status to say whether
+ * it is still live, the roles to say *why* it blocks, and the action journal's
+ * id **and** title so a link renders without a second request.
+ */
+export interface BlockingTask {
+  task_id: number;
+  text: string;
+  status: TaskStatus;
+  blocking_roles: TaskAnchorRole[];
+  action_journal_id: number;
+  action_journal_title: string;
+}
+
+/** The `meta` object on a refused journal deletion. */
+export interface JournalHasAnchoredTasksMeta {
+  journal_id: number;
+  blocking_tasks: BlockingTask[];
 }

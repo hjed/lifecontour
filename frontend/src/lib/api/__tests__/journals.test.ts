@@ -20,6 +20,8 @@ import {
   useCreateJournal,
   useUpdateJournal,
   useDeleteJournal,
+  JournalApiError,
+  blockingTasksFrom,
   useContactJournals,
   useCalendars,
   useCreateCalendar,
@@ -31,6 +33,7 @@ import {
   reviewItemKeys,
 } from '../journals';
 import { JournalType } from '@/types/journals';
+import { TaskStatus } from '@/types/tasks';
 import { toast } from 'sonner';
 
 // Mock fetch
@@ -116,6 +119,35 @@ const createMockJournalResponse = (
   journal: ReturnType<typeof createMockJournal>
 ) => ({
   data: journal,
+});
+
+const REFUSAL_DETAIL =
+  'This journal cannot be deleted because 1 task is anchored to it.';
+
+/** A real-shaped 409 from `DELETE /api/journals/{id}`. */
+const anchoredTasksRefusal = () => ({
+  errors: [
+    {
+      id: 'e1',
+      status: '409',
+      code: 'JOURNAL_HAS_ANCHORED_TASKS',
+      title: 'Conflict',
+      detail: REFUSAL_DETAIL,
+      meta: {
+        journal_id: 10,
+        blocking_tasks: [
+          {
+            task_id: 7,
+            text: 'print the permit',
+            status: 'not_done',
+            blocking_roles: ['due'],
+            action_journal_id: 20,
+            action_journal_title: 'Monday Planning',
+          },
+        ],
+      },
+    },
+  ],
 });
 
 describe('Journals API', () => {
@@ -1231,6 +1263,159 @@ describe('Journals API', () => {
           method: 'DELETE',
         })
       );
+    });
+
+    it('throws a JournalApiError carrying the refusal code and its blockers', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => anchoredTasksRefusal(),
+      } as Response);
+
+      const { result } = renderHook(() => useDeleteJournal(), {
+        wrapper: createWrapper,
+      });
+
+      result.current.mutate('1');
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      const error = result.current.error as JournalApiError;
+      expect(error).toBeInstanceOf(JournalApiError);
+      expect(error.message).toBe(REFUSAL_DETAIL);
+      expect(error.status).toBe(409);
+      expect(error.code).toBe('JOURNAL_HAS_ANCHORED_TASKS');
+      expect(error.meta?.journal_id).toBe(10);
+    });
+
+    it('leaves the blocked refusal for the dialog rather than toasting it', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => anchoredTasksRefusal(),
+      } as Response);
+
+      const { result } = renderHook(() => useDeleteJournal(), {
+        wrapper: createWrapper,
+      });
+
+      result.current.mutate('1');
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it('still toasts a failure that is not the anchored-tasks refusal', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({
+          errors: [{ status: '500', detail: 'Something broke' }],
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useDeleteJournal(), {
+        wrapper: createWrapper,
+      });
+
+      result.current.mutate('1');
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      expect(toast.error).toHaveBeenCalledWith('Something broke');
+    });
+
+    it('survives a refusal that carries no JSON body at all', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: async () => {
+          throw new SyntaxError('Unexpected token < in JSON');
+        },
+      } as unknown as Response);
+
+      const { result } = renderHook(() => useDeleteJournal(), {
+        wrapper: createWrapper,
+      });
+
+      result.current.mutate('1');
+
+      await waitFor(() => {
+        expect(result.current.isError).toBe(true);
+      });
+
+      const error = result.current.error as JournalApiError;
+      expect(error).toBeInstanceOf(JournalApiError);
+      expect(error.message).toBe('Failed to delete item');
+      expect(error.code).toBeUndefined();
+    });
+  });
+
+  describe('blockingTasksFrom', () => {
+    it('reads the blockers off the anchored-tasks refusal', () => {
+      const error = new JournalApiError(
+        REFUSAL_DETAIL,
+        409,
+        'JOURNAL_HAS_ANCHORED_TASKS',
+        anchoredTasksRefusal().errors[0].meta
+      );
+
+      expect(blockingTasksFrom(error)).toEqual([
+        {
+          task_id: 7,
+          text: 'print the permit',
+          status: TaskStatus.NOT_DONE,
+          blocking_roles: ['due'],
+          action_journal_id: 20,
+          action_journal_title: 'Monday Planning',
+        },
+      ]);
+    });
+
+    it('returns null for anything that is not that refusal', () => {
+      expect(blockingTasksFrom(new Error('boom'))).toBeNull();
+      expect(blockingTasksFrom(undefined)).toBeNull();
+      expect(
+        blockingTasksFrom(new JournalApiError('nope', 404, 'JOURNAL_NOT_FOUND'))
+      ).toBeNull();
+    });
+
+    it('returns null when the refusal carries no usable blockers', () => {
+      // The code alone is not enough to render an explanation: a payload
+      // whose blockers are missing or malformed must fall back to the prose
+      // rather than render an empty list that reads as "nothing blocks this".
+      expect(
+        blockingTasksFrom(
+          new JournalApiError(REFUSAL_DETAIL, 409, 'JOURNAL_HAS_ANCHORED_TASKS')
+        )
+      ).toBeNull();
+      expect(
+        blockingTasksFrom(
+          new JournalApiError(
+            REFUSAL_DETAIL,
+            409,
+            'JOURNAL_HAS_ANCHORED_TASKS',
+            { journal_id: 10, blocking_tasks: [] }
+          )
+        )
+      ).toBeNull();
+      expect(
+        blockingTasksFrom(
+          new JournalApiError(
+            REFUSAL_DETAIL,
+            409,
+            'JOURNAL_HAS_ANCHORED_TASKS',
+            { journal_id: 10, blocking_tasks: [{ task_id: 7 }] }
+          )
+        )
+      ).toBeNull();
     });
   });
 

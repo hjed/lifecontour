@@ -27,16 +27,19 @@ offer to make one. **And the journal list now says which journals are waiting on
 filtered through the *same* lapse rule the read model uses rather than a second one written in SQL, so
 a lapsed commitment produces no badge — which is what the specification requires of lapsing.
 **Only the e2e (22) remains.**)
-**ITER18-002 Phases 1, 2, 3 and 4 complete** (the delete guard: journal deletion is refused,
+**ITER18-002 Phases 1, 2, 3, 4 and 5 complete** (the delete guard: journal deletion is refused,
 explanatorily, for any journal anchoring a task, and that refusal now reaches REST and MCP callers as
 machine-readable blockers alongside the prose; merge, which is never refused — it re-points task links
 onto the survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw
 integrity error; and cancellation, the third journal operation, now pinned end to end — a journal
 really cancelled, by a user editing its event status or by either calendar-sync route, lapses the
 not-done tasks due in it with the cancellation reason, while touching none of their links and never
-being refused). Delivery rule 9 is satisfied for all three shipped journal operations; **the rest of
-ITER18-001 is next**, per the Sequencing Strategy. ITER18-002's remaining phases are 5 (the
-delete-failure UI and its e2e) and 6 (the retarget/merge lock order).
+being refused; and **Phase 5 put the refusal in front of a user** — the journal delete confirmation
+is a real dialog rather than a `window.confirm`, and a refusal keeps it open, naming every blocking
+task with its status, the anchor roles it blocks in and a working link to the journal it can be
+actioned from). Delivery rule 9 is satisfied for all three shipped journal operations; **the rest of
+ITER18-001 is next**, per the Sequencing Strategy. ITER18-002's one remaining phase is 6 (the
+retarget/merge lock order).
 **ITER18-003 Phases 1–7 complete: the specification's full event set is published, and all of it is
 now read.** The events (task
 created and deleted; text updated and status changed as one `TaskUpdated`; the due-journal retarget,
@@ -303,6 +306,17 @@ reserved. See *Task Query Keys* in `docs/architecture/frontend-design.md`.
 - Day grouping in the list is **client-side** (`frontend/src/lib/journal-grouping.ts`,
   `groupJournalsByDay`) over local time; server-side windows are computed in the user's timezone (see the
   outdoor dashboard, below).
+
+**Since ITER18-002 Phase 5:** the delete guard has a user-facing surface.
+`frontend/src/components/journals/DeleteJournalDialog.tsx` replaces `JournalDetailView`'s
+`window.confirm`, and `deleteJournal` in `frontend/src/lib/api/journals.ts` now throws a
+`JournalApiError` carrying the JSON:API `code` and `meta` instead of a bare `Error(detail)` — it is
+the **only** journal call that does, because it is the only one whose refusal a caller has to act on.
+The blockers are read through the exported `blockingTasksFrom`, which returns `null` for anything that
+is not a well-formed `JOURNAL_HAS_ANCHORED_TASKS` payload, and `useDeleteJournal` skips its error
+toast for exactly that case so the dialog can render the explanation in place. The steer toward
+cancelling branches on the journal's `EVENT` type, since a note journal has no cancelled state to
+steer to.
 
 ### Contacts
 
@@ -6594,17 +6608,62 @@ No unit work beyond what Phase 12 covers. No e2e (Phase 5).
   landed in ITER18-001 Phases 13 and 14, that re-pointing the sync suite changed no test's meaning,
   and that no other production code compares `event_state` against a hardcoded string.
 
-#### Phase 5: Frontend — Delete Failure Explanation and E2E
+#### Phase 5: Frontend — Delete Failure Explanation and E2E ✅ COMPLETE
 
 **Prerequisites:** Phases 2–4.
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4) · **Actual:** **~390 production** →
+**~1,430 tracked** across 8 files (production: the 250-line `DeleteJournalDialog` — over half of it
+the docstring and the copy itself — plus ~100 in `lib/api/journals.ts` for the typed error and its
+reader, 36 of types, and a net *reduction* in `JournalDetailView`; tests: 388 RTL, 427 e2e, 190
+extending the existing API suites; docs: this entry and the baseline paragraph).
+
+**The estimate was low by about 2.5×, and the miss is in the production number rather than the
+multiplier.** ~150 lines assumed the dialog was a rendering change — swap a `window.confirm` for an
+`AlertDialog` and map a payload. Two things it did not account for. First, the surface being replaced
+threw the refusal away: `deleteJournal` built a bare `Error(detail)`, so the phase had to introduce a
+typed error and a validating reader before there was anything to render — plumbing that is production
+code and has to be tested at its own level. Second, an explanation is **copy**, and the copy branches:
+the steer differs for an event journal and a note journal, the count differs for one blocker and
+several, and the roles have to be worded. The ×4 multiplier itself held up almost exactly.
+
+**Suggested calibration amendment (rule 16).** A "frontend surface for an existing payload" phase
+should be estimated from *how the payload currently reaches the client*, not from the component. Where
+the client's existing call discards the structured half of a refusal — a bare `Error(detail)` rather
+than a typed error carrying `code` and `meta` — add the error type, its narrowing reader and their
+tests to the estimate before counting the component at all. The tell: the phase's criteria talk about
+rendering fields the client has never been able to see.
 
 **Acceptance Criteria:**
 
-- [ ] The journal delete flow surfaces the blocking tasks: each named, each linking to the journal where it
-      can be actioned, with working navigation.
-- [ ] The dialog continues to steer toward cancelling the journal rather than deleting it.
-- [ ] A delete that succeeds is unchanged from today's behaviour.
+- [x] The journal delete flow surfaces the blocking tasks: each named, each linking to the journal where it
+      can be actioned, with working navigation. — the refusal replaces the confirmation **inside the
+      open dialog** rather than closing to a toast, because what makes it actionable is a set of links
+      and a toast takes those away before they can be clicked. `useDeleteJournal` skips its error
+      toast for this one code so the two do not both fire. Each row carries the task's text, its
+      status, the anchor roles it blocks in — joined, so a task anchored twice reads as one row — and
+      a `next/link` to `action_journal_id` labelled with `action_journal_title`, which is why the
+      backend carries the title as well as the id. Navigation is followed for real in the e2e.
+- [x] The dialog continues to steer toward cancelling the journal rather than deleting it. — and it
+      **names the control**, per the Phase 4 note below: an EVENT journal is pointed at *Event
+      Status → Cancelled*, and a journal without the EVENT type is told plainly that it has no
+      cancelled state, because pointing it at a control it does not have is worse than saying so. The
+      steer is shown on the confirmation **and** on the refusal.
+- [x] A delete that succeeds is unchanged from today's behaviour. — same toast, same
+      `router.push('/journals')`, same invalidation; the trigger keeps its `aria-label` and
+      destructive styling, so nothing addressing the old button broke. Covered by RTL and by the
+      mentions-only e2e, which deletes a journal a task merely mentions.
+
+**A correction to this phase's own e2e criterion, recorded rather than quietly reinterpreted.** The
+criterion below reads *"after cancelling or retargeting the task, the delete succeeds"*. **Cancelling
+the task cannot make the delete succeed** — ITER18-002's first acceptance criterion is that an
+anchoring journal is refused *regardless of task status*, which Phase 1 pins with a done task, and a
+cancelled task blocks exactly as a not-done one does. The routes out are retargeting (which moves the
+*due* anchor and demotes the journal to an intermediate link, and intermediate links never block) and
+deleting the task. So the e2e drives the retarget as written, and turns the impossible half into a
+**positive** assertion: `still refuses once the task is cancelled — status is not what blocks`, which
+also checks the explanation reports the new status so a cancelled blocker does not read as an
+oversight. This is the same shape of mistake the Phase 4 note below records — a claim about the
+feature made from its wording rather than from its rules.
 
 > **Note from Phase 4 — where the steer actually leads.** Cancelling a journal is a **type-data
 > edit**, not an operation of its own: the event editor's *Event Status* select offers "Cancelled"
@@ -6623,13 +6682,33 @@ No unit work beyond what Phase 12 covers. No e2e (Phase 5).
 > found it in one pass. **Carry-forward: "no capability X exists" is a claim about every way X could
 > be spelled, and a search for X-shaped names cannot establish it. Check the surface a user
 > touches — the form, the schema's enum, the editor — before recording an absence.**
-- [ ] E2E: deleting a journal with a task due in it shows the explanation; following the link reaches a
+- [x] E2E: deleting a journal with a task due in it shows the explanation; following the link reaches a
       journal where the task can be actioned; after cancelling or retargeting the task, the delete succeeds;
       merging a journal that anchors a task succeeds. Deterministic per-test fixtures, built with the
-      Phase 22 helpers and their UTC-boundary caveat.
+      Phase 22 helpers and their UTC-boundary caveat. — `tests/e2e/journal-delete-blocked.spec.ts`,
+      six tests, green on **both** projects (Mobile Chrome runs with `retries: 0`, so that half is a
+      clean signal). The refusal, its link followed to the creating journal and the task actionable
+      there; several blockers including one holding **both** anchor roles, whose action journal is the
+      journal being deleted because there is no other anchor to send the user to; cancelled-still-
+      refused, per the correction above; the retarget clearing the block and the delete then answering
+      204; a mentions-only journal deleting cleanly with the task unaffected; and the merge, which is
+      never refused and re-points the creating anchor onto the survivor. `TestDataManager` needed
+      nothing new — Phase 22's `createTaskAnchorJournals`, `createTask`, `attachTaskMention` and
+      `createRelativeJournal({ cancellable })` cover all of it. One flake was seen across a
+      `--repeat-each 2` sweep and chased down rather than retried away: the merge test's **first**
+      navigation timed out with the page still on `AuthGuard`'s *"Checking your authentication
+      status"* and the header showing *Sign In*, i.e. the session query had not resolved. It is the
+      shared `openJournal` readiness wait that every task spec uses, not anything about the guard;
+      the same test then passed 4/4 in isolation. Left alone deliberately — a bespoke retry in one
+      file would hide an infrastructure flake the suite carries everywhere.
 
 **Required Test Coverage:** unit (RTL) — the failure dialog rendered from the error payload, with one
-blocker and with several. E2E as above, on both e2e projects.
+blocker and with several. E2E as above, on both e2e projects. — **Met**, plus a level the phase did
+not name: `blockingTasksFrom` is tested directly in `lib/api/__tests__/journals.test.ts` against a
+plain `Error`, a different code, an absent `meta`, an empty blocker list and a blocker missing a
+field. An empty list narrows to `null` on purpose — rendering "these tasks block it" above nothing
+reads as though nothing does — so a malformed refusal degrades to the ordinary toast rather than to an
+explanation with a dead link in it.
 
 #### Phase 6: Lock Order — Retargeting Against Merge
 
