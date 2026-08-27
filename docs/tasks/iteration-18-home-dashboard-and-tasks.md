@@ -6643,6 +6643,17 @@ rendering fields the client has never been able to see.
       status, the anchor roles it blocks in — joined, so a task anchored twice reads as one row — and
       a `next/link` to `action_journal_id` labelled with `action_journal_title`, which is why the
       backend carries the title as well as the id. Navigation is followed for real in the e2e.
+      **One row is a control rather than a link, which the PR review caught.** A task created *and*
+      due in the journal being deleted is anchored to it twice, so `action_anchor_for` resolves to
+      the creating journal — that same journal. The payload is right (`action_anchor_for`'s docstring
+      already reasons it through: the deletion was refused, so the journal is still there), but a
+      link to the route already open changes nothing and leaves a modal covering the very controls it
+      points at — a dead end the phase's own fixture created and its own e2e asserted as correct.
+      That row now offers *"Action it on this journal"* and closes, because closing **is** the
+      navigation there; every other row closes on its way out too, so no overlay outlives the page it
+      was on. **Carry-forward: a link whose target can equal the current route is a navigation that
+      may be a no-op, and inside a controlled modal a no-op navigation is a trap. Check whether an
+      id the server hands back can be the id already on screen.**
 - [x] The dialog continues to steer toward cancelling the journal rather than deleting it. — and it
       **names the control**, per the Phase 4 note below: an EVENT journal is pointed at *Event
       Status → Cancelled*, and a journal without the EVENT type is told plainly that it has no

@@ -28,6 +28,15 @@
  * payload missing a field a link needs falls back to the ordinary toast, so a
  * malformed refusal degrades to today's behaviour instead of rendering an
  * explanation with a dead link in it.
+ *
+ * One case earns a control rather than a link: a task created **and** due in
+ * this journal is anchored to it twice, so `action_anchor_for` resolves to the
+ * creating journal, which is this same one. The payload is right — the deletion
+ * was refused, so the journal is still there — but a link to the route already
+ * open would change nothing and leave the dialog covering the very controls it
+ * points at. That row offers to close instead, because closing *is* the
+ * navigation: the task's own actions are on the page underneath. Every other
+ * row closes on its way out too, so no overlay outlives the page it was on.
  */
 
 'use client';
@@ -162,8 +171,8 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {blockers.length === 1
-                  ? 'One task is anchored to this journal. A task can never exist without both of its journals, so open the journal below to complete, cancel or retarget it first.'
-                  : `${blockers.length} tasks are anchored to this journal. A task can never exist without both of its journals, so open the journals below to complete, cancel or retarget them first.`}
+                  ? 'One task is anchored to this journal, and a task can never exist without both of its journals. Complete, cancel or retarget it, then delete again.'
+                  : `${blockers.length} tasks are anchored to this journal, and a task can never exist without both of its journals. Complete, cancel or retarget them, then delete again.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
 
@@ -182,13 +191,25 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
                     {statusWording(task.status)} ·{' '}
                     {describeRoles(task.blocking_roles)}
                   </div>
-                  <Link
-                    href={`/journals/${task.action_journal_id}`}
-                    className='text-primary mt-1 inline-block underline underline-offset-4'
-                    data-testid={`journal-delete-blocker-link-${task.task_id}`}
-                  >
-                    {task.action_journal_title}
-                  </Link>
+                  {String(task.action_journal_id) === journal.id ? (
+                    <button
+                      type='button'
+                      className='text-primary mt-1 inline-block underline underline-offset-4'
+                      data-testid={`journal-delete-blocker-link-${task.task_id}`}
+                      onClick={() => handleOpenChange(false)}
+                    >
+                      Action it on this journal
+                    </button>
+                  ) : (
+                    <Link
+                      href={`/journals/${task.action_journal_id}`}
+                      className='text-primary mt-1 inline-block underline underline-offset-4'
+                      data-testid={`journal-delete-blocker-link-${task.task_id}`}
+                      onClick={() => handleOpenChange(false)}
+                    >
+                      {task.action_journal_title}
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>

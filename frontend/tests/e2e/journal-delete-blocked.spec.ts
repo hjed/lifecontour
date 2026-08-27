@@ -171,11 +171,23 @@ test.describe('Journal Delete Guard', () => {
     await expect(bothRow).toContainText(both.text);
     await expect(bothRow).toContainText('created in this journal');
     await expect(bothRow).toContainText('due in this journal');
-    // Both its anchors are the journal being deleted, so the only journal left
-    // to send the user to is that same one.
+
+    // Both its anchors are the journal being deleted, so there is no other
+    // journal to send the user to. A link would target the route already open
+    // and leave this dialog covering the controls it points at, so the row
+    // offers to close instead — closing *is* the navigation here.
+    const stayPut = dialog.getByTestId(
+      `journal-delete-blocker-link-${both.id}`
+    );
+    await expect(stayPut).toHaveText('Action it on this journal');
+    await stayPut.click();
+
+    await expect(dialog).toBeHidden();
+    const bothTaskRow = page.getByTestId(`journal-task-${both.id}`).first();
+    await expect(bothTaskRow).toContainText(both.text);
     await expect(
-      dialog.getByTestId(`journal-delete-blocker-link-${both.id}`)
-    ).toHaveText(dueJournal.title);
+      bothTaskRow.getByRole('button', { name: 'Mark done' })
+    ).toBeVisible();
   });
 
   test('still refuses once the task is cancelled — status is not what blocks', async ({

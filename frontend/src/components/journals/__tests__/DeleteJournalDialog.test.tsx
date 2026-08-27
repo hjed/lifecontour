@@ -227,6 +227,53 @@ describe('DeleteJournalDialog', () => {
       expect(link).toHaveTextContent('Monday Planning');
     });
 
+    it('offers to stay put when the task is actionable on this journal', async () => {
+      // A task created *and* due here is anchored to this journal twice, so
+      // the only journal left to send the user to is the one they are on. A
+      // link would target the current route, change nothing, and leave the
+      // dialog covering the very controls it points at.
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValueOnce(
+        refusal(
+          blocker({
+            blocking_roles: ['creating', 'due'],
+            action_journal_id: JOURNAL_ID,
+            action_journal_title: 'Site visit',
+          })
+        )
+      );
+      renderDialog();
+
+      await confirmDelete(user);
+
+      const action = await screen.findByTestId('journal-delete-blocker-link-7');
+      expect(action).not.toHaveAttribute('href');
+
+      await user.click(action);
+
+      // Closing *is* the navigation here: the task's own controls are on the
+      // page underneath.
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it('closes as it leaves, so no overlay outlives the page it was on', async () => {
+      const user = userEvent.setup();
+      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      renderDialog();
+
+      await confirmDelete(user);
+      await user.click(
+        await screen.findByTestId('journal-delete-blocker-link-7')
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+    });
+
     it('says why each task blocks, including one holding both anchors', async () => {
       const user = userEvent.setup();
       mockFetch.mockResolvedValueOnce(
