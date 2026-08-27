@@ -8788,8 +8788,8 @@ rules for cancellation (**W18**), and its own estimate should come down accordin
 ##### Phase 5a: Agenda — Domain Models and the Ordering Rule ✅ COMPLETE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~95 production → **~570 tracked** (×6) · **Actual:** 130 production → **493 tracked**
-(493 insertions, 6 deletions across 5 files: 130 production, 261 tests, 102 documentation). The first
+**Estimated diff:** ~95 production → **~570 tracked** (×6) · **Actual:** 132 production → **493 tracked**
+(493 insertions, 6 deletions across 5 files: 132 production, 261 tests, 100 in this document). The first
 estimate in this iteration to come in *under*, and by a margin worth understanding rather than
 celebrating: ×6 was chosen because rule 14 catches rule-defining phases, and this is one. What rule 14
 did not account for is that a rule stated as a **sort key** costs almost nothing to write once its
@@ -8840,11 +8840,11 @@ non-mutation of the input, and the empty case. No integration, no e2e: nothing c
 ##### Phase 5b: Agenda — The One-Query Read and the Wire ✅ COMPLETE
 
 **Prerequisites:** Phase 5a.
-**Estimated diff:** ~230 production → **~920 tracked** (×4) · **Actual:** ~400 production →
-**~1,340 tracked** (1,339 insertions, 79 deletions across 17 files: ~400 production, ~910 tests,
-~30 documentation). **1.5× the estimate, and the miss is in the production figure rather than the
-multiplier** — ×3.3 against production is *better* than the ×4 budgeted, so the test estimate was
-sound and the production one was not. Two things were undercounted, both visible at planning time:
+**Estimated diff:** ~230 production → **~920 tracked** (×4) · **Actual:** 449 production →
+**~1,460 tracked** (1,629 insertions, 105 deletions across 20 files, of which 169 insertions are this
+document: 449 production, 978 tests, 33 other documentation). **~1.6× the estimate, and the miss is in
+the production figure rather than the multiplier** — ×3.3 against production is *better* than the ×4
+budgeted, so the test estimate was sound and the production one was not. Two things were undercounted, both visible at planning time:
 a **port ABC costs roughly as much as its adapter** in a codebase that documents every abstract
 method (62 vs 152 lines here, exactly rule 13's observation), and the JSON:API layer for a payload
 with two nested collections is three schemas plus two renderers (147 lines), not the handful of
@@ -8883,7 +8883,7 @@ tests (`TestTheAgendaSection` in `tests/unit/dashboard/test_home_dashboard_servi
 tests (`TestTheAgendaSection` in `tests/unit/api/test_home_dashboard_serialisation.py`) and 18
 integration tests in `tests/integration/api/test_home_dashboard_agenda.py`.
 
-**Delivery rule 3 was breached, and the rule needs restating rather than quietly re-read.** 5b is ~1,420
+**Delivery rule 3 was breached, and the rule needs restating rather than quietly re-read.** 5b is ~1,540
 changed lines against a 500-line cap. Calibration rule 16 restates that cap as ~1,500 for a phase that
 adds an entry point, and keeps 500 for one that does not — and this phase adds **no** new entry point,
 so 500 is the figure that applies to it and it is over by nearly 3×. The split was the right call and it
@@ -8937,7 +8937,7 @@ and the two writers disagree about which instant means "this date":
 | Writer | What it stores for an all-day event on 27 Aug |
 |---|---|
 | Google worker (`integration_workers/google/event_transformer.py`, `_parse_all_day_date` and the exclusive-end adjustment) | `datetime(2026, 8, 27, tzinfo=UTC)` — **midnight UTC**, for both bounds |
-| The app (`frontend/src/components/journals/JournalCreateForm.tsx`, `values.dateRange.from.toISOString()`) | midnight in the **browser's** zone, converted to UTC |
+| The app (`JournalCreateForm.tsx` supplies the range as `values.dateRange.from.toISOString()`; `type-editors/EventTypeEditor.tsx` supplies `is_all_day` and `timezone`) | midnight in the **browser's** zone, converted to UTC — with `timezone` defaulted to the user's configured zone |
 
 An instant-overlap window — which is what the acceptance criterion asks for, and what the outdoor
 dashboard has always used — cannot satisfy both. For a user **west of UTC**, a Google-synced all-day
@@ -8946,20 +8946,42 @@ W12 "ALL DAY" row (public holidays, synced OOO days, birthdays) is absent from t
 present on yesterday's. For a user east of UTC, the same instant lands correctly. App-created all-day
 events behave the other way round.
 
-**Why it is not fixed in this phase.** The defect is in the *storage convention*, not in this window.
-A date-based comparison would fix Google's rows and break the app's; an instant comparison does the
-reverse. Choosing between them is a data-model decision with a backfill attached, touching the Google
-worker and the journal write path — two domains, neither of them this phase's, which calibration rule 7
-exists to keep apart. Nothing here makes it worse: the journal list already groups these rows by the
-browser's zone and the outdoor dashboard already windows them by instant, so the agenda inherits an
-existing convention rather than introducing one.
+**A first draft of this note claimed the fix needed a backfill and changes in two other domains. That
+was wrong, and the correction is the useful part.** A *naive UTC-date* comparison would indeed fix
+Google's rows and break the app's — but a **zone-aware** one fixes both, and it is not a new rule:
+`event_date_in_timezone` (`core_shared/models/journals/calendar_info.py`) already exists, migration 0045
+already derives the clock columns `AT TIME ZONE jci.timezone`, and `SqlCalendarInfoRepository` already
+reads rows that way. Applied to an all-day row —
+`(j.event_date_range_start AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date` compared against the
+anchor date — it lands both conventions on the intended day:
 
-**Follow-up:** this needs its own phase — settle one convention for an all-day event's bounds
-(local midnight in the event's zone is the likely answer, since `journal_calendar_info.timezone` already
-exists to say which zone that is), migrate the rows, and pin it with a test for a user on each side of
-UTC. Until then, **ITER18-004 Phase 7 must not paper over it in the card**, and the acceptance bar for
-this iteration's e2e (Phase 17) should use timed events for its ordering fixtures so it is not silently
-asserting the broken case.
+- **Google's rows carry no zone.** `_extract_timezone` returns `None` for date-only events
+  (`event_transformer.py`), so `COALESCE` reads the instant as UTC, which is what it is. Correct for a
+  user on either side of UTC.
+- **The app's rows carry the user's zone.** `EventTypeEditor` defaults `timezone` to
+  `getDefaultTimezone()`, so the browser-local midnight instant read back in that zone is midnight
+  again. Correct.
+
+So the cost is a predicate in *this* phase's query — no backfill, no Google-worker change, no journal
+write-path change.
+
+**Why it is still not applied here, and this is a product call rather than a cost one.** The change is
+not a pure win: it has a regression case. An app-created all-day row whose `timezone` was **cleared**
+(`EventTypeEditor` sends `e.target.value || null`) currently lands *correctly* under instant overlap —
+its instant is local midnight, which is the first instant of the local-day window — and would land a day
+early for an east-of-UTC user under the date rule. So the choice is not "broken versus fixed" but
+"wrong for every west-of-UTC user's synced holidays and OOO days" versus "wrong for anyone who
+deliberately cleared the zone field". The first is far more common and the trade is almost certainly
+worth taking — but it is a behaviour change with a loser, in a phase already three times its line
+budget, and it belongs to somebody making it deliberately rather than to a windowing phase making it in
+passing.
+
+**Follow-up, with the approach settled rather than open:** apply the zone-aware date comparison to
+`is_all_day` rows (date-space overlap for a multi-day all-day event: `start_date <= anchor <= end_date`),
+leave timed rows on instant overlap, and pin it with a test for a user on each side of UTC plus one for
+the cleared-zone case. Consider also defaulting a cleared `timezone` at the write path so the residual
+case disappears. Until then, **ITER18-004 Phase 7 must not paper over it in the card**, and Phase 17's
+e2e ordering fixtures should use timed events so they are not silently asserting the broken case.
 - **Attendees are deduplicated, because taking two relationship types makes that
   possible.** `journal_contact_relationships` is keyed on *(journal, contact, type)*, so one contact can
   hold both `PARTICIPANT` and `INVITEE` on one journal — and a **contact merge reaches that state on its
