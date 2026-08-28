@@ -127,6 +127,7 @@ _REPOINT_ANCHORS = text("""
         updated_at = now()
     WHERE creating_journal_id = :source_id
        OR due_journal_id = :source_id
+    RETURNING id
 """)
 
 _DROP_REDUNDANT_LINKS = text("""
@@ -226,7 +227,12 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         #    both roles ends up with the survivor in both, which the
         #    specification permits. status and text are absent from the SET list
         #    because a merge is not allowed to change either.
-        await self.conn.execute(_REPOINT_ANCHORS, params)
+        #
+        #    It reports the tasks it updated, and the summary believes *that*
+        #    rather than the pre-read: the pre-read supplies the anchor role,
+        #    which is unreadable once both columns hold the survivor's id, but
+        #    only this statement can say the row was still there to move.
+        anchored = await self._task_ids_from(_REPOINT_ANCHORS, params)
 
         # 4. Drop the intermediate link that has become redundant with one of
         #    the task's own anchors — "the task was mentioned here" said in a
@@ -246,24 +252,54 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
             params | {"affected_task_ids": [row.task_id for row in affected]},
         )
 
-        return [
-            self._summarise(row, collapsed=collapsed, moved=moved, dropped=dropped)
+        # A task the four statements all passed over is not reported. The
+        # pre-read is a snapshot and nothing holds a task's own rows still after
+        # it — see ``_summarise`` — so "was in the snapshot" and "was moved" are
+        # different claims, and only the second may reach a user's history.
+        summaries = (
+            self._summarise(
+                row,
+                anchored=anchored,
+                collapsed=collapsed,
+                moved=moved,
+                dropped=dropped,
+            )
             for row in affected
-        ]
+        )
+        return [summary for summary in summaries if summary is not None]
 
     @staticmethod
     def _summarise(
         row: _AffectedTask,
         *,
+        anchored: set[int],
         collapsed: set[int],
         moved: set[int],
         dropped: set[int],
-    ) -> TaskJournalRepointing:
+    ) -> TaskJournalRepointing | None:
         """One task's share of the merge, as net effect rather than as statements.
 
-        The two anchors come straight off the pre-read. The three link outcomes
-        are set membership, and the only subtlety is which link statement 4
-        deleted:
+        **Every fact comes from a statement's ``RETURNING``, not from the
+        pre-read.** The pre-read says which *role* the absorbed journal held on
+        each task, because both anchor columns hold the survivor's id afterwards
+        and the role is unreadable by then — but whether that anchor actually
+        moved is ``anchored``, the set the ``UPDATE`` reported. Nothing holds a
+        task row still between the two: ``_lock_journals`` locks the **journals**,
+        and a concurrent ``delete_task`` touches neither. Trusting the snapshot
+        would publish an anchor move for a task whose row had gone, landing in
+        that task's history *after* its own deletion marker.
+
+        **A task no statement reported is not summarised**, and this returns
+        ``None`` for it. It can appear in the pre-read and then be passed over by
+        all four statements — a task mentioned only in the absorbed journal whose
+        link is detached in between, since a detach locks the task row rather
+        than either journal. Nothing moved for it, so there is nothing to
+        announce; before this returned ``None`` the value object refused to
+        describe nothing and the **merge failed**, which is the one thing the
+        specification says a task can never do to a merge.
+
+        The three link outcomes are set membership, and the only subtlety is
+        which link statement 4 deleted:
 
         - a task in ``dropped`` **and** in ``moved`` had its own link re-pointed
           onto the survivor and then removed, so it gained nothing — the
@@ -277,15 +313,28 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         the same place and a history distinguishing them would be describing SQL
         rather than the task.
         """
+        anchor_moved = row.task_id in anchored
+        creating_anchor_moved = anchor_moved and row.creating_anchor_moved
+        due_anchor_moved = anchor_moved and row.due_anchor_moved
         source_link_removed = row.task_id in collapsed or row.task_id in moved
+        target_link_added = row.task_id in moved and row.task_id not in dropped
+        target_link_removed = row.task_id in dropped and row.task_id not in moved
+        if not (
+            creating_anchor_moved
+            or due_anchor_moved
+            or source_link_removed
+            or target_link_added
+            or target_link_removed
+        ):
+            return None
         return TaskJournalRepointing(
             task_id=row.task_id,
             user_id=row.user_id,
-            creating_anchor_moved=row.creating_anchor_moved,
-            due_anchor_moved=row.due_anchor_moved,
+            creating_anchor_moved=creating_anchor_moved,
+            due_anchor_moved=due_anchor_moved,
             source_link_removed=source_link_removed,
-            target_link_added=row.task_id in moved and row.task_id not in dropped,
-            target_link_removed=row.task_id in dropped and row.task_id not in moved,
+            target_link_added=target_link_added,
+            target_link_removed=target_link_removed,
         )
 
     async def _task_ids_from(

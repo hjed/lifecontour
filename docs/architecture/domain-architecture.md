@@ -291,7 +291,11 @@ the *creating* journal where it arose and the *due* journal where it matters.
   turns that into events. `TaskAnchorRepository.repoint_journal_links` therefore returns
   `list[TaskJournalRepointing]` instead of `None`, since two of its four statements are deletes and
   the anchor roles are overwritten by the re-point itself, so no caller can reconstruct the answer
-  afterwards. Provenance is threaded through `merge_journals` from all three merge surfaces — the
+  afterwards. **Every fact in a summary comes from a statement's `RETURNING`, never from the read
+  that chose the tasks**: the merge's locks hold the two *journals*, so a task can be deleted or its
+  link detached in between, and a task the statements passed over is not reported at all. Trusting
+  that snapshot would write a change into the history of a task that no longer exists — or fail the
+  merge on a task, which the specification says can never happen. Provenance is threaded through `merge_journals` from all three merge surfaces — the
   REST merge endpoint (`ui`), the `merge_journals` MCP tool (`mcp`) and the review-queue auto-merge
   endpoint (`ui`, because *auto* describes how the pairs were chosen, not who chose to merge them).
   The re-point is **step 0** of the merge for a locking reason, which also means these events precede

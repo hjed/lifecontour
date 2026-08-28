@@ -499,6 +499,14 @@ class TaskAnchorRepository(ABC):
         something for it, since the caller turns each summary into a line in a
         user's history.
 
+        That last rule is about **concurrency**, not only about arithmetic. The
+        locks above hold the two journals, not the tasks: a task can be deleted,
+        or its link to the absorbed journal detached, between an implementation
+        deciding which tasks it is about and the statements that move them. Such
+        a task moved nothing and must not be reported — reporting it either
+        writes a change into the history of a task that no longer exists, or
+        (worse) fails the merge on a task, which this operation may never do.
+
         Args:
             source_journal_id: The journal being absorbed, which is about to be
                 deleted

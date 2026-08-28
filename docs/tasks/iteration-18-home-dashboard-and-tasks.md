@@ -8341,8 +8341,9 @@ the right provenance; publish → relay → projection with idempotency on redel
 leaves no task event; the `search-indexer` group still ignores the new type. **E2E:** none — this is a
 record of something the merge already does, and the merge's own e2e coverage does not change.
 
-**Delivered: 44 unit tests and 24 integration tests**, plus one Jest case. Unit: 8 for the value object
-(`tests/unit/tasks/test_task_journal_repointing.py`), 17 for the event class and its identity
+**Delivered: 51 unit tests and 24 integration tests**, plus one Jest case. Unit: 8 for the value object
+(`tests/unit/tasks/test_task_journal_repointing.py`), 7 for the assembly step added by the review fix
+(`test_merge_repoint_assembly.py`), 17 for the event class and its identity
 (`test_task_events.py`, 98 → 115), 10 for the publishing service
 (`test_task_journal_merge_service.py`), 6 for the projection (`tests/unit/history/test_history_service.py`,
 82 → 88), and one each in `test_journal_merge_service.py` (provenance forwarded) and
@@ -8426,7 +8427,34 @@ payload and vocabulary, why it is not a retarget, the provenance thread across t
   never appeared in task history — only a merge can move that field — so without a case in
   `taskEntryDescription` it would render through the generic formatter as *"Creating Journal Id"*. One
   branch and one Jest case.
-- **Mutation-checked, nine ways, all caught.** Dropping the publish loop fails **7** unit and **12**
+- **One review finding, and it was a regression this phase introduced.** The re-point reads the
+  affected tasks *before* the four statements run, and `_lock_journals` holds the two **journals** —
+  not the tasks. A concurrent `delete_task` or `detach_intermediate_journal` locks the task row and
+  neither journal, so it does not wait for the merge. Both halves were reproduced against the
+  assembly as first written rather than accepted on the reviewer's word:
+  - a task whose only reference to the absorbed journal is an intermediate link, detached in
+    between, is passed over by all four statements — and the summary would have described nothing,
+    which the value object refuses, so the **merge failed with a `ValueError`**. A merge blocked by a
+    task is the one thing the specification says cannot happen, and before this phase it could not:
+    the re-point published nothing, so it had nothing to refuse.
+  - a task deleted in between kept its anchor flag from the pre-read, so the merge published a
+    due-journal move for a task whose row had gone — a line landing in that task's history *after*
+    its own deletion marker.
+
+  Fixed by making the assembly believe the **statements** rather than the snapshot: the anchor
+  `UPDATE` gains `RETURNING id`, the pre-read now supplies only the anchor *role* (unreadable
+  afterwards, since both columns hold the survivor's id), and a task no statement reported yields no
+  summary and therefore no event. **Locks were considered and not taken:** locking the task rows
+  would not close the detach half — that deletes a *link* row — and locking both would widen the
+  retarget/merge deadlock this port already documents as ITER18-002 Phase 6. The tolerant assembly
+  needs no lock and is the more honest answer anyway, since "was in the snapshot" and "was moved" are
+  different claims and only the second belongs in a user's history.
+  *Tested at the level the failure lives at:* the assembly is pure, and the integration fixture is one
+  savepoint-bound connection, so neither race can be **staged** — the limitation `_lock_journals`
+  already records. Seven unit cases in `test_merge_repoint_assembly.py` pin the rule; the new SQL is
+  covered by the existing report tests, checked rather than assumed (making the anchor `RETURNING`
+  report nothing fails **9** of them).
+- **Mutation-checked, eleven ways, all caught.** Dropping the publish loop fails **7** unit and **12**
   integration tests. Claiming every task lost its source link fails **8** integration (and no unit, which
   is correct — the fact is assembled from SQL). Reversing the anchor pair fails **7** unit and **2**
   integration. Removing the projection's dispatch entry fails **9** unit and **5** integration. Dropping
@@ -8435,7 +8463,9 @@ payload and vocabulary, why it is not a retarget, the provenance thread across t
   re-point back after `journal_repo.save(target)` fails **exactly 1** unit test and **no** integration
   test, which is the honest shape: the lock order is a concurrency claim the savepoint-bound fixture
   cannot stage, so it is pinned at the level where it can be. Removing the frontend branch fails **1**
-  Jest case.
+  Jest case. The two added with the review fix: trusting the pre-read's anchor flag over the
+  `UPDATE`'s `RETURNING` fails **1** unit test and **9** integration tests, and summarising a task no
+  statement reported — instead of returning nothing for it — fails **2**.
 
 **Calibration.** Production came in at 3.3× the estimate (662 against ~200) and the total at ~2× the
 tracked figure. Two causes, and only one of them is the two-domain shape rule 7 warned about. The seam
