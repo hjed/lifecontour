@@ -7,6 +7,7 @@ InboundFieldMerger protected-edit logic.
 """
 
 import inspect
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -75,6 +76,7 @@ def _make_journal_event_data(
     existing_journal_id: int | None = None,
     contact_relationships: list[dict[str, str]] | None = None,
     recurring_event_id: str | None = None,
+    external_identity: str | None = None,
 ) -> dict[str, Any]:
     """Build a sample journal_event outbox payload."""
     return {
@@ -101,6 +103,7 @@ def _make_journal_event_data(
         "existing_journal_id": existing_journal_id,
         "contact_relationships": contact_relationships or [],
         "recurring_event_id": recurring_event_id,
+        "external_identity": external_identity,
     }
 
 
@@ -161,8 +164,16 @@ def _make_link_row(
     external_version: str | None = '"etag-old"',
     updated_at: datetime | None = None,
     recurring_event_id: str | None = None,
+    external_identity: str | None = "stored-token",
 ) -> MagicMock:
-    """Create a mock external event link row."""
+    """Create a mock external event link row.
+
+    ``external_identity`` is set explicitly, and defaults to a link that
+    already has one. Left to MagicMock it would be a truthy object, which
+    the backfill reads as "this link already has a token" — the guard would
+    never fire and a test meaning to exercise it would pass without doing
+    so.
+    """
     row = MagicMock()
     row.external_version = external_version
     row.journal_id = 42
@@ -170,6 +181,7 @@ def _make_link_row(
     row.sync_status = "synced"
     row.updated_at = updated_at or datetime(2026, 3, 16, tzinfo=UTC)
     row.recurring_event_id = recurring_event_id
+    row.external_identity = external_identity
     return row
 
 
@@ -188,12 +200,20 @@ def _call_writing_to(mock_connection: AsyncMock, table: str) -> Any:
     Found by what the statement targets rather than by position, so a query
     added elsewhere in the path does not silently re-point the assertion at
     a different statement.
+
+    The verb has to be matched against the table it governs, not looked for
+    anywhere in the text: a SELECT of the ``updated_at`` column contains the
+    substring "UPDATE", so a laxer check hands back a read and the
+    assertions that follow describe the wrong statement.
     """
+    pattern = re.compile(
+        rf"\b(?:UPDATE\s+{table}|INSERT\s+INTO\s+{table}|DELETE\s+FROM\s+{table})\b",
+        re.IGNORECASE,
+    )
     for call in mock_connection.execute.call_args_list:
-        statement = str(call.args[0])
-        if table in statement and "UPDATE" in statement.upper():
+        if pattern.search(str(call.args[0])):
             return call
-    raise AssertionError(f"no UPDATE against {table} was executed")
+    raise AssertionError(f"no write against {table} was executed")
 
 
 def _assert_no_writes(mock_connection: AsyncMock) -> None:
@@ -594,6 +614,123 @@ class TestJournalOutboxEventProcessor:
         assert result["status"] == "skipped"
         assert result["reason"] == "etag_unchanged"
         mock_journal_service.update_journal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_etag_still_backfills_a_missing_identity(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The token arrives on an event that has not changed.
+
+        The worker promotes a link out of SKIP_UNCHANGED precisely because
+        it has no token, so the event carries the etag already stored. If
+        the guard turns it away the token is never written and the worker
+        re-promotes the same link on every sync.
+        """
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-123"',
+            external_identity="widget-7f3a::instance-0",
+        )
+
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(
+                _make_link_row(external_version='"etag-123"', external_identity=None)
+            ),
+            _mock_empty_result(),  # _backfill_external_event_link_metadata
+            _mock_empty_result(),  # _flag_duplicate_journals lookup
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        statement, params = _call_writing_to(
+            mock_connection, "journal_external_event_links"
+        ).args
+        assert params["external_identity"] == "widget-7f3a::instance-0"
+        mock_journal_service.update_journal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_the_backfill_does_not_touch_sync_status(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A backfill is not a sync, so it must not report one.
+
+        Writing sync_status here would mark an unresolved conflict synced,
+        and updated_at would tell the field-protection merge the link is
+        newer than a local edit it should be protecting.
+        """
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-123"',
+            external_identity="widget-7f3a::instance-0",
+        )
+
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(
+                _make_link_row(external_version='"etag-123"', external_identity=None)
+            ),
+            _mock_empty_result(),
+            _mock_empty_result(),
+        ]
+
+        await processor.process_event(event)
+
+        statement, _params = _call_writing_to(
+            mock_connection, "journal_external_event_links"
+        ).args
+        written = str(statement)
+        assert "sync_status" not in written
+        assert "updated_at" not in written
+        assert "external_version" not in written
+
+    @pytest.mark.asyncio
+    async def test_a_link_that_already_has_a_token_is_left_alone(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Once the token is stored the link stops qualifying.
+
+        This is what makes the worker's promotion fire once per link
+        rather than on every sync forever.
+        """
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-123"',
+            external_identity="widget-7f3a::instance-0",
+        )
+
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(
+                _make_link_row(
+                    external_version='"etag-123"',
+                    external_identity="widget-7f3a::instance-0",
+                )
+            ),
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        with pytest.raises(AssertionError):
+            _call_writing_to(mock_connection, "journal_external_event_links")
 
     @pytest.mark.asyncio
     async def test_etag_none_does_not_skip(
