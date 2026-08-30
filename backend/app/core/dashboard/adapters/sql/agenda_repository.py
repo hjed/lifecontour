@@ -24,12 +24,21 @@ all-day event on 27 August is the instant ``2026-08-27T00:00Z``, which for a use
 west of UTC falls in their **26 August** window — so synced public holidays and
 out-of-office days show a day early.
 
-Reading the bounds back **in the zone they were written in** —
-``AT TIME ZONE COALESCE(jci.timezone, 'UTC')`` — recovers the intended date from
-both conventions, and it is the rule the codebase already uses elsewhere
-(``event_date_in_timezone``, and migration 0045 for the clock columns). Google's
-rows carry no zone, so they are read as UTC, which is what they are; the app's
-carry the user's, so local midnight reads back as midnight.
+Reading the bounds back **in the zone they were written in** recovers the
+intended date from both conventions, and it is the rule the codebase already uses
+elsewhere (``event_date_in_timezone``, and migration 0045 for the clock columns).
+Google's rows carry no zone, so they are read as UTC, which is what they are; the
+app's carry the user's, so local midnight reads back as midnight.
+
+**The zone is resolved through ``pg_timezone_names`` rather than used directly**,
+because the column takes any string and ``AT TIME ZONE`` *raises* on one
+PostgreSQL does not recognise — which would abort the statement and cost the
+whole section, so a single legacy or externally-synced row with a nonsense zone
+would empty an otherwise good day. The join turns an unrecognised name into
+``NULL`` and the ``COALESCE`` reads it as UTC, which is the same fallback
+``resolve_timezone`` gives the anchor and ``CalendarInfo`` hydration gives a
+persisted row. ``pg_timezone_names.name`` is unique, so the join cannot fan the
+row out.
 
 **One case is knowingly not served**, and is recorded in the iteration document:
 an app-created all-day row whose ``timezone`` was *cleared* has a local-midnight
@@ -107,6 +116,10 @@ _ENTRIES_QUERY = text(
     -- decoration and an unexpectedly missing calendar must not drop an event
     -- off somebody's day.
     LEFT JOIN calendars cal ON cal.id = jci.calendar_id
+    -- Resolves the stored zone to one PostgreSQL will accept, or to NULL. Never
+    -- feed jci.timezone to AT TIME ZONE directly: it raises on an unrecognised
+    -- name, and one bad row would abort the read for the whole day.
+    LEFT JOIN pg_timezone_names tz ON tz.name = jci.timezone
     LEFT JOIN LATERAL (
         SELECT json_agg(
                    json_build_object('id', t.id, 'name', t.name, 'color', t.color)
@@ -134,9 +147,9 @@ _ENTRIES_QUERY = text(
     WHERE j.user_id = :user_id
       AND CASE WHEN jci.is_all_day THEN
               (j.event_date_range_start
-                   AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date <= :anchor
+                   AT TIME ZONE COALESCE(tz.name, 'UTC'))::date <= :anchor
               AND (j.event_date_range_end
-                   AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date >= :anchor
+                   AT TIME ZONE COALESCE(tz.name, 'UTC'))::date >= :anchor
           ELSE
               j.event_date_range_end >= :window_start
               AND j.event_date_range_start <= :window_end
