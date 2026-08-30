@@ -280,7 +280,10 @@ the *creating* journal where it arose and the *due* journal where it matters.
   took away and one a person detached read as the same kind of line. The facts are **net effect**
   rather than statement-by-statement: a link that moved is a departure plus an arrival, while one
   collapsed as a duplicate, or moved and then dropped as redundant with an anchor, is the departure
-  alone, because in both of those the task ends with no link on either journal.
+  alone, because neither *gained* the task a link on the survivor. The two leave the task in
+  different states — a collapse keeps the survivor's link the task already had, a drop leaves none —
+  and produce one summary because history records the change, which is the same for both, rather
+  than the state, which differs only by where each task started.
   **It is deliberately not `TaskDueJournalRetargeted`**: a merge forces no status, can move the
   creating anchor, and can delete links, so reusing that type would tell a user they deferred a task
   they never touched. Rows written *before* a merge that name the absorbed journal are left exactly

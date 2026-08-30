@@ -529,10 +529,13 @@ class TaskJournalLinksRepointed(DomainEvent):
     **A link that moved is two rows, not one**, because the key names the
     journal: the absorbed journal leaves and the survivor arrives. A link
     collapsed as a duplicate, or moved and then dropped as redundant with an
-    anchor, is the departure alone — in both cases the task ends with no link on
-    either journal, and announcing an arrival would invent one the user never
-    had. The summary this is built from carries the *net* effect for exactly
-    that reason; see :class:`~core_shared.models.tasks.TaskJournalRepointing`.
+    anchor, is the departure alone — in neither case did the task *gain* a link
+    on the survivor, and announcing an arrival would claim it did. The two
+    differ in where they leave the task and agree on what changed: a collapse
+    keeps the survivor's link because the task already had one, a drop leaves it
+    with none, and both lost the absorbed journal's link and gained nothing.
+    History records the change rather than the state, which is why one summary
+    serves both; see :class:`~core_shared.models.tasks.TaskJournalRepointing`.
 
     **Provenance is the merging user's**, not ``SYSTEM``. The merge is something
     a person did — in the browser or over MCP — and the tasks it moved are

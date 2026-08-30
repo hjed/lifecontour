@@ -8,10 +8,13 @@ type existed the tasks domain had no way to know any of it happened.
 
 **The facts are per journal, not per statement.** The repository runs four
 statements, but "collapsed as a duplicate" and "moved and then dropped as
-redundant" leave the task in the same place — no link to either journal — and a
-history that distinguished them would be describing the SQL rather than the
-task. What a reader needs is where the task's links are now compared with where
-they were, so the fields name the two journals and the direction:
+redundant" describe the same *change* to the task — the absorbed journal's link
+is gone and no link on the survivor was gained — and a history that
+distinguished them would be describing the SQL rather than the task. They leave
+the task in different **states**: a collapse keeps the survivor's link, which
+the task already had, and a drop leaves it with none. That difference is
+inherited from where each task started, and history records what changed rather
+than what is. So the fields name the two journals and the direction:
 :attr:`source_link_removed`, :attr:`target_link_added`,
 :attr:`target_link_removed`.
 

@@ -8371,11 +8371,14 @@ payload and vocabulary, why it is not a retarget, the provenance thread across t
   journal a merge took away and one a person detached read as the same kind of line. Pinned by a test
   asserting the merge's removal row and a manual detach's are equal field for field.
 - **The facts are net effect, not statements.** The repository runs four statements, but "collapsed as a
-  duplicate" and "moved and then dropped as redundant" leave the task in the same place — no link on
-  either journal — and a history distinguishing them would be describing SQL rather than the task. So
-  `TaskJournalRepointing` carries `source_link_removed` / `target_link_added` / `target_link_removed`
-  rather than one boolean per statement, and a moved link is a departure **and** an arrival while the
-  two cancelling cases are the departure alone. The alternative would have announced an arrival for a
+  duplicate" and "moved and then dropped as redundant" are the same *change* to the task — the
+  absorbed journal's link is gone and none on the survivor was gained — and a history distinguishing
+  them would be describing SQL rather than the task. They leave the task in different **states**: a
+  collapse keeps the survivor's link the task already had, a drop leaves it with none. That
+  difference is inherited from where each task started, and history records what changed rather than
+  what is. So `TaskJournalRepointing` carries `source_link_removed` / `target_link_added` /
+  `target_link_removed` rather than one boolean per statement, and a moved link is a departure **and**
+  an arrival while the two cancelling cases are the departure alone. The alternative would have announced an arrival for a
   link the user never gained.
 - **The value object refuses to describe nothing.** A summary with no fact set, or with the survivor's
   link both gained and lost, raises rather than being published: the first would project zero rows and
@@ -8454,7 +8457,20 @@ payload and vocabulary, why it is not a retarget, the provenance thread across t
   already records. Seven unit cases in `test_merge_repoint_assembly.py` pin the rule; the new SQL is
   covered by the existing report tests, checked rather than assumed (making the anchor `RETURNING`
   report nothing fails **9** of them).
-- **Mutation-checked, eleven ways, all caught.** Dropping the publish loop fails **7** unit and **12**
+- **A second review finding, and this one was only in the prose.** Four places said a collapsed
+  duplicate and a moved-then-dropped link "leave the task in the same place — no link on either
+  journal". That is true of the drop and **false of the collapse**: `_COLLAPSE_DUPLICATE_LINKS`
+  deletes the source row *because* the target row exists, and that target link stays. The code was
+  right and the explanation was not — and the same files got it right elsewhere (the value object's
+  argument list, both unit tests), so it was an inconsistency within one change rather than a
+  misunderstanding. Corrected in all four: what the two cases share is the **change** — the absorbed
+  journal's link gone, none on the survivor gained — not the end state, which differs only because
+  they started differently. History records the change, which is why one summary serves both.
+  *The prose is now pinned by tests rather than only rewritten:* the two report tests assert the
+  differing link rows they leave behind, and swapping those two expectations fails both. The
+  reviewer's worry was that the wrong sentence "could mislead future maintenance or tests" — an
+  assertion is the only answer to that which survives the next edit.
+- **Mutation-checked, twelve ways, all caught.** Dropping the publish loop fails **7** unit and **12**
   integration tests. Claiming every task lost its source link fails **8** integration (and no unit, which
   is correct — the fact is assembled from SQL). Reversing the anchor pair fails **7** unit and **2**
   integration. Removing the projection's dispatch entry fails **9** unit and **5** integration. Dropping
@@ -8465,7 +8481,9 @@ payload and vocabulary, why it is not a retarget, the provenance thread across t
   cannot stage, so it is pinned at the level where it can be. Removing the frontend branch fails **1**
   Jest case. The two added with the review fix: trusting the pre-read's anchor flag over the
   `UPDATE`'s `RETURNING` fails **1** unit test and **9** integration tests, and summarising a task no
-  statement reported — instead of returning nothing for it — fails **2**.
+  statement reported — instead of returning nothing for it — fails **2**. The one added with the
+  second review fix: swapping the two cases' expected end states fails **2**, which is what makes
+  the collapse and the drop distinguishable in code rather than only in a sentence.
 
 **Calibration.** Production came in at 3.3× the estimate (662 against ~200) and the total at ~2× the
 tracked figure. Two causes, and only one of them is the two-domain shape rule 7 warned about. The seam

@@ -308,10 +308,12 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
           *before* the merge, and that is the one that went.
 
         A collapsed duplicate is a departure with no arrival for a different
-        reason — the survivor's link was already there and stays — and the two
-        deliberately produce the same summary, because they leave the task in
-        the same place and a history distinguishing them would be describing SQL
-        rather than the task.
+        reason — the survivor's link was already there and stays, so nothing was
+        gained rather than nothing remaining. The two deliberately produce the
+        same summary because the *change* is the same, not the end state: both
+        lost the absorbed journal's link and gained none on the survivor, and a
+        history distinguishing them would be describing SQL rather than the
+        task.
         """
         anchor_moved = row.task_id in anchored
         creating_anchor_moved = anchor_moved and row.creating_anchor_moved

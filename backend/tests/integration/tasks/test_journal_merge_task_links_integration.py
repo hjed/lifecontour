@@ -651,6 +651,11 @@ class TestTheRepointReportsWhatItMoved:
                 task_id=task_id, user_id=USER_ID, source_link_removed=True
             )
         ]
+        # And the survivor's link is still there — which is *why* nothing was
+        # gained. Asserted beside the report because the summary this produces
+        # is identical to the move-then-drop case below, and the two are only
+        # distinguishable by where they leave the task.
+        assert await _intermediate_ids(async_connection, task_id) == [target_id]
 
     async def test_a_link_moved_and_then_dropped_reports_only_the_departure(
         self,
@@ -687,6 +692,11 @@ class TestTheRepointReportsWhatItMoved:
                 source_link_removed=True,
             )
         ]
+        # The other half of the pair: the same summary as the collapse above,
+        # and the opposite end state. What the two share is the *change* — the
+        # absorbed journal's link gone, none gained on the survivor — not where
+        # the task is left, which differs because they started differently.
+        assert await _intermediate_ids(async_connection, task_id) == []
 
     async def test_a_pre_existing_link_dropped_as_redundant_is_reported_as_lost(
         self,
