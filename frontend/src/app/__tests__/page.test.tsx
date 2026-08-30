@@ -56,7 +56,7 @@ function dashboardDocument(): HomeDashboardResponse {
             mood_average: 7.5,
           },
         },
-        agenda: { status: DashboardSectionStatus.READY, data: {} },
+        agenda: { status: DashboardSectionStatus.READY, data: { entries: [] } },
         tasks: { status: DashboardSectionStatus.READY, data: {} },
         upcoming_dates: { status: DashboardSectionStatus.READY, data: {} },
       },

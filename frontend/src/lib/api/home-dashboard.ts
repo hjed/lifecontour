@@ -70,8 +70,68 @@ export interface HomeDashboardSummary {
   mood_average: number | null;
 }
 
-/** Today's event journals, and tomorrow's. Fields land in Phases 5 and 6. */
-export type HomeDashboardAgenda = Record<string, never>;
+/** One of an entry's tags, with the colour its badge is drawn in (W15). */
+export interface HomeDashboardAgendaTag {
+  id: string;
+  name: string;
+  /** Hex, or null. Decoration only — the name is what carries the meaning. */
+  color: string | null;
+}
+
+/** Somebody at the event, for the entry's avatar stack (W16). */
+export interface HomeDashboardAgendaParticipant {
+  contact_id: number;
+  name: string;
+}
+
+/**
+ * One event journal on the agenda.
+ *
+ * Deliberately data rather than finished strings, so the card owns how it is
+ * rendered accessibly: all-day and cancelled are booleans, tags carry a name
+ * beside their colour, and participants carry names for the avatar stack.
+ *
+ * **Two time representations, answering different questions.** `starts_at` and
+ * `ends_at` are the journal's stored instants — what the list is ordered by, and
+ * the only way to tell that an entry began before today. `start_time` and
+ * `end_time` are clock values in the *event's own* zone, which is why
+ * `timezone` travels with them: render them against that, not against
+ * `meta.anchor.timezone`. Both clock values are null for an all-day entry.
+ */
+export interface HomeDashboardAgendaEntry {
+  journal_id: number;
+  title: string;
+  is_all_day: boolean;
+  starts_at: string;
+  ends_at: string;
+  start_time: string | null;
+  end_time: string | null;
+  /** IANA zone the clock values are in; null means UTC. */
+  timezone: string | null;
+  location: string | null;
+  /** The calendar's colour, which W17 keys the row's accent bar to. */
+  calendar_color: string | null;
+  /**
+   * Cancelled events arrive flagged rather than filtered, so the card can mark
+   * them (W18). A surface must never present one as still happening.
+   */
+  is_cancelled: boolean;
+  tags: HomeDashboardAgendaTag[];
+  participants: HomeDashboardAgendaParticipant[];
+}
+
+/**
+ * Today's event journals, in the order the card draws them: all-day entries
+ * first, then timed ones ascending by start.
+ *
+ * An **empty list is a real answer** — nothing is scheduled today — and is not
+ * the same as the section being unavailable, where `data` is null instead.
+ *
+ * Tomorrow's entries and their count land in Phase 6.
+ */
+export interface HomeDashboardAgenda {
+  entries: HomeDashboardAgendaEntry[];
+}
 
 /** Not-done tasks due in the next seven days. Fields land in Phase 13. */
 export type HomeDashboardTasks = Record<string, never>;
