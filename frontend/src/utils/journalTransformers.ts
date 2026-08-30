@@ -21,6 +21,11 @@ export interface DisplayJournal {
   tags: JournalTag[];
   contacts: JournalContactRelationship[];
   calendar?: JournalCalendar | null;
+  /**
+   * Every calendar this event lives in, display calendar first. Absent on
+   * reads that do not load the links, where `calendar` alone is the answer.
+   */
+  calendars?: JournalCalendar[];
   type_data?: Record<string, JournalTypeData>;
   parent_id?: number | null;
   order?: number | null;
@@ -75,6 +80,7 @@ export function transformJournalForDisplay(
     tags: journal.attributes.tags,
     contacts: journal.attributes.contacts,
     calendar: journal.attributes.calendar,
+    calendars: journal.attributes.calendars,
     type_data: journal.attributes.type_data,
     parent_id: journal.attributes.parent_id ?? null,
     order: journal.attributes.order ?? null,

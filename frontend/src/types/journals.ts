@@ -499,6 +499,15 @@ export interface JournalAttributes {
   tags: JournalTag[];
   series?: JournalSeriesRef[];
   calendar?: JournalCalendar | null;
+  /**
+   * Every calendar this event lives in, display calendar first.
+   *
+   * One event can be held by several calendars — where one calendar invites
+   * another — and the sync records that as a single journal linked to each.
+   * The first entry is always `calendar` above. Absent on reads that do not
+   * load the links (search results), where `calendar` alone is the answer.
+   */
+  calendars?: JournalCalendar[];
   // Hierarchy information
   parent?: ParentJournalSummary | null;
   children?: ChildJournalSummary[];

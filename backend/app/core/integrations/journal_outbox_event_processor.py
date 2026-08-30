@@ -32,6 +32,7 @@ from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
 )
 from core_shared.models.journals.journal_types import JournalType
+from core_shared.models.journals.review_item import ReviewItem, ReviewReason
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     JournalSeriesCancelledEventData,
@@ -61,6 +62,9 @@ from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
 )
 from app.core.journal.adapters.sql.journal_series_repository import (
     SqlJournalSeriesRepository,
+)
+from app.core.journal.adapters.sql.review_item_repository import (
+    SqlReviewItemRepository,
 )
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
@@ -241,6 +245,7 @@ class JournalOutboxEventProcessor:
         self.match_candidate_detector = match_candidate_detector
         self.link_repo = SqlJournalEventLinkRepository(connection)
         self.series_repo = SqlJournalSeriesRepository(connection)
+        self.review_item_repo = SqlReviewItemRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -482,16 +487,34 @@ class JournalOutboxEventProcessor:
             and existing_link.external_version == etag
         ):
             # Backfill promotion: the worker re-sends unchanged events whose
-            # link predates the series feature, carrying the SAME etag. The
-            # recurring id and series membership must persist before the skip
-            # or the worker re-promotes the instance on every sync, forever.
-            if payload.recurring_event_id and existing_link.recurring_event_id is None:
-                await self._update_external_event_link_etag(
+            # link predates a feature, carrying the SAME etag. Whatever the
+            # link is missing must persist before the skip or the worker
+            # re-promotes the event on every sync, forever.
+            #
+            # Two things arrive this way, and neither can wait for the event
+            # to change — an event nobody edits would wait forever:
+            # the recurring id that makes an instance part of a series, and
+            # the identity token that makes one event in two calendars one
+            # journal. Both are additions to the link, not edits to the
+            # journal, so they belong on this side of the guard: the skip
+            # still spares the journal a no-op update and its history a
+            # no-op entry.
+            needs_recurring_id = (
+                payload.recurring_event_id is not None
+                and existing_link.recurring_event_id is None
+            )
+            needs_identity = (
+                payload.external_identity is not None
+                and existing_link.external_identity is None
+            )
+            if needs_recurring_id or needs_identity:
+                await self._backfill_external_event_link_metadata(
                     calendar_id=UUID(calendar_id),
                     external_event_id=external_event_id,
-                    etag=etag,
                     recurring_event_id=payload.recurring_event_id,
+                    external_identity=payload.external_identity,
                 )
+            if needs_recurring_id:
                 await self._ensure_series_membership(
                     journal_id=existing_journal_id,
                     user_id=existing_journal.user_id,
@@ -503,6 +526,16 @@ class JournalOutboxEventProcessor:
                     "Backfilled recurring id on unchanged event",
                     journal_id=existing_journal_id,
                     recurring_event_id=payload.recurring_event_id,
+                )
+            if needs_identity:
+                await self._flag_duplicate_journals(
+                    journal_id=existing_journal_id,
+                    user_id=existing_journal.user_id,
+                    external_identity=payload.external_identity,
+                )
+                logger.info(
+                    "Backfilled external identity on unchanged event",
+                    journal_id=existing_journal_id,
                 )
             logger.info(
                 "Journal update skipped - ETag unchanged",
@@ -614,6 +647,13 @@ class JournalOutboxEventProcessor:
             external_event_id=external_event_id,
             etag=etag,
             recurring_event_id=payload.recurring_event_id,
+            external_identity=payload.external_identity,
+        )
+
+        # Surface any journal that turns out to describe the same event
+        await self._flag_duplicate_journals(
+            journal_id=existing_journal_id,
+            user_id=existing_journal.user_id,
             external_identity=payload.external_identity,
         )
 
@@ -1763,7 +1803,8 @@ class JournalOutboxEventProcessor:
         result = await self.connection.execute(
             text("""
                 SELECT external_version, journal_id, sync_capability,
-                       sync_status, updated_at, recurring_event_id
+                       sync_status, updated_at, recurring_event_id,
+                       external_identity
                 FROM journal_external_event_links
                 WHERE calendar_id = :calendar_id
                   AND external_event_id = :external_event_id
@@ -1774,6 +1815,89 @@ class JournalOutboxEventProcessor:
             },
         )
         return result.fetchone()
+
+    async def _flag_duplicate_journals(
+        self,
+        journal_id: int,
+        user_id: str,
+        external_identity: str | None,
+    ) -> None:
+        """Send any journal describing this same event to the review queue.
+
+        De-duplication prevents *new* duplicates; it cannot retroactively
+        join two journals that already exist, because merging them means
+        choosing whose title, content and tags survive — the user's call,
+        not the sync's. What it can do is say with certainty that the pair
+        is one event, which is what the review queue is for.
+
+        The pair reaches this state through the identity backfill: two
+        journals synced before tokens existed each acquire the same token
+        on their next sync, and the second one to do so finds the first.
+
+        The journal ids are ordered before being recorded, newest first.
+        Two things ride on that order. The queue's uniqueness is on the
+        ordered pair, so flagging (A, B) on one sync and (B, A) on the next
+        would leave two rows describing one duplicate — and which journal
+        syncs first is not something this controls. And the queue's merge
+        deletes the *source*, so the source has to be the newer journal, as
+        match detection already records it; ordering the other way would
+        quietly destroy the older journal and the history it carries.
+
+        Ordering alone is not enough, because this is not the only thing
+        that queues a pair: match detection records the incoming journal
+        as the source, in whatever order the two were created. That is the
+        same pair this flags — one event means one day and one title,
+        which is exactly what an AI guess is drawn to — so the pair is
+        looked up in either order first, and an existing item, however the
+        user has since dealt with it, stands.
+        """
+        if not external_identity:
+            return
+
+        result = await self.connection.execute(
+            text("""
+                SELECT DISTINCT l.journal_id
+                FROM journal_external_event_links l
+                JOIN journals j ON j.id = l.journal_id
+                WHERE j.user_id = :user_id
+                  AND l.external_identity = :external_identity
+                  AND l.journal_id <> :journal_id
+            """),
+            {
+                "user_id": str(user_id),
+                "external_identity": external_identity,
+                "journal_id": journal_id,
+            },
+        )
+
+        for row in result.fetchall():
+            other_journal_id = int(row.journal_id)
+            already_queued = await self.review_item_repo.find_by_journal_pair(
+                journal_id, other_journal_id, str(user_id)
+            )
+            if already_queued is not None:
+                continue
+
+            candidate_id, source_id = sorted((journal_id, other_journal_id))
+            _, created = await self.review_item_repo.create(
+                ReviewItem(
+                    user_id=str(user_id),
+                    source_journal_id=source_id,
+                    candidate_journal_id=candidate_id,
+                    reason=ReviewReason.EXTERNAL_LINK_MATCH,
+                    confidence_score=1.0,
+                    details={
+                        "external_identity": external_identity,
+                        "detected_by": "cross_calendar_identity",
+                    },
+                )
+            )
+            if created:
+                logger.info(
+                    "Flagged two journals as one external event for review",
+                    source_journal_id=source_id,
+                    candidate_journal_id=candidate_id,
+                )
 
     async def _find_journal_by_external_identity(
         self,
@@ -1812,6 +1936,45 @@ class JournalOutboxEventProcessor:
         )
         row = result.fetchone()
         return int(row.journal_id) if row else None
+
+    async def _backfill_external_event_link_metadata(
+        self,
+        calendar_id: UUID,
+        external_event_id: str,
+        recurring_event_id: str | None = None,
+        external_identity: str | None = None,
+    ) -> None:
+        """Give a link metadata it predates, and change nothing else.
+
+        This runs for an event that has *not* changed, so it must not
+        pretend a sync happened. Writing ``sync_status`` would clear an
+        unresolved conflict the user still has to deal with, and bumping
+        ``updated_at`` would tell the field-protection merge that the link
+        is newer than a local edit it should be protecting. The etag is
+        already what the payload carries — that is why this event was
+        skipped — so there is nothing to write there either.
+
+        COALESCE keeps a stored value when the payload omits one.
+        """
+        await self.connection.execute(
+            text("""
+                UPDATE journal_external_event_links
+                SET recurring_event_id = COALESCE(
+                        :recurring_event_id, recurring_event_id
+                    ),
+                    external_identity = COALESCE(
+                        :external_identity, external_identity
+                    )
+                WHERE calendar_id = :calendar_id
+                  AND external_event_id = :external_event_id
+            """),
+            {
+                "calendar_id": calendar_id,
+                "external_event_id": external_event_id,
+                "recurring_event_id": recurring_event_id,
+                "external_identity": external_identity,
+            },
+        )
 
     async def _update_external_event_link_etag(
         self,

@@ -574,6 +574,7 @@ export function JournalDetailView({
               <div className='text-sm font-medium'>Calendar</div>
               <JournalCalendarBadge
                 calendar={journal.calendar}
+                calendars={journal.calendars}
                 journalTypes={journal.types}
                 onCalendarChange={handleCalendarChange}
                 availableCalendars={availableCalendars}

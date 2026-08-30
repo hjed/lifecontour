@@ -161,6 +161,19 @@ class JournalConverter:
         )
 
     @staticmethod
+    def _convert_calendars(
+        calendars: list[Calendar] | None,
+    ) -> list[CalendarSchema]:
+        """Every calendar the event lives in, display calendar first."""
+        return [
+            schema
+            for schema in (
+                JournalConverter._convert_calendar(entry) for entry in (calendars or [])
+            )
+            if schema is not None
+        ]
+
+    @staticmethod
     def _convert_parent(parent: Journal | None) -> dict[str, str] | None:
         """Convert parent journal to summary."""
         if not parent:
@@ -250,7 +263,7 @@ class JournalConverter:
         type_data: dict[str, Any] | None = None,
         contacts: list[JournalContactRelationship] | None = None,
         tags: list[JournalTag] | None = None,
-        calendar: Calendar | None = None,
+        calendars: list[Calendar] | None = None,
         parent: Journal | None = None,
         children: list[Journal] | None = None,
         children_count: int | None = None,
@@ -268,7 +281,9 @@ class JournalConverter:
             type_data: Type-specific data organized by type
             contacts: Contact relationships
             tags: Journal tags
-            calendar: Calendar (for EVENT type)
+            calendars: Every calendar the event lives in, display calendar
+                first (for EVENT type). The display calendar is its first
+                entry, and is what the response's ``calendar`` field reports.
             parent: Parent journal
             children: Child journals
             children_count: Number of child journals
@@ -283,7 +298,11 @@ class JournalConverter:
         # Convert embedded data
         contact_schemas = JournalConverter._convert_contacts(contacts)
         tag_schemas = JournalConverter._convert_tags(tags)
-        calendar_schema = JournalConverter._convert_calendar(calendar)
+        calendar_schemas = JournalConverter._convert_calendars(calendars)
+        # The calendar the journal is displayed in leads the list, and is
+        # what the long-standing single-calendar field reports.
+        calendar = calendars[0] if calendars else None
+        calendar_schema = calendar_schemas[0] if calendar_schemas else None
         parent_summary = JournalConverter._convert_parent(parent)
         children_summaries = JournalConverter._convert_children(
             children, children_types
@@ -303,6 +322,7 @@ class JournalConverter:
             contacts=contact_schemas,
             tags=tag_schemas,
             calendar=calendar_schema,
+            calendars=calendar_schemas,
             parent=parent_summary,
             children=children_summaries,
             children_count=children_count,

@@ -514,6 +514,22 @@ class CalendarRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_linked_to_journal(self, journal_id: int) -> list[Calendar]:
+        """
+        Find every calendar a journal's event lives in.
+
+        An event de-duplicated across calendars is one journal linked to
+        several, while it is still *displayed* in exactly one.
+
+        Args:
+            journal_id: The journal to look up
+
+        Returns:
+            The calendars, display calendar first; empty for a non-event
+        """
+        pass
+
+    @abstractmethod
     async def save(self, calendar: Calendar) -> Calendar:
         """
         Save a calendar (insert or update).
@@ -2091,6 +2107,32 @@ class ReviewItemRepository(ABC):
         Returns:
             A tuple of (ReviewItem, bool) where the bool indicates if the item was newly created
             (True) or already existed (False).
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_journal_pair(
+        self, journal_id: int, other_journal_id: int, user_id: str
+    ) -> ReviewItem | None:
+        """
+        Find the review item describing a pair of journals, in either order.
+
+        The unique constraint is on the ordered pair, so a caller that has
+        no say in which journal is the source cannot use it to tell whether
+        the pair is already queued. Producers record the pair in whichever
+        order suits them: match detection makes the incoming journal the
+        source, while cross-calendar identity sorts by id.
+
+        Args:
+            journal_id: One of the two journals
+            other_journal_id: The other journal
+            user_id: The user who owns both
+
+        Returns:
+            The review item for the pair whichever way round it was
+            recorded, or None if the pair has never been queued. Items the
+            user has already resolved or dismissed are returned too — a
+            decision about the pair is still a decision.
         """
         pass
 

@@ -22,6 +22,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.core.integrations.journal_sync_seeding import (
     USER_ID,
     build_processor,
@@ -49,6 +56,19 @@ async def _links(connection: AsyncConnection, journal_id: int) -> list[Any]:
             ORDER BY created_at, calendar_id
         """),
         {"journal_id": journal_id},
+    )
+    return list(result.fetchall())
+
+
+async def _review_items(connection: AsyncConnection) -> list[Any]:
+    """Everything sitting in the review queue, oldest first."""
+    result = await connection.execute(
+        text("""
+            SELECT source_journal_id, candidate_journal_id, reason,
+                   confidence_score, status, details
+            FROM journal_review_items
+            ORDER BY created_at, id
+        """)
     )
     return list(result.fetchall())
 
@@ -822,3 +842,622 @@ class TestARecurringEventSharedByTwoCalendars:
         series = await self._series_rows(async_connection)
         assert len(series) == 1
         assert series[0].member_count == 1
+
+
+class TestFlaggingDuplicatesThatAlreadyExist:
+    """Journals duplicated before the de-dupe shipped are surfaced, not merged.
+
+    The fix stops *new* duplicates. It cannot retroactively join two
+    journals that already exist — merging them means choosing whose title,
+    content and tags survive, which is the user's call. So once both
+    journals carry the same token, the pair goes to the review queue where
+    it can be merged or dismissed by hand.
+    """
+
+    async def _duplicate_pair(
+        self, connection: AsyncConnection
+    ) -> tuple[Any, str, str, int, int]:
+        """Two journals for one event, as a pre-de-dupe sync would leave them."""
+        processor = build_processor(connection)
+        work = await create_calendar(connection, name="Work")
+        personal = await create_calendar(connection, name="Personal")
+
+        first = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="work-copy-1",
+                external_identity=None,
+            )
+        )
+        second = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="personal-copy-9",
+                external_identity=None,
+            )
+        )
+        return (
+            processor,
+            work,
+            personal,
+            first["journal_id"],
+            second["journal_id"],
+        )
+
+    async def _backfill(
+        self,
+        processor: Any,
+        *,
+        calendar_id: str,
+        external_event_id: str,
+        journal_id: int,
+        etag: str = '"etag-1"',
+    ) -> None:
+        """The one-shot re-sync that gives an existing link its token.
+
+        The etag defaults to the one the link already carries, because the
+        event has *not* changed — the worker promotes it out of
+        SKIP_UNCHANGED purely to hand over the token. A changed etag would
+        take the ordinary update path and never exercise this.
+        """
+        await processor.process_event(
+            sync_event(
+                "journal_event.updated",
+                calendar_id=calendar_id,
+                external_event_id=external_event_id,
+                existing_journal_id=journal_id,
+                etag=etag,
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+    async def test_a_duplicate_pair_reaches_the_review_queue(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Once both links carry the token, the pair is flagged."""
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert {items[0].source_journal_id, items[0].candidate_journal_id} == {
+            first,
+            second,
+        }
+        assert items[0].status == "pending"
+
+    async def test_the_flag_says_the_two_are_one_external_event(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The reason distinguishes this from an AI similarity guess.
+
+        This is not "these look alike" — the source told us they are one
+        event, so it is certain, and the queue should say so.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        item = (await _review_items(async_connection))[0]
+        assert item.reason == "external_link_match"
+        assert item.confidence_score == 1.0
+
+    async def test_repeated_syncs_do_not_pile_up_items(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A pending review item is raised once, not once per sync."""
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        for etag in ('"v2"', '"v3"', '"v4"'):
+            await self._backfill(
+                processor,
+                calendar_id=work,
+                external_event_id="work-copy-1",
+                journal_id=first,
+                etag=etag,
+            )
+            await self._backfill(
+                processor,
+                calendar_id=personal,
+                external_event_id="personal-copy-9",
+                journal_id=second,
+                etag=etag,
+            )
+
+        assert len(await _review_items(async_connection)) == 1
+
+    async def test_which_journal_syncs_first_does_not_change_the_item(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Order must not produce a second item for the same pair.
+
+        The queue's uniqueness constraint is on the ordered pair, so
+        flagging (A, B) on one sync and (B, A) on the next would leave the
+        user two rows describing one duplicate.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        # …and now the other way round.
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+            etag='"v3"',
+        )
+
+        assert len(await _review_items(async_connection)) == 1
+
+    async def test_an_ai_guess_about_the_pair_is_not_duplicated(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A pair the AI already queued is not queued a second time.
+
+        Match detection writes the *incoming* journal as the source and
+        the one it matched against as the candidate, so it records the
+        pair in whichever order the journals were created. This flagging
+        sorts instead. The queue's uniqueness is on the ordered pair, so
+        two producers using two orderings would each insert, and the user
+        would see one duplicate described twice.
+
+        The pair this flags is precisely the pair the AI is most likely to
+        have guessed already — one event, so same day and same title.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        # As match detection leaves it: the newer journal is the source.
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_review_items
+                    (user_id, source_journal_id, candidate_journal_id,
+                     reason, confidence_score, status)
+                VALUES (:user_id, :source, :candidate,
+                        'duplicate_journal', 0.8, 'pending')
+            """),
+            {"user_id": USER_ID, "source": second, "candidate": first},
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert items[0].reason == "duplicate_journal"
+
+    async def test_a_resolved_pair_is_not_raised_again(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Deciding about a pair is not undone by the next sync.
+
+        A dismissed item is the user saying these two are not one thing.
+        Re-flagging it every sync would argue with them.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_review_items
+                    (user_id, source_journal_id, candidate_journal_id,
+                     reason, confidence_score, status)
+                VALUES (:user_id, :source, :candidate,
+                        'duplicate_journal', 0.8, 'dismissed')
+            """),
+            {"user_id": USER_ID, "source": second, "candidate": first},
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert items[0].status == "dismissed"
+
+    async def test_an_unchanged_event_still_hands_over_its_token(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The re-sync that carries the token changes nothing else.
+
+        This is the whole backfill path: the worker lifts a link out of
+        SKIP_UNCHANGED *because* it has no token, so the event it sends is
+        by definition unchanged and carries the etag already stored. If the
+        etag guard turns it away before the token is written, no link
+        predating the token ever gets one, the worker re-promotes it every
+        sync forever, and nothing is ever flagged.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+
+        assert [
+            link.external_identity for link in await _links(async_connection, first)
+        ] == [SHARED_TOKEN]
+
+    async def test_an_unchanged_resync_flags_the_pair(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Two unchanged events reaching the queue is the point of all this."""
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        items = await _review_items(async_connection)
+        assert len(items) == 1
+        assert {items[0].source_journal_id, items[0].candidate_journal_id} == {
+            first,
+            second,
+        }
+
+    async def test_an_unchanged_resync_leaves_the_journal_alone(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Handing over a token is not an edit.
+
+        The etag guard exists to stop unchanged events rewriting journals
+        and filling the history with no-ops. Backfilling through it must
+        not cost that.
+        """
+        processor, work, _personal, first, _second = await self._duplicate_pair(
+            async_connection
+        )
+        before = await async_connection.execute(
+            text("SELECT title, content FROM journals WHERE id = :id"),
+            {"id": first},
+        )
+        untouched = before.fetchone()
+        assert untouched is not None
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+
+        after = await async_connection.execute(
+            text("SELECT title, content FROM journals WHERE id = :id"), {"id": first}
+        )
+        assert after.fetchone() == untouched
+        history = await async_connection.execute(
+            text("""
+                SELECT count(*) FROM field_history
+                WHERE entity_type = 'journal' AND entity_id = :id
+            """),
+            {"id": first},
+        )
+        assert history.scalar() == 0
+
+    async def test_a_backfill_does_not_resolve_a_conflict(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Handing over a token is not a successful sync.
+
+        A conflicted link is waiting on the user. The event has not
+        changed — it is promoted only to carry the token — so marking the
+        link synced would clear a conflict nobody resolved, and the
+        classifier that decides to promote it never looks at sync_status,
+        so every conflicted link predating the token would be swept.
+        """
+        processor, work, _personal, first, _second = await self._duplicate_pair(
+            async_connection
+        )
+        await async_connection.execute(
+            text("""UPDATE journal_external_event_links
+                    SET sync_status = 'conflicted'
+                    WHERE external_event_id = 'work-copy-1'"""),
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+
+        status = await async_connection.execute(
+            text(
+                "SELECT sync_status FROM journal_external_event_links "
+                "WHERE external_event_id = 'work-copy-1'"
+            )
+        )
+        assert status.scalar() == "conflicted"
+
+    async def test_the_newer_journal_is_the_one_a_merge_would_absorb(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The pair's direction decides which journal a merge destroys.
+
+        ``merge_journals`` deletes the *source*, and the queue's own
+        "Merge All Identical" walks pending items merging source into
+        candidate. Match detection records the incoming journal as the
+        source, so the established one survives. Recording the pair
+        ascending by id would invert that for these items and delete the
+        older journal — the one carrying the longer history — while
+        keeping the newer.
+
+        Ordering still has to be deterministic, or two syncs would record
+        the pair both ways round; it just has to be the *other* order.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        assert first < second
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        item = (await _review_items(async_connection))[0]
+        assert item.source_journal_id == second
+        assert item.candidate_journal_id == first
+
+    async def test_merging_the_pair_keeps_both_calendars_identified(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A merge moves the links, so it must move what identifies them.
+
+        Resolving the pair is the point of flagging it, and the merge
+        carries the loser's links over to the winner. Dropping the token on
+        the way would leave the surviving journal holding a link the sync
+        can no longer recognise as this event.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        merge_service = JournalMergeService(
+            journal_repo=SqlJournalRepository(async_connection),
+            event_publisher=OutboxEventPublisher(async_connection),
+            task_merge_service=TaskJournalMergeService(
+                task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+                event_publisher=OutboxEventPublisher(async_connection),
+            ),
+        )
+        await merge_service.merge_journals(
+            target_id=first, source_id=second, transaction=async_connection
+        )
+
+        links = await _links(async_connection, first)
+        assert len(links) == 2
+        assert {link.external_identity for link in links} == {SHARED_TOKEN}
+
+    async def test_a_de_duplicated_event_is_not_flagged(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """One journal with two links is the fixed state, not a duplicate.
+
+        This is the case the whole feature produces, so flagging it would
+        put a review item in the queue for every shared event the user has.
+        """
+        processor = build_processor(async_connection)
+        work = await create_calendar(async_connection, name="Work")
+        personal = await create_calendar(async_connection, name="Personal")
+
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="work-copy-1",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="personal-copy-9",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+        assert await _review_items(async_connection) == []
+        assert created["journal_id"] is not None
+
+    async def test_unrelated_journals_are_not_flagged(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Different tokens are different events, however alike they look."""
+        processor = build_processor(async_connection)
+        work = await create_calendar(async_connection, name="Work")
+        personal = await create_calendar(async_connection, name="Personal")
+
+        first = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="week-1",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        second = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=personal,
+                external_event_id="week-2",
+                external_identity=OTHER_TOKEN,
+            )
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="week-1",
+            journal_id=first["journal_id"],
+        )
+
+        assert await _review_items(async_connection) == []
+        assert first["journal_id"] != second["journal_id"]
+
+    async def test_another_users_duplicate_is_not_flagged_against_mine(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A review item names two journals one person can merge."""
+        processor = build_processor(async_connection)
+        mine = await create_calendar(async_connection, name="Mine")
+        theirs = await create_calendar(
+            async_connection, user_id="somebody-else", name="Theirs"
+        )
+
+        first = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=mine,
+                external_event_id="my-copy",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+        await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=theirs,
+                external_event_id="their-copy",
+                user_id="somebody-else",
+                external_identity=SHARED_TOKEN,
+            )
+        )
+
+        await self._backfill(
+            processor,
+            calendar_id=mine,
+            external_event_id="my-copy",
+            journal_id=first["journal_id"],
+        )
+
+        assert await _review_items(async_connection) == []

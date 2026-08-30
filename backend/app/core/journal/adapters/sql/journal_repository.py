@@ -292,15 +292,38 @@ class SqlJournalRepository(JournalRepository):
             where_clauses.append(f"jta.tag_id IN ({', '.join(placeholders)})")
             needs_distinct = True
 
-        # Calendar filter
+        # Calendar filter.
+        #
+        # A calendar holds a journal either by being the one it is displayed
+        # in (journal_calendar_info) or by holding the same event under its
+        # own external link — which is how a de-duplicated event appears in
+        # both the calendar that invited and the one that was invited.
+        # Matching only the former would make a shared event vanish from
+        # every calendar but the first one to sync it.
+        #
+        # EXISTS rather than a join: a journal linked to two calendars would
+        # otherwise come back once per link, and the filter must not change
+        # how many rows a journal contributes.
         if calendar_id is not None:
-            if not (journal_type and journal_type.upper() == "EVENT"):
-                joins.append(
-                    "INNER JOIN journal_calendar_info jci_cal ON j.id = jci_cal.journal_id"
+            calendar_holds_journal = """(
+                EXISTS (
+                    SELECT 1 FROM journal_calendar_info jci_cal
+                    WHERE jci_cal.journal_id = j.id
+                      AND jci_cal.calendar_id = :calendar_id
                 )
-                where_clauses.append("jci_cal.calendar_id = :calendar_id")
+                OR EXISTS (
+                    SELECT 1 FROM journal_external_event_links jeel_cal
+                    WHERE jeel_cal.journal_id = j.id
+                      AND jeel_cal.calendar_id = :calendar_id
+                      AND jeel_cal.sync_status <> 'cancelled'
+                )
+            )"""
+            if not (journal_type and journal_type.upper() == "EVENT"):
+                where_clauses.append(calendar_holds_journal)
             else:
-                where_clauses.append("t.calendar_id = :calendar_id")
+                where_clauses.append(
+                    f"(t.calendar_id = :calendar_id OR {calendar_holds_journal})"
+                )
             params["calendar_id"] = calendar_id
 
         return needs_distinct
