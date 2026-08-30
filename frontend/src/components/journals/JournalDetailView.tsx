@@ -9,9 +9,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { isPast, parseISO } from 'date-fns';
@@ -69,6 +67,7 @@ import { CreateAlbumButton } from './CreateAlbumButton';
 import { InlineEditHeading } from './InlineEditHeading';
 import { JournalContentInline } from './JournalContentInline';
 import { InlineEditDateRange } from './InlineEditDateRange';
+import { DeleteJournalDialog } from './DeleteJournalDialog';
 import { MergeJournalDialog } from './MergeJournalDialog';
 import { ReviewSuggestions } from './ReviewSuggestions';
 import { validateRequired } from '@/lib/validation';
@@ -77,7 +76,6 @@ import { ExternalLinksDisplay } from '@/components/shared/ExternalLinksDisplay';
 import { useJournalExternalLinks } from '@/lib/api/external-links';
 import {
   useUpdateJournal,
-  useDeleteJournal,
   useAddContactRelationship,
   useRemoveContactRelationship,
   useJournalSeries,
@@ -91,7 +89,6 @@ import {
   useUpdateContactRelationship,
   journalKeys,
 } from '@/lib/api/journals';
-import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
 
@@ -139,13 +136,11 @@ export function JournalDetailView({
   journal,
   className,
 }: JournalDetailViewProps) {
-  const router = useRouter();
   const queryClient = useQueryClient();
 
   // Mutations
   const updateJournal = useUpdateJournal();
   const updateTypeData = useUpdateTypeData();
-  const deleteJournal = useDeleteJournal();
   const addContact = useAddContactRelationship();
   const removeContact = useRemoveContactRelationship();
   const updateContact = useUpdateContactRelationship();
@@ -280,13 +275,6 @@ export function JournalDetailView({
       journalId: journal.id,
       seriesId: created.id,
     });
-  };
-
-  const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this journal?')) return;
-
-    await deleteJournal.mutateAsync(journal.id);
-    router.push('/journals');
   };
 
   const handleTypeAdd = async (type: JournalType) => {
@@ -563,16 +551,7 @@ export function JournalDetailView({
             <div className='flex items-center gap-2'>
               <CreateAlbumButton journal={journal} />
               <MergeJournalDialog targetJournalId={journal.id} />
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleDelete}
-                disabled={deleteJournal.isPending}
-                aria-label='Delete journal'
-                className='text-destructive hover:bg-destructive/10'
-              >
-                <Trash2 className='h-4 w-4' />
-              </Button>
+              <DeleteJournalDialog journal={journal} />
             </div>
           </div>
         </CardHeader>

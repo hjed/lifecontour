@@ -130,7 +130,24 @@ class JournalHasAnchoredTasksError(JournalDomainError):
 
 
 def _describe_blockage(blocking_tasks: tuple[BlockingTask, ...]) -> str:
-    """Spell out what blocks the deletion and where to go to clear it."""
+    """Spell out what blocks the deletion and what would actually clear it.
+
+    The remedy is stated against the **anchors**, not against the task's
+    status, because status is not what blocks: the deletion is refused whatever
+    a task's status, so "cancel or complete it and try again" sends a caller —
+    person or agent — through actions that cannot succeed. Only two things
+    release an anchor, and which one applies depends on the role:
+
+    - a task **due** here can be retargeted onto another journal, which moves
+      the due anchor and leaves this journal behind as an intermediate link;
+    - a task **created** here cannot be moved at all — no service method other
+      than ``create_task`` accepts a creating journal — so deleting the task is
+      the only thing that clears it.
+
+    The steer toward cancelling the journal stays, and matters more for the
+    creating-anchor case than anywhere else: it is the one route out that does
+    not destroy a commitment.
+    """
     count = len(blocking_tasks)
     plural = "task" if count == 1 else "tasks"
     blockers = " ".join(
@@ -141,8 +158,10 @@ def _describe_blockage(blocking_tasks: tuple[BlockingTask, ...]) -> str:
     return (
         f"This journal cannot be deleted because {count} {plural} "
         f"{'is' if count == 1 else 'are'} anchored to it. {blockers} "
-        "Cancel, complete or retarget them and try again — or cancel this "
-        "journal instead of deleting it, which keeps the tasks intact."
+        "Completing or cancelling a task does not release it: a task due here "
+        "can be retargeted onto another journal, and a task created here can "
+        "only be deleted. Or cancel this journal instead of deleting it, which "
+        "keeps the tasks intact."
     )
 
 

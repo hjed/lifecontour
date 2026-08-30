@@ -69,9 +69,14 @@ jest.mock('@/lib/api/journals', () => ({
     isPending: false,
   }),
   useDeleteJournal: () => ({
+    mutate: mockDeleteJournal,
     mutateAsync: mockDeleteJournal,
     isPending: false,
   }),
+  // `DeleteJournalDialog` reads a refusal's blockers through this. It is
+  // mounted here, so the module mock owes it an implementation even though
+  // this file never provokes a refusal.
+  blockingTasksFrom: () => null,
   useAddContactRelationship: () => ({
     mutateAsync: mockAddContact,
   }),
