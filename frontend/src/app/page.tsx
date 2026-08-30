@@ -1,92 +1,75 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+/**
+ * The home page: the user's daily briefing.
+ *
+ * It answers, in one screen, what is on today, what is coming that might be
+ * forgotten, and what was promised — replacing the placeholder card grid
+ * entirely (specification §*The Home Dashboard*).
+ *
+ * The frame is **W1**–**W4**: no new chrome (the root layout already supplies
+ * the header, the sidebar and the page container, so this page deliberately
+ * adds no container of its own), a page header anchored on the server's today,
+ * and the three evidence sections in one independent-height row that stacks to
+ * a single column below `lg` in the order Agenda → Tasks → Upcoming dates.
+ *
+ * This page is the dashboard's only `useHomeDashboard()` caller today, because
+ * it is the only part of it that needs data: the header takes its day as a
+ * prop, which keeps it a pure function of the anchor and testable without a
+ * query, and the three cards render nothing from the payload yet.
+ *
+ * The hook is nonetheless written to be called from anywhere — one query key,
+ * so concurrent mounts dedupe into a single fetch (asserted in its own tests) —
+ * because that is what lets Phases 4, 7, 12 and 14 read it from inside each
+ * card. Reading it there rather than threading props down from here is what
+ * makes a section's loading and unavailable states its own, which is the
+ * per-section resilience the specification asks for and Phase 16 builds.
+ *
+ * The summary card (**W5**–**W10**) sits above the grid and lands in Phase 4;
+ * the sections' own contents land in Phases 7, 12, 14 and 15.
+ */
+
+'use client';
+
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { AgendaCard } from '@/components/dashboard/AgendaCard';
+import { DashboardPageHeader } from '@/components/dashboard/DashboardPageHeader';
+import { DashboardSection } from '@/components/dashboard/DashboardSection';
+import { TasksCard } from '@/components/dashboard/TasksCard';
+import { UpcomingDatesCard } from '@/components/dashboard/UpcomingDatesCard';
+import { useHomeDashboard } from '@/lib/api/home-dashboard';
+
+function HomeDashboard() {
+  const { data } = useHomeDashboard();
+
+  return (
+    <div className='space-y-4' data-testid='home-dashboard-ready'>
+      <DashboardPageHeader anchorDate={data?.meta.anchor.date} />
+
+      {/* `items-start` so a short Upcoming-dates card does not stretch to
+          match a tall Agenda; below `lg` the three stack in this DOM order. */}
+      <div
+        className='grid grid-cols-1 items-start gap-4 lg:grid-cols-3'
+        data-testid='dashboard-sections'
+      >
+        <DashboardSection id='agenda' title='Agenda'>
+          <AgendaCard />
+        </DashboardSection>
+
+        <DashboardSection id='tasks' title='Tasks'>
+          <TasksCard />
+        </DashboardSection>
+
+        <DashboardSection id='upcoming-dates' title='Upcoming dates'>
+          <UpcomingDatesCard />
+        </DashboardSection>
+      </div>
+    </div>
+  );
+}
 
 export default function HomePage() {
   return (
     <AuthGuard>
-      <div className='container mx-auto py-8'>
-        <div className='mb-8'>
-          <h1 className='text-4xl font-bold tracking-tight'>
-            Personal Management System
-          </h1>
-          <p className='text-muted-foreground mt-2'>
-            Your personal CRM and journal with AI integration
-          </p>
-        </div>
-
-        <div className='grid gap-6 md:grid-cols-2 lg:grid-cols-3'>
-          <Card>
-            <CardHeader>
-              <CardTitle>Contacts</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className='text-muted-foreground text-sm'>
-                Manage your personal and professional contacts with tags and
-                Google sync.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Journal</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className='text-muted-foreground text-sm'>
-                Keep track of your thoughts, experiences, and memories with mood
-                tracking.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Calendar</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className='text-muted-foreground text-sm'>
-                Sync with Google Calendar and link events to photos and journal
-                entries.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Photos</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className='text-muted-foreground text-sm'>
-                Connect with Immich to link photos to contacts, events, and
-                journal entries.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>AI Integration</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className='text-muted-foreground text-sm'>
-                MCP protocol support for AI assistants to access and manage your
-                data.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>System Status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className='text-muted-foreground text-sm'>
-                Monitor system health and integration status.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <HomeDashboard />
     </AuthGuard>
   );
 }

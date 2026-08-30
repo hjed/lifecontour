@@ -555,6 +555,18 @@ rules below follow from that record and apply to every phase in this document:
     follow-up) and 13 (get *and* list-by-journal) are each two capabilities under one heading and should
     be split, or re-estimated at roughly ×9 against production.
 
+17. **Estimate a frontend phase by counting its components, not by naming its page** — added after
+    ITER18-004 Phase 3 came in at **2,258 tracked against a 600 estimate (3.8×)** while landing at
+    **3.9× its own production**, i.e. almost exactly the ×4 rule. That is the point: the multiplier was
+    right and the estimate was still wrong by 3.8×, because the *production* figure was guessed from the
+    phase's title. "Page shell" is one page and turned out to be nine production artefacts — five
+    components, an API client typing a payload contract, a date helper, a navigation change and the page.
+    Rules 13–16 all tune the multiplier; this one says the multiplier was never the problem. **Before
+    multiplying, list the files the phase will add and price each at ~30–90 lines**, plus ~150 for an API
+    client that types a whole contract. The remaining ITER18-004 frontend phases (4, 7, 8, 12, 14, 15, 16)
+    are all estimated at ×4 over a title-derived production figure today, and each adds at least a card
+    *and* the entry row it repeats.
+
 **Programme size:** 65 phases — and therefore 65 PRs — across the six iterations
 (ITER18-001: 22, ITER18-002: 6, ITER18-003: 10, ITER18-004: 17, ITER18-005: 8, ITER18-006: 2).
 ITER18-002 gained its sixth phase during ITER18-001 Phase 7's review — the retarget/merge lock order;
@@ -9050,31 +9062,175 @@ phase while proving nothing.
   Where a value is drawn is the card's decision; suppressing it server-side would make the payload's
   *shape* depend on its state, which is a rendering rule leaking into the contract.
 
-#### Phase 3: Page Shell — Retire the Placeholder, Add Navigation
+#### Phase 3: Page Shell — Retire the Placeholder, Add Navigation ✅ COMPLETE
 
 **Prerequisites:** Phase 1.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) — net smaller than it looks: the placeholder
-deletions offset the new page (the ITER17-003 Phase 2 gross-vs-net lesson)
+deletions offset the new page (the ITER17-003 Phase 2 gross-vs-net lesson) · **Actual: 572 production,
+1,242 tests and 193 documentation added, 251 deleted → 2,258 tracked** (3.8× the estimate, **3.9×** its
+own production).
+
+**Both halves of the estimate were wrong, and only one of the two reasons was foreseen.**
+
+*Foreseen:* the e2e spec was pulled forward from Phase 17 at the user's request, and the overrun was
+recorded before work started as delivery rule 3 requires. Sizing rule 9 gives every new e2e spec a phase
+of its own at 150–250 lines; this one came to 265. That is ~265 of the ~1,660 overrun — **16% of it**.
+
+*Not foreseen, and the more useful number:* the production estimate of 150 was low by **3.8×**. "Page
+shell" reads like one file and is nine: five components, an API client typing the whole payload contract,
+a date helper, a navigation change and the page itself. The ×4 multiplier was *right* — 3.9× against
+production is almost exactly it — so the rule did not fail; **the production estimate did**, and no
+amount of multiplier tuning would have caught that.
+
+**Three lessons for the phases that follow.**
+
+1. **Count the components before multiplying.** A "frontend-component phase" is worth ~30–90 production
+   lines per component in this repo, plus its API client. Phases 4, 7, 12 and 14 each fill a card inside
+   this frame *and* add the entry row it repeats — that is two components each, not one, before their
+   own tests.
+2. **A shell phase front-loads cost the phases above it then avoid.** `DashboardSectionCard`,
+   `DashboardSection` and `DashboardPageHeader` (172 lines) are built once and reused four times, so
+   Phases 4, 7, 12 and 14 should each come in *below* a naive per-card estimate. If they do not, that is
+   the signal the shell was factored wrongly.
+3. **Pulling e2e forward is cheap and it paid for itself here** — 265 lines, and it caught two real
+   defects the unit tests could not see (see the decisions below). Later phases should expect the same
+   trade rather than treating their e2e as free *or* as expensive.
 
 **Acceptance Criteria:**
 
-- [ ] `frontend/src/app/page.tsx` renders the dashboard: `h1` "Today", the localised full date and framing
-      line (**W2**), inside the existing chrome unchanged (**W1**).
-- [ ] The three evidence sections sit in an independent-height three-column grid on `lg`, stacking to one
+- [x] `frontend/src/app/page.tsx` renders the dashboard: `h1` "Today", the localised full date and framing
+      line (**W2**), inside the existing chrome unchanged (**W1**). — `HomeDashboard` in `page.tsx` over
+      `DashboardPageHeader`. The page adds **no container of its own**: the root layout already supplies
+      `main.md:pl-64 > .container.mx-auto.px-4.py-6`, which is what **W1** describes, and the placeholder's
+      nested `container mx-auto py-8` was the likeliest source of the overflow **W3** forbids. Asserted
+      both ways — a unit test pins the absent container, an e2e test pins the absent overflow.
+- [x] The three evidence sections sit in an independent-height three-column grid on `lg`, stacking to one
       column in the order Agenda → Tasks → Upcoming dates below it (**W3**), each a `section` with an
       `sr-only` heading and a labelled list container (**W4**) — rendered as empty-state cards until their
-      phases land.
-- [ ] The six placeholder cards, `frontend/src/__tests__/app/page.test.tsx` **and** the now-unused
+      phases land. — `grid grid-cols-1 items-start gap-4 lg:grid-cols-3`; `DashboardSection` supplies the
+      `section aria-labelledby` + `sr-only h2`, `DashboardSectionCard` the labelled `ul`. The three cards
+      carry their real **W11**/**W21**/**W30** headers and **W29**-idiom empty lines now, so Phases 7, 12
+      and 14 fill a frame rather than replace one. Layout is asserted structurally in the unit tests (grid
+      classes, DOM order) *and* geometrically in e2e (equal `y` three-across at 1280, equal `x` stacked
+      at 375).
+- [x] The six placeholder cards, `frontend/src/__tests__/app/page.test.tsx` **and** the now-unused
       `homePageTestUtils.FEATURE_CARDS` fixture in `frontend/src/test-utils/index.tsx` are all removed in
-      this PR; leaving the fixture behind would imply the placeholder still exists.
-- [ ] A primary-navigation entry for the dashboard (wireframe gap 4), and the home page is the default view
-      after sign-in.
-- [ ] One shared TanStack query feeds the page so concurrent section mounts dedupe into a single fetch,
-      following `frontend/src/lib/api/outdoor-dashboard.ts`.
-- [ ] No horizontal overflow at any breakpoint; semantic colour classes so both themes work.
+      this PR; leaving the fixture behind would imply the placeholder still exists. — All three gone.
+      `src/test-utils/__tests__/no-placeholder-fixture.test.ts` sweeps every `.ts`/`.tsx` file under `src/`
+      and `tests/` for the name and asserts none remains, because the type checker only catches an
+      *import* of a removed export, not the same six strings copied somewhere else. The sweep asserts it
+      found files to search, so an empty walk cannot pass silently.
+- [x] A primary-navigation entry for the dashboard (wireframe gap 4), and the home page is the default view
+      after sign-in. — A top-level **Home** link (`nav-link-home`) above the sections in
+      `SidebarContentInner`, plus an exact-match `/` branch in `isActiveLink`. `/` was already the
+      post-sign-in default (`auth/callback/page.tsx` falls back to it), so this phase pins that with a test
+      rather than changing it.
+- [x] One shared TanStack query feeds the page so concurrent section mounts dedupe into a single fetch,
+      following `frontend/src/lib/api/outdoor-dashboard.ts`. — `useHomeDashboard()` in
+      `frontend/src/lib/api/home-dashboard.ts` over one `['home-dashboard']` key. Asserted twice: four
+      concurrent hook mounts issue one `fetch` (client test), and the whole rendered page issues one (page
+      test, run over the real hook against a routed fetch mock rather than a mocked hook).
+- [x] No horizontal overflow at any breakpoint; semantic colour classes so both themes work. —
+      `document.documentElement.scrollWidth <= clientWidth` asserted at 375 px on both e2e projects;
+      `bg-card`, `text-muted-foreground`, `border-border` and the `chart-*` tokens throughout, no raw
+      colours.
 
 **Required Test Coverage:** unit (RTL) — header, section scaffolding and labelling, single-column stacking
-markers, nav entry active state, and that the removed fixture has no remaining importers. E2E in Phase 17.
+markers, nav entry active state, and that the removed fixture has no remaining importers. ~~E2E in Phase
+17.~~ **E2E landed here instead**, at the user's request, on the ground that the phase completion
+requirements ask every phase with a user-visible surface for its own e2e. — **Delivered:** 46 unit tests
+(6 over the API client, 3 over the date helper, 20 over the page shell, 13 over the section components,
+4 over the fixture's removal), 10 over the navigation entry, and **13 e2e tests green on both `firefox`
+and `Mobile Chrome`**. No new backend tests: this phase changes no backend production code, and the
+endpoint's contract is already covered by the 88 unit and integration tests Phases 1–2 landed, which were
+re-run as a gate.
+
+**Phase 17's scope shrinks by exactly two of its criteria** — "the placeholder cards are gone" and "the
+navigation entry reaches the dashboard" — both discharged here. Everything else it lists concerns sections
+this phase does not build.
+
+**Decisions taken (Phase 3):**
+
+- **The header's date is the server's anchor, and the header shows *no* date until it arrives.** Phase 1
+  recorded that "Phase 3 must read `meta.anchor.date`", and the reason is stronger than convenience: every
+  window on the page is computed for the server's day in the user's *configured* zone, so labelling that
+  evidence with the browser's today would put the wrong date on the whole page for anyone whose browser
+  zone differs from their setting. The loading state therefore renders the framing line alone rather than
+  falling back to `new Date()` — **a wrong date is worse than none**, and a fallback would hide the bug
+  precisely when it mattered. `formatIsoDateLong` parses the anchor as a *local calendar date* (`parseISO`,
+  not `new Date`), the contract `formatIsoDate` already documents, so an already-resolved day is never
+  shifted a second time; a 1 January case pins it.
+- **Home is a top-level link, and the active-state rule had to be fixed before it could exist.** Every
+  other sidebar entry is a collapsible section; a "Home" section that folded away its only item would be a
+  worse affordance than a link, and the specification makes this page the post-sign-in default, so it must
+  not be foldable. The rule change is the part worth recording: `isActiveLink` ends in
+  `pathname.startsWith(href)`, and **every path starts with `/`**, so a naive entry would have marked Home
+  the current page on every route in the app. `/` now matches exactly, beside the branches `/contacts`,
+  `/journals` and `/integrations` already had, and the test that pins it asserts the *negative* case on
+  four routes.
+- **The entries list is rendered empty rather than hidden, and e2e is what caught it.** The first
+  implementation gave the `ul` `empty:hidden`, which reads as tidy and passes in jsdom — where Tailwind is
+  not applied. In a real browser it resolves to `display: none`, which takes the list **out of the
+  accessibility tree**, so `getByRole('list')` found nothing and **W4**'s labelled-list-per-section promise
+  was quietly false. An empty `ul` draws nothing anyway, so the class bought no rendering and cost the
+  guarantee. **A jsdom test cannot see a CSS-driven accessibility regression** — one of the two defects
+  that justify pulling e2e forward into this phase.
+- **The second was a role query the app chrome broke.** `getByRole('region')` returned four, not three:
+  Sonner's toast container is a labelled `section` too. The spec's section queries are scoped to the grid.
+  Worth recording because **every later dashboard phase will reach for the same query** — the sections'
+  entries, the tomorrow disclosure, the show-mores — and an unscoped one will keep counting a region the
+  page does not own.
+- **Three thin cards over one shared shell, rather than a config array.** The three sections differ only in
+  their copy today, so a single card driven by a three-entry array was the smaller diff. It was declined
+  because it optimises for the shape this phase happens to have rather than the one the next four need:
+  Phases 7, 12 and 14 each fill *one* card with real rendering, and a config array would have to be
+  dismantled to do it. The cards are one line each over `DashboardSectionCard`, so the only repetition is
+  in the props objects, where every token differs.
+- **No new backend integration tests, stated rather than skipped.** The phase completion requirements ask
+  every phase for explicit unit, integration and e2e coverage. This one changes no backend production code,
+  so there is nothing new to integrate; the honest discharge is to re-run the endpoint's existing 88 tests
+  as a gate, which is what was done, rather than to assert an unchanged contract a second time.
+- **One repo-hygiene fix rode along:** `frontend/.prettierignore` now ignores `playwright/.auth/`. The
+  Playwright setup project writes a saved browser auth state there; it is gitignored but was not
+  prettier-ignored, so **any local e2e run left `pnpm quality:check` failing** on a generated file. CI never
+  saw it because CI does not run e2e before the quality gate.
+
+**Two cache-freshness follow-ups, raised in review and deliberately deferred.** Both are real and both
+were verified against the code; neither is fixable *with a test* in a phase whose page renders no section
+data. They are recorded here rather than in the PR so the phases that own them inherit them.
+
+1. **Nothing invalidates `homeDashboardKeys.all`, and the app-wide `staleTime` is five minutes.** So once
+   a section renders task or contact data, changing an in-window task and returning to the dashboard can
+   serve the pre-mutation projection. Not observable in this phase: the only payload field the page reads
+   is `meta.anchor.date`, which no task or contact write can stale. **Owned by Phases 13–15** (tasks
+   section and its inline done action) **and Phase 12** (upcoming dates) — the first phases with data to
+   go stale, and therefore the first that can assert it. Note the fix is not one line:
+   `invalidateAfterMutation` takes each call site's own key sets rather than reading a central registry,
+   so this means editing every task and contact mutation handler. That is two domains, which calibration
+   rule 7 says not to do in one phase, and is a further reason it belongs to the phase that needs it.
+   The convention to follow is the one *Frontend Design → Task writes invalidate `journalKeys.lists()`*
+   already documents.
+2. **The query has no refresh scheduled at the anchor-day boundary.** React Query marks a query stale
+   after `staleTime` but does not refetch on that alone, so a dashboard left open *and focused* across
+   local midnight keeps yesterday's anchor — and, from this phase on, yesterday's date in the **W2**
+   header. `refetchOnWindowFocus` is `true` app-wide, so any refocus corrects it; the residual exposure is
+   an always-visible dashboard. **Owned by Phase 16** (section resilience and freshness), where it sits
+   beside the other whole-page concerns. The fix is not a constant interval but a refetch scheduled for
+   the next midnight **in `meta.anchor.timezone`** — the zone the payload already echoes — which is
+   rule-defining logic with DST boundaries to pin, so budget it at ×6 per calibration rule 14 rather than
+   treating it as a one-line query option.
+
+   This one is worth flagging to whoever takes Phase 16, because it contradicts a rule this phase wrote
+   into `DashboardPageHeader`: the header shows **no** date rather than guess one, on the grounds that *a
+   wrong date is worse than none*. A stale anchor after midnight is that same wrong date arriving by a
+   different route.
+
+**Local environment note (not a repo defect):** Playwright's global setup tears the Docker stack down and
+recreates it whenever the running services do not match its expected config, and on the machine this phase
+was built on, the redis host port this worktree's path hashes to (6600) is held by `mpd`, so redis could
+never be re-bound. The suite was run against a hand-started stack instead. Worth knowing because
+`scripts/workspace_env.py` derives ports purely from a path hash with **no override mechanism**, so a
+collision with a host service is unavoidable rather than configurable — recorded as a follow-up below.
 
 #### Phase 4: Summary Card
 
@@ -9307,7 +9463,11 @@ an incoherent split, so the card and its action ship in one PR, as **two commits
 - [ ] An inline **Done** button on every row (**W24**) marks the task done **without leaving the page**,
       after which the section updates in place and the row disappears.
 - [ ] The mutation routes through `invalidateAfterMutation` (cancel before invalidate) — the discipline
-      iteration 17 established across all 77 mutation handlers after two flake fixes.
+      iteration 17 established across all 77 mutation handlers after two flake fixes — and the keys it
+      invalidates **include `homeDashboardKeys.all`**. *Inherited from Phase 3:* nothing invalidates that
+      key today, and the app-wide `staleTime` is five minutes, so without this the section would serve the
+      pre-mutation projection to a user who returns to the dashboard after ticking something off. This is
+      the first phase with dashboard data a write can stale, and therefore the first that can assert it.
 - [ ] No overdue section, counter or badge appears anywhere on the page, and lapsed tasks never render here.
 - [ ] The summary card is **not** regenerated underneath the user when a task is ticked — the section
       updates, the summary refreshes on next load (the contract ITER18-005 Phase 7 relies on).
@@ -9335,7 +9495,9 @@ state. E2E in Phase 17.
 #### Phase 16: Section Resilience, Loading and Accessibility
 
 **Prerequisites:** Phases 4, 7, 12, 15.
-**Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Estimated diff:** ~130 production → **~520 tracked** (×4) · **revise upward**: the anchor-boundary
+refresh inherited from Phase 3 is rule-defining logic with DST cases, so budget that criterion at ×6 on
+top — roughly **~180 production → ~700 tracked** for the phase.
 
 **Acceptance Criteria:**
 
@@ -9349,14 +9511,20 @@ state. E2E in Phase 17.
       survive the final layout (**W4**).
 - [ ] No horizontal overflow at mobile widths with long journal titles, long contact names and long tag
       sets — the wide-content cases most likely to break the grid (**W3**).
+- [ ] **Inherited from Phase 3:** the dashboard query is refreshed at the **anchor-day boundary**, so a
+      dashboard left open across local midnight stops showing yesterday's anchor and yesterday's **W2**
+      date. Schedule it for the next midnight in `meta.anchor.timezone` — the zone the payload echoes —
+      not on a fixed interval. Rule-defining logic with DST boundaries: budget ×6 (calibration rule 14).
 
 **Required Test Coverage:** unit (RTL) — per-section loading and error rendering with the other sections
 still present; **keyboard traversal order across all interactive elements**; section and list labelling after
-layout; long-content layout assertions. E2E in Phase 17 covers the mobile project.
+layout; long-content layout assertions; **the midnight refetch, at a day boundary and across a DST
+transition**. E2E in Phase 17 covers the mobile project.
 
 #### Phase 17: E2E — Dashboard Wireframe Conformance
 
-**Prerequisites:** Phases 3–16.
+**Prerequisites:** Phases 3–16. **Phase 3 already shipped the shell's e2e**, so this phase extends
+`frontend/tests/e2e/home-dashboard.spec.ts` rather than creating it.
 **Estimated diff:** ~160 production → **~640 tracked** (×4)
 
 **Acceptance Criteria:**
@@ -9369,7 +9537,10 @@ layout; long-content layout assertions. E2E in Phase 17 covers the mobile projec
       changing.
 - [ ] Each declared state (**W33**) has its own test with its own fixtures: summary generated, generating and
       unavailable; tasks populated and empty; and the agenda and upcoming-dates empty states.
-- [ ] The placeholder cards are gone and the navigation entry reaches the dashboard.
+- [x] ~~The placeholder cards are gone and the navigation entry reaches the dashboard.~~ — **discharged in
+      Phase 3**, which brought its own e2e spec (`frontend/tests/e2e/home-dashboard.spec.ts`) rather than
+      deferring it here. That spec also covers the page frame (**W1**, **W2**) and the section grid
+      (**W3**, **W4**), so this phase inherits a working shell and adds only the sections' own behaviour.
 - [ ] **Fixtures account for the e2e user having no configured timezone** (backend day boundaries are UTC),
       so "today" and "tomorrow" fixtures are built from explicit UTC offsets — otherwise a local-noon
       journal lands on the wrong dashboard day.
@@ -9785,6 +9956,15 @@ why tasks are full domain-event citizens from the outset (ITER18-003).
 ## Follow-ups and Decisions
 
 Appended as the work proceeds, in the style of iterations 16 and 17.
+
+- **`scripts/workspace_env.py` has no port-override mechanism, and a host-service collision is therefore
+  unfixable locally** (found in ITER18-004 Phase 3). Every port is derived from a hash of the worktree
+  path, so a workspace whose redis port lands on one a host daemon already owns can never bring the test
+  stack up — Playwright's global setup restarts the stack whenever config drifts, and the restart fails
+  every time. An opt-in override (an env var consulted before the derived value, or a gitignored
+  `.workspace-ports` file) would cost a few lines and unblock the affected checkout. Not done here: it is
+  test infrastructure shared by every iteration, and changing it inside a page-shell phase would put an
+  unrelated risk in that PR.
 
 - **Record the actual diff beside each phase's estimate as it lands**, in the
   `**Estimated diff:** … · **Actual:** …` form iteration 17 used. The

@@ -423,41 +423,12 @@ export const testPatterns = {
   },
 } as const;
 
-// HomePage-specific test utilities
+// HomePage-specific test utilities.
+//
+// The placeholder feature-card fixture that used to live here went with the
+// placeholder page itself (ITER18-004 Phase 3): keeping it would have implied
+// the six cards still existed.
 export const homePageTestUtils = {
-  // Feature cards data for consistent testing
-  FEATURE_CARDS: [
-    {
-      title: 'Contacts',
-      description:
-        'Manage your personal and professional contacts with tags and Google sync.',
-    },
-    {
-      title: 'Journal',
-      description:
-        'Keep track of your thoughts, experiences, and memories with mood tracking.',
-    },
-    {
-      title: 'Calendar',
-      description:
-        'Sync with Google Calendar and link events to photos and journal entries.',
-    },
-    {
-      title: 'Photos',
-      description:
-        'Connect with Immich to link photos to contacts, events, and journal entries.',
-    },
-    {
-      title: 'AI Integration',
-      description:
-        'MCP protocol support for AI assistants to access and manage your data.',
-    },
-    {
-      title: 'System Status',
-      description: 'Monitor system health and integration status.',
-    },
-  ] as const,
-
   // Mock authenticated session response
   createAuthenticatedSessionMock: () => ({
     ok: true,

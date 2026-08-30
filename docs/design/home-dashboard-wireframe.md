@@ -106,6 +106,9 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
    Integrations only; "Home" is reachable solely from the header logo link (W1), which is today's
    behaviour. The specification asks for the home page to be reachable from the primary navigation as
    the post-sign-in default, so ITER18-004 adds it — a deliberate addition to the wireframe.
+   **Resolved in ITER18-004 Phase 3:** a top-level **Home** link above the collapsible sections, not a
+   section of its own — the page is the post-sign-in default and a section that folded away its only
+   item could hide it. The header logo link (W1) stays as it is.
 5. **No lapsed tasks anywhere on the page.** Deliberate and correct: lapsed tasks leave the dashboard
    silently. The lapsed presentation lives on journal detail views (ITER18-001), not here.
 6. **The key-stats footer (W10) is not called out in the specification's dashboard section.** The four

@@ -77,3 +77,19 @@ export function formatDateRange(
 export function formatIsoDate(date: string): string {
   return format(parseISO(date), 'd MMM yyyy', { locale: enAU });
 }
+
+/**
+ * Format an ISO **calendar date** (`YYYY-MM-DD`) in full: `EEEE, d MMMM yyyy`.
+ *
+ * The long form the home dashboard's header carries (**W2**) —
+ * *"Wednesday, 29 July 2026"*. Parsed as a local calendar date for the same
+ * reason as {@link formatIsoDate}, and it matters more here: the dashboard's
+ * date is the server's anchor, already resolved in the user's configured zone.
+ * Re-parsing it as an instant would shift it a day in any zone behind UTC and
+ * label the page with yesterday.
+ *
+ * @example formatIsoDateLong('2026-07-29') // "Wednesday, 29 July 2026"
+ */
+export function formatIsoDateLong(date: string): string {
+  return format(parseISO(date), 'EEEE, d MMMM yyyy', { locale: enAU });
+}

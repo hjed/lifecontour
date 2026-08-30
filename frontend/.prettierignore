@@ -18,6 +18,9 @@ coverage/
 # Test results
 test-results/
 playwright-report/
+# Saved browser auth state, written by the Playwright setup project. Gitignored
+# already; without this, a local e2e run leaves quality:check failing on it.
+playwright/.auth/
 
 # Environment files
 .env
