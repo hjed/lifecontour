@@ -8968,6 +8968,24 @@ needs a deliberate edit to a rarely-touched field while the winning case was eve
 synced holidays. **Follow-up:** default the zone at the journal write path when it is cleared, and the
 case disappears; that touches the write path, which is why it is not here.
 
+**The stored zone is resolved through `pg_timezone_names`, not handed to `AT TIME ZONE` directly.**
+`journal_calendar_info.timezone` is an unconstrained string and `AT TIME ZONE` **raises** on a name
+PostgreSQL does not recognise — which aborts the statement, so a single legacy or externally-synced row
+with a nonsense zone would take the whole section to *unavailable* and show the user an empty day. The
+rest of the system already refuses to break on this: `resolve_timezone` falls back to UTC for the
+anchor, and `CalendarInfo` hydration skips validation precisely so a bad persisted row cannot crash a
+read path. Found in review after the date fix landed — the fix introduced the exposure, since nothing in
+this query touched `jci.timezone` before it. Verified against the database rather than assumed: a bare
+`AT TIME ZONE 'Mars/Olympus'` raises, a `CASE` does guard its untaken branch (so timed rows were never
+at risk), and the `pg_timezone_names` lookup falls back correctly while still resolving a real zone.
+Two tests, both of which fail without the join.
+
+**A latent flake was fixed at the same time.** `test_the_clock_times_come_back_in_the_events_own_zone`
+seeded 09:00 in a UTC+14 zone for a UTC-anchored reader, which puts the instant on the *previous* UTC
+day for most of each day — so it passed or failed by the hour it ran. Placement and the recorded zone
+are now separate parameters on the seeder: the event sits on the reader's day while the row claims a
+different zone, which is the thing the test is actually about.
+
 **Of the five all-day tests, only one fails without the fix** — the far-western Google case, which is
 the defect. The other four pass either way and are guards: the eastern side that already worked, the app
 convention that already worked, the multi-day span, and the timed-event separation. Recorded because a

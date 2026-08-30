@@ -51,6 +51,11 @@ FAR_EAST = "Pacific/Kiritimati"  # UTC+14
 FAR_WEST = "Pacific/Niue"  # UTC-11
 
 
+# Sentinel for "write whatever zone the instant was built in", so a test can
+# also say "store this other string", including one that is not a zone at all.
+_KEEP: Any = object()
+
+
 def agenda_of(response: Any) -> dict[str, Any]:
     section: dict[str, Any] = response.json()["data"]["attributes"]["agenda"]
     return section
@@ -111,8 +116,16 @@ class EventSeeder:
         location: str | None = None,
         event_state: str = "confirmed",
         with_calendar_info: bool = True,
+        records_zone_as: str | None = _KEEP,
     ) -> int:
-        """One journal, optionally with the calendar info that makes it an event."""
+        """One journal, optionally with the calendar info that makes it an event.
+
+        ``timezone`` places the event — the local day and hour it is written at —
+        and is also what goes in the column. ``records_zone_as`` separates the
+        two, so a test can put an event squarely on the reader's day while the
+        row still claims a different zone, which is what the stored clock values
+        actually mean.
+        """
         tz = ZoneInfo(timezone)
         local_day = datetime.datetime.now(tz).date() + datetime.timedelta(
             days=day_offset
@@ -152,14 +165,21 @@ class EventSeeder:
                     "end_time": None if all_day else end.time(),
                     "all_day": all_day,
                     "location": location,
-                    "timezone": timezone,
+                    "timezone": (
+                        timezone if records_zone_as is _KEEP else records_zone_as
+                    ),
                     "event_state": event_state,
                 },
             )
         return journal_id
 
     async def all_day_on(
-        self, day: datetime.date, *, title: str, written_in: str | None = None
+        self,
+        day: datetime.date,
+        *,
+        title: str,
+        written_in: str | None = None,
+        stored_as: str | None = _KEEP,
     ) -> int:
         """An all-day journal for ``day``, in one of the two storage conventions.
 
@@ -168,6 +188,10 @@ class EventSeeder:
         for a date-only event. Passing a zone is the **app** convention: midnight
         in that zone, with the zone recorded — which is what the create form plus
         ``EventTypeEditor`` produce.
+
+        ``stored_as`` overrides what goes in the column, so a test can write a
+        zone that is not a real one. The column takes any string, which is the
+        whole reason the query cannot hand it to ``AT TIME ZONE`` unchecked.
         """
         zone = ZoneInfo(written_in) if written_in else datetime.UTC
         midnight = datetime.datetime.combine(day, datetime.time.min, zone)
@@ -196,7 +220,7 @@ class EventSeeder:
             {
                 "journal_id": journal_id,
                 "calendar_id": await self.calendar(),
-                "timezone": written_in,
+                "timezone": written_in if stored_as is _KEEP else stored_as,
             },
         )
         return journal_id
@@ -323,16 +347,23 @@ class TestWhatReachesTheAgenda:
     ) -> None:
         """The stored clock values are the event's wall time, and say so.
 
-        Seeded in a zone the reader is not in, so a payload that quietly
-        converted the times — or dropped the zone that makes them readable —
-        fails here rather than in a card three phases on.
+        The event sits on the reader's own day — this user has no stored zone, so
+        that is UTC's day — while the row claims a different one. A payload that
+        quietly converted the times, or dropped the zone that makes them
+        readable, fails here rather than in a card three phases on.
+
+        Placement and the recorded zone are separated deliberately: seeding at
+        09:00 in a UTC+14 zone would put the instant on the *previous* UTC day
+        for most of each day, so the test would pass or fail by the hour it ran.
         """
-        await seeder.event(title="Kiritimati morning", timezone=FAR_EAST, hour=9)
+        await seeder.event(
+            title="A meeting booked elsewhere", hour=12, records_zone_as=FAR_EAST
+        )
 
         entry = entries_of(await authenticated_client.get(URL))[0]
 
         assert entry["timezone"] == FAR_EAST
-        assert entry["start_time"] == "09:00:00"
+        assert entry["start_time"] == "12:00:00"
 
     async def test_a_journal_with_no_calendar_info_is_not_an_event(
         self, authenticated_client: AsyncClient, seeder: EventSeeder
@@ -822,3 +853,63 @@ class TestAnAllDayEventLandsOnItsOwnDate:
         entries = entries_of(await authenticated_client.get(URL))
 
         assert [entry["journal_id"] for entry in entries] == [journal_id]
+
+
+@pytest.mark.asyncio
+class TestAnUnrecognisedStoredTimezone:
+    """One nonsense zone must not cost the whole day.
+
+    ``journal_calendar_info.timezone`` is an unconstrained string, and
+    ``AT TIME ZONE`` **raises** on a name PostgreSQL does not know — which aborts
+    the statement, so the section would report *unavailable* and the user would
+    see an empty agenda because one legacy or externally-synced row was wrong.
+
+    The rest of the system already refuses to break on this: ``resolve_timezone``
+    falls back to UTC for the anchor, and ``CalendarInfo`` hydration skips
+    validation precisely so a bad persisted row cannot crash a read path. The
+    query resolves the name through ``pg_timezone_names`` for the same reason.
+    """
+
+    async def test_the_agenda_still_answers_and_keeps_its_other_events(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        today = datetime.datetime.now(datetime.UTC).date()
+        for offset in (-1, 0, 1):
+            day = today + datetime.timedelta(days=offset)
+            await seeder.all_day_on(
+                day, title=f"Legacy {day.isoformat()}", stored_as="Mars/Olympus"
+            )
+        await seeder.event(title="An ordinary meeting", hour=9)
+
+        response = await authenticated_client.get(URL)
+
+        section = agenda_of(response)
+        assert section["status"] == "ready", section
+        anchor = response.json()["meta"]["anchor"]["date"]
+        assert {entry["title"] for entry in entries_of(response)} == {
+            f"Legacy {anchor}",
+            "An ordinary meeting",
+        }
+
+    async def test_the_bad_row_is_read_as_utc_rather_than_dropped(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        """UTC is the fallback, so the row lands on the date it was written as.
+
+        Dropping it would be the other way to avoid the crash, and it is worse:
+        an all-day event that silently disappears is indistinguishable from a day
+        that has none.
+        """
+        today = datetime.datetime.now(datetime.UTC).date()
+        for offset in (-1, 0, 1):
+            day = today + datetime.timedelta(days=offset)
+            await seeder.all_day_on(
+                day, title=f"Legacy {day.isoformat()}", stored_as="Mars/Olympus"
+            )
+
+        response = await authenticated_client.get(URL)
+
+        anchor = response.json()["meta"]["anchor"]["date"]
+        assert [entry["title"] for entry in entries_of(response)] == [
+            f"Legacy {anchor}"
+        ]

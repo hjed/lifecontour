@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "app": {
+      "command": "/home/hjed/.local/share/agent-multiplexer/bin/app-mcp",
+      "args": [
+        "--workspace-id",
+        "58cd6f42-ce77-41fb-a1b1-49a39c9d79e1",
+        "--ticket-id",
+        "3944e49b-3b9f-4430-8dcd-d048f31930e8",
+        "--run-id",
+        "142b59eb-8a48-4c3e-a354-f198f6609a97"
+      ],
+      "env": {
+        "APP_MCP_STATE_DIR": "/home/hjed/.local/share/agent-multiplexer"
+      }
+    }
+  }
+}
