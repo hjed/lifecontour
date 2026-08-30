@@ -537,6 +537,42 @@ class SqlJournalRepository(JournalRepository):
         )
         return [self._row_to_journal(row) for row in result.fetchall()]
 
+    async def find_and_lock_by_ids_for_user(
+        self, user_id: str, journal_ids: list[int]
+    ) -> list[Journal]:
+        """Lock the user's journals among ``journal_ids``, low to high, and return them.
+
+        One statement per id rather than one ``id = ANY(...)`` over the lot: a
+        row lock is not promised in the order a query returns its rows, so a
+        single statement would leave the acquisition order to the plan and the
+        ordering claim would be intended rather than true. Ascending id is the
+        order ``SqlTaskAnchorRepository._lock_journals`` uses, and agreeing with
+        it is the whole point — see the port for what the two operations were
+        deadlocking over.
+
+        ``FOR KEY SHARE`` and the owner predicate both sit in the statement, so a
+        journal belonging to somebody else is not locked and not returned.
+        """
+        query = text(
+            """
+            SELECT id, user_id, title, content,
+                   event_date_range_start, event_date_range_end,
+                   parent_id, "order", created_at, updated_at
+            FROM journals
+            WHERE id = :journal_id AND user_id = :user_id
+            FOR KEY SHARE
+            """
+        )
+        locked: list[Journal] = []
+        for journal_id in sorted(set(journal_ids)):
+            result = await self.conn.execute(
+                query, {"journal_id": journal_id, "user_id": user_id}
+            )
+            row = result.fetchone()
+            if row is not None:
+                locked.append(self._row_to_journal(row))
+        return locked
+
     async def get_by_ids_for_user(
         self,
         user_id: str,

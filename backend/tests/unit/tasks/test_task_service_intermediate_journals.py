@@ -60,9 +60,21 @@ def _task(status: TaskStatus = TaskStatus.NOT_DONE) -> Task:
 
 @pytest.fixture
 def mock_task_repo() -> AsyncMock:
-    """A task repository holding a two-journal trail."""
+    """A task repository holding a two-journal trail.
+
+    A retarget reads the task twice — a non-locking peek that names the journals
+    to lock, then the locking read every rule is decided from — so the peek is
+    wired to report whatever the locking read is configured to return. The tests
+    below are about the wrappers, not about the two disagreeing.
+    """
     repo = AsyncMock()
     repo.list_intermediate_journal_ids.return_value = [11, 22]
+
+    async def peek(_task_id: int, _user_id: str) -> Task | None:
+        found = repo.find_by_id_for_update.return_value
+        return found if isinstance(found, Task) else None
+
+    repo.find_by_id.side_effect = peek
     return repo
 
 
@@ -98,7 +110,7 @@ def retargeting_service(
     settings_repo.get_timezone.return_value = "UTC"
 
     journal_repo = AsyncMock()
-    journal_repo.find_by_ids_for_user.return_value = [
+    journal_repo.find_and_lock_by_ids_for_user.return_value = [
         Journal(
             id=NEW_DUE_JOURNAL_ID,
             user_id=USER_ID,

@@ -425,17 +425,20 @@ def service_on(
     connection: AsyncConnection,
     user_settings_repository: SqlUserSettingsRepository,
     repo: type[SqlTaskRepository] = SqlTaskRepository,
+    journal_repo: type[SqlJournalRepository] = SqlJournalRepository,
 ) -> TaskService:
     """A ``TaskService`` over real adapters on ``connection``.
 
     The ``service`` fixture is bound to the test's single savepoint connection;
     the concurrency tests need one service per real connection, which is the
-    only way two units of work can overlap. ``repo`` lets a test substitute a
-    repository subclass that observes or signals from inside the call.
+    only way two units of work can overlap. ``repo`` and ``journal_repo`` let a
+    test substitute a repository subclass that observes or signals from inside
+    the call — the journal one because the retarget's *journal* locks are now
+    what it takes first, so that is where a lock-ordering test has to listen.
     """
     return TaskService(
         task_repo=repo(connection),
-        journal_repo=SqlJournalRepository(connection),
+        journal_repo=journal_repo(connection),
         contact_repo=SqlContactRepository(connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
         event_publisher=OutboxEventPublisher(connection),
@@ -448,6 +451,7 @@ async def committed_task(
     *,
     journal_offsets: Sequence[int] = (7,),
     status: TaskStatus = TaskStatus.NOT_DONE,
+    creating_index: int = 0,
 ) -> AsyncIterator[tuple[str, int, list[int]]]:
     """A task that really is committed, under an owner nobody else will see.
 
@@ -457,9 +461,11 @@ async def committed_task(
     for real, scoped to a one-off user id, and deleted again whatever happens.
 
     ``journal_offsets`` says how many journals to create and where to put them
-    relative to now; the task is anchored to the first one as both its creating
-    and its due journal, and the rest are there for a test that needs somewhere
-    to retarget *to*.
+    relative to now; the task is due in the first one, and the rest are there for
+    a test that needs somewhere to retarget *to*. The creating anchor is the
+    first one too unless ``creating_index`` moves it — which a test wants when it
+    is about the **due** anchor alone and a shared creating anchor would drag a
+    second re-point into the outcome.
 
     Yields:
         ``(user_id, task_id, journal_ids)``.
@@ -477,7 +483,7 @@ async def committed_task(
         ]
         task_id = await create_task(
             setup,
-            creating_journal_id=journal_ids[0],
+            creating_journal_id=journal_ids[creating_index],
             due_journal_id=journal_ids[0],
             status=status,
             user_id=user_id,
@@ -507,6 +513,19 @@ async def committed_task(
                     "WHERE event_type LIKE 'Task%' AND aggregate_id = :task_id"
                 ),
                 {"task_id": task_id},
+            )
+            # And the journal events, for the same reason. A test that overlaps a
+            # real ``JournalMergeService`` with this task's journals publishes
+            # ``JournalUpdated`` and ``JournalDeleted`` on a committed connection
+            # too, and journal ids are globally unique, so these are exactly this
+            # helper's journals and nobody else's.
+            await cleanup.execute(
+                text(
+                    "DELETE FROM outbox_events "
+                    "WHERE event_type LIKE 'Journal%' "
+                    "AND aggregate_id = ANY(:journal_ids)"
+                ),
+                {"journal_ids": journal_ids},
             )
             await cleanup.execute(
                 text("DELETE FROM tasks WHERE user_id = :user_id"),
