@@ -27,7 +27,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 from core_shared.models.journals import BlockingTask
-from core_shared.models.tasks import Task
+from core_shared.models.tasks import Task, TaskJournalRepointing
 
 
 class TaskRepository(ABC):
@@ -451,7 +451,7 @@ class TaskAnchorRepository(ABC):
     @abstractmethod
     async def repoint_journal_links(
         self, *, source_journal_id: int, target_journal_id: int
-    ) -> None:
+    ) -> list[TaskJournalRepointing]:
         """Move every task link off one journal and onto another.
 
         Called by a journal merge before it deletes the absorbed journal. Unlike
@@ -489,8 +489,31 @@ class TaskAnchorRepository(ABC):
         passing the same journal as both source and target is a no-op rather
         than a self-collapse.
 
+        **It reports what it moved, per task**, because the tasks domain
+        publishes an event for each one and no caller can reconstruct the answer
+        afterwards: two of the four statements are deletes, and the anchor roles
+        are overwritten by the re-point itself. The summaries carry the *net*
+        effect rather than a statement-by-statement account — see
+        :class:`~core_shared.models.tasks.TaskJournalRepointing` — and an
+        implementation must report a task **only** if it actually moved
+        something for it, since the caller turns each summary into a line in a
+        user's history.
+
+        That last rule is about **concurrency**, not only about arithmetic. The
+        locks above hold the two journals, not the tasks: a task can be deleted,
+        or its link to the absorbed journal detached, between an implementation
+        deciding which tasks it is about and the statements that move them. Such
+        a task moved nothing and must not be reported — reporting it either
+        writes a change into the history of a task that no longer exists, or
+        (worse) fails the merge on a task, which this operation may never do.
+
         Args:
             source_journal_id: The journal being absorbed, which is about to be
                 deleted
             target_journal_id: The surviving journal the links move onto
+
+        Returns:
+            One summary per task this call moved, ordered by task id so a merge's
+            events go out in the same order every time. Empty when the absorbed
+            journal has no task on it, which is most merges.
         """

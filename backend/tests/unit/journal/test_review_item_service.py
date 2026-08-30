@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.journals.review_item import ReviewItem, ReviewReason
 
@@ -152,8 +153,53 @@ class TestAutoMergeReviewItems:
         assert remaining == 0
         assert errors == []
         mock_merge_service.merge_journals.assert_awaited_once_with(
-            target_id=20, source_id=10, transaction=mock_transaction
+            target_id=20,
+            source_id=10,
+            transaction=mock_transaction,
+            source=Provenance.SYSTEM,
+            changed_by="system",
         )
+
+    @pytest.mark.asyncio
+    async def test_the_caller_s_provenance_reaches_every_merge(
+        self,
+        review_item_service,
+        mock_review_item_repo,
+        mock_journal_service,
+        mock_merge_service,
+        mock_transaction,
+    ):
+        """ "Auto" is how the pairs were chosen, not who chose to merge them.
+
+        A person pressed the button, and each merge re-points the task links of
+        whatever tasks the absorbed journal held — so those tasks' history has to
+        name that person rather than the system. Without the forward, one screen
+        of merges would fill several users' task histories with changes nobody
+        appears to have made.
+        """
+        mock_review_item_repo.find_pending_by_user.return_value = [
+            _review_item(1, 10, 20),
+            _review_item(2, 11, 21),
+        ]
+        mock_review_item_repo.count_pending_by_user.return_value = 0
+        mock_journal_service.get_journal.side_effect = [
+            _journal(10),
+            _journal(20),
+            _journal(11),
+            _journal(21),
+        ]
+
+        await review_item_service.auto_merge_review_items(
+            "user-1",
+            transaction=mock_transaction,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        assert [
+            (call.kwargs["source"], call.kwargs["changed_by"])
+            for call in mock_merge_service.merge_journals.await_args_list
+        ] == [(Provenance.UI, "ui"), (Provenance.UI, "ui")]
 
     @pytest.mark.asyncio
     async def test_skips_conflicting_items(

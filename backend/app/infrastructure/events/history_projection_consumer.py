@@ -66,9 +66,11 @@ _CONTACT_HISTORY_EVENT_TYPES: list[str] = [
     "ContactSummaryUpdated",
 ]
 
-# Task-domain event types the projection maps: the lifecycle set plus the
-# due-anchor move and the intermediate-journal pair. That is every type the tasks
-# domain publishes, so nothing a task write announces reaches the stream unread.
+# Task-domain event types the projection maps: the lifecycle set, the due-anchor
+# move, the intermediate-journal pair, and the re-point a journal merge performs.
+# That is every type the tasks domain publishes, so nothing a task write
+# announces reaches the stream unread — including the one write that is not
+# performed by a task write path at all.
 #
 # This list and ``HistoryService._HANDLERS`` move together, in both directions: an
 # unsubscribed type is filtered out here and its history is never written, while a
@@ -86,6 +88,7 @@ TASK_HISTORY_EVENT_TYPES: list[str] = [
     "TaskDueJournalRetargeted",
     "TaskJournalLinked",
     "TaskJournalUnlinked",
+    "TaskJournalLinksRepointed",
     "TaskDeleted",
 ]
 

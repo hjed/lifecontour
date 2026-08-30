@@ -54,14 +54,18 @@ row — and **Phase 7 completed the set**: the anchor move projects as a `due_jo
 status line on the deferrals that reopened a task) and the intermediate links as `journal:{id}` rows
 the right way round, so a task's trail says which journal, in which role, and when. Nothing a task
 write announces is now written and left unread, and the invariant is asserted in a form that
-**fails** for a new type rather than a list to extend — which is what Phase 10 will meet. Phase 7
+**fails** for a new type rather than a list to extend — which is exactly what happened when Phase 10
+landed, three tests before a line of its projection existed. Phase 7
 also pins the specification's *"tasks are not indexed"* at three independent levels: the
 `search-indexer` group matches no task type, `SearchIndexer` skips one anyway, and a real task
 lifecycle through that group creates no index, dead-letters nothing and is findable nowhere.
 Nothing is user-visible yet — the read surface is Phase 8 and the first screen that
 shows it is Phase 9. Phase 3's review added
-**Phase 10**: a journal merge re-points task anchors and publishes no task event, which is now the
-completeness test's one **named exclusion** and asserted positively rather than merely absent.
+**Phase 10**: a journal merge re-points task anchors and published no task event, which the
+completeness test carried as its one **named exclusion**, asserted positively rather than merely
+absent. Phase 10 closed it — `TaskJournalLinksRepointed`, one per task a merge moves, authored by the
+tasks domain and published inside the merge's own unit of work — and the exclusion list is now empty
+by assertion.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -8335,11 +8339,17 @@ mounting the feed unconditionally fails **25** of the row's 31.
 Docker PostgreSQL; `pnpm quality:check` clean and the whole Jest suite green (179 suites, 2,243
 tests); `task-activity-history.spec.ts` green on **both** e2e projects, five tests each.
 
-#### Phase 10: Events — Anchors Re-pointed by a Journal Merge
+#### Phase 10: Events — Anchors Re-pointed by a Journal Merge ✅ COMPLETE
 
 **Prerequisites:** Phases 4 and 7, ITER18-002 Phase 3 (complete).
 **Estimated diff:** ~200 production → **~1,000–1,400 tracked** — above the 500-line standard and flagged
 under delivery rule 3, for the reasons under *Why this is its own phase* below.
+**Actual:** **~662 production → ~2,086 tests** across 31 files (production: the events module 149, the
+anchor repository 146, the new tasks-domain merge service 113, the repointing value object 85, the
+merge service 45, DI 31, `HistoryService` 22, the port contract 17, the MCP tool 16, the REST
+controllers 12, the review-item service 12, the consumer list 6, the frontend wording 6 — plus ~60
+documentation lines outside this entry). **Production ran to 3.3× the estimate and the total to ~2×
+the tracked figure**, which is the calibration finding below.
 
 **Added during Phase 3**, whose local review surfaced it. It is a new phase rather than an amendment to
 ITER18-002 Phase 3 because that phase is complete and merged: a shipped phase's record is not edited to
@@ -8370,25 +8380,29 @@ history exists to record.
 
 **Acceptance Criteria:**
 
-- [ ] A journal merge publishes a task-scoped event **per affected task**, aggregated under the task id,
+- [x] A journal merge publishes a task-scoped event **per affected task**, aggregated under the task id,
       recording which anchors moved, which intermediate links moved, and which were dropped as duplicate
-      or redundant. A merge touching no task publishes nothing.
-- [ ] The event is **not** `TaskDueJournalRetargeted`. A merge is not a retarget: it does not force the
-      status to *not done*, it can move the **creating** anchor, and it can *delete* links. Reusing that
-      type would make a user's history claim they deferred a task they never touched.
-- [ ] Published **inside the merge's existing unit of work**, so a merge that fails leaves no task event,
+      or redundant. A merge touching no task publishes nothing. — `TaskJournalLinksRepointed`, one per
+      task the re-point moved, in **task-id order**. What it records is the **net effect** rather than a
+      statement-by-statement account; see *Decisions taken*.
+- [x] The event is **not** `TaskDueJournalRetargeted`. — a class of its own, and the reasons are in its
+      docstring rather than only here: a merge forces no status, can move the creating anchor, and can
+      delete links.
+- [x] Published **inside the merge's existing unit of work**, so a merge that fails leaves no task event,
       and the events go out in a deterministic order relative to the merge's own `JournalUpdated` and
-      `JournalDeleted`.
-- [ ] Provenance reaches the event from the merge's caller, so a merge performed in the UI and one
-      performed over MCP are distinguishable on the affected tasks. **`JournalMergeService.merge_journals`
-      does not currently take `source`/`changed_by`** — threading them through it and both merge surfaces
-      is part of this phase, and is the larger half of its production cost.
-- [ ] `HistoryService` projects the event into `field_history` under the task entity type, reusing the
+      `JournalDeleted`. — the re-point is step 0, so the task events precede both; asserted over the
+      stored rows in `(occurred_at, id)` order, and the rollback asserted by failing a **caller's** unit
+      of work, which leaves neither the move nor the event.
+- [x] Provenance reaches the event from the merge's caller. — `merge_journals` gains
+      `source`/`changed_by`, threaded from **three** surfaces rather than the two this entry named; the
+      third is recorded below.
+- [x] `HistoryService` projects the event into `field_history` under the task entity type, reusing the
       handlers Phases 6–7 built rather than adding a parallel shape. A row whose value names an absorbed
-      journal is left as it is: rewriting history to point at the survivor would be editing the record of
-      what happened.
-- [ ] Whichever design is chosen for open decision 4, **the journal domain does not construct task
-      events.**
+      journal is left as it is. — one dispatch entry onto the *existing* `_project_task_updated`, no new
+      handler, and an integration test that a pre-merge row naming the absorbed journal is untouched.
+- [x] Whichever design is chosen for open decision 4, **the journal domain does not construct task
+      events.** — (a), as the default said: `JournalMergeService` holds `TaskJournalMergeService`
+      instead of `TaskAnchorRepository`.
 
 **Why this is its own phase, and why it is oversized.** It is the only phase in this iteration that must
 touch **two domains** — the thing calibration rule 7 singles out as the expensive kind, having measured
@@ -8397,19 +8411,16 @@ domain's merge and the event belongs to the task domain. What the phase *can* do
 call, which is what open decision 4 is about. The estimate is raised accordingly rather than written down
 to 500 and discovered later, per delivery rule 3.
 
-**Open decisions:**
+**Open decisions — resolved:**
 
-4. **Where the event is published from.** Either (a) `repoint_journal_links` returns what it moved and a
-   **task-domain** service method publishes, with `JournalMergeService` calling that method instead of the
-   repository — one new seam, and task events stay authored by the task domain; or (b) the merge service
-   publishes directly from a returned summary, which is fewer moving parts but puts one domain's service
-   in charge of another's events. (a) matches the ports-and-adapters stance the domain architecture
-   document takes and is the default unless (b) turns out materially smaller.
-5. **One event per affected task, or one event carrying every affected task.** Per-task is the shape
-   `field_history` wants — `entity_id` is a task id, and Phase 6 aggregates under it — but a merge
-   absorbing a heavily-linked journal would publish a row per task in one unit of work. Per-task is the
-   default; if a batch shape is chosen instead, the projection has to fan it out and that cost moves to
-   Phase 7's handler.
+4. **Where the event is published from** — **(a)**, the documented default. `repoint_journal_links`
+   returns what it moved and `TaskJournalMergeService.repoint_journal_links` publishes, with
+   `JournalMergeService` calling that instead of the repository. One new seam; task events stay authored
+   by the task domain.
+5. **One event per affected task, or one carrying every affected task** — **per task**, the documented
+   default. `field_history.entity_id` is a task id and Phase 6 aggregates under it, so a batch event
+   would have to be aggregated under one of the two journals — which is exactly where the merge already
+   publishes and exactly why the affected tasks' histories said nothing.
 
 **Required Test Coverage:** unit — the payload for each way a merge can move a task (due anchor only,
 creating anchor only, both, intermediate link moved, duplicate collapsed, redundant link dropped), and
@@ -8417,6 +8428,165 @@ that a merge affecting no task produces none. Integration — merge → outbox r
 the right provenance; publish → relay → projection with idempotency on redelivery; a merge that fails
 leaves no task event; the `search-indexer` group still ignores the new type. **E2E:** none — this is a
 record of something the merge already does, and the merge's own e2e coverage does not change.
+
+**Delivered: 51 unit tests and 24 integration tests**, plus one Jest case. Unit: 8 for the value object
+(`tests/unit/tasks/test_task_journal_repointing.py`), 7 for the assembly step added by the review fix
+(`test_merge_repoint_assembly.py`), 17 for the event class and its identity
+(`test_task_events.py`, 98 → 115), 10 for the publishing service
+(`test_task_journal_merge_service.py`), 6 for the projection (`tests/unit/history/test_history_service.py`,
+82 → 88), and one each in `test_journal_merge_service.py` (provenance forwarded) and
+`test_review_item_service.py` (forwarded per merge in the loop). Integration: 14 in
+`test_journal_merge_task_links_integration.py` (13 → 27) — eleven for what the re-point *reports*, one
+rollback, two ordering; 4 in `test_task_history_projection_e2e.py` (20 → 24); 2 surface tests in
+`test_journal_merge_endpoint.py` and assertions added to the existing MCP merge test; and the
+completeness inventory's twelfth write path, which is four parametrised cases. **No e2e**, as the phase
+specifies, and the absence is a checked fact: `grep -rn "merge" frontend/src/lib/api/journals.ts`
+reaches the merge dialog, but nothing on screen changes — the rows this phase writes appear in the task
+history feed Phase 9 already built and already covers.
+
+**Documentation.** `docs/architecture/domain-architecture.md` — the tasks event list, the new type's
+payload and vocabulary, why it is not a retarget, the provenance thread across three surfaces, and the
+**named-exclusion list is now empty**. `docs/architecture/integration-architecture.md` — the
+`HistoryProjectionConsumer` row's type list.
+
+**Decisions taken (Phase 10):**
+
+- **The payload is `changed_fields`, so there is no new handler.** The alternative — a bespoke handler
+  reading merge-shaped keys — was rejected for the reason Phase 7 rejected one for the retarget: "how a
+  task field change becomes a row" already exists, and a second copy is a second place for it to
+  disagree. The anchors carry `(absorbed, survivor)` pairs; each intermediate link is a `journal:{id}`
+  row in the direction it moved, which is the **same key** a manual attach and detach land under, so a
+  journal a merge took away and one a person detached read as the same kind of line. Pinned by a test
+  asserting the merge's removal row and a manual detach's are equal field for field.
+- **The facts are net effect, not statements.** The repository runs four statements, but "collapsed as a
+  duplicate" and "moved and then dropped as redundant" are the same *change* to the task — the
+  absorbed journal's link is gone and none on the survivor was gained — and a history distinguishing
+  them would be describing SQL rather than the task. They leave the task in different **states**: a
+  collapse keeps the survivor's link the task already had, a drop leaves it with none. That
+  difference is inherited from where each task started, and history records what changed rather than
+  what is. So `TaskJournalRepointing` carries `source_link_removed` / `target_link_added` /
+  `target_link_removed` rather than one boolean per statement, and a moved link is a departure **and**
+  an arrival while the two cancelling cases are the departure alone. The alternative would have announced an arrival for a
+  link the user never gained.
+- **The value object refuses to describe nothing.** A summary with no fact set, or with the survivor's
+  link both gained and lost, raises rather than being published: the first would project zero rows and
+  read downstream exactly like a task the merge never touched, and the second is a shape the four
+  statements cannot produce. Both failures are otherwise silent, which is the whole argument for making
+  them loud.
+- **`RETURNING` on three statements, and a widened pre-read for the anchors.** What each statement did
+  is only knowable while it runs — two of them are deletes — and the anchor *roles* are only legible
+  before the update, since afterwards both columns hold the survivor's id. So the existing
+  "affected task ids" read becomes a read of `(task_id, user_id, creating_anchor_moved,
+  due_anchor_moved)` ordered by id, and the three link statements report their own rows. **No new query
+  and no new lock**: the pre-read replaces the old one, and the ordering it gains is what makes the
+  events deterministic between runs.
+- **The owner travels from the repository, because the merge never read the task.** It reached these
+  tasks through a *journal*, and `field_history.user_id` is what keeps a hard-deleted task's history
+  readable and owner-scoped. Cheapest to take from the same pre-read; a second query would have been the
+  only alternative.
+- **A concrete service, not a new ABC** — flagged in the plan so it could be overruled, and it was not.
+  `TaskAnchorRepository` is an abstract port because adapters vary; this has one implementation and one
+  consumer, and its single method *is* the whole capability the journal domain is handed. It is provided
+  from `JournalProvider`, following the Phase 1 rule that a port the consumer needs is supplied by the
+  consumer's own provider — otherwise every container registering `JournalProvider` would have to
+  register `TaskProvider` too, which cost eleven test files last time it was measured.
+- **A third merge surface the phase entry did not name.** `ReviewItemService.auto_merge_review_items`
+  merges every conflict-free pair in the review queue, in one unit of work, from a REST endpoint. It
+  would otherwise have stamped every task it moved `system`. It is `ui`: *auto* describes how the pairs
+  were chosen, not who chose to merge them — the same reading that makes a retarget-derived link the
+  user's. It is also the only caller that can re-point one task twice, which is why `event_id` names the
+  **absorbed journal** as well as the task, following `TaskJournalLinked`'s precedent.
+- **The provenance parameter collided with a local variable, and the local was renamed.** `merge_journals`
+  already had `source` — the source *Journal*. Naming the new parameter anything else would have made
+  this the one write method in the codebase that spells provenance differently, so the local became
+  `source_journal` instead. mypy caught the collision immediately; a dynamically-typed codebase would
+  have shipped a merge that passed a `Provenance` where a `Journal` was expected.
+- **A latent trap in the shared projection harness, found by this phase and fixed there.**
+  `relay_and_project` relays with `batch_size=50` but built the consumer with the production default of
+  **ten**, so one `_process_batch()` read at most ten messages. Driving a merge through the task
+  lifecycle test added two journal events, pushed the run to eleven, and the task's **delete marker
+  silently disappeared** — with the row count still looking plausible. The consumer now matches the
+  relay. *The lesson: a harness that processes "one batch" is asserting a size limit nobody wrote down,
+  and it fails as missing data rather than as an error.*
+- **The completeness inventory's exclusion is deleted, not satisfied.** `NAMED_EXCLUSIONS` is now empty,
+  `test_a_merge_repoints_a_task_and_publishes_nothing` is inverted into
+  `test_a_merge_repoints_a_task_and_says_so`, the "which phase owns it" test is gone, and the merge is a
+  twelfth `WritePath` with `ports={"repoint_journal_links"}` reached through `JournalMergeService` —
+  the one path in that file driven from another domain, which is the thing the inventory's port-anchored
+  design existed to catch. The emptiness is asserted, so the list cannot quietly grow again.
+- **One frontend line, because a new field name reaches a rendered feed.** `creating_journal_id` had
+  never appeared in task history — only a merge can move that field — so without a case in
+  `taskEntryDescription` it would render through the generic formatter as *"Creating Journal Id"*. One
+  branch and one Jest case.
+- **One review finding, and it was a regression this phase introduced.** The re-point reads the
+  affected tasks *before* the four statements run, and `_lock_journals` holds the two **journals** —
+  not the tasks. A concurrent `delete_task` or `detach_intermediate_journal` locks the task row and
+  neither journal, so it does not wait for the merge. Both halves were reproduced against the
+  assembly as first written rather than accepted on the reviewer's word:
+  - a task whose only reference to the absorbed journal is an intermediate link, detached in
+    between, is passed over by all four statements — and the summary would have described nothing,
+    which the value object refuses, so the **merge failed with a `ValueError`**. A merge blocked by a
+    task is the one thing the specification says cannot happen, and before this phase it could not:
+    the re-point published nothing, so it had nothing to refuse.
+  - a task deleted in between kept its anchor flag from the pre-read, so the merge published a
+    due-journal move for a task whose row had gone — a line landing in that task's history *after*
+    its own deletion marker.
+
+  Fixed by making the assembly believe the **statements** rather than the snapshot: the anchor
+  `UPDATE` gains `RETURNING id`, the pre-read now supplies only the anchor *role* (unreadable
+  afterwards, since both columns hold the survivor's id), and a task no statement reported yields no
+  summary and therefore no event. **Locks were considered and not taken:** locking the task rows
+  would not close the detach half — that deletes a *link* row — and locking both would widen the
+  retarget/merge deadlock this port already documents as ITER18-002 Phase 6. The tolerant assembly
+  needs no lock and is the more honest answer anyway, since "was in the snapshot" and "was moved" are
+  different claims and only the second belongs in a user's history.
+  *Tested at the level the failure lives at:* the assembly is pure, and the integration fixture is one
+  savepoint-bound connection, so neither race can be **staged** — the limitation `_lock_journals`
+  already records. Seven unit cases in `test_merge_repoint_assembly.py` pin the rule; the new SQL is
+  covered by the existing report tests, checked rather than assumed (making the anchor `RETURNING`
+  report nothing fails **9** of them).
+- **A second review finding, and this one was only in the prose.** Four places said a collapsed
+  duplicate and a moved-then-dropped link "leave the task in the same place — no link on either
+  journal". That is true of the drop and **false of the collapse**: `_COLLAPSE_DUPLICATE_LINKS`
+  deletes the source row *because* the target row exists, and that target link stays. The code was
+  right and the explanation was not — and the same files got it right elsewhere (the value object's
+  argument list, both unit tests), so it was an inconsistency within one change rather than a
+  misunderstanding. Corrected in all four: what the two cases share is the **change** — the absorbed
+  journal's link gone, none on the survivor gained — not the end state, which differs only because
+  they started differently. History records the change, which is why one summary serves both.
+  *The prose is now pinned by tests rather than only rewritten:* the two report tests assert the
+  differing link rows they leave behind, and swapping those two expectations fails both. The
+  reviewer's worry was that the wrong sentence "could mislead future maintenance or tests" — an
+  assertion is the only answer to that which survives the next edit.
+- **Mutation-checked, twelve ways, all caught.** Dropping the publish loop fails **7** unit and **12**
+  integration tests. Claiming every task lost its source link fails **8** integration (and no unit, which
+  is correct — the fact is assembled from SQL). Reversing the anchor pair fails **7** unit and **2**
+  integration. Removing the projection's dispatch entry fails **9** unit and **5** integration. Dropping
+  provenance at each of the three surfaces fails **exactly the one surface test for it** — the useful
+  result, because it says those tests exercise the surface rather than the service behind it. Moving the
+  re-point back after `journal_repo.save(target)` fails **exactly 1** unit test and **no** integration
+  test, which is the honest shape: the lock order is a concurrency claim the savepoint-bound fixture
+  cannot stage, so it is pinned at the level where it can be. Removing the frontend branch fails **1**
+  Jest case. The two added with the review fix: trusting the pre-read's anchor flag over the
+  `UPDATE`'s `RETURNING` fails **1** unit test and **9** integration tests, and summarising a task no
+  statement reported — instead of returning nothing for it — fails **2**. The one added with the
+  second review fix: swapping the two cases' expected end states fails **2**, which is what makes
+  the collapse and the drop distinguishable in code rather than only in a sentence.
+
+**Calibration.** Production came in at 3.3× the estimate (662 against ~200) and the total at ~2× the
+tracked figure. Two causes, and only one of them is the two-domain shape rule 7 warned about. The seam
+itself was cheap — one service, one constructor swap. What was not: **the repository had to start
+answering a question it had never been asked**, which meant a widened pre-read, `RETURNING` on three
+statements, a value object with its own invariants, and the derivation that tells the two link deletions
+apart — roughly 230 production lines that no part of the estimate anticipated, because the estimate was
+sized on "publish an event from an existing write". *Calibration addition:* when a phase gives an
+existing write an event, estimate from **what the write currently reports**, not from the event. A write
+that already returns what it did costs the publisher; one that returns `None` costs the reporting layer
+first, and that layer is where the invariants and their tests go.
+
+**Quality gates run locally:** `ruff format --check`, `ruff check` and `mypy` clean on `backend/` and
+`core_shared/`; the full backend unit suite and the full backend integration suite green against Docker
+PostgreSQL; `pnpm quality:check` clean and the Jest suite green.
 
 ### ITER18-004: The Home Dashboard
 

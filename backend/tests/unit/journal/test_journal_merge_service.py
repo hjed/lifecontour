@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
     FitnessMergeMode,
@@ -14,7 +15,9 @@ from core_shared.models.journals import (
 from app.core.journal.services.journal_merge_service import (
     JournalMergeService,
 )
-from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
 
 
 @pytest.fixture
@@ -31,16 +34,18 @@ def mock_event_publisher():
 
 
 @pytest.fixture
-def mock_task_anchor_repo():
-    """An anchor-repository mock held to the real port's surface.
+def mock_task_merge_service():
+    """A mock of the tasks domain's merge service, held to its real surface.
 
-    ``spec`` matters here: the merge service must call a method the port
-    actually declares, so a typo or a method that only exists on the mock
-    cannot pass. It also pins that merge reaches tasks through the *anchor*
-    port, which cannot write a task's text, status or contacts, rather than
-    through the full ``TaskRepository``.
+    ``spec`` matters here: the merge must call a method that actually exists, so
+    a typo or a method invented by the mock cannot pass. It also pins *which*
+    collaborator the journal domain is given. It is not the full
+    ``TaskRepository`` — that could change a task's text, status or contacts —
+    and since this phase it is not the anchor repository either: the tasks
+    domain owns what a task announces about itself, so the merge asks it to move
+    the links rather than moving them and leaving the announcement to nobody.
     """
-    return AsyncMock(spec=TaskAnchorRepository)
+    return AsyncMock(spec=TaskJournalMergeService)
 
 
 @pytest.fixture
@@ -58,11 +63,11 @@ def mock_transaction():
 
 
 @pytest.fixture
-def merge_service(mock_journal_repo, mock_event_publisher, mock_task_anchor_repo):
+def merge_service(mock_journal_repo, mock_event_publisher, mock_task_merge_service):
     return JournalMergeService(
         journal_repo=mock_journal_repo,
         event_publisher=mock_event_publisher,
-        task_anchor_repo=mock_task_anchor_repo,
+        task_merge_service=mock_task_merge_service,
     )
 
 
@@ -913,7 +918,7 @@ class TestAdditiveFitnessMerge:
 
 
 class TestTaskLinkRepointing:
-    """Merge moves a task's journal links onto the survivor.
+    """Merge moves a task's journal links onto the survivor, and says so.
 
     A task's two anchors are ``ON DELETE RESTRICT`` foreign keys and its
     intermediate links are ``ON DELETE CASCADE``, so *when* the re-point runs
@@ -927,6 +932,15 @@ class TestTaskLinkRepointing:
     ``tests/integration/tasks/test_journal_merge_task_links_integration.py``
     instead. A primary-key violation and an ``ON DELETE CASCADE`` cannot happen
     against a mock.
+
+    **The collaborator changed and the assertions did not soften.** The merge
+    used to call the anchor repository directly, which is why the tasks it moved
+    were never announced; it now calls the tasks domain's own merge service,
+    which performs the same re-point and publishes an event per task. What is
+    asserted here is the journal domain's side of that seam — that it delegates,
+    once, with the ids the right way round, before every journal write, and that
+    it hands over the actor rather than letting a user's merge be recorded as
+    the system's.
     """
 
     @staticmethod
@@ -942,20 +956,57 @@ class TestTaskLinkRepointing:
 
     @pytest.mark.asyncio
     async def test_merge_repoints_task_links_onto_the_survivor(
-        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+        self,
+        merge_service,
+        mock_journal_repo,
+        mock_task_merge_service,
+        mock_transaction,
     ):
         """The source's task links are re-pointed exactly once, ids not transposed."""
         self._arrange(mock_journal_repo)
 
         await merge_service.merge_journals(1, 2, mock_transaction)
 
-        mock_task_anchor_repo.repoint_journal_links.assert_awaited_once_with(
-            source_journal_id=2, target_journal_id=1
+        mock_task_merge_service.repoint_journal_links.assert_awaited_once_with(
+            source_journal_id=2,
+            target_journal_id=1,
+            transaction=mock_transaction,
+            source=Provenance.SYSTEM,
+            changed_by="system",
         )
 
     @pytest.mark.asyncio
+    async def test_the_merging_actor_reaches_the_tasks_that_moved(
+        self,
+        merge_service,
+        mock_journal_repo,
+        mock_task_merge_service,
+        mock_transaction,
+    ):
+        """A merge in the browser and one over MCP are told apart per task.
+
+        The merge is a write on a *journal*, and the tasks it moves are
+        consequences of it, so they carry whoever performed it. Defaulting them
+        to ``system`` would tell a user's own history that part of what they did
+        was not theirs — the same argument the link a retarget retains settled.
+        """
+        self._arrange(mock_journal_repo)
+
+        await merge_service.merge_journals(
+            1, 2, mock_transaction, source=Provenance.MCP, changed_by="mcp"
+        )
+
+        kwargs = mock_task_merge_service.repoint_journal_links.await_args.kwargs
+        assert kwargs["source"] is Provenance.MCP
+        assert kwargs["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
     async def test_task_links_are_repointed_before_any_journal_is_written(
-        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+        self,
+        merge_service,
+        mock_journal_repo,
+        mock_task_merge_service,
+        mock_transaction,
     ):
         """Order is the whole point, and it is load-bearing twice.
 
@@ -979,7 +1030,7 @@ class TestTaskLinkRepointing:
 
             return record_call
 
-        mock_task_anchor_repo.repoint_journal_links.side_effect = record("repoint")
+        mock_task_merge_service.repoint_journal_links.side_effect = record("repoint")
         mock_journal_repo.save.side_effect = record("save_target")
         mock_journal_repo.delete.side_effect = record("delete_source")
 
@@ -989,7 +1040,11 @@ class TestTaskLinkRepointing:
 
     @pytest.mark.asyncio
     async def test_merge_touches_nothing_else_on_a_task(
-        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+        self,
+        merge_service,
+        mock_journal_repo,
+        mock_task_merge_service,
+        mock_transaction,
     ):
         """Merge re-points links and stops there — it never changes a status.
 
@@ -1002,12 +1057,16 @@ class TestTaskLinkRepointing:
 
         await merge_service.merge_journals(1, 2, mock_transaction)
 
-        called = {name for name, _args, _kwargs in mock_task_anchor_repo.mock_calls}
+        called = {name for name, _args, _kwargs in mock_task_merge_service.mock_calls}
         assert called == {"repoint_journal_links"}
 
     @pytest.mark.asyncio
     async def test_merge_is_not_blocked_by_tasks(
-        self, merge_service, mock_journal_repo, mock_task_anchor_repo, mock_transaction
+        self,
+        merge_service,
+        mock_journal_repo,
+        mock_task_merge_service,
+        mock_transaction,
     ):
         """Unlike delete, merge stays available — calendar sync depends on it."""
         target = self._arrange(mock_journal_repo)
@@ -1016,7 +1075,7 @@ class TestTaskLinkRepointing:
 
         assert result is target
         mock_journal_repo.delete.assert_called_once_with(2)
-        mock_task_anchor_repo.repoint_journal_links.assert_awaited_once()
+        mock_task_merge_service.repoint_journal_links.assert_awaited_once()
 
 
 class TestHasBaseConflicts:
@@ -1043,7 +1102,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
-            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
+            task_merge_service=AsyncMock(spec=TaskJournalMergeService),
         )
         assert service.has_base_conflicts(target, source) is False
 
@@ -1068,7 +1127,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
-            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
+            task_merge_service=AsyncMock(spec=TaskJournalMergeService),
         )
         assert service.has_base_conflicts(target, source) is True
 
@@ -1093,7 +1152,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
-            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
+            task_merge_service=AsyncMock(spec=TaskJournalMergeService),
         )
         assert service.has_base_conflicts(target, source) is True
 
@@ -1121,7 +1180,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
-            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
+            task_merge_service=AsyncMock(spec=TaskJournalMergeService),
         )
         assert service.has_base_conflicts(target, source) is True
 
@@ -1146,7 +1205,7 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
-            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
+            task_merge_service=AsyncMock(spec=TaskJournalMergeService),
         )
         assert service.has_base_conflicts(target, source) is False
 
@@ -1171,6 +1230,6 @@ class TestHasBaseConflicts:
         service = JournalMergeService(
             journal_repo=AsyncMock(),
             event_publisher=AsyncMock(),
-            task_anchor_repo=AsyncMock(spec=TaskAnchorRepository),
+            task_merge_service=AsyncMock(spec=TaskJournalMergeService),
         )
         assert service.has_base_conflicts(target, source) is False

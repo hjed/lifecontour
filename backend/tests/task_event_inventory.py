@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, get_origin
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
 
 from app.core.tasks.models import events as task_events
 from app.core.tasks.models.events import DomainEvent, TaskJournalLinkOrigin
@@ -32,6 +32,12 @@ _SAMPLE_ARGUMENTS: dict[Any, Any] = {
     TaskStatus: TaskStatus.NOT_DONE,
     TaskJournalLinkOrigin: TaskJournalLinkOrigin.MANUAL,
     Provenance: Provenance.SYSTEM,
+    # A merge's summary for one task. It has to record *something* — the value
+    # object refuses one that records nothing — so the sample names the plainest
+    # outcome rather than an all-default instance.
+    TaskJournalRepointing: TaskJournalRepointing(
+        task_id=1, user_id="x", due_anchor_moved=True
+    ),
 }
 
 

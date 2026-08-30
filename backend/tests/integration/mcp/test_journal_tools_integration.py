@@ -59,6 +59,7 @@ from tests.integration.tasks.task_seeding import (
     create_journal,
     create_task,
     link_intermediate_journal,
+    task_events,
 )
 
 
@@ -2557,6 +2558,23 @@ class TestMergeMcpToolsMountedIntegration:
         assert row.creating_journal_id == target_id
         assert row.due_journal_id == due_id
         assert row.status == "not_done"
+
+        repointed = [
+            event
+            for event in await task_events(clean_database, task_id=task_id)
+            if event.event_type == "TaskJournalLinksRepointed"
+        ]
+        assert len(repointed) == 1
+        # ``mcp``, not ``ui`` and not ``system``: an assistant merged these
+        # journals, and a task's history is where its owner finds out who moved
+        # it. This is the half of the provenance thread the REST test cannot
+        # reach — the tool builds the merge and the tasks domain's service by
+        # hand, so it is also the only place that construction is exercised.
+        assert repointed[0].payload["source"] == "mcp"
+        assert repointed[0].payload["changed_by"] == "mcp"
+        assert repointed[0].payload["changed_fields"] == {
+            "creating_journal_id": [creating_id, target_id]
+        }
 
     async def _create_journal_via_rest(
         self,

@@ -6,9 +6,11 @@ journals use, and those events project into field history exactly as contact and
 journal events do", each carrying provenance and the actor.
 
 This module holds creation, every change to the task's own fields — text, status
-and contact membership — due-journal retargeting, intermediate journal links and
-hard deletion. That is the full event set the specification names. The history
-projection that reads these payloads lands in a later phase.
+and contact membership — due-journal retargeting, intermediate journal links,
+the re-point a journal merge performs, and hard deletion. That is the full event
+set the specification names plus the one it did not anticipate: a write on task
+rows performed from the **journal** domain. Everything here is projected into
+``field_history`` by ``HistoryService``.
 
 **A task's text, status and contact changes share one event**, ``TaskUpdated``,
 carrying ``changed_fields`` — not one event type per field. The phases that added
@@ -58,7 +60,7 @@ from enum import StrEnum
 from typing import Any
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 #: The prefix every contact-membership key carries.
@@ -106,11 +108,11 @@ def journal_field_name(journal_id: int) -> str:
     origin to spell. ``journal:retarget:{id}`` followed by ``journal:{id}`` would
     show the user a removal with nothing added before it.
 
-    Unlike ``contact_field_name`` this is built only by the projection: the
-    journal link is an event type of its own rather than a ``changed_fields``
-    entry, so the service never spells the key. It lives here anyway, next to the
-    events whose payloads it reads, because the two formats have to stay
-    recognisably the same thing.
+    Built by the projection for the link pair, whose journal id is a payload key
+    rather than a ``changed_fields`` entry — and by
+    :class:`TaskJournalLinksRepointed`, which does spell it, because a merge
+    reports several link movements at once and carries them as fields. Two
+    builders, one definition, which is the reason this is a function.
     """
     return f"journal:{journal_id}"
 
@@ -459,12 +461,13 @@ class TaskJournalUnlinked(DomainEvent):
     """Event raised when an intermediate-journal link is removed from a task.
 
     **No ``origin``**, unlike its counterpart. That event has two causes and has
-    to name one; this has exactly one — a user asking for the link to go —
-    because the other two ways a link row disappears announce nothing at all: a
-    journal merge collapsing redundant links, which belongs to the phase that
-    gives the merge its task-scoped events, and a journal delete cascading, which
-    removes the row without anybody acting on the task. A key with one possible
-    value would advertise a second case that does not exist.
+    to name one; this has exactly one — a user asking for the link to go. Of the
+    other two ways a link row disappears, a journal **merge** announces itself as
+    :class:`TaskJournalLinksRepointed` rather than as an unlink, because what
+    happened to the task is that one journal became another; and a journal delete
+    cascades, removing the row without anybody acting on the task and publishing
+    nothing. A key with one possible value would advertise a second case that
+    does not exist.
 
     **Published only when a row was actually removed**, so a detach of a link
     that was not there is silent, as is the refusal a detach of an anchor raises.
@@ -494,6 +497,140 @@ class TaskJournalUnlinked(DomainEvent):
             },
             transaction=transaction,
         )
+
+
+@dataclass(frozen=True)
+class TaskJournalLinksRepointed(DomainEvent):
+    """Event raised when a journal merge moves a task's links onto the survivor.
+
+    The one event in this module a **task write path does not publish**. The
+    write lives in the journal domain — ``JournalMergeService`` re-points every
+    link a task holds on the journal it is absorbing, because the anchors are
+    ``ON DELETE RESTRICT`` and the intermediate links cascade — and the tasks
+    domain publishes this so the affected tasks' own histories say what happened
+    to them. Until it existed, a merged task's history read
+    ``due_journal_id: A → B`` from an earlier retarget while the row said C, and
+    nothing in between explained the jump.
+
+    **It is deliberately not** :class:`TaskDueJournalRetargeted`. A merge is not
+    a retarget: it does not force the status to *not done*, it can move the
+    **creating** anchor, and it can *delete* links. Reusing that type would make
+    a user's history claim they deferred a task they never touched.
+
+    **The payload is** ``changed_fields``\\ **, like the retarget's**, and for
+    the same reason: ``HistoryService._project_task_updated`` already turns one
+    into a row per field, so this type needs a dispatch entry rather than a
+    parallel projection shape. The vocabulary is the merge's own — the anchors
+    carry ``(absorbed, survivor)``, and each intermediate link is a
+    :func:`journal_field_name` row in the direction it moved, the same key a
+    manual attach and detach land under so that a merge's removal and a person's
+    removal of the same journal read as the same kind of line.
+
+    **A link that moved is two rows, not one**, because the key names the
+    journal: the absorbed journal leaves and the survivor arrives. A link
+    collapsed as a duplicate, or moved and then dropped as redundant with an
+    anchor, is the departure alone — in neither case did the task *gain* a link
+    on the survivor, and announcing an arrival would claim it did. The two
+    differ in where they leave the task and agree on what changed: a collapse
+    keeps the survivor's link because the task already had one, a drop leaves it
+    with none, and both lost the absorbed journal's link and gained nothing.
+    History records the change rather than the state, which is why one summary
+    serves both; see :class:`~core_shared.models.tasks.TaskJournalRepointing`.
+
+    **Provenance is the merging user's**, not ``SYSTEM``. The merge is something
+    a person did — in the browser or over MCP — and the tasks it moved are
+    consequences of that action, so filing them under the system would tell that
+    user's own history that part of what they did was not theirs. Same reasoning
+    as the intermediate link a retarget retains.
+
+    **``event_id`` names the absorbed journal as well as the task.** One merge
+    publishes at most one of these per task, so the clock would do — but
+    ``ReviewItemService.auto_merge_review_items`` performs several merges in one
+    unit of work, and a task caught in two of them publishes two. Each merge
+    absorbs a different journal, and the history projection writes
+    ``ON CONFLICT DO NOTHING`` over ``event_id``, so naming it removes a
+    collision that would otherwise drop one merge from the task's history.
+    """
+
+    def __init__(
+        self,
+        repointing: TaskJournalRepointing,
+        source_journal_id: int,
+        target_journal_id: int,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=(
+                f"task_journal_links_repointed_{repointing.task_id}_"
+                f"{source_journal_id}_{now.isoformat()}"
+            ),
+            occurred_at=now,
+            aggregate_id=repointing.task_id,
+            event_type="TaskJournalLinksRepointed",
+            event_data={
+                "task_id": repointing.task_id,
+                "user_id": repointing.user_id,
+                # The two journals are here as well as inside the pairs below
+                # because they say *why* the fields moved — this task was caught
+                # in a merge of these two journals — which no ``(old, new)`` pair
+                # carries on its own.
+                "source_journal_id": source_journal_id,
+                "target_journal_id": target_journal_id,
+                "changed_fields": _repointing_changed_fields(
+                    repointing, source_journal_id, target_journal_id
+                ),
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+def _repointing_changed_fields(
+    repointing: TaskJournalRepointing,
+    source_journal_id: int,
+    target_journal_id: int,
+) -> dict[str, Any]:
+    """The merge's outcome for one task, as field changes.
+
+    Built here rather than by the caller for the reason
+    :class:`TaskDueJournalRetargeted` builds its own: the mapping from "what the
+    merge did" to "what a history row says" is a rule, and a rule spelt at the
+    call site is one each future caller can spell differently.
+
+    Every pair is ``(old, new)`` **positionally** —
+    ``HistoryService._rows_from_changed_fields`` reads ``change[0]`` as the old
+    value and never looks at the key — so a pair built the wrong way round would
+    render the merge as having moved the task *out of* the surviving journal,
+    with nothing downstream able to notice.
+
+    The value object refuses a summary that records nothing, so this never
+    returns an empty dict for a task the repository reported.
+    """
+    changed_fields: dict[str, Any] = {}
+    if repointing.creating_anchor_moved:
+        changed_fields["creating_journal_id"] = (source_journal_id, target_journal_id)
+    if repointing.due_anchor_moved:
+        changed_fields["due_journal_id"] = (source_journal_id, target_journal_id)
+    if repointing.source_link_removed:
+        changed_fields[journal_field_name(source_journal_id)] = (
+            source_journal_id,
+            None,
+        )
+    if repointing.target_link_added:
+        changed_fields[journal_field_name(target_journal_id)] = (
+            None,
+            target_journal_id,
+        )
+    if repointing.target_link_removed:
+        changed_fields[journal_field_name(target_journal_id)] = (
+            target_journal_id,
+            None,
+        )
+    return changed_fields
 
 
 @dataclass(frozen=True)

@@ -196,6 +196,9 @@ from app.core.journal.services.route_service import RouteService
 from app.core.settings.models import UserSettingsRepository
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
@@ -514,22 +517,45 @@ class JournalProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def task_journal_merge_service(
+        self,
+        task_anchor_repo: TaskAnchorRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> TaskJournalMergeService:
+        """Provide the tasks domain's half of a journal merge.
+
+        Provided here rather than by ``TaskProvider``, for the reason the anchor
+        repository above is: Dishka validates the whole graph at construction, so
+        a ``JournalProvider`` that depended on something ``TaskProvider``
+        supplies would force every container registering one to register the
+        other — eleven test containers, when this was last measured. It needs
+        only the anchor repository this provider already builds and the
+        request's outbox publisher, so ``JournalProvider`` stays self-sufficient.
+        """
+        return TaskJournalMergeService(
+            task_anchor_repo=task_anchor_repo,
+            event_publisher=event_publisher,
+        )
+
+    @provide(scope=Scope.REQUEST)
     def journal_merge_service(
         self,
         journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
-        task_anchor_repo: TaskAnchorRepository,
+        task_merge_service: TaskJournalMergeService,
     ) -> JournalMergeService:
         """Provide a JournalMergeService instance.
 
-        The anchor repository is the same one the delete guard uses: a merge
-        moves task links onto the survivor before deleting the absorbed journal,
-        whose anchors would otherwise refuse the delete.
+        A merge moves task links onto the survivor before deleting the absorbed
+        journal, whose anchors would otherwise refuse the delete — and the tasks
+        it moves record it in their own history. Both are the tasks domain's
+        service to perform, so the journal domain holds that rather than the
+        anchor repository the delete guard uses.
         """
         return JournalMergeService(
             journal_repo=journal_repo,
             event_publisher=event_publisher,
-            task_anchor_repo=task_anchor_repo,
+            task_merge_service=task_merge_service,
         )
 
     @provide(scope=Scope.REQUEST)

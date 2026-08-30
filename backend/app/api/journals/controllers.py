@@ -1852,7 +1852,14 @@ async def auto_merge_review_items(
         skipped_count,
         remaining_count,
         errors,
-    ) = await review_item_service.auto_merge_review_items(user.id, connection)
+    ) = await review_item_service.auto_merge_review_items(
+        user.id,
+        connection,
+        # "Auto" is how the pairs were chosen, not who chose to merge them: a
+        # person pressed this, so the tasks these merges move say so.
+        source=Provenance.UI,
+        changed_by="ui",
+    )
 
     return {
         "data": {
@@ -2793,6 +2800,10 @@ async def merge_journal(
         transaction=connection,
         overrides=overrides_dict,
         fitness_merge_mode=merge_request.data.attributes.fitness_merge_mode,
+        # A person merged these journals in the browser, so the tasks the merge
+        # moves record it as theirs rather than as the system's.
+        source=Provenance.UI,
+        changed_by="ui",
     )
 
     # Get enriched target journal to return

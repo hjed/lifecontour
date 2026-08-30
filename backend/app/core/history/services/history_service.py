@@ -11,9 +11,11 @@ integer id, so its rows go under ``("task", task_id)`` and use the *journal*
 marker convention (``__created__``/``__deleted__``) rather than the contact one
 (``field_name="status"``). The contact shape exists because contact history
 spreads across a family of sub-entity rows; a task has none. Every type the
-domain publishes is mapped: the three lifecycle types, the due-anchor move, and
-the intermediate-journal pair. Nothing a task write announces is written to the
-stream and then never read.
+domain publishes is mapped: the three lifecycle types, the due-anchor move, the
+intermediate-journal pair, and the re-point a **journal merge** performs on every
+task the absorbed journal held. Nothing a task write announces is written to the
+stream and then never read — including the one write that no task write path
+performs.
 
 Contacts (ITER12-003 Phase 1): each contact handler reproduces the EXACT rows the
 synchronous dual-write (``ContactHistoryService.record_*``) writes today, keyed to
@@ -659,8 +661,18 @@ class HistoryService:
         (``(None, id)``) or unlinking them (``(id, None)``) projects like any
         other field — one row, naming the person, the right way round.
 
-        **``TaskDueJournalRetargeted`` is mapped here too**, which is why this
-        docstring is not only about updates. That event carries a
+        **Two other types are mapped here**, which is why this docstring is not
+        only about updates. The second is
+        :class:`~app.core.tasks.models.events.TaskJournalLinksRepointed`, which a
+        journal merge publishes per task it moved: its ``changed_fields`` carries
+        the anchors as ``(absorbed, survivor)`` pairs and each intermediate link
+        as a ``journal:{id}`` row in the direction it moved, so a merge's changes
+        arrive in the vocabulary a retarget and a manual attach already use. It
+        is the one type here whose write happens in another domain, and the
+        reason it reads like the rest is that the tasks domain builds the payload
+        rather than the journal domain.
+
+        The first is ``TaskDueJournalRetargeted``. That event carries a
         ``changed_fields`` payload *for this reason*: ``due_journal_id: (old,
         new)`` and, only when the deferral reopened the task, ``status: (old,
         "not_done")``, so the anchor move and the reopen each read as their own
@@ -918,5 +930,10 @@ _HANDLERS = {
     "TaskDueJournalRetargeted": HistoryService._project_task_updated,
     "TaskJournalLinked": HistoryService._project_task_journal_linked,
     "TaskJournalUnlinked": HistoryService._project_task_journal_unlinked,
+    # The journal merge's re-point shares the same handler, for the same reason
+    # the retarget does: its payload is ``changed_fields``, built that way so a
+    # merge's anchors and links become rows through the one definition of how a
+    # task field change becomes a row.
+    "TaskJournalLinksRepointed": HistoryService._project_task_updated,
     "TaskDeleted": HistoryService._project_task_deleted,
 }

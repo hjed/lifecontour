@@ -21,14 +21,31 @@ set operations over the two link-bearing tables rather than as a rule applied
 per row.
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 from core_shared.models.journals import BlockingTask, blocking_task_from_anchors
-from core_shared.models.tasks import TaskStatus
-from sqlalchemy import text
+from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
+from sqlalchemy import TextClause, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.tasks.models.repositories import TaskAnchorRepository
+
+
+@dataclass(frozen=True)
+class _AffectedTask:
+    """A row of the pre-read: one task the merge is about to move.
+
+    Distinct from :class:`~core_shared.models.tasks.TaskJournalRepointing`
+    because it is only half the answer — what the *anchors* did — recorded
+    before the three link statements have run and said what they did.
+    """
+
+    task_id: int
+    user_id: str
+    creating_anchor_moved: bool
+    due_anchor_moved: bool
+
 
 # ORDER BY t.id keeps the enumeration in the failure message stable: without it
 # PostgreSQL is free to return the rows in whatever order the plan produces.
@@ -52,14 +69,35 @@ _FIND_ANCHORED = text("""
 # and ``_lock_journals`` for why each exists and why the order is not free.
 _LOCK_JOURNAL = text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE")
 
-_TASK_IDS_REFERENCING = text("""
-    SELECT id FROM tasks
-    WHERE creating_journal_id = :journal_id OR due_journal_id = :journal_id
-    UNION
-    SELECT task_id FROM task_intermediate_journals
-    WHERE journal_id = :journal_id
+# The affected tasks, with the anchor roles the source journal holds on each.
+#
+# The roles have to be read *here* rather than returned by the update: both
+# anchors end up holding the survivor's id, so afterwards nothing in the row says
+# which of them moved. The union finds every task that names the journal in any
+# of the three roles — including one that only mentions it, which has no anchor
+# role at all — and the join back to ``tasks`` supplies the owner, which the
+# merge never read because it reached these tasks through a journal.
+_TASKS_REFERENCING = text("""
+    WITH referencing AS (
+        SELECT id AS task_id FROM tasks
+        WHERE creating_journal_id = :journal_id OR due_journal_id = :journal_id
+        UNION
+        SELECT task_id FROM task_intermediate_journals
+        WHERE journal_id = :journal_id
+    )
+    SELECT
+        t.id,
+        t.user_id,
+        (t.creating_journal_id = :journal_id) AS creating_anchor_moved,
+        (t.due_journal_id = :journal_id) AS due_anchor_moved
+    FROM tasks t
+    JOIN referencing r ON r.task_id = t.id
+    ORDER BY t.id
 """)
 
+# ``RETURNING`` on the three link statements, because what each one did is only
+# knowable while it runs: two of them are deletes, and afterwards the rows they
+# are about are gone.
 _COLLAPSE_DUPLICATE_LINKS = text("""
     DELETE FROM task_intermediate_journals src
     WHERE src.journal_id = :source_id
@@ -68,12 +106,14 @@ _COLLAPSE_DUPLICATE_LINKS = text("""
         WHERE tgt.task_id = src.task_id
         AND tgt.journal_id = :target_id
     )
+    RETURNING src.task_id
 """)
 
 _REPOINT_INTERMEDIATE_LINKS = text("""
     UPDATE task_intermediate_journals
     SET journal_id = :target_id
     WHERE journal_id = :source_id
+    RETURNING task_id
 """)
 
 _REPOINT_ANCHORS = text("""
@@ -87,6 +127,7 @@ _REPOINT_ANCHORS = text("""
         updated_at = now()
     WHERE creating_journal_id = :source_id
        OR due_journal_id = :source_id
+    RETURNING id
 """)
 
 _DROP_REDUNDANT_LINKS = text("""
@@ -97,6 +138,7 @@ _DROP_REDUNDANT_LINKS = text("""
     AND tij.journal_id = :target_id
     AND (t.creating_journal_id = :target_id
          OR t.due_journal_id = :target_id)
+    RETURNING tij.task_id
 """)
 
 
@@ -133,31 +175,41 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
 
     async def repoint_journal_links(
         self, *, source_journal_id: int, target_journal_id: int
-    ) -> None:
+    ) -> list[TaskJournalRepointing]:
         """Move every task link off the absorbed journal and onto the survivor.
 
         Four statements, and the order is the design. Each one is a set
         operation over every affected task, so a merge costs the same whether
         one task is anchored to the source or a hundred.
 
-        The affected tasks are read *first*, before anything moves, because the
-        last statement needs to know which tasks this merge touched and by then
-        every reference to the source is gone. That read is taken under locks on
-        both journals, for the reasons ``_lock_journals`` explains.
+        The affected tasks are read *first*, before anything moves, for two
+        reasons that happen to want the same read: the last statement needs to
+        know which tasks this merge touched, and by then every reference to the
+        source is gone; and the anchor **roles** are only legible before the
+        update, since afterwards both columns hold the survivor's id. That read
+        is taken under locks on both journals, for the reasons ``_lock_journals``
+        explains.
+
+        **What each statement did is reported, not inferred.** Three of them
+        carry ``RETURNING``, because two are deletes whose effect is invisible
+        once they have run and the third's rows are indistinguishable from links
+        the task already held. The per-task summary is assembled from those
+        three sets and the pre-read's roles; see :meth:`_summarise` for how the
+        two link deletions are told apart.
         """
         if source_journal_id == target_journal_id:
             # Nothing to move, and every statement below would read the rows it
             # is about to write: statement 1's EXISTS would match each
             # intermediate link against itself and delete the lot.
-            return
+            return []
 
         params = {"source_id": source_journal_id, "target_id": target_journal_id}
 
         await self._lock_journals(source_journal_id, target_journal_id)
 
-        affected_task_ids = await self._task_ids_referencing(source_journal_id)
-        if not affected_task_ids:
-            return
+        affected = await self._tasks_referencing(source_journal_id)
+        if not affected:
+            return []
 
         # 1. Collapse duplicates *before* the re-point. A task linked to both
         #    journals as an intermediate would otherwise make statement 2 write a
@@ -165,17 +217,22 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         #    key. ON CONFLICT cannot rescue an UPDATE, so the duplicate has to be
         #    gone before the UPDATE runs — the ITER17-001 Phase 4 lesson, and the
         #    same shape as JournalTagRepository.merge_into.
-        await self.conn.execute(_COLLAPSE_DUPLICATE_LINKS, params)
+        collapsed = await self._task_ids_from(_COLLAPSE_DUPLICATE_LINKS, params)
 
         # 2. Re-point what is left. These rows cascade on journal delete, so
         #    without this they would be destroyed silently rather than refused.
-        await self.conn.execute(_REPOINT_INTERMEDIATE_LINKS, params)
+        moved = await self._task_ids_from(_REPOINT_INTERMEDIATE_LINKS, params)
 
         # 3. Re-point both anchors at once. A task anchored to the source in
         #    both roles ends up with the survivor in both, which the
         #    specification permits. status and text are absent from the SET list
         #    because a merge is not allowed to change either.
-        await self.conn.execute(_REPOINT_ANCHORS, params)
+        #
+        #    It reports the tasks it updated, and the summary believes *that*
+        #    rather than the pre-read: the pre-read supplies the anchor role,
+        #    which is unreadable once both columns hold the survivor's id, but
+        #    only this statement can say the row was still there to move.
+        anchored = await self._task_ids_from(_REPOINT_ANCHORS, params)
 
         # 4. Drop the intermediate link that has become redundant with one of
         #    the task's own anchors — "the task was mentioned here" said in a
@@ -190,9 +247,110 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         #    intermediate link, so retargeting *back* onto it produces exactly
         #    that shape — and destroying a bystander's record of where it has
         #    been is not this operation's business.
-        await self.conn.execute(
-            _DROP_REDUNDANT_LINKS, params | {"affected_task_ids": affected_task_ids}
+        dropped = await self._task_ids_from(
+            _DROP_REDUNDANT_LINKS,
+            params | {"affected_task_ids": [row.task_id for row in affected]},
         )
+
+        # A task the four statements all passed over is not reported. The
+        # pre-read is a snapshot and nothing holds a task's own rows still after
+        # it — see ``_summarise`` — so "was in the snapshot" and "was moved" are
+        # different claims, and only the second may reach a user's history.
+        summaries = (
+            self._summarise(
+                row,
+                anchored=anchored,
+                collapsed=collapsed,
+                moved=moved,
+                dropped=dropped,
+            )
+            for row in affected
+        )
+        return [summary for summary in summaries if summary is not None]
+
+    @staticmethod
+    def _summarise(
+        row: _AffectedTask,
+        *,
+        anchored: set[int],
+        collapsed: set[int],
+        moved: set[int],
+        dropped: set[int],
+    ) -> TaskJournalRepointing | None:
+        """One task's share of the merge, as net effect rather than as statements.
+
+        **Every fact comes from a statement's ``RETURNING``, not from the
+        pre-read.** The pre-read says which *role* the absorbed journal held on
+        each task, because both anchor columns hold the survivor's id afterwards
+        and the role is unreadable by then — but whether that anchor actually
+        moved is ``anchored``, the set the ``UPDATE`` reported. Nothing holds a
+        task row still between the two: ``_lock_journals`` locks the **journals**,
+        and a concurrent ``delete_task`` touches neither. Trusting the snapshot
+        would publish an anchor move for a task whose row had gone, landing in
+        that task's history *after* its own deletion marker.
+
+        **A task no statement reported is not summarised**, and this returns
+        ``None`` for it. It can appear in the pre-read and then be passed over by
+        all four statements — a task mentioned only in the absorbed journal whose
+        link is detached in between, since a detach locks the task row rather
+        than either journal. Nothing moved for it, so there is nothing to
+        announce; before this returned ``None`` the value object refused to
+        describe nothing and the **merge failed**, which is the one thing the
+        specification says a task can never do to a merge.
+
+        The three link outcomes are set membership, and the only subtlety is
+        which link statement 4 deleted:
+
+        - a task in ``dropped`` **and** in ``moved`` had its own link re-pointed
+          onto the survivor and then removed, so it gained nothing — the
+          departure alone;
+        - a task in ``dropped`` but not in ``moved`` had a link to the survivor
+          *before* the merge, and that is the one that went.
+
+        A collapsed duplicate is a departure with no arrival for a different
+        reason — the survivor's link was already there and stays, so nothing was
+        gained rather than nothing remaining. The two deliberately produce the
+        same summary because the *change* is the same, not the end state: both
+        lost the absorbed journal's link and gained none on the survivor, and a
+        history distinguishing them would be describing SQL rather than the
+        task.
+        """
+        anchor_moved = row.task_id in anchored
+        creating_anchor_moved = anchor_moved and row.creating_anchor_moved
+        due_anchor_moved = anchor_moved and row.due_anchor_moved
+        source_link_removed = row.task_id in collapsed or row.task_id in moved
+        target_link_added = row.task_id in moved and row.task_id not in dropped
+        target_link_removed = row.task_id in dropped and row.task_id not in moved
+        if not (
+            creating_anchor_moved
+            or due_anchor_moved
+            or source_link_removed
+            or target_link_added
+            or target_link_removed
+        ):
+            return None
+        return TaskJournalRepointing(
+            task_id=row.task_id,
+            user_id=row.user_id,
+            creating_anchor_moved=creating_anchor_moved,
+            due_anchor_moved=due_anchor_moved,
+            source_link_removed=source_link_removed,
+            target_link_added=target_link_added,
+            target_link_removed=target_link_removed,
+        )
+
+    async def _task_ids_from(
+        self, statement: TextClause, params: dict[str, Any]
+    ) -> set[int]:
+        """Run one of the three reporting statements and read its ``RETURNING``.
+
+        A set rather than a list: each statement touches a given task at most
+        once — the link table is keyed on ``(task_id, journal_id)`` and every one
+        of them matches a single journal — and membership is all the summary
+        asks.
+        """
+        result = await self.conn.execute(statement, params)
+        return {int(row[0]) for row in result.fetchall()}
 
     async def _lock_journals(
         self, source_journal_id: int, target_journal_id: int
@@ -271,13 +429,24 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         for journal_id in sorted((source_journal_id, target_journal_id)):
             await self.conn.execute(_LOCK_JOURNAL, {"journal_id": journal_id})
 
-    async def _task_ids_referencing(self, journal_id: int) -> list[int]:
-        """The ids of every task that names this journal in any of the three roles.
+    async def _tasks_referencing(self, journal_id: int) -> list[_AffectedTask]:
+        """Every task that names this journal in any of the three roles.
 
         Read before a re-point moves anything, because afterwards there is
-        nothing left pointing at the journal to identify them by.
+        nothing left pointing at the journal to identify them by — and because
+        the anchor roles it carries are overwritten by the re-point itself.
+
+        Ordered by task id, which is the order the events go out in: the union's
+        two halves would otherwise arrive in whatever order the plan produced,
+        and one merge's outbox rows would differ between runs.
         """
-        result = await self.conn.execute(
-            _TASK_IDS_REFERENCING, {"journal_id": journal_id}
-        )
-        return [int(row[0]) for row in result.fetchall()]
+        result = await self.conn.execute(_TASKS_REFERENCING, {"journal_id": journal_id})
+        return [
+            _AffectedTask(
+                task_id=int(row.id),
+                user_id=row.user_id,
+                creating_anchor_moved=bool(row.creating_anchor_moved),
+                due_anchor_moved=bool(row.due_anchor_moved),
+            )
+            for row in result.fetchall()
+        ]

@@ -24,7 +24,7 @@ a journal that has since passed — are ones a task reaches after creation.
 import pytest
 import pytest_asyncio
 from core_shared.models.journals import BlockingTask, JournalHasAnchoredTasksError
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -293,7 +293,7 @@ class _DeleteGuardDouble(TaskAnchorRepository):
 
     async def repoint_journal_links(
         self, *, source_journal_id: int, target_journal_id: int
-    ) -> None:
+    ) -> list[TaskJournalRepointing]:
         raise AssertionError("the delete guard must not re-point task links")
 
 
