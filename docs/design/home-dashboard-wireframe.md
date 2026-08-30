@@ -150,3 +150,10 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     has no way to express — its rows are not shown in the context of any journal, so there is no "this
     journal" for a mention to attach to or be removed from. The dashboard's own row stays exactly as W24
     draws it, and gains nothing from this phase.
+12. **W13's "ascending by start time" is implemented as ascending by start *instant*.** For every
+    event that begins and ends within the day the two are the same. They differ for a **multi-day**
+    journal running through today, whose clock start belongs to an earlier day: ordering by the clock
+    component would interleave it with today's entries at an hour that never happened today, so it is
+    ordered by when it actually began and therefore leads the timed block. Recorded here as delivery
+    rule 4 requires; settled in ITER18-004 Phase 5a, which pins it with
+    `test_it_sorts_by_when_it_began_not_by_when_today_began`.

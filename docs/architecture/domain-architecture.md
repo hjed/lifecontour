@@ -631,10 +631,12 @@ own local wall time either way — so a day whose clocks change is the 23 or 25 
 building from the date keeps the result independent of which instant you started from, `fold` included.
 
 It lives in the journal domain, not settings or tasks: `app/core/settings` must stay a leaf that any
-domain can import, and the home dashboard's agenda reads journals rather than tasks. **Standing
-duplication to collapse:** `OutdoorDashboardService._window` / `._user_timezone` and
-`compute_search_window` (`app/core/integrations/immich/album_creation_service.py`) predate this module
-and should be migrated onto it; that migration was deliberately kept out of the phase that introduced it.
+domain can import, and the home dashboard's agenda reads journals rather than tasks.
+`OutdoorDashboardService` has been migrated onto it — `local_window` for its boundaries and
+`JournalDateResolver.timezone_for` for the zone — by the phase that gave the agenda the same windowing,
+which also fixed the repeated-hour case its private copy had. **Standing duplication to collapse:**
+`compute_search_window` (`app/core/integrations/immich/album_creation_service.py`) predates this module
+and should be migrated onto it too.
 
 ### Task creation invariants
 

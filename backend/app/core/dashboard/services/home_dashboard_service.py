@@ -48,8 +48,12 @@ from app.core.dashboard.models.sections import (
     TasksSectionData,
     UpcomingDatesSectionData,
 )
+from app.core.dashboard.services.agenda_section import order_agenda_entries
 from app.core.dashboard.services.summary_section import summary_section_for
-from app.core.journal.services.journal_date_resolver import today_in
+from app.core.journal.services.journal_date_resolver import (
+    local_day_window,
+    today_in,
+)
 from app.infrastructure.unit_of_work import savepoint
 
 if TYPE_CHECKING:
@@ -57,6 +61,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
+    from app.core.dashboard.models.repositories import AgendaRepository
     from app.core.journal.services.daily_summary_repository import (
         JournalDailySummaryRepository,
     )
@@ -72,10 +77,12 @@ class HomeDashboardService:
         self,
         date_resolver: JournalDateResolver,
         summary_repo: JournalDailySummaryRepository,
+        agenda_repo: AgendaRepository,
         connection: AsyncConnection | None = None,
     ) -> None:
         self.date_resolver = date_resolver
         self.summary_repo = summary_repo
+        self.agenda_repo = agenda_repo
         # Held for the per-section SAVEPOINTs, not for querying: the sections
         # read through their own repositories. ``savepoint`` no-ops without a
         # real connection, so a unit test may leave it out.
@@ -161,8 +168,27 @@ class HomeDashboardService:
     async def _load_agenda(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo
     ) -> AgendaSectionData:
-        """Today's and tomorrow's event journals. Filled by Phases 5 and 6."""
-        return AgendaSectionData()
+        """Today's event journals, in the order the card draws them.
+
+        The window is the user's **local** day, built by ``local_day_window`` so
+        that a zone whose clocks change is the 23 or 25 hours it really is and a
+        day that ends in a repeated hour still ends where it ends. The anchor
+        goes with it because an all-day event happens on a *date* rather than at
+        instants and is matched by date; timed events are matched by overlap, so
+        a multi-day journal running through today is on it. The ordering rule is
+        applied here rather than in SQL because it belongs to the section, not to
+        the query.
+
+        A day with nothing on it returns an **empty payload**, not ``None``:
+        "nothing scheduled today" is an answer this section can give, and it must
+        not arrive looking like the section that could not answer at all.
+
+        Tomorrow's entries join this payload in Phase 6.
+        """
+        entries = await self.agenda_repo.list_entries_in_window(
+            user_id, window=local_day_window(anchor, tz), anchor=anchor
+        )
+        return AgendaSectionData(entries=order_agenda_entries(entries))
 
     async def _load_tasks(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo

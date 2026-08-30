@@ -567,8 +567,11 @@ rules below follow from that record and apply to every phase in this document:
     are all estimated at ×4 over a title-derived production figure today, and each adds at least a card
     *and* the entry row it repeats.
 
-**Programme size:** 65 phases — and therefore 65 PRs — across the six iterations
-(ITER18-001: 22, ITER18-002: 6, ITER18-003: 10, ITER18-004: 17, ITER18-005: 8, ITER18-006: 2).
+**Programme size:** 66 phases — and therefore 66 PRs — across the six iterations
+(ITER18-001: 22, ITER18-002: 6, ITER18-003: 10, ITER18-004: 18, ITER18-005: 8, ITER18-006: 2).
+ITER18-004 gained its eighteenth when Phase 5 was split into 5a and 5b at planning time — the first
+phase in this iteration to be split *before* work started rather than overrun, which is what Phase 2's
+retrospective asked for.
 ITER18-002 gained its sixth phase during ITER18-001 Phase 7's review — the retarget/merge lock order;
 ITER18-003 gained its tenth during its own Phase 3 — the merge re-point publishing no task event; and
 **ITER18-006 exists at all because of ITER18-003 Phase 9's review**, which found that a *contact* merge
@@ -9255,26 +9258,269 @@ collision with a host service is unavoidable rather than configurable — record
 the regenerate action's happy and failure paths, its presence in the unavailable state, and that a summary
 error does not throw the page. E2E in Phase 17.
 
-#### Phase 5: Agenda — Today's Query and Ordering
+#### Phase 5: Agenda — Today's Query and Ordering ✅ COMPLETE (as 5a + 5b)
 
 **Prerequisites:** Phase 1, ITER18-001 Phase 3 (the date helper —
 `backend/app/core/journal/services/journal_date_resolver.py`; use `local_day_window` for the day window
 and `JournalDateResolver.today` for the anchor, and migrate `OutdoorDashboardService._window` onto it
 while you are here, per Phase 3's recorded follow-up).
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4). **Split at planning time into 5a and 5b —
+see below**; the original single-phase estimate was low by roughly 2×.
 
 **Acceptance Criteria:**
 
-- [ ] A repository query returns today's event journals for the user with everything the section needs —
+- [x] A repository query returns today's event journals for the user with everything the section needs —
       title, all-day flag, start/end times, location, tags, participants, `event_state` — in **one query**,
-      not one per journal.
-- [ ] The service orders them **all-day first, then timed ascending by start** (**W12**, **W13**), windowed
+      not one per journal. *(5b)*
+- [x] The service orders them **all-day first, then timed ascending by start** (**W12**, **W13**), windowed
       on the user's local day with the `EventDateRange` overlap semantics the outdoor dashboard uses.
-- [ ] The section reports empty distinctly from unavailable, so the UI can show one line.
+      *(the rule in 5a, the windowing in 5b)*
+- [x] The section reports empty distinctly from unavailable, so the UI can show one line. *(5b)*
 
 **Required Test Coverage:** unit — ordering with several all-day items, a multi-day journal overlapping
 today, and the empty case. Integration — the query against real journals with calendar info; day-boundary
 anchoring for a non-UTC user; a query-count assertion for the nested tags/participants. No e2e.
+
+**Split recorded before work started (delivery rule 3, and Phase 2's retrospective):**
+
+Phase 2 concluded that *"a phase whose plan already estimates past 500 should be split at planning time,
+and the seam is usually the one calibration rule 4 names."* This is the first phase to which that applies
+prospectively. Planning the work file by file put production at **~300–340 lines**, not ~150 — domain
+models, a repository port, a SQL adapter, a pure ordering module, service wiring, the JSON:API section
+fields *and* the outdoor `_window` migration the prerequisite line asks for — which is ~1,200–1,400
+tracked. The seam calibration rule 4 names is exactly available here: the ordering rule is tested domain
+logic that needs no caller.
+
+| | Deliverable | Estimated production → tracked |
+|---|---|---|
+| **5a** | Agenda domain models (`AgendaEntry`, `AgendaTag`, `AgendaParticipant`, `AgendaSectionData.entries`) and the pure ordering rule, with its unit tests. Mergeable alone. | ~95 → **~570** (×6 — rule 14: the deliverable is a *rule*, and its acceptance criteria read as a matrix) |
+| **5b** | Repository port + SQL adapter (one query), DI wiring, `_load_agenda`, the JSON:API agenda fields, the integration suite, and the `OutdoorDashboardService._window` migration. | ~230 → **~920** (×4 — wires an existing rule to an existing surface, no new entry point) |
+
+**Scope note carried into 5b — `is_cancelled` reaches the wire in Phase 5, not Phase 6.** The first
+acceptance criterion above requires the query to return `event_state`, and there is no honest way to
+fetch it and then withhold it: a payload that carried a cancelled event without saying so would present
+it as active, which the specification forbids. So the entry carries a derived `is_cancelled` and it
+serialises here. **Phase 6 keeps** tomorrow's entries, the collapsed event count, and the presentation
+rules for cancellation (**W18**), and its own estimate should come down accordingly.
+
+##### Phase 5a: Agenda — Domain Models and the Ordering Rule ✅ COMPLETE
+
+**Prerequisites:** Phase 1.
+**Estimated diff:** ~95 production → **~570 tracked** (×6) · **Actual:** 132 production → **493 tracked**
+(493 insertions, 6 deletions across 5 files: 132 production, 261 tests, 100 in this document). The first
+estimate in this iteration to come in *under*, and by a margin worth understanding rather than
+celebrating: ×6 was chosen because rule 14 catches rule-defining phases, and this is one. What rule 14
+did not account for is that a rule stated as a **sort key** costs almost nothing to write once its
+boundaries are known — the whole ordering is six lines — so the multiplier lands on a production figure
+that is mostly *docstrings for dataclasses* rather than logic. 15 tests against 6 lines of rule is the
+same test-per-boundary discipline Phase 3 recorded; it just had less production to multiply. **Suggested refinement:** apply ×6 to a rule-defining
+phase's *rule*, and ×2–3 to the data it operates on, rather than one multiplier over both.
+
+**Acceptance Criteria:**
+
+- [x] `AgendaEntry` and its nested `AgendaTag` / `AgendaParticipant` carry everything the section needs:
+      title and journal id, the all-day flag, the stored instants *and* the clock times, location,
+      the calendar colour **W17** keys the accent bar to, cancellation, tags and participants. —
+      `app/core/dashboard/models/sections.py`. Both time
+      representations are carried deliberately: the instants are the window and ordering key and the only
+      way to see that an entry began before today, while `start_time`/`end_time` are the
+      `journal_calendar_info` `TIME` columns the existing calendar surface renders and **W13** draws.
+- [x] `AgendaSectionData` carries an ordered `entries` tuple that defaults to empty, so a ready section
+      with nothing in it stays distinguishable from an unavailable one. — Defaults to `()`, asserted
+      against an unavailable section in `test_dashboard_sections.py`.
+- [x] A pure ordering rule pins all-day entries above timed ones (**W12**) and ascends timed ones by
+      start (**W13**), deterministically, with no database and no caller. —
+      `order_agenda_entries` in `app/core/dashboard/services/agenda_section.py`.
+
+**Required Test Coverage:** unit only — several all-day items, a multi-day journal overlapping today, ties,
+non-mutation of the input, and the empty case. No integration, no e2e: nothing calls it yet. —
+**Delivered:** 11 tests in `tests/unit/dashboard/test_agenda_ordering.py` and 4 added to
+`test_dashboard_sections.py`.
+
+**Decisions taken (Phase 5a):**
+
+- **All-day is a pin, not a tie-break.** An all-day entry outranks every timed one however early the
+  timed one starts, because an all-day item is not a thing happening at 00:00 — it is a thing true of the
+  whole day, and the card marks it `ALL DAY` in place of a time. Pinned by
+  `test_an_all_day_entry_precedes_a_timed_one_that_starts_earlier`, so an "improvement" that sorts
+  everything by one key fails.
+- **Timed entries sort by the stored instant, not by the clock time the card draws.** A journal that
+  began yesterday and runs through today carries a `start_time` belonging to another day, so ordering by
+  that component would interleave it with today's entries at an hour that never happened today. The
+  instant is also the quantity the day window compares against, so the list is ordered by the same
+  measure that decided which entries are on it. Ties fall back to the journal id, so two events that
+  really do start at once render identically on every request.
+- **The rule is a module-level function, not a service method.** It is the whole product of this phase,
+  it is only meaningful at its boundaries, and a function over a sequence is the shape those boundaries
+  can be asserted at with no database and no caller — which is what makes 5a mergeable on its own
+  (calibration rule 4).
+
+##### Phase 5b: Agenda — The One-Query Read and the Wire ✅ COMPLETE
+
+**Prerequisites:** Phase 5a.
+**Estimated diff:** ~230 production → **~920 tracked** (×4) · **Actual:** 470 production →
+**~1,630 tracked** (1,859 insertions, 105 deletions across 20 files, of which 231 insertions are this
+document: 470 production, 1,120 tests, 38 other documentation). **~1.6× the estimate, and the miss is in
+the production figure rather than the multiplier** — ×3.3 against production is *better* than the ×4
+budgeted, so the test estimate was sound and the production one was not. Two things were undercounted, both visible at planning time:
+a **port ABC costs roughly as much as its adapter** in a codebase that documents every abstract
+method (62 vs 152 lines here, exactly rule 13's observation), and the JSON:API layer for a payload
+with two nested collections is three schemas plus two renderers (147 lines), not the handful of
+fields "add the section's fields" suggests. **Suggested refinement:** when a phase's payload contains
+a nested collection, count one schema per level and budget the port at parity with its adapter.
+
+**Acceptance Criteria:**
+
+- [x] One query returns today's event journals for the acting user with their tags and participants
+      aggregated, not one query per journal, scoped on `journals.user_id`. —
+      `SqlAgendaRepository.list_entries_in_window`
+      (`app/core/dashboard/adapters/sql/agenda_repository.py`) behind the `AgendaRepository` port
+      (`app/core/dashboard/models/repositories.py`). Tags and attendees are aggregated in their own
+      `LATERAL` sub-selects, so neither fans the journal's row out and neither is read per journal;
+      pinned by a `recorded_statements` assertion that eight events with tags and participants cost
+      exactly what two do.
+- [x] `HomeDashboardService._load_agenda` windows on the user's local day through `local_day_window`,
+      with the outdoor dashboard's `EventDateRange` overlap semantics, and applies 5a's ordering rule. —
+      Asserted against a fixed instant just past Sydney midnight, on both ends of the window.
+- [x] The agenda section serialises its entries, and an empty day serialises as `ready` with an empty
+      list rather than as unavailable. — `AgendaEntrySchema` / `AgendaTagSchema` /
+      `AgendaParticipantSchema` in `app/api/home_dashboard/schemas.py`; an empty day is
+      `{"status": "ready", "data": {"entries": []}}`, asserted at both the renderer and over HTTP.
+- [x] `OutdoorDashboardService._window` / `._user_timezone` are migrated onto `journal_date_resolver`,
+      discharging ITER18-001 Phase 3's recorded follow-up. — The service now takes a
+      `JournalDateResolver` instead of a `UserSettingsRepository`, and its three windows are built by
+      `local_window`. The standing-duplication note in *domain-architecture.md* is reduced to
+      `compute_search_window`, which is the one call site left.
+
+**Required Test Coverage:** unit — the local-day window the repository is asked for, the ordered result,
+the empty day, a repository failure costing only this section, and the serialised shape. Integration —
+real journals with calendar info, tags and participants; overlap and non-overlap; day-boundary anchoring
+for a non-UTC user; another user's journal absent; a cancelled event flagged rather than omitted; and a
+statement-count assertion proving the nested reads do not become N+1. No e2e. — **Delivered:** 6 service
+tests (`TestTheAgendaSection` in `tests/unit/dashboard/test_home_dashboard_service.py`), 8 serialisation
+tests (`TestTheAgendaSection` in `tests/unit/api/test_home_dashboard_serialisation.py`) and 18
+integration tests in `tests/integration/api/test_home_dashboard_agenda.py`.
+
+**Delivery rule 3 was breached, and the rule needs restating rather than quietly re-read.** 5b is ~1,760
+changed lines against a 500-line cap. Calibration rule 16 restates that cap as ~1,500 for a phase that
+adds an entry point, and keeps 500 for one that does not — and this phase adds **no** new entry point,
+so 500 is the figure that applies to it and it is over by nearly 3×. The split was the right call and it
+was not enough: the seam taken was 5a's *rule*, and the remaining half was still a port, an adapter, a
+service change, a JSON:API layer and a migration of somebody else's service. A second seam was available
+and was not taken — the `OutdoorDashboardService` migration is a self-contained refactor with its own
+regression tests and no dependency on anything else here. **Rule for the phases that follow: when a
+phase carries a migration of existing code alongside new work, the migration is its own PR.**
+
+**Decisions taken (Phase 5b):**
+
+- **The port lives in the dashboard domain, not the journal domain.**
+  `OutdoorDashboardRepository` sits in `app/core/journal/models/repositories.py` because it returns a
+  *journal* model for a journal-scoped projection. This one returns `AgendaEntry`, a dashboard model, so
+  putting it beside the outdoor one would point the journal domain at the dashboard for no gain. It also
+  keeps calibration rule 7 honest: the only journal-domain file this phase edits is
+  `outdoor_dashboard_service.py`, for the recorded migration.
+- **`LATERAL` sub-selects rather than joins or a second query.** Tags and attendees are both
+  many-per-journal, so joining either directly multiplies the journal's row by its children and joining
+  both multiplies them by each other. The existing precedent
+  (`incomplete_outdoor_activity_repository.py`) aggregates with `COUNT(*)`; this needs the values, so it
+  aggregates with `json_agg`, cast to `::text` so the parsing happens here rather than depending on
+  whether the connection has a JSON codec registered.
+- **Attendees are `PARTICIPANT` *and* `INVITEE`.** Taking only `PARTICIPANT` was the obvious reading of
+  "participants" and is wrong in practice: the Google worker writes **every** synced attendee as
+  `INVITEE` (`integration_workers/google/event_transformer.py`), and `JournalContactBadge` already
+  treats the two as one notion of attendance. An agenda that took only `PARTICIPANT` would show an empty
+  avatar stack on exactly the events most users have most of. `MENTION` and `ABOUT` are excluded: those
+  are people the journal is *about*, who were never claimed to be there, and showing them as attendees
+  would be a false statement rather than an over-inclusive one.
+- **`is_cancelled` reaches the wire here rather than in Phase 6**, per the scope note recorded above the
+  split. Phase 6 keeps tomorrow and the presentation rules.
+- **Two zones twenty-five hours apart do not separate two days.** The first draft of the day-boundary
+  test seeded an event for a `Pacific/Kiritimati` user and asserted a `Pacific/Niue` user could not see
+  it. It failed, correctly: the two are never on the same *date*, but their day windows overlap by
+  twenty-three hours, so almost any instant is in both. What actually distinguishes a local day from
+  UTC's is that a large-offset local day **spans two UTC dates** — Kiritimati's runs 10:00 UTC to 10:00
+  UTC — so the test now seeds a pair straddling that UTC midnight and asserts both arrive. A
+  UTC-anchored implementation could return at most one of them whichever date it picked. The pair is
+  seeded on three consecutive local days and the assertion is keyed on the anchor the server reports,
+  so a midnight crossing mid-test moves the expectation with the answer. **Worth carrying forward:** the
+  far-east/far-west pair already in `test_home_dashboard_api.py` is a valid discriminator for an
+  *anchor date*, and not one for *window membership*.
+
+**All-day events had two storage conventions, and the agenda read the wrong day for half the world.**
+
+An all-day event happens on a *date*, but the schema stores only instants — and the two writers disagree
+about which instant means that date:
+
+| Writer | What it stores for an all-day event on 27 Aug | `journal_calendar_info.timezone` |
+|---|---|---|
+| Google worker (`integration_workers/google/event_transformer.py`, `_parse_all_day_date` plus the exclusive-end adjustment) | `datetime(2026, 8, 27, tzinfo=UTC)` — **midnight UTC**, both bounds | `NULL` — `_extract_timezone` returns None for a date-only event |
+| The app (`JournalCreateForm.tsx` supplies the range as `values.dateRange.from.toISOString()`; `type-editors/EventTypeEditor.tsx` supplies `is_all_day` and `timezone`) | midnight in the **browser's** zone, converted to UTC | the user's configured zone, via `getDefaultTimezone()` |
+
+Under instant overlap — the semantics the acceptance criterion names, and the ones the outdoor dashboard
+has always used — a Google-synced all-day event on 27 August is the instant `2026-08-27T00:00Z`, which
+for a user **west of UTC** falls in their **26 August** window. Their synced public holidays,
+out-of-office days and birthdays showed on yesterday's agenda and never on today's. East of UTC it was
+correct, which is why it survived the first round of tests: every all-day fixture was UTC and the
+day-boundary test deliberately used only `Pacific/Kiritimati`.
+
+**The fix, and why it is not a new convention.** All-day rows are matched by **date** rather than by
+instant, with the bounds read back **in the zone they were written in**:
+`(event_date_range_start AT TIME ZONE COALESCE(jci.timezone, 'UTC'))::date` against the anchor, and the
+same on `end` so a multi-day all-day event overlaps in date space. This is the rule the codebase already
+has — `event_date_in_timezone` (`core_shared/models/journals/calendar_info.py`), and migration 0045 for
+the clock columns. Google's rows carry no zone so they are read as UTC, which is what they are; the
+app's carry the user's, so local midnight reads back as midnight. Timed rows keep instant overlap, and a
+test holds that separation shut: a far-western user's midday is on the *following* UTC date, so a timed
+event matched by date would vanish.
+
+**Recorded honestly: an earlier draft of this note deferred the fix on the grounds that it needed a
+backfill and changes in two other domains.** That was wrong. A *naive UTC-date* comparison would indeed
+have fixed Google's rows and broken the app's, but the zone-aware one serves both, and it costs one
+predicate in this query.
+
+**One case is knowingly not served.** An app-created all-day row whose `timezone` was **cleared**
+(`EventTypeEditor` sends `e.target.value || null`) has a local-midnight instant and no zone to read it
+in, so it is read as UTC and lands a day early for a user east of UTC. Under instant overlap that row
+was correct, so this is a trade rather than a pure win — taken deliberately, because the losing case
+needs a deliberate edit to a rarely-touched field while the winning case was every west-of-UTC user's
+synced holidays. **Follow-up:** default the zone at the journal write path when it is cleared, and the
+case disappears; that touches the write path, which is why it is not here.
+
+**The stored zone is resolved through `pg_timezone_names`, not handed to `AT TIME ZONE` directly.**
+`journal_calendar_info.timezone` is an unconstrained string and `AT TIME ZONE` **raises** on a name
+PostgreSQL does not recognise — which aborts the statement, so a single legacy or externally-synced row
+with a nonsense zone would take the whole section to *unavailable* and show the user an empty day. The
+rest of the system already refuses to break on this: `resolve_timezone` falls back to UTC for the
+anchor, and `CalendarInfo` hydration skips validation precisely so a bad persisted row cannot crash a
+read path. Found in review after the date fix landed — the fix introduced the exposure, since nothing in
+this query touched `jci.timezone` before it. Verified against the database rather than assumed: a bare
+`AT TIME ZONE 'Mars/Olympus'` raises, a `CASE` does guard its untaken branch (so timed rows were never
+at risk), and the `pg_timezone_names` lookup falls back correctly while still resolving a real zone.
+Two tests, both of which fail without the join.
+
+**A latent flake was fixed at the same time.** `test_the_clock_times_come_back_in_the_events_own_zone`
+seeded 09:00 in a UTC+14 zone for a UTC-anchored reader, which puts the instant on the *previous* UTC
+day for most of each day — so it passed or failed by the hour it ran. Placement and the recorded zone
+are now separate parameters on the seeder: the event sits on the reader's day while the row claims a
+different zone, which is the thing the test is actually about.
+
+**Of the five all-day tests, only one fails without the fix** — the far-western Google case, which is
+the defect. The other four pass either way and are guards: the eastern side that already worked, the app
+convention that already worked, the multi-day span, and the timed-event separation. Recorded because a
+reviewer counting tests would otherwise read five proofs where there is one proof and four fences.
+
+- **Two payload fields were added in review, and both were the same kind of miss.** `timezone` and
+  `calendar_color` were each *reachable from a row the query already read* and each needed by a
+  wireframe element the card cannot draw without it — the clock times are uninterpretable without the
+  zone they are in, and **W17**'s accent bar is keyed to the calendar's colour. The pattern to carry
+  forward: when a phase's acceptance criteria enumerate payload fields, check the enumeration against
+  the wireframe elements the payload has to serve, because an enumeration written before the query
+  exists will not know what the query turns out to have in its hands.
+- **The Phase 1 SAVEPOINT test is now proved by a real query.**
+  `TestASqlErrorDoesNotPoisonTheRemainingSections` had to monkeypatch a harmless query into
+  `_load_agenda` so that some section ran SQL after the broken one. The agenda now issues one of its
+  own, and it is read immediately after the summary, so the stand-in is gone and the test asserts
+  against the real path — which is what Phase 1 recorded it was waiting for.
 
 #### Phase 6: Agenda — Cancelled Events and Tomorrow
 
@@ -9314,6 +9560,21 @@ journal appears flagged, not omitted; tomorrow's window is the user's local tomo
 
 **Required Test Coverage:** unit (RTL) — ordering as rendered, each entry element, the cancelled treatment,
 the empty line, and accessible list labelling. E2E in Phase 17.
+
+**Payload gaps left for this phase, recorded by Phase 5b so they are not discovered late:**
+
+- **The accent colour (W17) is supplied; the type glyph (W14) is not.** Phase 5's acceptance criteria
+  enumerate the fields the query returns and a colour was not among them, so 5b left it out — until
+  review pointed out that the accent then had no source, and it was added as `calendar_color` off a
+  `LEFT JOIN calendars`. Journal *types* are not joined at all and are the larger of the two if the
+  glyph is wanted; this phase still owns that decision.
+- **`start_time` is a clock value in the *event's* timezone, not the reader's.** The column is a bare
+  `TIME` beside `journal_calendar_info.timezone`, and this is what the existing calendar surface renders
+  (`toCalendarEvent`, `frontend/src/lib/calendarEventHelpers.ts`), so the agenda matches it deliberately
+  rather than inventing a second convention. The visible consequence is narrow: an event stored in
+  another zone shows that zone's wall time. Changing it would be an app-wide divergence needing its own
+  decision, not a card-phase choice — and the entry also carries `starts_at`, the true instant, if this
+  phase decides otherwise.
 
 #### Phase 8: Tomorrow Disclosure
 

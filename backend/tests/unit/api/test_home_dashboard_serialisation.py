@@ -27,7 +27,10 @@ from app.api.home_dashboard.schemas import (
     to_home_dashboard_response,
 )
 from app.core.dashboard.models.sections import (
+    AgendaEntry,
+    AgendaParticipant,
     AgendaSectionData,
+    AgendaTag,
     DashboardSection,
     DashboardSummaryState,
     HomeDashboard,
@@ -51,9 +54,26 @@ GENERATED_SUMMARY = SummarySectionData(
     mood_average=7.5,
 )
 
-# The sections Phases 5-6, 11 and 13 have yet to fill. Named rather than
-# repeated so a phase filling one has a single place to stop excluding it.
-STILL_EMPTY = ("agenda", "tasks", "upcoming_dates")
+# The sections Phases 11 and 13 have yet to fill. Named rather than repeated so
+# a phase filling one has a single place to stop excluding it.
+STILL_EMPTY = ("tasks", "upcoming_dates")
+
+NINE_AM = datetime.datetime(2026, 7, 31, 9, tzinfo=datetime.UTC)
+
+COFFEE = AgendaEntry(
+    journal_id=42,
+    title="Coffee with Sam",
+    is_all_day=False,
+    starts_at=NINE_AM,
+    ends_at=NINE_AM + datetime.timedelta(hours=1),
+    start_time=datetime.time(9, 0),
+    end_time=datetime.time(10, 0),
+    timezone="Australia/Sydney",
+    location="The good place",
+    calendar_color="#336699",
+    tags=(AgendaTag(id="tag-1", name="social", color="#ff0000"),),
+    participants=(AgendaParticipant(contact_id=7, name="Sam Taylor"),),
+)
 
 
 def dashboard(**overrides: object) -> HomeDashboard:
@@ -126,9 +146,9 @@ class TestTheFourSections:
     def test_a_ready_section_carries_a_payload_object(self) -> None:
         """Present whether or not the phase that fills it has landed yet.
 
-        The three unfilled sections serialise as ``{}`` — "ready and holding
+        The two unfilled sections serialise as ``{}`` — "ready and holding
         nothing", which is a real answer rather than an absence — while the
-        summary carries the fields this phase gave it.
+        summary and the agenda carry the fields their phases gave them.
         """
         document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
 
@@ -322,3 +342,158 @@ class TestTheStatusIsDocumentedAsItBehaves:
 
         assert described is not None
         assert "empty payload is then a real answer" in described
+
+
+class TestTheAgendaSection:
+    """The agenda on the wire: entries in order, and nothing pre-formatted.
+
+    What the card needs is *data* — a boolean for all-day, a boolean for
+    cancelled, names for the avatar stack, a colour beside each tag name — so
+    that Phase 7 can render a marker with real text rather than styling alone
+    and an avatar with a real ``alt``. A payload of finished strings would take
+    those decisions away from the surface that has to make them accessible.
+    """
+
+    def test_an_entry_renders_field_for_field(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(
+                agenda=DashboardSection.ready(AgendaSectionData(entries=(COFFEE,)))
+            )
+        ).model_dump(mode="json")
+
+        assert document["data"]["attributes"]["agenda"]["data"]["entries"] == [
+            {
+                "journal_id": 42,
+                "title": "Coffee with Sam",
+                "is_all_day": False,
+                "starts_at": "2026-07-31T09:00:00Z",
+                "ends_at": "2026-07-31T10:00:00Z",
+                "start_time": "09:00:00",
+                "end_time": "10:00:00",
+                "timezone": "Australia/Sydney",
+                "location": "The good place",
+                "calendar_color": "#336699",
+                "is_cancelled": False,
+                "tags": [{"id": "tag-1", "name": "social", "color": "#ff0000"}],
+                "participants": [{"contact_id": 7, "name": "Sam Taylor"}],
+            }
+        ]
+
+    def test_it_keeps_the_order_the_service_put_the_entries_in(self) -> None:
+        """The wire preserves W12/W13; it does not re-sort and cannot re-shuffle."""
+        later = AgendaEntry(
+            journal_id=43,
+            title="Dinner",
+            is_all_day=False,
+            starts_at=NINE_AM + datetime.timedelta(hours=10),
+            ends_at=NINE_AM + datetime.timedelta(hours=12),
+        )
+        document = to_home_dashboard_response(
+            dashboard(
+                agenda=DashboardSection.ready(
+                    AgendaSectionData(entries=(COFFEE, later))
+                )
+            )
+        ).model_dump(mode="json")
+
+        entries = document["data"]["attributes"]["agenda"]["data"]["entries"]
+        assert [entry["journal_id"] for entry in entries] == [42, 43]
+
+    def test_an_all_day_entry_carries_no_clock_times(self) -> None:
+        """The card draws ``ALL DAY`` in place of a time (W12), so there is none."""
+        all_day = AgendaEntry(
+            journal_id=44,
+            title="Public holiday",
+            is_all_day=True,
+            starts_at=NINE_AM,
+            ends_at=NINE_AM,
+        )
+        document = to_home_dashboard_response(
+            dashboard(
+                agenda=DashboardSection.ready(AgendaSectionData(entries=(all_day,)))
+            )
+        ).model_dump(mode="json")
+
+        entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
+        assert entry["is_all_day"] is True
+        assert entry["start_time"] is None
+        assert entry["end_time"] is None
+
+    def test_a_cancelled_entry_says_so(self) -> None:
+        """W18: shown, never hidden, and never as if it were still happening."""
+        cancelled = AgendaEntry(
+            journal_id=45,
+            title="Postponed standup",
+            is_all_day=False,
+            starts_at=NINE_AM,
+            ends_at=NINE_AM,
+            is_cancelled=True,
+        )
+        document = to_home_dashboard_response(
+            dashboard(
+                agenda=DashboardSection.ready(AgendaSectionData(entries=(cancelled,)))
+            )
+        ).model_dump(mode="json")
+
+        entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
+        assert entry["is_cancelled"] is True
+        assert entry["title"] == "Postponed standup"
+
+    def test_the_clock_times_carry_the_zone_they_are_expressed_in(self) -> None:
+        """``09:00`` alone is uninterpretable, so the zone travels beside it.
+
+        The stored clock values are the **event's** wall time, not the reader's —
+        migration 0045 derives them ``AT TIME ZONE jci.timezone`` — so a Sydney
+        reader's agenda can hold a New York meeting saying nine in the morning
+        that sorts into their evening. The journals API sends the same field
+        beside the same two values for the same reason.
+        """
+        document = to_home_dashboard_response(
+            dashboard(
+                agenda=DashboardSection.ready(AgendaSectionData(entries=(COFFEE,)))
+            )
+        ).model_dump(mode="json")
+
+        entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
+        assert entry["timezone"] == "Australia/Sydney"
+        assert entry["start_time"] == "09:00:00"
+
+    def test_an_entry_with_nothing_optional_renders_its_absences(self) -> None:
+        bare = AgendaEntry(
+            journal_id=46,
+            title="A quiet event",
+            is_all_day=False,
+            starts_at=NINE_AM,
+            ends_at=NINE_AM,
+        )
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.ready(AgendaSectionData(entries=(bare,))))
+        ).model_dump(mode="json")
+
+        entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
+        assert entry["location"] is None
+        assert entry["timezone"] is None
+        assert entry["calendar_color"] is None
+        assert entry["tags"] == []
+        assert entry["participants"] == []
+
+    def test_an_empty_day_is_ready_with_an_empty_list(self) -> None:
+        """Not ``{}`` and not null: the section answered, and the answer is none.
+
+        The card's single quiet line for "nothing scheduled today" is a different
+        line from the one it shows when the section could not be read, so the two
+        cannot share a representation.
+        """
+        document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
+
+        assert document["data"]["attributes"]["agenda"] == {
+            "status": "ready",
+            "data": {"entries": []},
+        }
+
+    def test_an_unavailable_agenda_carries_null_data(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.unavailable())
+        ).model_dump(mode="json")
+
+        assert document["data"]["attributes"]["agenda"]["data"] is None
