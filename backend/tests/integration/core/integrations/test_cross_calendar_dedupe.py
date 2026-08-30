@@ -22,6 +22,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.core.integrations.journal_sync_seeding import (
     USER_ID,
     build_processor,
@@ -1260,6 +1267,90 @@ class TestFlaggingDuplicatesThatAlreadyExist:
             )
         )
         assert status.scalar() == "conflicted"
+
+    async def test_the_newer_journal_is_the_one_a_merge_would_absorb(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The pair's direction decides which journal a merge destroys.
+
+        ``merge_journals`` deletes the *source*, and the queue's own
+        "Merge All Identical" walks pending items merging source into
+        candidate. Match detection records the incoming journal as the
+        source, so the established one survives. Recording the pair
+        ascending by id would invert that for these items and delete the
+        older journal — the one carrying the longer history — while
+        keeping the newer.
+
+        Ordering still has to be deterministic, or two syncs would record
+        the pair both ways round; it just has to be the *other* order.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        assert first < second
+
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        item = (await _review_items(async_connection))[0]
+        assert item.source_journal_id == second
+        assert item.candidate_journal_id == first
+
+    async def test_merging_the_pair_keeps_both_calendars_identified(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A merge moves the links, so it must move what identifies them.
+
+        Resolving the pair is the point of flagging it, and the merge
+        carries the loser's links over to the winner. Dropping the token on
+        the way would leave the surviving journal holding a link the sync
+        can no longer recognise as this event.
+        """
+        processor, work, personal, first, second = await self._duplicate_pair(
+            async_connection
+        )
+        await self._backfill(
+            processor,
+            calendar_id=work,
+            external_event_id="work-copy-1",
+            journal_id=first,
+        )
+        await self._backfill(
+            processor,
+            calendar_id=personal,
+            external_event_id="personal-copy-9",
+            journal_id=second,
+        )
+
+        merge_service = JournalMergeService(
+            journal_repo=SqlJournalRepository(async_connection),
+            event_publisher=OutboxEventPublisher(async_connection),
+            task_merge_service=TaskJournalMergeService(
+                task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+                event_publisher=OutboxEventPublisher(async_connection),
+            ),
+        )
+        await merge_service.merge_journals(
+            target_id=first, source_id=second, transaction=async_connection
+        )
+
+        links = await _links(async_connection, first)
+        assert len(links) == 2
+        assert {link.external_identity for link in links} == {SHARED_TOKEN}
 
     async def test_a_de_duplicated_event_is_not_flagged(
         self,

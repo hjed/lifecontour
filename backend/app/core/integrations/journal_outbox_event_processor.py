@@ -1834,11 +1834,14 @@ class JournalOutboxEventProcessor:
         journals synced before tokens existed each acquire the same token
         on their next sync, and the second one to do so finds the first.
 
-        The journal ids are ordered before being recorded. The queue's
-        uniqueness is on the ordered pair, so flagging (A, B) on one sync
-        and (B, A) on the next would leave two rows describing one
-        duplicate — and which journal syncs first is not something this
-        controls.
+        The journal ids are ordered before being recorded, newest first.
+        Two things ride on that order. The queue's uniqueness is on the
+        ordered pair, so flagging (A, B) on one sync and (B, A) on the next
+        would leave two rows describing one duplicate — and which journal
+        syncs first is not something this controls. And the queue's merge
+        deletes the *source*, so the source has to be the newer journal, as
+        match detection already records it; ordering the other way would
+        quietly destroy the older journal and the history it carries.
 
         Ordering alone is not enough, because this is not the only thing
         that queues a pair: match detection records the incoming journal
@@ -1875,7 +1878,7 @@ class JournalOutboxEventProcessor:
             if already_queued is not None:
                 continue
 
-            source_id, candidate_id = sorted((journal_id, other_journal_id))
+            candidate_id, source_id = sorted((journal_id, other_journal_id))
             _, created = await self.review_item_repo.create(
                 ReviewItem(
                     user_id=str(user_id),
