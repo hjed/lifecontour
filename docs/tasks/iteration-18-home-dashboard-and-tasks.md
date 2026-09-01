@@ -27,7 +27,7 @@ offer to make one. **And the journal list now says which journals are waiting on
 filtered through the *same* lapse rule the read model uses rather than a second one written in SQL, so
 a lapsed commitment produces no badge — which is what the specification requires of lapsing.
 **Only the e2e (22) remains.**)
-**ITER18-002 Phases 1, 2, 3, 4 and 5 complete** (the delete guard: journal deletion is refused,
+**ITER18-002 is complete** (the delete guard: journal deletion is refused,
 explanatorily, for any journal anchoring a task, and that refusal now reaches REST and MCP callers as
 machine-readable blockers alongside the prose; merge, which is never refused — it re-points task links
 onto the survivor and de-duplicates them, so `POST /api/journals/{id}/merge` can no longer raise a raw
@@ -37,9 +37,11 @@ not-done tasks due in it with the cancellation reason, while touching none of th
 being refused; and **Phase 5 put the refusal in front of a user** — the journal delete confirmation
 is a real dialog rather than a `window.confirm`, and a refusal keeps it open, naming every blocking
 task with its status, the anchor roles it blocks in and a working link to the journal it can be
-actioned from). Delivery rule 9 is satisfied for all three shipped journal operations; **the rest of
-ITER18-001 is next**, per the Sequencing Strategy. ITER18-002's one remaining phase is 6 (the
-retarget/merge lock order).
+actioned from); **and Phase 6 closed the last lock-order inversion** — retargeting a task now takes
+its two journals `FOR KEY SHARE` in ascending id order *before* it locks the task row, which is the
+order a merge already used, so a retarget overlapping a merge of the journal a task is due in queues
+instead of one of the two aborting. Delivery rule 9 is satisfied for all three shipped journal
+operations; **the rest of ITER18-001 is next**, per the Sequencing Strategy.
 **ITER18-003 Phases 1–7 complete: the specification's full event set is published, and all of it is
 now read.** The events (task
 created and deleted; text updated and status changed as one `TaskUpdated`; the due-journal retarget,
@@ -6754,10 +6756,31 @@ field. An empty list narrows to `null` on purpose — rendering "these tasks blo
 reads as though nothing does — so a malformed refusal degrades to the ordinary toast rather than to an
 explanation with a dead link in it.
 
-#### Phase 6: Lock Order — Retargeting Against Merge
+#### Phase 6: Lock Order — Retargeting Against Merge ✅ COMPLETE
 
 **Prerequisites:** ITER18-001 Phase 7, ITER18-002 Phase 3. Independent of Phases 2, 4 and 5.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Actual:** **~225 production** →
+**~1,320 tracked** across 10 files (production: the port's contract 48, the SQL adapter 36, the
+service's reorder and its new helper 169 — most of that docstring — and 32 rewriting the merge side's
+lock-order note; tests: 505 in the retarget unit file, 251 in the journal repository integration file,
+314 in a new two-connection integration file, 36 in shared seeding; docs: 31 in `database-design.md`
+plus this entry).
+
+**Production came in at ×2 and the tests at ×5.9, and both misses have the same cause: a lock order
+is a claim about *sequence*, and sequence has to be written down twice — once in the code and once in
+the reason it is that way round.** The three-line reorder the estimate imagined is genuinely three
+lines; what surrounds it is ~120 lines of docstring explaining why the peek decides nothing, why the
+mode is `FOR KEY SHARE` rather than `FOR UPDATE`, and why one re-verification is enough. The same
+applies to the tests: an ordering cannot be asserted from an outcome, so each claim needs its own
+apparatus — a parent mock to interleave two ports' call histories, a statement recorder to prove the
+locks are taken one id at a time, and two real connections with committed rows to prove the two
+operations queue rather than abort.
+
+**Calibration addition (rule 17): a phase whose acceptance criteria are about *when* something
+happens rather than *what* happens should budget its tests from the number of distinct orderings it
+claims, not from the size of the code change.** Five criteria here produced five kinds of test
+apparatus, and the production change they all guard is under twenty lines of logic. The tell is a
+criterion containing the word "before", "still", or "instead of".
 
 **Why this exists.** Raised by the automated review on ITER18-001 Phase 7's pull request, confirmed
 against the two lock sequences, and deferred to here rather than fixed in that phase because the fix
@@ -6782,21 +6805,112 @@ takes each lock — which is why it is a phase rather than a documented acceptan
 
 **Acceptance Criteria:**
 
-- [ ] `retarget_due_journal` acquires its journal locks **before** the task lock, in the same ascending-id
-      order `repoint_journal_links` uses, so the two operations queue instead of deadlocking.
-- [ ] The previous due journal — which is not known until the task has been read — is handled without
-      reopening the window: state the chosen approach (a non-locking peek followed by a locking read that
-      re-verifies, or a locking read on the journal domain's port that covers both journals).
-- [ ] The acknowledgement rule and the status the retarget decides from are still read under the row lock;
-      the fix must not reintroduce the lost-*decision* hazard ITER18-001 Phase 6 closed.
-- [ ] The same-journal no-op still reads no journal and takes no journal lock.
-- [ ] `repoint_journal_links`'s lock-order docstring is updated to name retargeting as ordered *with* it
-      rather than against it.
+- [x] `retarget_due_journal` acquires its journal locks **before** the task lock, in the same ascending-id
+      order `repoint_journal_links` uses, so the two operations queue instead of deadlocking. —
+      `JournalRepository.find_and_lock_by_ids_for_user` (`SqlJournalRepository`), one owner-scoped
+      `SELECT … FOR KEY SHARE` per id, low to high, called through the service's
+      `_lock_retarget_journals` before `find_by_id_for_update`. Pinned on the calls themselves with a
+      parent mock that interleaves the two ports' histories, and end to end over two real connections.
+- [x] The previous due journal — which is not known until the task has been read — is handled without
+      reopening the window: state the chosen approach. — **a non-locking peek, then the ordered locking
+      read, then the locking task read that re-verifies.** See *Decisions taken (Phase 6)* below.
+- [x] The acknowledgement rule and the status the retarget decides from are still read under the row lock;
+      the fix must not reintroduce the lost-*decision* hazard ITER18-001 Phase 6 closed. — the peek names
+      journals and answers the no-op and nothing else; the status, the acknowledgement, the previous due
+      journal, the text written back and even the task's existence are all read again under the lock.
+      `TestTheDecisionsAreMadeFromTheLockedRead` makes the two reads disagree in each of those four ways
+      and asserts the locked one won — including the converse case, so the rule is read from the lock
+      rather than merely made stricter.
+- [x] The same-journal no-op still reads no journal and takes no journal lock. — and now takes no **task**
+      row lock either: the peek answers it, and a call that writes nothing has no decision for an
+      interleaving to lose. Asserted on `mock_calls` being empty for both the journal and settings ports,
+      and on `find_by_id_for_update` never being awaited.
+- [x] `repoint_journal_links`'s lock-order docstring is updated to name retargeting as ordered *with* it
+      rather than against it. — rewritten in `_lock_journals`, which now states the conflicting pair
+      (`FOR KEY SHARE` against `FOR UPDATE`) that makes the queue real. The three other docstrings that
+      cited the inversion as a reason **not** to lock — `_require_future_dated`, `_save` and
+      `attach_intermediate_journal` — were corrected in the same pass, since each of their arguments
+      changed rather than merely aged.
 
 **Required Test Coverage:** unit — the order in which the locks are requested, asserted on the calls, so
 a refactor cannot silently invert it again; the no-op still touching no journal. Integration — a retarget
 overlapping a merge of its due journal completes rather than deadlocking, over two real connections and a
 committed fixture, in **both** interleavings. No e2e.
+
+**Decisions taken (Phase 6):**
+
+- **The approach: a non-locking peek, an ordered locking journal read, then the locking task read that
+  re-verifies.** The two options the criterion offered are not alternatives — a read of the *task* is the
+  only thing that can name the journal it is leaving, so the port-level locking read needs the peek to
+  know what to lock. What the peek must not do is *decide*, and it does not: it answers "which two
+  journals" and "is this the same-journal no-op", and every rule below is applied to the locked read.
+- **`FOR KEY SHARE`, not `FOR UPDATE`.** It conflicts with the merge's `FOR UPDATE` and with the `DELETE`
+  that ends a merge, which is all the ordering needs, and it is *precisely* the lock the intermediate-link
+  insert's and the anchor update's foreign keys take a moment later — so the fix holds nothing new, only
+  the same locks earlier and in order. `FOR UPDATE` would have made every journal edit queue behind an
+  unrelated task move, and would have narrowed the future-dated rule's *deliberate* window: the
+  specification wants a task whose due journal later slips into the past to be **lapsed, not refused**.
+  Pinned both ways in `TestTheJournalLockHoldsAgainstAnotherConnection` — a second connection's
+  `FOR UPDATE` waits, a plain `UPDATE` does not.
+- **Re-verification means discarding the peek's answer, not taking a second lock — and that correction
+  came out of the local review.** The first cut re-ran the ordered locking read over the journal the
+  locked read reported, reasoning that the intermediate link's foreign key would otherwise take that
+  lock unordered. **That reasoning was wrong.** The foreign key takes the identical `FOR KEY SHARE` on
+  the identical row at the identical point in the order — after the task row — so the extra call closed
+  nothing and cost two round trips; worse, when the newly-discovered journal's id was the *lower* of the
+  pair it was a low-after-high acquisition, which is the shape of the very inversion the phase removes.
+  It is gone, and the unit test that pinned it is now parametrised on both sides of the target so nobody
+  re-adds it after reading the ascending case alone.
+- **Two residual windows are stated on the method rather than claimed away.** *A third writer*
+  committing between the peek and the task lock can leave the retarget linking a journal it did not
+  lock — the guarantee is about the *pair*, and three operations can still race. And *the same-journal
+  no-op is decided from the peek*, which is forced: deciding it under the task lock means either taking
+  that lock first (the inversion) or taking journal locks for a call that writes nothing (criterion 4).
+  A no-op returns a read, and a read is a snapshot whatever lock produced it — a merge committing an
+  instant after a *locked* no-op returned would hand the caller the same stale journal id. Both windows
+  are pinned by tests asserting the chosen behaviour rather than merely described.
+- **The "once is enough" argument itself holds**, and is worth keeping for the next reader: from the
+  moment the task's `FOR NO KEY UPDATE` is held nothing can move `due_journal_id`, because every writer
+  of that column — a retarget, a status change, a merge's `UPDATE tasks` — takes a conflicting lock.
+  That is what makes the locked read's answer final. The mistake was inferring a lock **ordering**
+  benefit from a **freshness** guarantee. *Carry-forward: "the value cannot change again" and "the lock
+  for it is taken in the right order" are different claims, and a re-read proves only the first.*
+- **One statement per id, not one `id = ANY(...)`.** A row lock is not promised in the order a query
+  returns its rows, so a single ordered statement would leave acquisition order to the plan and the
+  ordering claim would be intended rather than true. This is the reason `_lock_journals` already locks its
+  pair one statement each, and the integration test counts the statements rather than trusting the loop.
+- **No constructor changed, which is why the wiring cost nothing.** `TaskService` already takes
+  `JournalRepository`; the phase added a method to that port rather than a collaborator to the service, so
+  none of the 24 construction sites Phase 1 and ITER18-003 Phase 1 both got caught by had to move. *The
+  carry-forward is the estimating one:* when a phase needs a new capability from a domain a service
+  already reaches into, adding to the existing port is both the cheaper change and the one that keeps the
+  dependency count honest.
+- **The two-connection test isolates the due anchor deliberately.** Its task is created in a fourth
+  journal the merge never touches. Sharing the creating anchor with the absorbed journal would make the
+  merge move both, and the two interleavings would then end in different states for a reason that has
+  nothing to do with locking — a retarget running first leaves an intermediate link the merge's fourth
+  statement then drops as redundant with the creating anchor. `committed_task` gained a `creating_index`
+  parameter for it.
+
+**Delivery notes (Phase 6):**
+
+- **Docs:** `docs/architecture/database-design.md`'s merge lock-order section gained the retarget side —
+  the ordered acquisition, the `FOR KEY SHARE` rationale and what it deliberately does not block, the
+  peek-and-re-verify shape, and a restatement that task *creation* is the one pairing no lock order can
+  fix. The docstrings on both sides of the pair are the primary record, as this repo's convention has it.
+- **Reviewed independently against this document and the specification, and the review changed the
+  code.** It found the second locking read to be inert (above); the two residual windows asserted rather
+  than stated; one of the two interleaving tests releasing its barrier from the test body rather than
+  from inside the merge, so the "overlap" could degrade to a sequence and still pass; and
+  `committed_task` sweeping only `Task%` outbox rows while the new test's real merge commits `Journal%`
+  ones. All four are fixed, and the `FOR KEY SHARE`-versus-`DELETE` half of the mode claim — previously
+  exercised only indirectly — now has a test of its own.
+- **Gates run locally:** `ruff format` and `ruff check` clean for `backend` and `core_shared`; `mypy`
+  clean over **976** backend files and **136** in `core_shared`; the full `tests/unit/` suite
+  (**4,174** tests); and `tests/integration/tasks/`, `tests/integration/journal/`,
+  `tests/integration/api/` and `tests/integration/mcp/` — **2,299** tests, in two serial chunks. No
+  frontend or e2e gates: the phase changes no frontend file, and this phase's stated coverage is
+  explicitly "No e2e".
 
 ### ITER18-003: Task Events, Field History, and Activity Records
 

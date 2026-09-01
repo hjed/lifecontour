@@ -405,20 +405,30 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         concurrent creation anchoring to the absorbed journal made the merge
         fail — but it is not zero, and calling it impossible would be wrong.
 
-        **A deadlock against task *retargeting* is also possible, and unlike the
-        one above it can be closed.** ``TaskService.retarget_due_journal`` locks
-        the **task** row first and only then takes ``FOR KEY SHARE`` on the
-        journals, through the link insert's and the anchor update's foreign
-        keys; this method and its caller take the **journals** first and then
-        write the task rows. Two operations, the same two kinds of row, opposite
-        orders — so retargeting a task while a merge absorbs the journal it is
-        due in deadlocks. The difference from creation is that a retarget
-        *chooses* when it takes each lock, so an ordering exists that removes
-        the inversion. Doing so changes both sides and needs a locking read on
-        the journal domain's port, which is why it is **ITER18-002 Phase 6**
-        rather than a note here. Until it lands, this is a known intermittent
-        failure of one of the two callers, not a correctness hole: neither
-        operation half-applies.
+        **Task *retargeting* is ordered *with* this method, not against it.**
+        ``TaskService.retarget_due_journal`` used to lock the **task** row first
+        and take ``FOR KEY SHARE`` on the journals only afterwards, through the
+        link insert's and the anchor update's foreign keys — the same two kinds
+        of row as here, in the opposite order — so retargeting a task while a
+        merge absorbed the journal it was due in deadlocked. The difference from
+        creation is that a retarget *chooses* when it takes each lock, so an
+        ordering existed that removed the inversion, and ITER18-002 Phase 6 took
+        it: the retarget now reads both of its journals through
+        ``JournalRepository.find_and_lock_by_ids_for_user`` — ``FOR KEY SHARE``,
+        ascending id, one statement each, exactly as below — **before** it locks
+        the task row. Whichever of the two operations arrives first, the other
+        queues on the journals rather than meeting it head-on.
+
+        ``FOR KEY SHARE`` on that side and ``FOR UPDATE`` on this one is the
+        conflicting pair that makes the queue real; it is also the lock the
+        retarget's own foreign keys would have taken later, so nothing new is
+        held by either operation.
+
+        The guarantee is about **this pair**. A retarget names the journals to
+        lock from a read it takes without a lock, so a *third* writer committing
+        in that instant can leave it linking a journal it did not lock — see
+        ``TaskService.retarget_due_journal``, which states that window rather
+        than claiming it away. Two operations still queue; three can still race.
 
         As with the deleted-task cases in the task repository's own tests, none
         of the concurrent forms can be staged against the integration fixture —

@@ -445,7 +445,43 @@ journal after the re-point and before the delete, and `RESTRICT` would block the
 because two merges absorbing different journals into the same target could both clear the de-duplication
 step before either wrote its `(task_id, target)` link, colliding on the composite primary key.
 
-It sits on `TaskAnchorRepository` — the port the delete guard uses — rather than on `TaskRepository`, so
+**Retargeting a task takes the same rows in the same order** (ITER18-002 Phase 6). A retarget writes an
+intermediate link for the journal the task is leaving and updates the due anchor to the journal it is
+moving to, and both statements take `FOR KEY SHARE` on their journal through a foreign key. Taking those
+locks *implicitly*, after the task's own `FOR NO KEY UPDATE`, put the retarget in the opposite order to
+the merge — journals after the task, where the merge has journals before it — so retargeting a task while
+a merge absorbed the journal it was due in deadlocked, and PostgreSQL aborted one side. `TaskService.
+retarget_due_journal` therefore now acquires them **up front**, through
+`JournalRepository.find_and_lock_by_ids_for_user`: owner-scoped, `FOR KEY SHARE`, one statement per id in
+ascending order, before it locks the task row. Whichever of the *two* arrives first, the other queues.
+
+`FOR KEY SHARE` is the weakest mode that conflicts with the merge's `FOR UPDATE` and with the `DELETE`
+that ends it, and it is exactly the lock the retarget's own foreign keys would have taken a moment later —
+so nothing new is held, only held earlier and in order. It deliberately does **not** conflict with a plain
+journal `UPDATE`, so editing a journal never waits behind a task move, and the specification's rule that a
+task whose due journal later slips into the past is *lapsed rather than invalid* keeps the window it needs.
+
+The journal a task is **leaving** is not knowable until the task has been read, so the retarget reads it
+twice: a non-locking peek that names the two journals to lock (and answers the same-journal no-op, which
+takes no lock at all), then the locking read from which every rule — the status, the acknowledgement, the
+previous due journal — is actually decided.
+
+That leaves **two windows, both deliberate and both documented on the method rather than smoothed over**.
+A *third* writer committing between the peek and the task lock can move the due journal onto a journal the
+retarget did not lock, and the link insert's foreign key then takes it after the task row; locking it
+explicitly there was tried and removed, because the foreign key acquires the identical lock at the
+identical point in the order. And the same-journal **no-op** is decided from the peek, because deciding it
+under the task lock would mean either taking that lock first — the inversion — or taking journal locks for
+a call that writes nothing. A no-op returns a read, and a read is a snapshot whatever lock produced it.
+
+**Task creation is the one pairing no lock order can fix**, and it is unchanged: an `INSERT` takes its
+foreign-key locks in *declaration* order — creating anchor, then due anchor — which is the task's own
+pairing rather than an ordering of ids, so a task created with its creating anchor on the survivor and its
+due anchor on the absorbed journal grabs the higher id first. That window is far smaller than the one the
+merge's lock closes, but it is not zero.
+
+`repoint_journal_links` sits on `TaskAnchorRepository` — the port the delete guard uses — rather than on
+`TaskRepository`, so
 the journal domain can move task links without also being able to change a task's text, status or
 contacts. Like everything on that port it is **journal-scoped rather than owner-scoped**: it is data
 integrity for a journal about to be deleted, and a row skipped by an owner filter would fail the merge.

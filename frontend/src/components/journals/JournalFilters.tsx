@@ -209,6 +209,7 @@ export function JournalFilters({
                 'w-full justify-start text-left font-normal',
                 !dateRange && 'text-muted-foreground'
               )}
+              data-testid='journal-date-range-trigger'
             >
               <CalendarIcon className='mr-2 h-4 w-4' />
               {getDateRangeDisplay()}

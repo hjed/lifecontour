@@ -1,14 +1,17 @@
 """Integration tests for SqlJournalRepository."""
 
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from core_shared.models.journals import EventDateRange, Journal, JournalNotFoundError
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from tests.integration.statement_recorder import recorded_statements
 
 
 @pytest_asyncio.fixture
@@ -1255,3 +1258,285 @@ class TestJournalRepositoryFindIdsByFilters:
 
         assert ids == {typed.id}
         assert untyped.id not in ids
+
+
+def saved_id(journal: Journal) -> int:
+    """A saved journal's id, narrowed once so the lock tests can pass lists of them."""
+    assert journal.id is not None
+    return journal.id
+
+
+@pytest.mark.integration
+class TestJournalRepositoryFindAndLockByIdsForUser:
+    """The ordered locking read a retarget takes before it locks its task row.
+
+    ``TaskService.retarget_due_journal`` and a journal merge touch the same two
+    kinds of row, and until ITER18-002 Phase 6 they took them in opposite orders.
+    This read is what puts the retarget's journal locks in front of its task
+    lock, in the same ascending-id order ``SqlTaskAnchorRepository._lock_journals``
+    uses — so the two queue instead of deadlocking.
+
+    Its owner scoping is the ordinary journal-domain contract, and the tests for
+    it read the same as ``find_by_ids_for_user``'s. What is particular to this
+    method is the last three: the ids are locked one statement at a time in
+    ascending order, and the mode is ``FOR KEY SHARE`` — strong enough to queue
+    behind a merge or a delete, weak enough that editing a journal is never
+    blocked by somebody retargeting a task into it.
+    """
+
+    OWNER = "lock-owner"
+    STRANGER = "lock-stranger"
+
+    async def test_returns_the_users_journals(
+        self, journal_repository: SqlJournalRepository
+    ):
+        first = await journal_repository.save(create_test_journal(user_id=self.OWNER))
+        second = await journal_repository.save(create_test_journal(user_id=self.OWNER))
+
+        found = await journal_repository.find_and_lock_by_ids_for_user(
+            self.OWNER, [saved_id(first), saved_id(second)]
+        )
+
+        assert {journal.id for journal in found} == {first.id, second.id}
+
+    async def test_another_users_journal_is_absent_not_forbidden(
+        self, journal_repository: SqlJournalRepository
+    ):
+        """Ownership is enforced by the query, so the caller never holds the row.
+
+        This is what lets the retarget answer ``TaskAnchorJournalNotFoundError``
+        without deciding between "missing" and "not yours" — and what stops it
+        taking a lock on a journal it was never allowed to see.
+        """
+        mine = await journal_repository.save(create_test_journal(user_id=self.OWNER))
+        theirs = await journal_repository.save(
+            create_test_journal(user_id=self.STRANGER)
+        )
+
+        found = await journal_repository.find_and_lock_by_ids_for_user(
+            self.OWNER, [saved_id(mine), saved_id(theirs)]
+        )
+
+        assert [journal.id for journal in found] == [mine.id]
+
+    async def test_a_missing_id_is_simply_absent(
+        self, journal_repository: SqlJournalRepository
+    ):
+        mine = await journal_repository.save(create_test_journal(user_id=self.OWNER))
+
+        found = await journal_repository.find_and_lock_by_ids_for_user(
+            self.OWNER, [saved_id(mine), 999999]
+        )
+
+        assert [journal.id for journal in found] == [mine.id]
+
+    async def test_no_ids_costs_no_statement(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A retarget never asks for nothing, but a lock loop that did would round trip."""
+        with recorded_statements(async_connection) as statements:
+            found = await journal_repository.find_and_lock_by_ids_for_user(
+                self.OWNER, []
+            )
+
+        assert found == []
+        assert statements == []
+
+    async def test_one_statement_per_id_in_ascending_order(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """The ordering claim is about statements, so the statements are counted.
+
+        ``FOR KEY SHARE`` does not promise to lock in the order a query returns
+        its rows, so one ordered statement over three ids would leave the order
+        up to the plan — the reason ``_lock_journals`` issues one per id too. The
+        ids are handed over out of order here, and the locks still have to be
+        taken low to high.
+        """
+        journals = [
+            await journal_repository.save(create_test_journal(user_id=self.OWNER))
+            for _ in range(3)
+        ]
+        ids = sorted(saved_id(journal) for journal in journals)
+
+        with recorded_statements(async_connection) as statements:
+            await journal_repository.find_and_lock_by_ids_for_user(
+                self.OWNER, [ids[2], ids[0], ids[1]]
+            )
+
+        assert len(statements) == 3
+        assert all("FOR KEY SHARE" in statement for statement in statements)
+
+    async def test_the_ids_are_locked_low_to_high(
+        self,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Asserted on the rows each statement returned, not on the SQL text.
+
+        The statements are identical apart from their bound parameter, which the
+        recorder does not capture, so the order is read off the journals the
+        method hands back — it returns them in the order it locked them.
+        """
+        journals = [
+            await journal_repository.save(create_test_journal(user_id=self.OWNER))
+            for _ in range(3)
+        ]
+        ids = sorted(saved_id(journal) for journal in journals)
+
+        found = await journal_repository.find_and_lock_by_ids_for_user(
+            self.OWNER, [ids[2], ids[0], ids[1]]
+        )
+
+        assert [journal.id for journal in found] == ids
+
+
+@pytest.mark.integration
+class TestTheJournalLockHoldsAgainstAnotherConnection:
+    """What ``FOR KEY SHARE`` blocks, and what it deliberately does not.
+
+    The mode is the whole design of the fix. It has to conflict with the merge's
+    ``FOR UPDATE`` — and with the ``DELETE`` that ends a merge — or the two
+    operations would not queue and the lock ordering would guarantee nothing. It
+    must **not** conflict with an ordinary journal ``UPDATE``, or retargeting a
+    task into a journal would start blocking somebody editing that journal's
+    title, which is a cost the deadlock fix has no right to impose. It is also
+    exactly the lock the intermediate-link insert's and the anchor update's
+    foreign keys take later, so nothing new is being held — only held earlier.
+
+    Two real connections are needed to see any of that, which the savepoint
+    fixture cannot give: its outer transaction is invisible to everyone else.
+    So these rows are committed for real under a one-off user id and deleted in
+    a ``finally``.
+    """
+
+    @staticmethod
+    async def _committed_journal(async_engine: AsyncEngine) -> tuple[str, int]:
+        user_id = f"lock-race-{uuid4()}"
+        async with async_engine.connect() as setup:
+            saved = await SqlJournalRepository(setup).save(
+                create_test_journal(user_id=user_id, title="Contended")
+            )
+            await setup.commit()
+        assert saved.id is not None
+        return user_id, saved.id
+
+    @staticmethod
+    async def _cleanup(async_engine: AsyncEngine, user_id: str) -> None:
+        async with async_engine.connect() as cleanup:
+            await cleanup.execute(
+                text("DELETE FROM journals WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+            await cleanup.commit()
+
+    async def test_a_for_update_waits_for_the_lock_holder(
+        self, async_engine: AsyncEngine
+    ):
+        """A merge's lock queues behind a retarget's, rather than deadlocking with it.
+
+        The waiter is given a ``lock_timeout`` so a regression fails in a second
+        instead of hanging the suite; the assertion is that it times out while
+        the holder is inside its transaction and succeeds once that commits.
+        """
+        user_id, journal_id = await self._committed_journal(async_engine)
+        try:
+            async with (
+                async_engine.connect() as holder,
+                async_engine.connect() as waiter,
+            ):
+                await holder.begin()
+                await SqlJournalRepository(holder).find_and_lock_by_ids_for_user(
+                    user_id, [journal_id]
+                )
+
+                await waiter.execute(text("SET lock_timeout = '1s'"))
+                with pytest.raises(DBAPIError):
+                    await waiter.execute(
+                        text("SELECT id FROM journals WHERE id = :id FOR UPDATE"),
+                        {"id": journal_id},
+                    )
+                await waiter.rollback()
+
+                await holder.commit()
+
+                result = await waiter.execute(
+                    text("SELECT id FROM journals WHERE id = :id FOR UPDATE"),
+                    {"id": journal_id},
+                )
+                assert result.scalar_one() == journal_id
+                await waiter.rollback()
+        finally:
+            await self._cleanup(async_engine, user_id)
+
+    async def test_a_delete_waits_for_the_lock_holder(self, async_engine: AsyncEngine):
+        """The other half of the claim, and the half a merge actually ends with.
+
+        ``repoint_journal_links`` takes ``FOR UPDATE`` and the merge then deletes
+        the absorbed journal; a `DELETE` takes the same strength, so the lock has
+        to hold against it too or a journal could vanish out from under a
+        retarget between its check and its write.
+        """
+        user_id, journal_id = await self._committed_journal(async_engine)
+        try:
+            async with (
+                async_engine.connect() as holder,
+                async_engine.connect() as deleter,
+            ):
+                await holder.begin()
+                await SqlJournalRepository(holder).find_and_lock_by_ids_for_user(
+                    user_id, [journal_id]
+                )
+
+                await deleter.execute(text("SET lock_timeout = '1s'"))
+                with pytest.raises(DBAPIError):
+                    await deleter.execute(
+                        text("DELETE FROM journals WHERE id = :id"), {"id": journal_id}
+                    )
+                await deleter.rollback()
+
+                await holder.commit()
+        finally:
+            await self._cleanup(async_engine, user_id)
+
+    async def test_an_ordinary_update_is_not_blocked(self, async_engine: AsyncEngine):
+        """``FOR KEY SHARE``, not ``FOR UPDATE``: editing a journal stays free.
+
+        A retarget holds these locks for the rest of its unit of work, so a
+        stronger mode would make every journal edit wait behind an unrelated
+        task move. It would also make the future-dated rule's documented window
+        narrower by accident — the specification wants a task whose due journal
+        later moves into the past to be *lapsed*, not refused.
+        """
+        user_id, journal_id = await self._committed_journal(async_engine)
+        try:
+            async with (
+                async_engine.connect() as holder,
+                async_engine.connect() as editor,
+            ):
+                await holder.begin()
+                await SqlJournalRepository(holder).find_and_lock_by_ids_for_user(
+                    user_id, [journal_id]
+                )
+
+                await editor.execute(text("SET lock_timeout = '1s'"))
+                await editor.execute(
+                    text("UPDATE journals SET title = :title WHERE id = :id"),
+                    {"title": "Edited while locked", "id": journal_id},
+                )
+                await editor.commit()
+
+                await holder.commit()
+
+            async with async_engine.connect() as check:
+                result = await check.execute(
+                    text("SELECT title FROM journals WHERE id = :id"),
+                    {"id": journal_id},
+                )
+                assert result.scalar_one() == "Edited while locked"
+        finally:
+            await self._cleanup(async_engine, user_id)

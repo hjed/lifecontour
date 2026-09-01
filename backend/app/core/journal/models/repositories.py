@@ -175,6 +175,54 @@ class JournalRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_and_lock_by_ids_for_user(
+        self, user_id: str, journal_ids: list[int]
+    ) -> list[Journal]:
+        """Find journals by IDs, scoped to a user, holding each for the transaction.
+
+        :meth:`find_by_ids_for_user` with a row lock, and it exists for the lock
+        rather than for the read. A caller that is about to write rows carrying
+        foreign keys to these journals will take ``FOR KEY SHARE`` on each of
+        them anyway, when the write runs; taking the same locks **here**, before
+        anything else, is what lets that caller choose the order it acquires
+        them in.
+
+        That matters because journal merge takes both of its journals
+        ``FOR UPDATE`` in ascending id order and only then writes the task rows
+        (see
+        :meth:`~app.core.tasks.models.repositories.TaskAnchorRepository.repoint_journal_links`).
+        ``TaskService.retarget_due_journal`` used to do the reverse — task row
+        first, journals afterwards through its writes' foreign keys — and the two
+        deadlocked. It now comes here first, with the same ascending order, so
+        the two queue instead.
+
+        The mode is ``FOR KEY SHARE``: the weakest that conflicts with the
+        merge's ``FOR UPDATE`` and with a journal ``DELETE``, and precisely the
+        one the foreign keys would take later, so nothing new is held — only held
+        earlier. An ordinary journal ``UPDATE`` is deliberately **not** blocked,
+        so editing a journal never waits behind somebody retargeting a task into
+        it.
+
+        The ids are locked one statement at a time, low to high, because a row
+        lock does not promise to be taken in the order a query returns its rows —
+        the same reason ``repoint_journal_links`` locks its pair one statement
+        each.
+
+        Callers must already be inside their unit of work: a lock taken outside
+        one is released immediately and closes nothing.
+
+        Args:
+            user_id: The user ID to scope the lookup to
+            journal_ids: Journal IDs to fetch and lock, in any order
+
+        Returns:
+            The user's journals among ``journal_ids``, in ascending id order.
+            Ownership is enforced by the query, so another user's journal is
+            simply absent — and never locked.
+        """
+        pass
+
+    @abstractmethod
     async def get_by_ids_for_user(
         self,
         user_id: str,

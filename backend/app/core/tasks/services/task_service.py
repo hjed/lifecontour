@@ -632,8 +632,10 @@ class TaskService:
         :meth:`retarget_due_journal` produces on its own and Phase 7 explicitly
         declined to clean up ("nothing is ever unlinked, including a link that
         has become redundant"). A lock would narrow a window onto an outcome that
-        is legitimate either side of it, and it would deepen the lock-order
-        inversion against journal merge that ITER18-002 Phase 6 exists to remove.
+        is legitimate either side of it. It would also have to be ordered against
+        journal merge the way :meth:`retarget_due_journal` now is — journal locks
+        first, ascending, then the task row — which is real machinery to buy
+        nothing observable.
 
         Args:
             user_id: The acting user; the task and the journal must be theirs
@@ -996,19 +998,52 @@ class TaskService:
         not done would go on to reopen a task somebody has since marked done,
         with no acknowledgement at all.
 
-        **Known: this ordering deadlocks against a concurrent journal merge.**
-        The task row is locked first and the journals only afterwards, through
-        the link insert's and the anchor update's foreign keys;
+        **The journals are locked before the task row, which is what stops this
+        deadlocking against a journal merge.**
         :meth:`~app.core.tasks.models.repositories.TaskAnchorRepository.repoint_journal_links`
-        takes the journals first and the task rows after. Retargeting a task
-        while a merge absorbs the journal it is due in therefore aborts one of
-        the two. Neither half-applies, so nothing is corrupted — but one caller
-        sees a database error. Closing it means taking the journal locks first,
-        in the merge's ascending-id order, which needs a locking read on the
-        journal domain's port and a way to know the *previous* due journal before
-        the task has been read. That is **ITER18-002 Phase 6**, whose subject is
-        this pair; it is deliberately not done here, where the merge contract is
-        not in scope.
+        and its caller take the journals ``FOR UPDATE`` in ascending id order and
+        write the task rows after; this method used to do the reverse, so
+        retargeting a task while a merge absorbed the journal it was due in
+        aborted one of the two. It now acquires the same rows in the same order,
+        so the two queue.
+
+        Getting there needs three reads where there were two, because the
+        journal a task is *leaving* is not knowable until the task has been read:
+
+        1. a **peek** — :meth:`~…TaskRepository.find_by_id`, no lock — which
+           names the two journals and answers the same-journal no-op, the one
+           path that reads no journal and takes no lock of any kind;
+        2. the **ordered locking read** of both journals, through
+           :meth:`_lock_retarget_journals`, taking exactly the ``FOR KEY SHARE``
+           the writes below would take anyway — earlier, and low id to high;
+        3. the **locking read of the task**, from which every rule below is
+           decided. The peek decides nothing else: it is a snapshot from before
+           the journal locks were waited on, so the status, the previous due
+           journal and even the task's existence are all read again here.
+
+        **Two residual windows, both stated rather than papered over.**
+
+        *A third writer between the peek and the task lock.* If step 3 reports a
+        different due journal — a merge re-pointed it onto a survivor, say — the
+        journal now being left is not one of the two step 2 locked, so the link
+        insert takes its own ``FOR KEY SHARE`` on it after the task lock. Locking
+        it explicitly at that point was tried and removed: the foreign key
+        acquires the very same lock at the very same place in the order, so the
+        extra statements bought nothing. This needs a *third* concurrent
+        operation rather than the pair the phase is about, and it is the same
+        family as the creation deadlock below.
+
+        *The same-journal no-op is decided from the peek*, because it must be:
+        deciding it under the task lock means either taking that lock first — the
+        inversion — or taking journal locks for a call that writes nothing, which
+        the phase's own criterion forbids. A no-op writes nothing, so what it
+        returns is a read, and every read is a snapshot: a merge committing a
+        moment after a *locked* no-op returned would leave the caller holding the
+        same stale journal id. The lock would narrow the window, not close it.
+
+        The one ordering this does **not** close at all is against task
+        *creation*, and no ordering can: an insert takes its foreign-key locks in
+        declaration order rather than by id. See ``_lock_journals``.
 
         Args:
             user_id: The acting user; the task and the journal must be theirs
@@ -1040,16 +1075,38 @@ class TaskService:
             TaskReopenNotAcknowledgedError: When the task is *done* and the
                 caller has not acknowledged that retargeting reopens it.
         """
+        # A read that takes no lock, and decides nothing. It is here to name the
+        # journals — the one being left is not knowable any other way — and to
+        # answer the same-journal no-op, which writes nothing and so needs
+        # neither a journal nor a row lock.
+        peeked = await self.task_repo.find_by_id(task_id, user_id)
+        if peeked is None:
+            raise TaskNotFoundError(task_id)
+        if peeked.due_journal_id == due_journal_id:
+            return peeked
+
+        journals = await self._lock_retarget_journals(
+            user_id, peeked.due_journal_id, due_journal_id
+        )
+
+        # Only now the task row, and every rule below is decided from *this*
+        # read rather than from the peek above.
         task = await self.task_repo.find_by_id_for_update(task_id, user_id)
         if task is None:
             raise TaskNotFoundError(task_id)
 
+        # The journal actually being left, which is the one linked and announced
+        # below. It comes from here rather than from the peek even though they
+        # almost always agree — see the docstring's third read.
         previous_due_journal_id = task.due_journal_id
         if previous_due_journal_id == due_journal_id:
             return task
 
-        due_journal = await self._resolve_due_journal(user_id, due_journal_id)
-        await self._require_future_dated(user_id, due_journal_id, due_journal, now)
+        if due_journal_id not in journals:
+            raise TaskAnchorJournalNotFoundError("due", due_journal_id)
+        await self._require_future_dated(
+            user_id, due_journal_id, journals[due_journal_id], now
+        )
 
         # Last, and deliberately: the acknowledgement is a confirmation rather
         # than a validation, so a caller who confirms should not then be told
@@ -1086,12 +1143,12 @@ class TaskService:
                 )
             )
         # Through ``_save`` rather than straight to the repository, for the race
-        # its docstring describes. The window is wider here than on creation: the
-        # journal-delete guard refuses to delete a journal that *already* anchors
-        # a task, and the new due journal does not anchor this one until the
-        # statement below runs — so a delete landing between the read above and
-        # this write is permitted, and would otherwise surface as a raw
-        # ``IntegrityError`` in place of the 404 this method promises.
+        # its docstring describes. The window this path had is now shut — the
+        # journal is held ``FOR KEY SHARE`` from the locking read above, and a
+        # ``DELETE`` conflicts with that — but the mapping stays: it is the same
+        # method creation writes through, where no journal lock is taken, and a
+        # guard that only holds on one of two callers is worth neither of them
+        # relying on.
         saved = await self._save(
             replace(
                 task,
@@ -1338,11 +1395,15 @@ class TaskService:
         is at stake is only which error the caller sees, so it is mapped back
         rather than locked out.
 
-        Locking the journal rows for the duration would close the window, but it
-        needs an owner-scoped *locking* read on ``JournalRepository`` — another
-        domain's port — to change an outcome that is identical either way: the
-        journal is gone, and the task cannot anchor to it. A violation naming
-        anything else is re-raised untouched.
+        Locking the journal rows for the duration closes the window, and the
+        **retarget** path now does hold them — not for this, but because the lock
+        order against journal merge required it, and ``FOR KEY SHARE`` conflicts
+        with the ``DELETE`` too. The **creation** path still does not: it would
+        need the same owner-scoped locking read on ``JournalRepository`` to
+        change an outcome that is identical either way — the journal is gone, and
+        the task cannot anchor to it — so the mapping below stays, and is what
+        both paths rely on. A violation naming anything else is re-raised
+        untouched.
         """
         try:
             return await self.task_repo.save(task)
@@ -1478,16 +1539,38 @@ class TaskService:
 
         return found[due_journal_id]
 
-    async def _resolve_due_journal(self, user_id: str, due_journal_id: int) -> Journal:
-        """Load the due anchor alone, for a retarget, on the same terms.
+    async def _lock_retarget_journals(
+        self, user_id: str, previous_due_journal_id: int, due_journal_id: int
+    ) -> dict[int, Journal]:
+        """Hold both of a retarget's journals, in the order a merge holds them.
 
-        The creating anchor is not re-read: it cannot change, and reading it
-        would invite a rule about it that the specification does not have.
+        The two journals a retarget writes against are the one it is leaving —
+        the intermediate link's foreign key — and the one it is moving to — the
+        anchor update's. Both foreign keys take ``FOR KEY SHARE`` when their
+        statement runs; this takes the identical locks first, and in ascending id
+        order, which is what stops the retarget and a journal merge acquiring the
+        same pair of rows in opposite orders. See
+        :meth:`~app.core.journal.models.repositories.JournalRepository.find_and_lock_by_ids_for_user`.
+
+        The **creating** anchor is not among them and is still not re-read: it
+        cannot change, its foreign key is not re-checked by an update that leaves
+        the column alone, and reading it would invite a rule about it that the
+        specification does not have.
+
+        Ownership stays enforced by the query, so a journal belonging to somebody
+        else is absent from the result and was never locked. The caller decides
+        what a missing **due** journal means; a missing *previous* one needs no
+        answer here, because it can only have been deleted by the merge this
+        ordering exists to queue behind — and the locking read of the task that
+        follows is what notices.
         """
-        found = await self._journals_by_id(user_id, [due_journal_id])
-        if due_journal_id not in found:
-            raise TaskAnchorJournalNotFoundError("due", due_journal_id)
-        return found[due_journal_id]
+        return {
+            journal.id: journal
+            for journal in await self.journal_repo.find_and_lock_by_ids_for_user(
+                user_id, sorted({previous_due_journal_id, due_journal_id})
+            )
+            if journal.id is not None
+        }
 
     async def _require_future_dated(
         self,
@@ -1514,10 +1597,12 @@ class TaskService:
         :func:`~app.core.journal.services.journal_date_resolver.is_future_dated`,
         which is the module that owns what "future-dated" means.
 
-        **The journal is read without a lock, and that is not a hole.** A
-        concurrent ``update_journal`` can move the journal's date into the past
-        between this check and the caller's write, so a task can be committed
-        against a due journal that is *already* past. Raised in review on
+        **The journal's date can still move under this check, and that is not a
+        hole.** A retarget now holds ``FOR KEY SHARE`` on the journal by the time
+        it gets here, but that mode deliberately does not block an ordinary
+        ``update_journal``: it can move the journal's date into the past between
+        this check and the caller's write, so a task can be committed against a
+        due journal that is *already* past. Raised in review on
         ITER18-001 Phase 7 as an invariant-4 violation; it is not one. The
         specification makes invariant 4 a rule about the moment a due journal is
         **set** — "checked when a due journal is *set*, not continuously. A task
@@ -1529,12 +1614,12 @@ class TaskService:
         identical, supported state, so a lock would narrow a window onto an
         outcome that is legitimate either side of it.
 
-        Two further reasons not to take one. It would have to be a locking read
-        on the **journal** domain's port, which this service reaches for only
-        deliberately (see :meth:`_save`). And it would be taken *after* the task
-        row lock on the retarget path, deepening the lock-order inversion against
-        journal merge that ITER18-002 Phase 6 exists to remove — buying nothing
-        observable at the cost of more deadlocks.
+        A stronger lock would also cost something real. Blocking a journal edit
+        for the length of a retarget's unit of work is a price this rule has no
+        reason to charge, and ``FOR KEY SHARE`` was chosen on the retarget path
+        precisely so it does not — see
+        :meth:`~app.core.journal.models.repositories.JournalRepository.find_and_lock_by_ids_for_user`.
+        On the creation path no journal lock is taken at all.
         """
         tz = await self.date_resolver.timezone_for(user_id)
         moment = now if now is not None else datetime.datetime.now(tz)

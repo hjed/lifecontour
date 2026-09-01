@@ -26,7 +26,8 @@ repository, because the timezone rule is part of the behaviour being tested.
 
 import datetime
 import inspect
-from unittest.mock import AsyncMock
+from dataclasses import replace
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from core_shared.models.history import Provenance
@@ -123,23 +124,55 @@ def new_due_journal() -> Journal:
 
 @pytest.fixture
 def mock_task_repo() -> AsyncMock:
-    """A task repository that echoes back whatever it is asked to save."""
+    """A task repository that echoes back whatever it is asked to save.
+
+    A retarget reads the task **twice**: a non-locking peek that learns which
+    journal it is leaving, and the locking read that every decision is then made
+    from. Unless a test says otherwise the two agree, so the peek is wired to
+    report whatever the locking read is configured to return and a test that
+    only cares about the task's state still has one place to set it. The tests
+    that need them to *disagree* — which is what a concurrent writer between
+    them looks like — use :func:`stored_task`.
+    """
     repo = AsyncMock()
 
     async def save(task: Task) -> Task:
         return task
 
+    async def peek(_task_id: int, _user_id: str) -> Task | None:
+        found = repo.find_by_id_for_update.return_value
+        return found if isinstance(found, Task) else None
+
     repo.save.side_effect = save
     repo.find_by_id_for_update.return_value = make_task()
+    repo.find_by_id.side_effect = peek
     repo.add_intermediate_journal.return_value = True
     return repo
 
 
+def stored_task(repo: AsyncMock, *, peeked: Task | None, locked: Task | None) -> None:
+    """Make the retarget's two reads of the task disagree.
+
+    The gap between the peek and the locking read is exactly where another
+    writer's commit lands, so it is the only place these two can differ — and
+    every rule the retarget applies has to come from ``locked``.
+    """
+    repo.find_by_id.side_effect = None
+    repo.find_by_id.return_value = peeked
+    repo.find_by_id_for_update.return_value = locked
+
+
 @pytest.fixture
 def mock_journal_repo(new_due_journal: Journal) -> AsyncMock:
-    """A journal repository holding the target journal, owner-scoped like the real one."""
+    """A journal repository holding the target journal, owner-scoped like the real one.
+
+    The retarget reads journals through the **ordered locking read**
+    ``find_and_lock_by_ids_for_user``, which is what puts the journal locks in
+    front of the task lock; the plain ``find_by_ids_for_user`` is no longer on
+    this path at all.
+    """
     repo = AsyncMock()
-    repo.find_by_ids_for_user.return_value = [new_due_journal]
+    repo.find_and_lock_by_ids_for_user.return_value = [new_due_journal]
     return repo
 
 
@@ -315,7 +348,7 @@ class TestRetargetingAlwaysLeavesTheTaskNotDone:
         the journal it arose in — and the journal it is *leaving* still becomes
         an intermediate link.
         """
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(CREATING_JOURNAL_ID, at(TOMORROW))
         ]
 
@@ -515,7 +548,7 @@ class TestReopeningADoneTaskNeedsAcknowledgement:
         assertion, which is the whole reason it exists.
         """
         mock_task_repo.find_by_id_for_update.return_value = make_task(TaskStatus.DONE)
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(NEW_DUE_JOURNAL_ID, at(YESTERDAY))
         ]
 
@@ -534,7 +567,7 @@ class TestReopeningADoneTaskNeedsAcknowledgement:
     ) -> None:
         """The same ordering, for the other rule the caller can act on alone."""
         mock_task_repo.find_by_id_for_update.return_value = make_task(TaskStatus.DONE)
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         with pytest.raises(TaskAnchorJournalNotFoundError):
             await retarget(service, mock_transaction, acknowledge_reopen=False)
@@ -603,7 +636,7 @@ class TestTheDueJournalIsRevalidated:
         journal is simply not in the result, so the error cannot say which.
         """
         mock_task_repo.find_by_id_for_update.return_value = make_task(current)
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         with pytest.raises(TaskAnchorJournalNotFoundError) as exc_info:
             await retarget(
@@ -624,11 +657,15 @@ class TestTheDueJournalIsRevalidated:
         mock_journal_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Ownership is enforced by the query, never by a comparison afterwards."""
+        """Ownership is enforced by the query, never by a comparison afterwards.
+
+        Both of the retarget's journals go through it, so one it is not allowed
+        to see is never even locked.
+        """
         await retarget(service, mock_transaction)
 
-        mock_journal_repo.find_by_ids_for_user.assert_awaited_once_with(
-            USER_ID, [NEW_DUE_JOURNAL_ID]
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
+            USER_ID, sorted((OLD_DUE_JOURNAL_ID, NEW_DUE_JOURNAL_ID))
         )
 
 
@@ -650,7 +687,7 @@ class TestTheFutureDatedRuleIsRevalidated:
     ) -> None:
         """Today is not the future either — the rule is *after* today, not *not before*."""
         mock_task_repo.find_by_id_for_update.return_value = make_task(current)
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(NEW_DUE_JOURNAL_ID, at(day))
         ]
 
@@ -669,7 +706,7 @@ class TestTheFutureDatedRuleIsRevalidated:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("current", ALL_STATUSES)
-    async def test_the_journal_being_left_is_never_read(
+    async def test_the_journal_being_left_is_locked_but_never_judged(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,
@@ -679,16 +716,18 @@ class TestTheFutureDatedRuleIsRevalidated:
     ) -> None:
         """Which is what makes a *lapsed* task resurrectable rather than stuck.
 
-        A lapsed task is one whose due journal has already passed. If the journal
-        it is *leaving* were loaded, the future-dated rule would sooner or later
-        be applied to it and exactly the tasks a user most needs to resurrect
-        would be the ones they could not. Asserted on the ids the journal
-        repository is asked for rather than on the outcome, because an outcome
-        assertion here would pass for an implementation that reads the old
-        journal and then ignores it — and the next person to add a rule would
-        find the value already in hand.
+        A lapsed task is one whose due journal has already passed. The journal it
+        is leaving **is** loaded now — the lock ordering needs it named before
+        the task row is taken — so the property that matters can no longer be
+        "it is never read". It is that the future-dated rule is applied to the
+        **new** journal alone: here the journal being left is dated in the past
+        and comes back from the very same read, and the retarget still succeeds.
         """
         mock_task_repo.find_by_id_for_update.return_value = make_task(current)
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
+            make_journal(OLD_DUE_JOURNAL_ID, at(YESTERDAY), title="Long gone"),
+            make_journal(NEW_DUE_JOURNAL_ID, at(TOMORROW)),
+        ]
 
         result = await retarget(
             service,
@@ -696,11 +735,6 @@ class TestTheFutureDatedRuleIsRevalidated:
             acknowledge_reopen=acknowledgement_for(current),
         )
 
-        requested = [
-            call.args[1]
-            for call in mock_journal_repo.find_by_ids_for_user.await_args_list
-        ]
-        assert requested == [[NEW_DUE_JOURNAL_ID]]
         assert result.due_journal_id == NEW_DUE_JOURNAL_ID
         assert result.status == TaskStatus.NOT_DONE
 
@@ -748,7 +782,7 @@ class TestTheFutureDatedRuleIsRevalidated:
 
         assert exc_info.value.today == datetime.date(2026, 8, 7)
         assert exc_info.value.journal_date == TOMORROW
-        assert mock_journal_repo.find_by_ids_for_user.await_count == 1
+        assert mock_journal_repo.find_and_lock_by_ids_for_user.await_count == 1
 
 
 @pytest.mark.unit
@@ -779,17 +813,36 @@ class TestUnreachableTasks:
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """The owner-scoped read returns nothing, so the message cannot leak."""
+        """Both owner-scoped reads return nothing, so the message cannot leak."""
         mock_task_repo.find_by_id_for_update.return_value = None
 
         with pytest.raises(TaskNotFoundError) as exc_info:
             await retarget(service, mock_transaction, user_id=OTHER_USER_ID)
 
         assert str(exc_info.value) == str(TaskNotFoundError(TASK_ID))
-        mock_task_repo.find_by_id_for_update.assert_awaited_once_with(
-            TASK_ID, OTHER_USER_ID
-        )
+        mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, OTHER_USER_ID)
         mock_task_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_task_deleted_between_the_two_reads_is_still_a_404(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The peek is not authoritative about existence either.
+
+        The task can be deleted while the retarget waits for the journal locks,
+        so the locking read is checked for ``None`` in its own right rather than
+        trusting what the peek found a moment earlier.
+        """
+        stored_task(mock_task_repo, peeked=make_task(), locked=None)
+
+        with pytest.raises(TaskNotFoundError):
+            await retarget(service, mock_transaction)
+
+        mock_task_repo.save.assert_not_awaited()
+        mock_task_repo.add_intermediate_journal.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_the_read_is_owner_scoped_and_locked(
@@ -805,11 +858,16 @@ class TestUnreachableTasks:
         concurrent ``set_status`` mark the task done in between, so the reopen
         happens without the acknowledgement the rule exists to require — the
         same lost *decision* Phase 6 found on ``set_status``.
+
+        The peek that precedes it is owner-scoped too, and takes no lock at all:
+        it exists only to name the journals to lock, and every decision below is
+        made again from the locked read. See
+        :class:`TestTheDecisionsAreMadeFromTheLockedRead`.
         """
         await retarget(service, mock_transaction)
 
         mock_task_repo.find_by_id_for_update.assert_awaited_once_with(TASK_ID, USER_ID)
-        mock_task_repo.find_by_id.assert_not_awaited()
+        mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, USER_ID)
 
 
 @pytest.mark.unit
@@ -854,8 +912,11 @@ class TestRetargetingOntoTheCurrentDueJournal:
     ) -> None:
         """Not even to re-judge its date, which a lapsed task would fail.
 
-        Asserted on ``mock_calls`` rather than on named methods, so a method
-        added to either port later cannot slip through.
+        Reading no journal is also **taking no journal lock**: the ordered
+        locking read is the retarget's first journal call, so an empty
+        ``mock_calls`` says both at once. Asserted on ``mock_calls`` rather than
+        on named methods, so a method added to either port later cannot slip
+        through.
         """
         mock_task_repo.find_by_id_for_update.return_value = make_task()
 
@@ -863,6 +924,421 @@ class TestRetargetingOntoTheCurrentDueJournal:
 
         assert mock_journal_repo.mock_calls == []
         assert mock_settings_repo.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_the_verdict_comes_from_the_peek_even_when_it_is_stale(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The one decision the unlocked read owns, asserted rather than assumed.
+
+        Everything else a retarget concludes is re-read under the task's row
+        lock. This cannot be: deciding the no-op under that lock would mean
+        either taking it *before* the journals — the inversion the phase exists
+        to remove — or taking journal locks for a call that writes nothing, which
+        the criterion above forbids. So when a writer moves the task's due
+        journal in the instant between the peek and now, the answer is still
+        "nothing to do".
+
+        **That is a snapshot, not a wrong answer.** A no-op writes nothing, so
+        what it returns is a read; a merge committing a moment after a *locked*
+        no-op had returned would leave the caller holding the same stale journal
+        id. The lock narrows the window rather than closing it, and it costs the
+        ordering to do so.
+        """
+        stored_task(
+            mock_task_repo,
+            peeked=make_task(due_journal_id=NEW_DUE_JOURNAL_ID),
+            locked=make_task(due_journal_id=OLD_DUE_JOURNAL_ID),
+        )
+
+        result = await retarget(service, mock_transaction)
+
+        assert result.due_journal_id == NEW_DUE_JOURNAL_ID
+        mock_task_repo.find_by_id_for_update.assert_not_awaited()
+        mock_task_repo.save.assert_not_awaited()
+        assert mock_journal_repo.mock_calls == []
+
+    @pytest.mark.asyncio
+    async def test_takes_no_row_lock_either(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The peek answers it, so a read-only call never takes a writer's lock.
+
+        Nothing is decided and nothing is written, so there is no decision for an
+        interleaving to lose — and the retarget now learns the current due
+        journal *before* it would have taken the lock anyway.
+        """
+        await retarget(service, mock_transaction, due_journal_id=OLD_DUE_JOURNAL_ID)
+
+        mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, USER_ID)
+        mock_task_repo.find_by_id_for_update.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestTheLockOrderAgreesWithMerge:
+    """The journals are taken before the task, ascending, as a merge takes them.
+
+    ``TaskAnchorRepository.repoint_journal_links`` and its caller lock the
+    **journals** ``FOR UPDATE`` in ascending id order and only then write the
+    **task** rows. Until this phase the retarget did the reverse — task row
+    first, journals afterwards through the link insert's and the anchor update's
+    foreign keys — so the two deadlocked whenever a merge absorbed the journal a
+    task was due in.
+
+    The order is asserted on the calls themselves, across both ports at once,
+    because that is the only form a refactor cannot silently invert: an outcome
+    assertion passes just as well for the ordering that deadlocks.
+    """
+
+    @staticmethod
+    def recording(mock_task_repo: AsyncMock, mock_journal_repo: AsyncMock) -> Mock:
+        """One parent for both ports, so their two histories become one sequence.
+
+        Two separate mocks record two separate call lists and neither can say
+        which happened first, so they are attached to a manager whose
+        ``mock_calls`` is the interleaving. It has to be attached **before** the
+        call under test: propagation happens when a call is made, not when the
+        parent is asked.
+        """
+        manager = Mock()
+        manager.attach_mock(mock_task_repo, "task_repo")
+        manager.attach_mock(mock_journal_repo, "journal_repo")
+        return manager
+
+    @staticmethod
+    def names(manager: Mock) -> list[str]:
+        """Every call either port received, named, in order."""
+        return [name for name, *_ in manager.mock_calls]
+
+    @pytest.mark.asyncio
+    async def test_the_journals_are_locked_before_the_task_row(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The whole point of the phase, stated as a sequence.
+
+        A non-locking peek first — it takes nothing and only names the journals —
+        then the ordered locking read on the journal port, then the task's row
+        lock. Invert any of the three and this fails.
+        """
+        manager = self.recording(mock_task_repo, mock_journal_repo)
+
+        await retarget(service, mock_transaction)
+
+        called = self.names(manager)
+        assert called.index(
+            "journal_repo.find_and_lock_by_ids_for_user"
+        ) < called.index("task_repo.find_by_id_for_update")
+        assert called.index("task_repo.find_by_id") < called.index(
+            "journal_repo.find_and_lock_by_ids_for_user"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_writes_happen_after_both_locks(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The two writes take their own foreign-key locks, so they come last.
+
+        ``add_intermediate_journal`` takes ``FOR KEY SHARE`` on the journal the
+        task is leaving and ``save`` takes it on the journal it is moving to.
+        Both are already held by then, which is what makes them free rather than
+        a second, unordered acquisition.
+        """
+        manager = self.recording(mock_task_repo, mock_journal_repo)
+
+        await retarget(service, mock_transaction)
+
+        called = self.names(manager)
+        lock = called.index("journal_repo.find_and_lock_by_ids_for_user")
+        assert lock < called.index("task_repo.add_intermediate_journal")
+        assert lock < called.index("task_repo.save")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("previous_id", "requested_id"),
+        [(22, 33), (33, 22)],
+        ids=["previous-is-lower", "previous-is-higher"],
+    )
+    async def test_the_journal_ids_are_requested_in_ascending_order(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+        previous_id: int,
+        requested_id: int,
+    ) -> None:
+        """Ascending id, not "the one being left and then the one being set".
+
+        A merge locks its pair by id, so the retarget has to as well: two
+        operations agreeing to take the same rows in *some* fixed order is the
+        whole of the guarantee, and the order has to be the same one. The
+        parametrisation puts the previous journal on each side of the target so a
+        hard-coded ordering passes only half of it.
+        """
+        mock_task_repo.find_by_id_for_update.return_value = make_task(
+            due_journal_id=previous_id
+        )
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
+            make_journal(requested_id, at(TOMORROW))
+        ]
+
+        await retarget(service, mock_transaction, due_journal_id=requested_id)
+
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
+            USER_ID, sorted((previous_id, requested_id))
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_non_locking_read_is_not_used_for_the_journals(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """``find_by_ids_for_user`` takes no lock, so it cannot order anything.
+
+        It is still the right read everywhere else in the service; on this path
+        substituting it would restore the deadlock while leaving every outcome
+        assertion in this file green.
+        """
+        await retarget(service, mock_transaction)
+
+        mock_journal_repo.find_by_ids_for_user.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestTheDecisionsAreMadeFromTheLockedRead:
+    """The peek names journals. It decides nothing.
+
+    Putting a non-locking read in front of the locking one is only safe if
+    nothing is *concluded* from it, because the gap between the two is exactly
+    where another writer's commit lands. Every case here makes the two reads
+    disagree and asserts the locked one won.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_acknowledgement_is_required_for_a_task_done_since_the_peek(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The lost *decision* ITER18-001 Phase 6 closed, re-checked at the peek.
+
+        Somebody marks the task done while the retarget waits for the journal
+        locks. Deciding from the peek would reopen a completed task with no
+        acknowledgement at all — the rule bypassed by timing rather than by
+        request.
+        """
+        stored_task(
+            mock_task_repo,
+            peeked=make_task(TaskStatus.NOT_DONE),
+            locked=make_task(TaskStatus.DONE),
+        )
+
+        with pytest.raises(TaskReopenNotAcknowledgedError):
+            await retarget(service, mock_transaction)
+
+        mock_task_repo.save.assert_not_awaited()
+        mock_task_repo.add_intermediate_journal.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_acknowledgement_is_required_for_a_task_reopened_since_the_peek(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The converse, so the rule is read from the lock rather than merely stricter.
+
+        A test that only pinned the refusal above would also pass for an
+        implementation that demanded an acknowledgement from *both* reads.
+        """
+        stored_task(
+            mock_task_repo,
+            peeked=make_task(TaskStatus.DONE),
+            locked=make_task(TaskStatus.NOT_DONE),
+        )
+
+        result = await retarget(service, mock_transaction)
+
+        assert result.status == TaskStatus.NOT_DONE
+        assert result.due_journal_id == NEW_DUE_JOURNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_the_status_the_event_reports_comes_from_the_locked_read(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """``previous_status`` is a claim about the row, not about a stale read."""
+        stored_task(
+            mock_task_repo,
+            peeked=make_task(TaskStatus.NOT_DONE),
+            locked=make_task(TaskStatus.CANCELLED),
+        )
+
+        await retarget(service, mock_transaction)
+
+        changed = retarget_event(mock_event_publisher).event_data["changed_fields"]
+        assert changed["status"] == (
+            TaskStatus.CANCELLED.value,
+            TaskStatus.NOT_DONE.value,
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_task_written_back_is_the_locked_one(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Not the peek's copy, which would silently undo the other writer's text."""
+        peeked = make_task()
+        locked = replace(make_task(), text="reworded while we waited")
+        stored_task(mock_task_repo, peeked=peeked, locked=locked)
+
+        result = await retarget(service, mock_transaction)
+
+        assert result.text == "reworded while we waited"
+
+
+@pytest.mark.unit
+class TestThePreviousDueJournalIsReVerified:
+    """What happens when the peek's answer stops being true.
+
+    The journals have to be named before the task row is locked, and the only
+    place they can be named from is a read that takes no lock. So the peek can
+    be overtaken — by another retarget, or by the very merge this ordering
+    exists to queue behind, which re-points the anchor onto the survivor and
+    deletes the journal the peek reported.
+
+    **What re-verification means here is that the peek's answer is discarded**:
+    the journal linked and announced comes from the locking read, which is the
+    only one that can still be true. It does **not** mean taking the missed
+    journal's lock explicitly. That was written and then removed, because it
+    bought nothing: the intermediate-link insert's foreign key takes the same
+    ``FOR KEY SHARE`` on the same row at the same point in the lock order — after
+    the task row — so an extra ordered read only added two round trips to a
+    window it could not close. The window is stated on the method instead. It
+    needs a *third* concurrent writer, where the ordering this phase fixed needed
+    only the pair.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_peek_that_still_agrees_locks_once(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The ordinary case pays for none of this."""
+        await retarget(service, mock_transaction)
+
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
+            USER_ID, sorted((OLD_DUE_JOURNAL_ID, NEW_DUE_JOURNAL_ID))
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "survivor_id", [44, 11], ids=["survivor-above", "survivor-below"]
+    )
+    async def test_a_due_journal_that_moved_is_not_locked_a_second_time(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+        survivor_id: int,
+    ) -> None:
+        """One ordered acquisition, whichever side of the target the survivor sits.
+
+        A second one would request a lock the foreign key is about to take
+        anyway, at the same point in the order — and when the survivor's id is
+        the **lower** of the two it would be a low-after-high acquisition, which
+        is the shape of the very inversion this phase removed. The parametrised
+        pair is here so that shape cannot be reintroduced by whoever reads the
+        ascending case alone and thinks a second call is free.
+        """
+        stored_task(
+            mock_task_repo,
+            peeked=make_task(due_journal_id=OLD_DUE_JOURNAL_ID),
+            locked=make_task(due_journal_id=survivor_id),
+        )
+
+        await retarget(service, mock_transaction)
+
+        assert mock_journal_repo.find_and_lock_by_ids_for_user.await_args_list == [
+            call(USER_ID, sorted((OLD_DUE_JOURNAL_ID, NEW_DUE_JOURNAL_ID)))
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_link_and_the_event_name_the_journal_the_task_really_left(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The trail records where the task was, not where it was a moment before."""
+        survivor_id = 44
+        stored_task(
+            mock_task_repo,
+            peeked=make_task(due_journal_id=OLD_DUE_JOURNAL_ID),
+            locked=make_task(due_journal_id=survivor_id),
+        )
+
+        await retarget(service, mock_transaction)
+
+        mock_task_repo.add_intermediate_journal.assert_awaited_once_with(
+            TASK_ID, survivor_id, USER_ID
+        )
+        changed = retarget_event(mock_event_publisher).event_data["changed_fields"]
+        assert changed["due_journal_id"] == (survivor_id, NEW_DUE_JOURNAL_ID)
+
+    @pytest.mark.asyncio
+    async def test_a_task_moved_onto_the_requested_journal_becomes_a_no_op(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Somebody else got there first, so there is nothing left to set.
+
+        The same answer the peek would have given had it run a moment later, and
+        the same one ``set_status`` gives for a status that is already current.
+        """
+        stored_task(
+            mock_task_repo,
+            peeked=make_task(due_journal_id=OLD_DUE_JOURNAL_ID),
+            locked=make_task(TaskStatus.DONE, due_journal_id=NEW_DUE_JOURNAL_ID),
+        )
+
+        result = await retarget(service, mock_transaction)
+
+        assert result.due_journal_id == NEW_DUE_JOURNAL_ID
+        assert result.status == TaskStatus.DONE
+        mock_task_repo.save.assert_not_awaited()
+        mock_task_repo.add_intermediate_journal.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -921,7 +1397,7 @@ class TestNothingElseIsTouched:
             await retarget(service, mock_transaction)
 
         # The journal refusal.
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
         with pytest.raises(TaskAnchorJournalNotFoundError):
             await retarget(service, mock_transaction, acknowledge_reopen=True)
 
@@ -1494,7 +1970,7 @@ class TestARefusedOrEmptyRetargetAnnouncesNothing:
         mock_transaction: AsyncMock,
         mock_event_publisher: AsyncMock,
     ) -> None:
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         with pytest.raises(TaskAnchorJournalNotFoundError):
             await retarget(service, mock_transaction)
@@ -1509,7 +1985,7 @@ class TestARefusedOrEmptyRetargetAnnouncesNothing:
         mock_transaction: AsyncMock,
         mock_event_publisher: AsyncMock,
     ) -> None:
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(NEW_DUE_JOURNAL_ID, at(TODAY))
         ]
 

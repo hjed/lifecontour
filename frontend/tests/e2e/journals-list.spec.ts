@@ -444,10 +444,11 @@ test.describe('Journal List Page', () => {
         await expect(heading).toBeVisible({ timeout: 30000 });
       }
 
-      // Open date range filter popover
-      const dateRangeButton = page.getByRole('button', {
-        name: /pick a date range/i,
-      });
+      // Open date range filter popover. Addressed by test id rather than by its
+      // accessible name, because that name *is* the selected range: it changes
+      // from "Pick a date range" to the dates as soon as one is chosen, and the
+      // assertions below are about exactly that text.
+      const dateRangeButton = page.getByTestId('journal-date-range-trigger');
       await dateRangeButton.click();
 
       // Wait for calendar to be visible
@@ -469,6 +470,15 @@ test.describe('Journal List Page', () => {
         'November',
         'December',
       ];
+
+      // How the trigger button renders a chosen date: `dd MMM yyyy` in en-AU,
+      // so the day is zero-padded and the month is the three-letter form. The
+      // calendar *cells* use the long form ("29 August 2026"), which is why the
+      // two are built separately rather than one being derived from the other.
+      const displayDate = (date: Date) =>
+        `${String(date.getUTCDate()).padStart(2, '0')} ` +
+        `${monthNames[date.getUTCMonth()].slice(0, 3)} ` +
+        `${date.getUTCFullYear()}`;
 
       // Build the accessible name for the start/end date buttons
       // We want a range that only includes day2 (yesterday) but not day1 or day3
@@ -497,12 +507,19 @@ test.describe('Journal List Page', () => {
         .getByRole('button', { name: new RegExp(`\\b${startLabel}\\b`) })
         .click();
 
-      // Start waiting for API response before clicking the second date
-      const responsePromise = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals') &&
-          response.url().includes('end_date') &&
-          response.status() === 200
+      // Wait for that first click to be committed before touching the calendar
+      // again. In range mode the first click selects a *single-day* range —
+      // `{ from, to }` both set — which re-renders every cell in both months to
+      // paint the selection. Clicking the end date into that re-render is how
+      // this test used to fail on Firefox: Playwright reported the click as
+      // successful, React had already replaced the node, and no handler ever
+      // ran, so the range stayed at one day and the filtered list came back
+      // empty. Gating on the trigger's own text is the narrowest signal that the
+      // state actually moved.
+      await expect(dateRangeButton).toHaveText(
+        new RegExp(
+          `${displayDate(rangeStart)}\\s*-\\s*${displayDate(rangeStart)}`
+        )
       );
 
       // Ensure the grid for the range end month is visible
@@ -524,8 +541,16 @@ test.describe('Journal List Page', () => {
         .getByRole('button', { name: new RegExp(`\\b${endLabel}\\b`) })
         .click();
 
-      // Wait for the API response to complete
-      await responsePromise;
+      // The completed range, read off the trigger. This replaces a
+      // `waitForResponse` for a `/api/journals` call carrying `end_date`, which
+      // could never have gated anything: the *first* click already produces a
+      // complete one-day range, so it already sends `end_date`, and the wait was
+      // satisfied by that request rather than by this one.
+      await expect(dateRangeButton).toHaveText(
+        new RegExp(
+          `${displayDate(rangeStart)}\\s*-\\s*${displayDate(rangeEnd)}`
+        )
+      );
 
       // Verify only the Middle journal is visible (day2 is within the range)
       await expect(
