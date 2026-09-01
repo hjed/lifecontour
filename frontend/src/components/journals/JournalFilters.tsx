@@ -215,7 +215,15 @@ export function JournalFilters({
               {getDateRangeDisplay()}
             </Button>
           </PopoverTrigger>
-          <PopoverContent className='w-auto p-0' align='start'>
+          {/* `max-h`/`overflow-y-auto` because the two months stack
+              *vertically* on a narrow viewport: without a scroll container the
+              second month renders below the fold inside a popover that cannot
+              scroll, so its dates are unreachable on a phone. Above `sm` the
+              two sit side by side and the cap never engages. */}
+          <PopoverContent
+            className='max-h-[70vh] w-auto overflow-y-auto p-0'
+            align='start'
+          >
             <Calendar
               mode='range'
               selected={dateRange}
