@@ -11,20 +11,20 @@
  * and the three evidence sections in one independent-height row that stacks to
  * a single column below `lg` in the order Agenda → Tasks → Upcoming dates.
  *
- * This page is the dashboard's only `useHomeDashboard()` caller today, because
- * it is the only part of it that needs data: the header takes its day as a
- * prop, which keeps it a pure function of the anchor and testable without a
- * query, and the three cards render nothing from the payload yet.
+ * The page reads `useHomeDashboard()` for the header's day alone — the header
+ * takes it as a prop, which keeps it a pure function of the anchor and testable
+ * without a query. **The summary card calls the same hook itself**, and the
+ * three section cards will as they are filled in.
  *
- * The hook is nonetheless written to be called from anywhere — one query key,
- * so concurrent mounts dedupe into a single fetch (asserted in its own tests) —
- * because that is what lets Phases 4, 7, 12 and 14 read it from inside each
- * card. Reading it there rather than threading props down from here is what
- * makes a section's loading and unavailable states its own, which is the
- * per-section resilience the specification asks for and Phase 16 builds.
+ * That is the arrangement rather than threading props down from here, and the
+ * reason is per-section resilience: a card that owns its own read owns its own
+ * loading and unavailable states, which is what the specification asks for and
+ * Phase 16 builds. It costs nothing because the hook has one query key, so
+ * every caller on the page dedupes into a single fetch — asserted here, with
+ * the card mounted, and again in the hook's own tests.
  *
- * The summary card (**W5**–**W10**) sits above the grid and lands in Phase 4;
- * the sections' own contents land in Phases 7, 12, 14 and 15.
+ * The summary card (**W5**–**W10**) sits above the grid; the sections' own
+ * contents land in Phases 7, 12, 14 and 15.
  */
 
 'use client';
@@ -33,6 +33,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard';
 import { AgendaCard } from '@/components/dashboard/AgendaCard';
 import { DashboardPageHeader } from '@/components/dashboard/DashboardPageHeader';
 import { DashboardSection } from '@/components/dashboard/DashboardSection';
+import { DashboardSummaryCard } from '@/components/dashboard/DashboardSummaryCard';
 import { TasksCard } from '@/components/dashboard/TasksCard';
 import { UpcomingDatesCard } from '@/components/dashboard/UpcomingDatesCard';
 import { useHomeDashboard } from '@/lib/api/home-dashboard';
@@ -43,6 +44,9 @@ function HomeDashboard() {
   return (
     <div className='space-y-4' data-testid='home-dashboard-ready'>
       <DashboardPageHeader anchorDate={data?.meta.anchor.date} />
+
+      {/* The headline, full width and directly above the evidence (W5). */}
+      <DashboardSummaryCard />
 
       {/* `items-start` so a short Upcoming-dates card does not stretch to
           match a tall Agenda; below `lg` the three stack in this DOM order. */}

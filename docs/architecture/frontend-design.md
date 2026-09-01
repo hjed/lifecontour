@@ -1030,13 +1030,13 @@ elements are numbered **W1**–**W33**.
   concurrent callers dedupe into a single fetch — asserted directly, with four
   simultaneous mounts issuing one request.
 
-  As the shell stands, `page.tsx` is the only caller: the header takes its day
-  as a prop (which keeps it a pure function of the anchor, testable without a
-  query) and the section cards render nothing from the payload yet. The cards
-  call the hook themselves as their phases land, rather than being handed props
-  from the page, because that is what makes a section's loading and unavailable
-  states its own — the per-section resilience the specification asks for. The
-  dedupe guarantee is what makes that free.
+  `page.tsx` calls it for the header's day — the header takes that day as a
+  prop, which keeps it a pure function of the anchor and testable without a
+  query — and **the summary card calls it itself**. The three section cards
+  will as their phases land, rather than being handed props from the page,
+  because a card that owns its own read owns its own loading and unavailable
+  states: the per-section resilience the specification asks for. The dedupe
+  guarantee is what makes that free, and it is asserted with the card mounted.
 - **Section availability**: a section reports `ready` (an empty payload is a
   real answer — nothing scheduled, nothing due) or `unavailable`, where `data`
   is `null`. *Unavailable* covers both "could not be read" and "there is none",
@@ -1061,6 +1061,43 @@ elements are numbered **W1**–**W33**.
   summary (**W3**). `items-start` lets the columns size independently, so a
   short Upcoming-dates card does not stretch to match a tall Agenda; below `lg`
   the three stack in DOM order — Agenda → Tasks → Upcoming dates.
+- **Summary card**: `DashboardSummaryCard` is the page's headline (**W5**–**W10**),
+  full width between the header and the grid, drawn apart from the evidence
+  cards with `bg-primary/5 border-primary/20` and a primary accent bar down its
+  left edge. It is a `<section aria-labelledby>` named by a **visible** `h2`
+  ("AI Daily Summary"), so the outline runs `h1` → the card's `h2` → the
+  sections' `sr-only` `h2`s → the card headings.
+  - It reads the summary from the **dashboard payload**, not from
+    `useDailySummary`. The journals view's hook goes through
+    `DailySummaryService.get_or_generate`, which writes and can hold an AI call
+    open for seconds; the dashboard is a read-only projection, so it takes the
+    same row through the section envelope instead. "The same entity the
+    journals view shows" is satisfied by the entity, not by the code path.
+  - **Three declared states**: generated (**W7**), generating (a `secondary`
+    "Generating..." badge beside the label and one muted line — **W8**), and
+    unavailable (one quiet line — **W9**), which a failed dashboard request
+    degrades to as well. A fourth *rendering* — a quiet line while the page's
+    query is in flight — is not a state the wire produces; it is the
+    placeholder wireframe gap 9 anticipates until Phase 16 builds the
+    skeletons.
+  - The generated body splits the summary on blank lines into real `<p>`
+    elements (**W7**'s "one or more prose paragraphs"), with
+    `whitespace-pre-line` for the single newlines inside one. Never clamped,
+    never truncated.
+  - The key-stats footer (`SummaryKeyStats`, a `dl` of four `dt`/`dd` pairs)
+    renders in the generated state only (**W10**), showing a count of zero
+    rather than dropping a column and an em dash for an unrated day. It is
+    `grid-cols-2 sm:grid-cols-4` — the wireframe's single row from `sm` up, a
+    2×2 block below it, because four columns in a card at 375 px is what
+    **W3**'s overflow rule exists to prevent (wireframe gap 14).
+  - **W9's wording drops its cause clause.** The wireframe reads "No summary
+    today — AI summaries are not configured", but *unavailable* also covers a
+    day that simply has no summary yet, which is the ordinary case; the card
+    names no cause it cannot know and keeps the reassurance verbatim
+    (wireframe gap 13).
+  - **W6's Regenerate control**, and the cache invalidation that follows it,
+    are documented below once Phase 4d adds them; this phase mounts the card
+    and adds no action to it.
 - **Section semantics**: `DashboardSection` wraps each card in a
   `<section aria-labelledby>` whose `h2` is `sr-only`, with the visible title
   supplied by the card header (**W4**). Hiding the heading rather than dropping

@@ -105,9 +105,15 @@ async function renderHomePage() {
   return screen.findByTestId('home-dashboard-ready');
 }
 
-/** The three evidence sections, in the order the DOM holds them. */
+/**
+ * The three evidence sections, in the order the DOM holds them.
+ *
+ * Scoped to the grid rather than the page: the summary card is a labelled
+ * region of its own (**W5**), and in a real browser the app chrome contributes
+ * another (the toast area), so an unscoped role query counts more than three.
+ */
 function sectionNames(): string[] {
-  return screen
+  return within(screen.getByTestId('dashboard-sections'))
     .getAllByRole('region')
     .map(
       section => section.getAttribute('aria-label') ?? headingTextOf(section)
@@ -277,11 +283,109 @@ describe('HomePage — the dashboard shell', () => {
     });
   });
 
+  describe('The summary card (W5)', () => {
+    it('sits between the page header and the section grid', async () => {
+      const ready = await renderHomePage();
+
+      const card = await screen.findByTestId('dashboard-summary-card');
+      const grid = screen.getByTestId('dashboard-sections');
+      const header = screen.getByRole('heading', { level: 1 });
+
+      // `compareDocumentPosition` reads DOM order, which is the order a
+      // screen reader and a stacked mobile layout both follow.
+      expect(
+        header.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      expect(
+        card.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      expect(ready).toContainElement(card);
+    });
+
+    it("renders today's summary from the payload the page already fetched", async () => {
+      await renderHomePage();
+
+      expect(
+        await screen.findByTestId('dashboard-summary-text')
+      ).toHaveTextContent('A quiet Wednesday.');
+    });
+
+    it('still costs one dashboard request with the card mounted', async () => {
+      await renderHomePage();
+
+      await screen.findByTestId('dashboard-summary-text');
+
+      const dashboardCalls = mockFetch.mock.calls.filter(
+        ([input]) => String(input) === DASHBOARD_URL
+      );
+      expect(dashboardCalls).toHaveLength(1);
+    });
+
+    it('leaves the three evidence sections rendering when the summary is unavailable', async () => {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.summary = {
+              status: DashboardSectionStatus.UNAVAILABLE,
+              data: null,
+            };
+            return document;
+          },
+        } as Response)
+      );
+
+      await renderHomePage();
+
+      expect(
+        await screen.findByTestId('dashboard-summary-unavailable')
+      ).toBeInTheDocument();
+      expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+
+    /**
+     * Named for what it actually checks. The specification asks for
+     * independence in **both** directions, and this is not yet evidence of the
+     * second one: none of the three section cards reads the payload until
+     * Phases 7, 12 and 14, so an unavailable `agenda` envelope cannot affect
+     * anything rendered here and the assertion below would hold whatever the
+     * envelope said. What it does guard is that an unavailable sibling does not
+     * make the page *throw*, which is worth keeping and is all it is claimed
+     * to be. The real assertion belongs to the first phase whose card reads the
+     * query.
+     */
+    it('does not throw when a section envelope reports unavailable', async () => {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.agenda = {
+              status: DashboardSectionStatus.UNAVAILABLE,
+              data: null,
+            };
+            return document;
+          },
+        } as Response)
+      );
+
+      await renderHomePage();
+
+      expect(
+        await screen.findByTestId('dashboard-summary-text')
+      ).toHaveTextContent('A quiet Wednesday.');
+      expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+  });
+
   describe('Section cards', () => {
     it('each card carries its own wireframe header', async () => {
       await renderHomePage();
 
-      const [agenda, tasks, dates] = screen.getAllByRole('region');
+      const [agenda, tasks, dates] = within(
+        screen.getByTestId('dashboard-sections')
+      ).getAllByRole('region');
 
       // The visible title is the card's own heading, one level below the
       // section's hidden h2 — W4's "visible title provided by the card header".
