@@ -36,105 +36,11 @@ test.describe('Contact Favourites and Filtering', () => {
       }
     });
 
-    test('should display empty state when no favourite contacts exist', async ({
-      regularContacts,
-    }) => {
-      const { page, contacts } = regularContacts;
-
-      // Navigate to favourites page
-      await page.goto('/contacts/favourites');
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      // Verify all contacts are non-favourite (guaranteed by fixture)
-      contacts.forEach(contact => {
-        expect(contact.isFavourite).toBe(false);
-      });
-
-      // Should show empty state message
-      const emptyState = page.locator('[data-testid="empty-state"]');
-      await expect(emptyState).toBeVisible();
-
-      // Verify the empty state contains the expected text and helpful messaging
-      await expect(emptyState).toContainText('No favourite contacts found');
-      await expect(emptyState).toContainText(
-        'Star some contacts to see them here'
-      );
-
-      // Should not show any contact cards (exclude empty state card)
-      const contactCards = page.locator('[data-testid^="contact-"]');
-      await expect(contactCards).toHaveCount(0);
-    });
-
-    test('should allow navigation back to all contacts from empty state', async ({
-      regularContacts,
-    }) => {
-      const { page } = regularContacts;
-
-      await page.goto('/contacts/favourites');
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      // Empty state should offer a link back to all contacts
-      const emptyStateLink = page.locator(
-        '[data-testid="empty-state"] a[href="/contacts"]'
-      );
-      await expect(emptyStateLink).toBeVisible();
-      await expect(emptyStateLink).toBeEnabled();
-
-      await Promise.all([
-        page.waitForURL('**/contacts'),
-        emptyStateLink.click(),
-      ]);
-      await expect(page).toHaveURL(/\/contacts$/);
-    });
-
-    test('should expose accessible aria labels on favourite toggles', async ({
-      favouriteContacts,
-    }) => {
-      const { page, contacts } = favouriteContacts;
-
-      await page.goto('/contacts/favourites');
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      // Fixture guarantees favourite contacts are rendered
-      expect(contacts.length).toBeGreaterThan(0);
-      for (const contact of contacts) {
-        await expect(
-          page.locator(`[data-testid="contact-${contact.id}"]`)
-        ).toBeVisible();
-      }
-
-      // Favourite toggle buttons must carry an accessible aria-label
-      const favouriteButtons = page.locator(
-        'button[aria-label*="favourite" i]'
-      );
-      await expect(favouriteButtons.first()).toHaveAttribute(
-        'aria-label',
-        /favourite/i
-      );
-    });
-
-    test('should redirect to login when not authenticated', async ({
-      unauthenticatedPage,
-    }) => {
-      // Navigate to favourites page
-      await unauthenticatedPage.goto('/contacts/favourites');
-      await expect(unauthenticatedPage).toHaveTitle(
-        /Personal Management System/
-      );
-
-      // Wait for the login form to appear (this indicates the redirect logic is working)
-      await expect(
-        unauthenticatedPage.getByRole('heading', { name: 'Welcome Back' })
-      ).toBeVisible();
-
-      // Should redirect to login
-      await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
-
-      // Should show OAuth button
-      await expect(
-        unauthenticatedPage.getByRole('button', { name: /continue with/i })
-      ).toBeVisible();
-    });
+    // Note: the empty state (copy, no contact cards, and its Browse All
+    // Contacts link) is unit-tested in app/contacts/favourites/__tests__/
+    // page.test.tsx, and the favourite toggle's aria-label in
+    // FavouriteToggle.test.tsx. The login redirect for protected contact
+    // routes is covered once, in contacts-tag-filtering.spec.ts.
 
     test('should toggle favourite status when favourite button is clicked', async ({
       favouritesTestData,
@@ -200,87 +106,10 @@ test.describe('Contact Favourites and Filtering', () => {
   // (the canonical home for tag filtering), so they are not duplicated here.
 
   test.describe('Integration Tests', () => {
-    test('should maintain consistent navigation between contact pages', async ({
-      favouriteContacts,
-      isMobile,
-    }) => {
-      const { page, contacts } = favouriteContacts;
-
-      // Start on contacts page
-      await page.goto('/contacts');
-      await expect(page).toHaveTitle(/Personal Management System/);
-
-      // Navigate to favourites page via sidebar
-      if (isMobile) {
-        const hamburgerButton = page
-          .locator(
-            'button[aria-label*="menu"], button[aria-label*="navigation"]'
-          )
-          .first();
-        if (await hamburgerButton.isVisible()) {
-          await hamburgerButton.click();
-        }
-      }
-
-      const favouritesLink = page
-        .locator('a[href="/contacts/favourites"]:visible')
-        .first();
-      await expect(favouritesLink).toBeVisible();
-
-      // Wait for navigation to complete
-      await Promise.all([
-        page.waitForURL('**/contacts/favourites'),
-        favouritesLink.click(),
-      ]);
-
-      // Should be on favourites page
-      await expect(page).toHaveURL(/\/contacts\/favourites/);
-
-      // Should show favourite contacts (guaranteed by fixture)
-      expect(contacts.length).toBeGreaterThan(0);
-      contacts.forEach(contact => {
-        expect(contact.isFavourite).toBe(true);
-      });
-    });
-
-    test('should display consistent UI structure across contact pages', async ({
-      authenticatedPage,
-      isMobile,
-    }) => {
-      const pagesToTest = ['/contacts', '/contacts/favourites'];
-
-      for (const pageUrl of pagesToTest) {
-        await authenticatedPage.goto(pageUrl);
-        await expect(authenticatedPage).toHaveTitle(
-          /Personal Management System/
-        );
-
-        // Each page should have sidebar and header
-        const sidebar = authenticatedPage
-          .locator(
-            'aside[role="complementary"], nav[aria-label="Main Navigation"], [data-testid="sidebar"]'
-          )
-          .first();
-        if (isMobile) {
-          const hamburgerButton = authenticatedPage
-            .locator(
-              'button[aria-label*="menu"], button[aria-label*="navigation"]'
-            )
-            .first();
-          await expect(hamburgerButton).toBeVisible();
-        } else {
-          await expect(sidebar).toBeVisible();
-        }
-
-        const header = authenticatedPage
-          .locator('h1, [role="heading"]')
-          .first();
-        await expect(header).toBeVisible();
-
-        // Each page should have main content area
-        const mainContent = authenticatedPage.locator('main, [role="main"]');
-        await expect(mainContent).toBeVisible();
-      }
-    });
+    // Note: 'should allow navigation to favourites page from sidebar' above
+    // already walks the sidebar route to /contacts/favourites; the former
+    // consistent-navigation and consistent-UI-structure tests repeated that
+    // walk and page-shell assertions that the RTL page tests
+    // (app/contacts/__tests__) make in jsdom.
   });
 });

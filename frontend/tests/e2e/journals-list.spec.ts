@@ -45,20 +45,9 @@ test.describe('Journal List Page', () => {
       }
     });
 
-    test('should display empty state when no journals exist', async ({
-      emptyJournalsPage,
-    }) => {
-      const page = emptyJournalsPage;
-
-      // Navigate to journals page
-      await page.goto('/journals');
-
-      // Wait for page to load
-      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-      // Verify the empty state card is displayed
-      await expect(page.getByText('No journals found')).toBeVisible();
-    });
+    // Note: the 'No journals found' empty state is unit-tested in
+    // app/journals/__tests__/page.test.tsx; asserting it here required the
+    // emptyJournalsPage fixture to delete every journal one-by-one.
   });
 
   test.describe('Filtering', () => {

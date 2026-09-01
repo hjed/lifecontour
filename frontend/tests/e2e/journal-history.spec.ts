@@ -65,21 +65,11 @@ async function waitForHistoryEntries(
 }
 
 test.describe('Journal Activity History', () => {
-  test('displays the Activity Feed section on the journal detail page', async ({
-    journalsWithData,
-  }) => {
-    const { page, journals } = journalsWithData;
-    const journal = journals[0];
-
-    await page.goto(`/journals/${journal.id}`);
-    await expect(page).toHaveURL(new RegExp(`/journals/${journal.id}`));
-
-    const activityFeedHeading = page.getByRole('heading', {
-      name: /Activity/i,
-    });
-    await expect(activityFeedHeading).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId('activity-feed')).toBeVisible();
-  });
+  // Note: the Activity Feed's rendering — heading, empty state, provenance
+  // triggers for every source (ui/mcp/strava/…), and their labels — is
+  // unit-tested in journals/__tests__/ActivityFeed.test.tsx and
+  // history/__tests__/ActivityItem.test.tsx. The tests below cover what jsdom
+  // cannot: real history projection through the backend.
 
   test('shows a journal edit at the bottom with UI provenance once projected', async ({
     journalsWithData,
@@ -209,58 +199,10 @@ test.describe('Journal Activity History', () => {
     expect(historyData.data.length).toBeLessThanOrEqual(5);
   });
 
-  test('displays a provenance indicator and tooltip for an external source', async ({
-    journalsWithData,
-    isMobile,
-  }) => {
-    const { page, journals } = journalsWithData;
-    const journal = journals[0];
-
-    // Mock the history API to return a deterministic external-source entry so
-    // the provenance icon/tooltip can be asserted without async projection.
-    await page.route(`**/api/journals/${journal.id}/history*`, async route => {
-      const json = {
-        data: [
-          {
-            type: 'journal_history',
-            id: '901',
-            attributes: {
-              entity_type: 'journal',
-              entity_id: Number(journal.id),
-              field_name: 'title',
-              old_value: 'Old',
-              new_value: 'New',
-              changed_by: 'strava-sync',
-              source: 'strava',
-              created_at: new Date().toISOString(),
-            },
-          },
-        ],
-        meta: {
-          total_count: 1,
-          current_page: 1,
-          page_count: 1,
-          per_page: 10,
-        },
-      };
-      await route.fulfill({ json });
-    });
-
-    await page.goto(`/journals/${journal.id}`);
-    await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
-      timeout: 10000,
-    });
-
-    const stravaTrigger = page.getByTestId('provenance-trigger-strava').first();
-    await expect(stravaTrigger).toBeVisible();
-
-    if (!isMobile) {
-      await expect(async () => {
-        await stravaTrigger.hover();
-        await expect(page.getByRole('tooltip')).toBeVisible({ timeout: 2000 });
-      }).toPass({ timeout: 10000 });
-    }
-  });
+  // Note: the external-source (strava) provenance trigger and its tooltip
+  // label were asserted here against a fully mocked history API — that
+  // rendering is unit-tested per source in ActivityItem.test.tsx
+  // ('renders a provenance trigger for %s' and getProvenanceLabel).
 
   /**
    * ITER17-005 Phase 1: journal tag changes are domain events, so they reach the

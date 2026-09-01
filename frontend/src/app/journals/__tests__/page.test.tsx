@@ -167,6 +167,22 @@ describe('JournalsPage', () => {
     expect(screen.getByText('Test Journal 1')).toBeInTheDocument();
   });
 
+  it('shows the empty state when no journals exist', () => {
+    (useInfiniteJournals as jest.Mock).mockReturnValue({
+      data: { pages: [{ data: [] }], pageParams: [] },
+      isLoading: false,
+      error: null,
+      hasNextPage: false,
+      hasPreviousPage: false,
+      isFetchingNextPage: false,
+      isFetchingPreviousPage: false,
+    });
+
+    renderWithQueryClient(<JournalsPage />);
+
+    expect(screen.getByText('No journals found')).toBeInTheDocument();
+  });
+
   describe('tag deep link (/journals?tag=<id>)', () => {
     const getLatestInfiniteFilters = () => {
       const calls = (useInfiniteJournals as jest.Mock).mock.calls;

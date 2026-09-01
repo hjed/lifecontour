@@ -182,4 +182,19 @@ describe('FavouritesPage', () => {
       screen.getByText('Star some contacts to see them here')
     ).toBeInTheDocument();
   });
+
+  it('offers a way back to all contacts from the empty state', async () => {
+    mockUseContacts.mockReturnValue({
+      data: { data: [], meta: { total: 0, page: 1, limit: 20 } },
+      isLoading: false,
+      error: null,
+    } as never);
+
+    renderWithProviders(<FavouritesPage />);
+
+    const backLink = await screen.findByRole('link', {
+      name: /browse all contacts/i,
+    });
+    expect(backLink).toHaveAttribute('href', '/contacts');
+  });
 });

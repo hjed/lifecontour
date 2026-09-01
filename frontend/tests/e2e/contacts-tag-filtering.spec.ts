@@ -95,61 +95,6 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     }
   });
 
-  test('should handle non-existent tag gracefully', async ({
-    authenticatedPage,
-  }) => {
-    // Navigate to a non-existent tag
-    await authenticatedPage.goto('/contacts?tag=non-existent-tag-999');
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
-
-    // The page should load without errors — contacts list shows
-    // with no results since the tag ID does not match any real tag
-    const heading = authenticatedPage.locator('h1');
-    await expect(heading).toBeVisible();
-  });
-
-  test('should display empty state when tag has no contacts', async ({
-    authenticatedPage,
-  }) => {
-    // Create a tag first, then navigate to it (it will have no contacts)
-    const response = await authenticatedPage.request.post('/api/tags', {
-      data: {
-        data: {
-          type: 'tags',
-          attributes: {
-            name: 'Empty-Test-Tag-' + Date.now(),
-          },
-        },
-      },
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    expect(response.ok()).toBe(true);
-    const responseData = await response.json();
-    const tagId = responseData.data.id;
-
-    try {
-      // Navigate to the empty tag via unified contacts URL
-      await authenticatedPage.goto(`/contacts?tag=${tagId}`);
-      await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
-
-      // Should show the standard empty state on the unified contacts page
-      await expect(
-        authenticatedPage.getByText(/no contacts found/i)
-      ).toBeVisible();
-
-      // Should not show any contact cards
-      await expect(
-        authenticatedPage.locator('[data-testid^="contact-"]')
-      ).toHaveCount(0);
-    } finally {
-      // Clean up the tag
-      await authenticatedPage.request.delete(`/api/tags/${tagId}`);
-    }
-  });
-
   test('parent tag filter should show contacts tagged with child tags', async ({
     authenticatedPage,
   }) => {
@@ -320,86 +265,11 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     await authenticatedPage.request.delete(`/api/tags/${tagId}`);
   });
 
-  test('should show tag name in page header when tag exists', async ({
-    authenticatedPage,
-  }) => {
-    // Create a test tag
-    const tagName = 'Header-Test-Tag-' + Date.now();
-    const response = await authenticatedPage.request.post('/api/tags', {
-      data: {
-        data: {
-          type: 'tags',
-          attributes: {
-            name: tagName,
-          },
-        },
-      },
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    expect(response.ok()).toBe(true);
-    const responseData = await response.json();
-    const tagId = responseData.data.id;
-
-    await authenticatedPage.goto(`/contacts?tag=${tagId}`);
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
-
-    // Wait for the heading to contain the tag name — this is loaded
-    // asynchronously via the useTags() query, so we use Playwright's
-    // web-first assertion which auto-retries until the text appears.
-    const heading = authenticatedPage.locator('h1');
-    await expect(heading).toContainText(tagName, { ignoreCase: true });
-
-    // Cleanup test data
-    await authenticatedPage.request.delete(`/api/tags/${tagId}`);
-  });
-
-  test('should show active tag badge with clear functionality', async ({
-    authenticatedPage,
-  }) => {
-    // Create a test tag
-    const tagName = 'Badge-Test-' + Date.now();
-    const response = await authenticatedPage.request.post('/api/tags', {
-      data: {
-        data: {
-          type: 'tags',
-          attributes: { name: tagName },
-        },
-      },
-      headers: { 'Content-Type': 'application/json' },
-    });
-    expect(response.ok()).toBe(true);
-    const responseData = await response.json();
-    const tagId = responseData.data.id;
-
-    await authenticatedPage.goto(`/contacts?tag=${tagId}`);
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
-
-    // Active tag badge should be visible
-    const tagBadge = authenticatedPage.locator(
-      '[data-testid="active-tag-filter"]'
-    );
-    await expect(tagBadge).toBeVisible({ timeout: 10000 });
-
-    // Click clear to remove tag filter
-    const clearButton = authenticatedPage.locator(
-      '[data-testid="clear-tag-filter"]'
-    );
-    await expect(clearButton).toBeVisible();
-    await clearButton.click();
-
-    // Should return to unfiltered contacts list
-    await authenticatedPage.waitForURL('**/contacts');
-    expect(authenticatedPage.url()).not.toContain('tag=');
-
-    // Tag badge should no longer be visible
-    await expect(tagBadge).toBeHidden();
-
-    // Cleanup
-    await authenticatedPage.request.delete(`/api/tags/${tagId}`);
-  });
+  // Note: the tag name in the page header, the active-tag badge with its
+  // clear button (including the ID fallback for an unresolved tag name), and
+  // the empty/unknown-tag states are unit-tested in the ContactsPage tag
+  // filtering block of app/contacts/__tests__/page.test.tsx. The tag filter's
+  // real backend behaviour stays covered by the filter tests above.
 
   test('should maintain consistent navigation with other contact pages', async ({
     authenticatedPage,

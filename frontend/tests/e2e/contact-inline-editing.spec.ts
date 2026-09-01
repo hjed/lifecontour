@@ -129,59 +129,10 @@ test.describe('Contact Inline Editing', () => {
     await expect(nicknameField).toContainText('UpdatedNickname');
   });
 
-  test('should display contact methods section', async ({
-    contactsWithData,
-  }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const contactMethodsHeading = page.getByRole('heading', {
-      name: 'Contact Methods',
-    });
-    await expect(contactMethodsHeading).toBeVisible();
-
-    const addMethodButton = page.getByRole('button', {
-      name: /add contact method/i,
-    });
-    await expect(addMethodButton).toBeVisible();
-  });
-
-  test('should display addresses section', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const addressesHeading = page.getByRole('heading', { name: 'Addresses' });
-    await expect(addressesHeading).toBeVisible();
-
-    const addAddressButton = page.getByRole('button', { name: /add address/i });
-    await expect(addAddressButton).toBeVisible();
-  });
-
-  test('should display activity feed section', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const activityHeading = page.getByRole('heading', {
-      name: /activity|timeline/i,
-    });
-    await expect(activityHeading).toBeVisible();
-  });
-
-  test('should display relationships section', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[1];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const relationshipsHeading = page.getByRole('heading', {
-      name: /relationships/i,
-    });
-    await expect(relationshipsHeading).toBeVisible();
-  });
+  // Note: the section shells rendered on the detail page — Contact Methods,
+  // Addresses, Activity Feed, and Relationships headings with their add
+  // buttons — are unit-tested in ContactMethodsList.test.tsx,
+  // ContactAddressesList.test.tsx, ActivityFeed.test.tsx, and
+  // RelationshipsList.test.tsx. The inline-editing tests above already load
+  // the real detail page, so its composition stays exercised end-to-end.
 });
