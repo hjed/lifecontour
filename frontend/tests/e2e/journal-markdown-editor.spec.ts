@@ -58,25 +58,12 @@ async function clearEditor(page: Page): Promise<void> {
 }
 
 test.describe('Journal Markdown Editor', () => {
-  test('renders markdown content in the detail view', async ({
-    authenticatedPage,
-    testCleanup,
-  }) => {
-    const page = authenticatedPage;
-    const content = await openJournalWithContent(
-      page,
-      testCleanup,
-      '# Big heading\n\nSome **bold** words.\n\n- first\n- second'
-    );
-
-    // Markdown is rendered as real elements, not literal syntax.
-    await expect(
-      content.getByRole('heading', { level: 1, name: 'Big heading' })
-    ).toBeVisible();
-    await expect(content.locator('strong', { hasText: 'bold' })).toBeVisible();
-    await expect(content.locator('li')).toHaveCount(2);
-    await expect(content).not.toContainText('# Big heading');
-  });
+  // Note: markdown-to-element rendering (headings, emphasis, lists, GFM) and
+  // XSS sanitisation (no live <script>/<img onerror> nodes, no event-handler
+  // attributes) are unit-tested in MarkdownRenderer.test.tsx. The tests below
+  // stay as e2e because they assert computed CSS, real typing through
+  // ProseMirror input rules, or the persistence round-trip — none of which
+  // jsdom can exercise.
 
   test('applies typography styling to the rendered markdown', async ({
     authenticatedPage,
@@ -121,27 +108,6 @@ test.describe('Journal Markdown Editor', () => {
     await expect(heading).not.toHaveCSS('color', lightColor);
   });
 
-  test('does not execute embedded scripts (XSS)', async ({
-    authenticatedPage,
-    testCleanup,
-  }) => {
-    const page = authenticatedPage;
-    const content = await openJournalWithContent(
-      page,
-      testCleanup,
-      'Before <script>window.__xssExecuted = true;</script><img src=x onerror="window.__xssExecuted = true"> After'
-    );
-
-    // The raw HTML must not execute and must not become a live <img> node.
-    const xssExecuted = await page.evaluate(
-      () => (window as unknown as { __xssExecuted?: boolean }).__xssExecuted
-    );
-    expect(xssExecuted).toBeUndefined();
-    await expect(content.locator('img')).toHaveCount(0);
-    await expect(content).toContainText('Before');
-    await expect(content).toContainText('After');
-  });
-
   test('formats text live as you type in the inline editor', async ({
     authenticatedPage,
     testCleanup,
@@ -176,26 +142,9 @@ test.describe('Journal Markdown Editor', () => {
     await expect(content).not.toContainText('original content');
   });
 
-  test('bold toolbar button formats the selection', async ({
-    authenticatedPage,
-    testCleanup,
-  }) => {
-    const page = authenticatedPage;
-    const content = await openJournalWithContent(
-      page,
-      testCleanup,
-      'plain words'
-    );
-
-    const editor = await openInlineEditor(page, content);
-    await page.keyboard.press('ControlOrMeta+A');
-    await page.getByRole('button', { name: 'Bold' }).click();
-
-    await expect(editor.locator('strong')).toHaveText('plain words');
-
-    await page.getByTestId('journal-content-save').click();
-    await expect(content.locator('strong')).toHaveText('plain words');
-  });
+  // Note: toolbar formatting commands (Bold et al.) are unit-tested in
+  // MarkdownEditor.test.tsx; the inline-editor test above already covers the
+  // save round-trip in a real browser.
 
   test('creates a journal with markdown via the create form', async ({
     authenticatedPage,
