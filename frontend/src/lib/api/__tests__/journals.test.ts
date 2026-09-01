@@ -18,6 +18,13 @@ import {
   useRemoveJournalTag,
   journalTagKeys,
   useCreateJournal,
+  useMergeJournal,
+  useUpdateJournalField,
+  useAddJournalType,
+  useRemoveJournalType,
+  useUpdateTypeData,
+  useAddContactRelationship,
+  useRemoveContactRelationship,
   useUpdateJournal,
   useDeleteJournal,
   JournalApiError,
@@ -1010,8 +1017,14 @@ describe('Journals API', () => {
         expect(calls).toEqual([
           `cancel:${JSON.stringify(journalTagKeys.lists())}`,
           `cancel:${JSON.stringify(journalKeys.all)}`,
+          // The dashboard joined this list in ITER18-004 Phase 4f, for the
+          // reason the journal queries are already here: deleting a tag
+          // un-assigns it from every journal, and the agenda renders a
+          // journal's tags.
+          `cancel:${JSON.stringify(homeDashboardKeys.all)}`,
           `invalidate:${JSON.stringify(journalTagKeys.lists())}`,
           `invalidate:${JSON.stringify(journalKeys.all)}`,
+          `invalidate:${JSON.stringify(homeDashboardKeys.all)}`,
         ]);
       });
     });
@@ -2062,5 +2075,243 @@ describe('useRegenerateDailySummary and the home dashboard', () => {
     expect(invalidateQueries).not.toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: homeDashboardKeys.all })
     );
+  });
+});
+
+/**
+ * **Every** journal write stales the home dashboard (ITER18-004 Phase 4f).
+ *
+ * The dashboard reads across journals — today's daily summary and its counters,
+ * and the agenda's event journals with their tags and participants — so rather
+ * than deciding per mutation which of those fields it happens to touch, every
+ * journal writer invalidates it. The table below is the contract, and it is
+ * enumerated rather than sampled because the first version of this fix covered
+ * four writers and review found a fifth; a sampled test would have missed the
+ * sixth just as easily.
+ */
+describe('journal writes and the home dashboard', () => {
+  let queryClient: QueryClient;
+
+  const createWrapper = ({ children }: { children: ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: queryClient }, children);
+
+  const journalPayload = () =>
+    createMockJournalResponse(createMockJournal('1', { title: 'Edited' }));
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    jest.clearAllMocks();
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  /**
+   * Some writers defer their invalidation behind a 150 ms timer (it waits for
+   * the write to be visible to a re-read), so the assertion runs the timers
+   * rather than awaiting the mutation alone. Writers without the timer are
+   * unaffected by advancing it.
+   */
+  async function runAndFlush(mutate: () => void): Promise<void> {
+    mutate();
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    await act(async () => {
+      jest.advanceTimersByTime(200);
+    });
+  }
+
+  function respondOnce(body: unknown) {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => body,
+    } as Response);
+  }
+
+  /** Every mutation that can change what the dashboard would answer. */
+  const WRITERS: ReadonlyArray<
+    readonly [
+      string,
+      () => { mutate: (...args: never[]) => void },
+      unknown,
+      unknown,
+    ]
+  > = [
+    [
+      'useCreateJournal',
+      useCreateJournal,
+      journalPayload(),
+      {
+        title: 'New Journal',
+        content: 'Content',
+        event_date_range: { start: '2024-01-01', end: '2024-01-01' },
+      },
+    ],
+    [
+      'useUpdateJournal',
+      useUpdateJournal,
+      journalPayload(),
+      {
+        id: '1',
+        data: { title: 'Edited' },
+      },
+    ],
+    ['useDeleteJournal', useDeleteJournal, {}, '1'],
+    [
+      'useMergeJournal',
+      useMergeJournal,
+      journalPayload(),
+      {
+        targetId: '1',
+        sourceId: '2',
+      },
+    ],
+    [
+      'useUpdateJournalField',
+      useUpdateJournalField,
+      journalPayload(),
+      {
+        journalId: '1',
+        fieldName: 'title',
+        value: 'Edited',
+      },
+    ],
+    [
+      'useAddJournalType',
+      useAddJournalType,
+      journalPayload(),
+      {
+        journalId: '1',
+        journalType: JournalType.EVENT,
+      },
+    ],
+    [
+      'useRemoveJournalType',
+      useRemoveJournalType,
+      journalPayload(),
+      {
+        journalId: '1',
+        journalType: JournalType.EVENT,
+      },
+    ],
+    [
+      'useUpdateTypeData',
+      useUpdateTypeData,
+      journalPayload(),
+      {
+        journalId: '1',
+        journalType: JournalType.FITNESS,
+        typeData: { mood_value: 7 },
+      },
+    ],
+    [
+      'useAddContactRelationship',
+      useAddContactRelationship,
+      journalPayload(),
+      {
+        journalId: '1',
+        contactId: '2',
+        relationshipType: 'participant',
+      },
+    ],
+    [
+      'useRemoveContactRelationship',
+      useRemoveContactRelationship,
+      {},
+      { journalId: '1', contactId: '2' },
+    ],
+    [
+      'useAddJournalTag',
+      useAddJournalTag,
+      journalPayload(),
+      {
+        journalId: '1',
+        tagId: '3',
+      },
+    ],
+    [
+      'useRemoveJournalTag',
+      useRemoveJournalTag,
+      {},
+      {
+        journalId: '1',
+        tagId: '3',
+      },
+    ],
+  ];
+
+  it.each(WRITERS)(
+    're-reads the dashboard after %s',
+    async (_name, useWriter, response, variables) => {
+      const invalidateQueries = jest.spyOn(queryClient, 'invalidateQueries');
+      respondOnce(response);
+
+      const { result } = renderHook(() => useWriter(), {
+        wrapper: createWrapper,
+      });
+
+      await runAndFlush(() =>
+        (result.current.mutate as (input: unknown) => void)(variables)
+      );
+
+      expect(invalidateQueries).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: homeDashboardKeys.all })
+      );
+    }
+  );
+
+  it('leaves the dashboard alone when the write fails', async () => {
+    const invalidateQueries = jest.spyOn(queryClient, 'invalidateQueries');
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ errors: [{ detail: 'Nope' }] }),
+    } as Response);
+
+    const { result } = renderHook(() => useUpdateJournal(), {
+      wrapper: createWrapper,
+    });
+
+    await runAndFlush(() =>
+      result.current.mutate({ id: '1', data: { title: 'Edited' } })
+    );
+
+    expect(invalidateQueries).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: homeDashboardKeys.all })
+    );
+  });
+
+  it('still writes the regenerated summary into the journals cache', async () => {
+    // Pins that widening the filter list did not disturb the mutation that
+    // started it: 4d's regeneration still updates the journals-side cache.
+    respondOnce({
+      data: {
+        type: 'journal-daily-summaries',
+        id: '2026-07-29',
+        attributes: { summary_date: '2026-07-29', status: 'generated' },
+      },
+    });
+
+    const { result } = renderHook(() => useRegenerateDailySummary(), {
+      wrapper: createWrapper,
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync('2026-07-29');
+    });
+
+    expect(
+      queryClient.getQueryData([
+        ...journalKeys.all,
+        'daily-summary',
+        '2026-07-29',
+      ])
+    ).toBeDefined();
   });
 });

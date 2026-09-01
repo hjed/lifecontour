@@ -9330,6 +9330,18 @@ data. They are recorded here rather than in the PR so the phases that own them i
    rule 7 says not to do in one phase, and is a further reason it belongs to the phase that needs it.
    The convention to follow is the one *Frontend Design → Task writes invalidate `journalKeys.lists()`*
    already documents.
+
+   **Partly discharged in Phase 4f, and the ownership above was wrong in a way worth recording.** This
+   note reasoned that no phase before 12 could *observe* the staleness, and assigned the whole follow-up
+   accordingly. It missed a third writer: **journal** writes. The summary section's headline is today's
+   daily summary row and its counters are counts of that day's journals, and the backend's indexer flips
+   that row to `PENDING` whenever a journal on the day changes — so the moment Phase 4's card renders
+   payload data, editing a journal and returning to `/` serves pre-edit prose and counts for five
+   minutes. Phase 4f adds `homeDashboardKeys.all` to `useCreateJournal`, `useUpdateJournal`,
+   `useDeleteJournal` and `useMergeJournal`. **Task and contact writes are still uncovered** and remain
+   Phases 12–15's, unchanged. The lesson is the note's own test — "the first phases with data to go
+   stale" — applied to the wrong axis: it asked which section would render the data, when it should have
+   asked which *writers* could change it.
 2. **The query has no refresh scheduled at the anchor-day boundary.** React Query marks a query stale
    after `staleTime` but does not refetch on that alone, so a dashboard left open *and focused* across
    local midnight keeps yesterday's anchor — and, from this phase on, yesterday's date in the **W2**
@@ -9373,6 +9385,29 @@ the signal; splitting after the code exists costs an extra rebase and a discarde
 | **4c** | Mount it on the page; page-level integration tests; the shell's re-scoped section queries | 189 |
 | **4d** | **W6**'s Regenerate, its anchor-freshness guard, and the `homeDashboardKeys.all` invalidation | 614 |
 | **4e** | The e2e block, and this write-up | 366 |
+| **4f** | Every journal write invalidates the dashboard — a review finding | 362 |
+
+**Review ran to four rounds and changed the phase's substance in three of them**, which is the strongest
+argument in this document for the split: findings this specific are not reachable on a 1,727-line diff.
+Three are worth carrying forward.
+
+1. **A stale anchor stops being cosmetic the moment the page grows a write.** Phase 3 recorded the
+   missing day-boundary refetch as Phase 16's on the grounds that its cost was a wrong *label*, and
+   **W6**'s Regenerate turns the same staleness into a write against the wrong day. 4d refuses a day the
+   anchor has outlived — a guard, not the refetch, which is still Phase 16's. **Every later phase that
+   adds an action keyed on `meta.anchor` inherits this**, and Phase 14's inline task action is next.
+2. **A card's tests prove what it renders, not what makes the render stale.** Every invalidation gap in
+   this phase came from review rather than from the suite, because nothing in a component test can see a
+   cache that will be wrong later. The phases that add mutating sections should budget for that
+   explicitly.
+3. **An enabled control is not evidence of a mutation *not* firing.** The e2e that pins "the card never
+   regenerates for itself" originally asserted only that the button was enabled, which a regression that
+   auto-posted would have passed. It now watches the network. Any later "does not happen" claim needs
+   the same treatment.
+
+The remaining findings were documentation drifting from the code *inside* the split — a module comment,
+a phase pointer, an ownership paragraph and this table's own arithmetic — which is the split's own tax
+and was worth paying.
 
 **Two of the six exceed 500** — 4b by 16% and 4d by 23% — and in both the overrun is test lines answering
 review, not production. 4b's remaining seam would separate the card's rendering from its own test file,
@@ -9485,13 +9520,62 @@ summary reachable end to end; the criterion stays `[ ]` and its checklist is une
   place, and the rest of the page still works", which is the clause kept verbatim. Recorded in the
   wireframe document as gap 13, with the Regenerate ruling above as gap 15 and W10's 2×2 stats
   block below `sm` as gap 14.
+- **Two backend defects were found underneath 4f, and no client invalidation can close either.**
+  Review pushed back on 4f's contract and the pushback was right; the consumer code was read to check
+  it, and both claims hold.
+
+  1. **Moving a journal off a day never marks that day's summary stale.**
+     `SearchIndexerConsumer._invalidate_daily_summary` reloads the journal *after* the write and reads
+     `journal.event_date_range.start` — the **new** date. The day the journal left keeps a `GENERATED`
+     summary with counters that still include it.
+  2. **Deleting a journal marks nothing stale at all.** The same handler cannot load the deleted row, and
+     the `JournalDeleted` payload carries `journal_id` and `user_id` but **no date**, so it logs and
+     returns. The day's summary stays `GENERATED` with its pre-delete counters indefinitely.
+
+  Both predate this iteration and both are visible on `/journals` as well as on the dashboard — this
+  phase only made them *legible*, because the dashboard is the first surface to show those counters
+  where a user is looking every day. Neither is fixable from the client: re-reading returns the same
+  stale row, since `invalidate_for_date` changes only the status and leaves the counters. **The fix is a
+  backend one** — carry the date on `JournalDeleted`, and invalidate the old date as well as the new one
+  on a move — with its own tests, and it belongs to the journals domain rather than to this iteration.
+  Raised here rather than silently absorbed.
+
+  Review then found **two more of the same shape**, and the consumer's event set is the reason for all
+  four. `SearchIndexerConsumer` invalidates on exactly
+  `{"JournalCreated", "JournalUpdated", "JournalDeleted"}`, so a write that publishes anything else
+  leaves the summary `GENERATED`:
+
+  3. **Adding or removing a contact on a journal never marks the day's summary stale.**
+     `JournalContactService` publishes only `ContactSummaryRefreshRequested`, which is not in that set —
+     yet `contact_count` is `len(set(summary_input.contact_names))`, gathered from exactly those
+     relationships. So the counter the card draws can be wrong with nothing to correct it.
+  4. **Assigning or removing a journal tag likewise publishes outside the set**
+     (`JournalTagAssigned` / `JournalTagRemoved`). No summary counter is derived from tags, so this one
+     does not affect the card — but the **agenda** renders a journal's tags (**W15**), so it will matter
+     to Phase 7, and it is recorded here so that phase does not rediscover it.
+
+  Checked at the same time and **not** a gap: updating type data goes through
+  `JournalWriteService.update_type_data`, which publishes `JournalUpdated`, so a mood edit *does*
+  invalidate — which matters, because `mood_average` is derived from those values.
+
+  A further point from the same review is **accepted as a limitation rather than fixed**: the
+  consumer is asynchronous, so a client invalidation fired 150 ms after a write cannot know the row has
+  been marked stale yet. In practice the dashboard is not mounted while a journal is being edited, so
+  the query is *inactive*, is marked stale rather than refetched, and is re-read on its next mount — by
+  which time the consumer has almost always run. The residual exposure is a consumer backlog, which no
+  amount of client-side delay would fix either.
+
 - **The invalidation belongs to the mutation, not to the card.** `useRegenerateDailySummary` now also
   invalidates `homeDashboardKeys.all` through `invalidateAfterMutation`, because regenerating from the
   **journals** view leaves the dashboard exactly as stale as regenerating from the dashboard does, and a
   card-level `onSuccess` would only have fixed the surface that happened to ask. This is the **first
   invalidator of `homeDashboardKeys.all`** — Phase 3's deferred follow-up 1 — and it discharges the part
-  of it this phase can see. The rest stands: task and contact writes still do not invalidate the
-  dashboard, which is Phases 12–15's, and nothing here makes that cheaper.
+  of it a regeneration can reach. **Phase 4f discharges a second part that Phase 3's note had missed
+  entirely:** journal writes stale the summary too, because the indexer flips the row to `PENDING`
+  whenever a journal on the day changes, so the four journal writers now invalidate the dashboard as
+  well. That gap was found by review on the first (unsplit) PR, not by this phase's own tests, which is
+  itself worth recording: a card's tests can prove what it renders and say nothing about what makes the
+  render stale. Task and contact writes remain uncovered and stay Phases 12–15's.
 - **All four stat pairs are drawn, including a zero, and an unrated day reads as an em dash.** The
   journals view hides a zero count; this one does not, because a footer whose columns come and go changes
   shape from day to day, and "no events today" is worth reading rather than inferring from a gap. `—`
