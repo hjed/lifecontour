@@ -8964,8 +8964,11 @@ section without the inline done action — the specification names that as an in
    Five matches the tasks section; the wireframe shows three rows and a show-more naming five.
 4. **Which date types count as "important dates" for the dashboard** — settled in **Phase 7**. All five
    types, or only the recurring ones? `first_met` with `year` precision has no in-window occurrence.
-5. **Whether "tomorrow" expansion is server-provided or lazily fetched** — settled in **Phase 4**. One
-   round trip argues for including tomorrow in the payload; collapsed-by-default argues for lazy.
+5. **Whether "tomorrow" expansion is server-provided or lazily fetched** — settled in **Phase 6**
+   (payload) and **Phase 8** (disclosure). One round trip argues for including tomorrow in the payload;
+   collapsed-by-default argues for lazy. *(Pointer corrected in Phase 4: it read "settled in Phase 4",
+   which builds the summary card and has no tomorrow to expand. The phases that own the agenda's
+   tomorrow are 6 and 8.)*
 
 #### Phase 1: Dashboard Endpoint Skeleton and Section Envelope
 
@@ -9349,28 +9352,164 @@ never be re-bound. The suite was run against a hand-started stack instead. Worth
 `scripts/workspace_env.py` derives ports purely from a path hash with **no override mechanism**, so a
 collision with a host service is unavoidable rather than configurable — recorded as a follow-up below.
 
-#### Phase 4: Summary Card
+#### Phase 4: Summary Card ✅ COMPLETE (as 4a–4e)
 
 **Prerequisites:** Phases 2 and 3.
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4) · **Actual: 510 production, 1,641 tests and
+148 documentation → 2,299 tracked across six PRs** (3.8× the estimate, **4.5×** its own production; this
+document's own changed lines are excluded, as Phase 3 excluded its own, and the three figures sum to the
+total and to the per-PR table below — an earlier revision of this line did neither).
+
+**Split into five PRs, and the reason it took two attempts is the lesson worth keeping.** The phase was
+planned whole at ~820 tracked, and delivery rule 3 asks for a split at that point, not a recorded
+overrun — Phase 2 wrote exactly that ruling and this phase's first attempt repeated the mistake it
+warns against, raising a single 1,727-line PR before splitting it. **A plan that estimates past 500 is
+the signal; splitting after the code exists costs an extra rebase and a discarded review request.**
+
+| PR | Slice | Tracked |
+|---|---|---|
+| **4a** | `SummaryKeyStats` — **W10**'s footer and its 6 tests, no caller yet | 188 |
+| **4b** | `DashboardSummaryCard` — **W5**, **W7**–**W10**, the three states | 580 |
+| **4c** | Mount it on the page; page-level integration tests; the shell's re-scoped section queries | 189 |
+| **4d** | **W6**'s Regenerate, its anchor-freshness guard, and the `homeDashboardKeys.all` invalidation | 614 |
+| **4e** | The e2e block, and this write-up | 366 |
+
+**Two of the six exceed 500** — 4b by 16% and 4d by 23% — and in both the overrun is test lines answering
+review, not production. 4b's remaining seam would separate the card's rendering from its own test file,
+which is not a seam: the tests *are* how the states are specified. 4d grew after it was raised, from 412
+to 614, as review turned one Regenerate button into a button plus an anchor-freshness guard with its own
+locale and stale-closure cases. **That is the honest shape of a review cycle on a phase whose criteria
+enumerate states**, and it is an argument for the ×6 budget rule 14 asks for rather than for a further
+split: splitting a PR *while it is under review* costs more than it saves.
+
+**Three lessons from Phase 3, tested.**
+
+*Lesson 1 held.* "Count the components before multiplying": this phase is two components, not one — the
+card and the stats footer it draws — and the naive per-card estimate of 150 was low by 2.2× against the
+329 they actually cost.
+
+*Lesson 2 held.* The shell paid for itself in the opposite direction: nothing here re-derives the page
+frame, the query, the anchor or the section envelope, and `page.tsx` grew by five lines.
+
+*Lesson 3 was wrong about the price, right about the value.* Phase 3 predicted "the same trade" for e2e —
+~265 lines. This one came to 306, so the size held; what did not hold is the claim that a card phase
+would come in *below* a per-card estimate. The reason is calibration rule 14, again: **three states × two
+questions each** (what does the body show, is the footer drawn) plus an action with four conditions
+around it is a matrix, not a rendering, and the card's test file is 543 lines against 249 of card. A
+phase whose acceptance criteria enumerate states should be budgeted at ×6, and Phases 7, 12 and 14 each
+enumerate more states than this one does.
 
 **Acceptance Criteria:**
 
-- [ ] The summary card renders visually distinguished from the evidence cards with its accent bar and
+- [x] The summary card renders visually distinguished from the evidence cards with its accent bar and
       header label (**W5**, **W6**), including the **Regenerate** action wired to the existing regenerate
-      endpoint — which **persists in the unavailable state**, as the wireframe shows (**W9**).
-- [ ] All three states render per the wireframe: generated as full prose (**W7**), generating with badge
+      endpoint — which **persists in the unavailable state**, as the wireframe shows (**W9**). —
+      `frontend/src/components/dashboard/DashboardSummaryCard.tsx`: `bg-primary/5 border-primary/20`
+      with `border-l-4 border-l-primary`, a sparkle chip and a ghost `size="sm"` **Regenerate** button
+      rendered *outside* the three state branches, over the existing
+      `POST /api/journals/daily-summary/{date}/regenerate` through `useRegenerateDailySummary`. Its
+      presence in all three states is pinned by a table-driven unit test, and its being *usable* inside
+      **W8** and **W9** — the two states a reader is stuck in — again in e2e.
+- [x] All three states render per the wireframe: generated as full prose (**W7**), generating with badge
       and placeholder line (**W8**), unavailable as one quiet line making clear the rest of the page works
-      (**W9**).
-- [ ] The key-stats footer — journals, events, contacts, average mood out of ten — renders **only** in the
-      generated state (**W10**).
-- [ ] The summary text is read-only; the only mutation on the whole page besides the inline task action is
-      this user-requested regeneration.
-- [ ] A summary failure degrades to **W9** while the other sections continue to render.
+      (**W9**). — `SummaryBody` branches on the section envelope: `whitespace-pre-line`
+      `text-sm leading-relaxed` prose with no clamp; a `secondary` "Generating..." badge beside the
+      header label over one muted line; and one muted line otherwise.
+- [x] The key-stats footer — journals, events, contacts, average mood out of ten — renders **only** in the
+      generated state (**W10**). — `SummaryKeyStats`, a `dl` of four `dt`/`dd` pairs, drawn only when
+      there is prose. Its absence is asserted separately in the generating and unavailable states, at
+      both the unit and e2e levels.
+- [x] The summary text is read-only; the only mutation on the whole page besides the inline task action is
+      this user-requested regeneration. — No input, textarea or edit control anywhere on the card
+      (asserted by querying for them rather than by inspection), and the card issues exactly one request
+      of its own, the one a click on **Regenerate** starts.
+- [x] A summary failure degrades to **W9** while the other sections continue to render. — Asserted at
+      page level over the real query (a summary section reported `unavailable` leaves the other three
+      rendering) and at card level (a dashboard request that fails outright renders **W9** rather than
+      throwing). **The "and vice versa" half is not yet falsifiable and is not claimed to be:** the
+      agenda, tasks and upcoming-dates cards read nothing from the payload until Phases 7, 12 and 14, so
+      the test that asserts they survive an unavailable *sibling* would pass against any payload at all.
+      It is kept as the regression guard it can be today, and the direction becomes real evidence in the
+      first phase whose card reads the query.
+
+      One behaviour this criterion does **not** cover, pinned by a test and recorded rather than fixed: a
+      dashboard request that fails carries no anchor, so **W6**'s control is drawn but disabled. The day
+      to regenerate is the server's today in the user's configured zone, and posting the browser's would
+      regenerate the wrong day for anyone whose zone differs — the same rule the **W2** header follows.
+      Recovering a failed request is a *retry*, not a regeneration, and belongs to **Phase 16** with the
+      other whole-page resilience. The control is enabled in all three states the payload can declare.
 
 **Required Test Coverage:** unit (RTL) — each of the three states, the stat footer's presence and absence,
 the regenerate action's happy and failure paths, its presence in the unavailable state, and that a summary
-error does not throw the page. E2E in Phase 17.
+error does not throw the page. ~~E2E in Phase 17.~~ **E2E landed here instead** (4e), on the same ground
+Phase 3 used: the phase completion requirements ask every phase with a user-visible surface for its own
+e2e. — **Delivered:** 28 unit tests over the card (21 in 4b, 7 in 4d) and 6 over the stats footer (4a), 5
+page-level integration tests over the real hook against a routed fetch (4c), 3 over the mutation's new
+invalidation (4d), and **18 e2e tests green on both `firefox` and `Mobile Chrome`** (9 per project, 4e). No new backend tests: this phase changes no
+backend production code, so the honest discharge is to re-run the endpoint's 69 unit and integration tests
+as a gate — `backend/tests/unit/dashboard/` plus
+`backend/tests/integration/api/test_home_dashboard_api.py`, **69 tests, all green**. (Phase 3 recorded 88
+for "the endpoint's contract"; that count included files beyond these two, and the two figures are not
+describing the same command. The number above is the command this phase ran.)
+
+**Phase 17's scope is deliberately left intact.** It was tempting to claim the summary's three states
+(**W33**) as discharged, the way Phase 3 discharged two of its criteria — but Phase 17 asks for each
+state "with its own **fixtures**", and these tests serve their states from `page.route` mocks. That is
+the right call for this phase (see the spec's own docstring for why an AI-produced state cannot be
+created deterministically), and it is *not* the thing Phase 17 asks for. What this phase does give
+Phase 17 is a working set of state assertions to point at real fixtures once ITER18-005 makes the
+summary reachable end to end; the criterion stays `[ ]` and its checklist is unedited.
+
+**Decisions taken (Phase 4):**
+
+- **The card does not fire regeneration for itself, and that is how Phase 2's gap is closed.** Phase 2
+  recorded that nothing moves a journal daily summary out of `PENDING`, folded `PENDING` into
+  *generating*, and named the resolution "Phase 4's to close" — guessing that the card would fire the
+  regenerate endpoint on seeing `generating`, "which keeps the write user-initiated in the sense that
+  matters". **It does not, and the guess was the wrong half of the tension.** This phase's own acceptance
+  criterion says the only mutation here besides the inline task action is a *user-requested*
+  regeneration, and a page that this iteration makes the post-sign-in default is the worst possible
+  trigger for a multi-second AI write: every sign-in would start one, for every user whose journal
+  changed today, whether or not they cared about the summary. The gap is closed instead by **keeping
+  **W6**'s control enabled inside **W8****, so the state always has a visible exit under the reader's
+  own hand. That is a smaller claim than "the state is honest", and deliberately so — making it honest
+  on read is ITER18-005 Phase 2's, and that phase still has to reconcile "regenerated on read" with "a
+  dashboard load must not write". This phase does not pre-empt it; it makes sure the user is not stuck
+  while it is pending.
+- **W9's wording drops its cause clause.** The wireframe reads "No summary today — AI summaries are not
+  configured. Everything below still works." Phase 2 widened *unavailable* to cover a day that simply has
+  no summary yet, which is the **ordinary** case, and the wire deliberately carries no way to tell that
+  apart from a failure. A card that blamed configuration would therefore be wrong more often than right,
+  so it names no cause it cannot know: **"No summary today — everything below still works."** The
+  specification wins over the wireframe (delivery rule 4) and asks only that the page "says so quietly in
+  place, and the rest of the page still works", which is the clause kept verbatim. Recorded in the
+  wireframe document as gap 13, with the Regenerate ruling above as gap 15 and W10's 2×2 stats
+  block below `sm` as gap 14.
+- **The invalidation belongs to the mutation, not to the card.** `useRegenerateDailySummary` now also
+  invalidates `homeDashboardKeys.all` through `invalidateAfterMutation`, because regenerating from the
+  **journals** view leaves the dashboard exactly as stale as regenerating from the dashboard does, and a
+  card-level `onSuccess` would only have fixed the surface that happened to ask. This is the **first
+  invalidator of `homeDashboardKeys.all`** — Phase 3's deferred follow-up 1 — and it discharges the part
+  of it this phase can see. The rest stands: task and contact writes still do not invalidate the
+  dashboard, which is Phases 12–15's, and nothing here makes that cheaper.
+- **All four stat pairs are drawn, including a zero, and an unrated day reads as an em dash.** The
+  journals view hides a zero count; this one does not, because a footer whose columns come and go changes
+  shape from day to day, and "no events today" is worth reading rather than inferring from a gap. `—`
+  rather than `0` for `mood_average: null`, which is most days: nothing was rated, which is not a day
+  rated zero.
+- **The card reads the dashboard payload, never `useDailySummary`.** The obvious reuse — the journals
+  view's own hook — is the one thing this card must not do: `useDailySummary` hits
+  `GET /api/journals/daily-summary/{date}`, which goes through `DailySummaryService.get_or_generate` and
+  *writes*. Phase 2 already ruled that the dashboard reads the row rather than the code path; this is the
+  first phase where that ruling had a tempting alternative in front of it. The card takes the section
+  envelope from the page's one query, which also keeps the round-trip promise intact — asserted.
+- **The card is a labelled region with a *visible* `h2`.** The three evidence sections use `sr-only`
+  headings because their card headers draw the title; the summary card's header label **is** the title,
+  so hiding a duplicate would be the wrong trade. The consequence is one every later phase inherits:
+  `getAllByRole('region')` on the page now returns four, so the shell's own section queries were
+  re-scoped to `dashboard-sections` — exactly the correction Phase 3's decisions predicted would be
+  needed, arriving one phase later than expected and for a different reason (the page's own card, not
+  the toast area).
 
 #### Phase 5: Agenda — Today's Query and Ordering ✅ COMPLETE (as 5a + 5b)
 
