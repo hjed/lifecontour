@@ -29,9 +29,11 @@ import {
   useDeleteCalendar,
   useInfiniteJournals,
   useDismissReviewItem,
+  useRegenerateDailySummary,
   journalKeys,
   reviewItemKeys,
 } from '../journals';
+import { homeDashboardKeys } from '../home-dashboard';
 import { JournalType } from '@/types/journals';
 import { TaskStatus } from '@/types/tasks';
 import { toast } from 'sonner';
@@ -1952,5 +1954,113 @@ describe('useDismissReviewItem optimistic updates', () => {
       data: { id: string }[];
     };
     expect(cached.data.map(i => i.id)).toEqual(['r1', 'r2']);
+  });
+});
+
+/**
+ * Regenerating a daily summary stales the **home dashboard**, whose headline is
+ * that same summary entity (ITER18-004 Phase 4).
+ *
+ * The invalidation belongs to the mutation rather than to the card that calls
+ * it, because the journals view regenerates the same row and leaves the
+ * dashboard just as stale. This is the first invalidator of
+ * `homeDashboardKeys.all`; the sections that follow inherit the convention.
+ */
+describe('useRegenerateDailySummary and the home dashboard', () => {
+  let queryClient: QueryClient;
+
+  const createWrapper = ({ children }: { children: ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: queryClient }, children);
+
+  const SUMMARY_DATE = '2026-07-29';
+
+  const regeneratedSummary = () => ({
+    data: {
+      type: 'journal-daily-summaries',
+      id: SUMMARY_DATE,
+      attributes: {
+        summary_date: SUMMARY_DATE,
+        summary_text: 'A busier Wednesday after all.',
+        journal_count: 3,
+        event_count: 2,
+        contact_count: 4,
+        mood_average: 7.5,
+        status: 'generated',
+      },
+    },
+  });
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    jest.clearAllMocks();
+    mockFetch.mockReset();
+  });
+
+  it('invalidates the dashboard so its headline is re-read', async () => {
+    const invalidateQueries = jest.spyOn(queryClient, 'invalidateQueries');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => regeneratedSummary(),
+    } as Response);
+
+    const { result } = renderHook(() => useRegenerateDailySummary(), {
+      wrapper: createWrapper,
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync(SUMMARY_DATE);
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: homeDashboardKeys.all })
+    );
+  });
+
+  it('still writes the regenerated summary into the journals cache', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => regeneratedSummary(),
+    } as Response);
+
+    const { result } = renderHook(() => useRegenerateDailySummary(), {
+      wrapper: createWrapper,
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync(SUMMARY_DATE);
+    });
+
+    expect(
+      queryClient.getQueryData([
+        ...journalKeys.all,
+        'daily-summary',
+        SUMMARY_DATE,
+      ])
+    ).toEqual(regeneratedSummary());
+  });
+
+  it('leaves the dashboard alone when the regeneration fails', async () => {
+    const invalidateQueries = jest.spyOn(queryClient, 'invalidateQueries');
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ errors: [{ detail: 'AI provider unavailable' }] }),
+    } as Response);
+
+    const { result } = renderHook(() => useRegenerateDailySummary(), {
+      wrapper: createWrapper,
+    });
+
+    await expect(result.current.mutateAsync(SUMMARY_DATE)).rejects.toThrow(
+      'AI provider unavailable'
+    );
+
+    expect(invalidateQueries).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: homeDashboardKeys.all })
+    );
   });
 });

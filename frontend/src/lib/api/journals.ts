@@ -42,6 +42,7 @@ import {
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
+import { homeDashboardKeys } from './home-dashboard';
 import { taskKeys } from './tasks';
 import { journalKeys } from './journal-keys';
 import { getDefaultTimezone, useUserSettings } from './settings';
@@ -1211,6 +1212,14 @@ export function useRegenerateDailySummary() {
         [...journalKeys.all, 'daily-summary', date],
         data
       );
+      // The home dashboard's headline is this same summary entity, so a
+      // regeneration stales it whichever surface asked for one. The
+      // invalidation lives here rather than in the dashboard card for exactly
+      // that reason: regenerating from the journals view leaves the dashboard
+      // just as stale as regenerating from the dashboard does.
+      void invalidateAfterMutation(queryClient, {
+        queryKey: homeDashboardKeys.all,
+      });
       if (data.data) {
         toast.success('Daily summary regenerated successfully');
       } else {

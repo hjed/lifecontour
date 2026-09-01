@@ -172,3 +172,11 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     prevent, so ITER18-004 Phase 4 renders `grid-cols-2 sm:grid-cols-4`. The row is exactly as drawn from
     `sm` up. Recorded here because it is a layout decision the wireframe could not have shown: it depicts
     one viewport.
+15. **The summary card's Regenerate never fires itself.** W6 draws the control and W8 draws the
+    generating state, but nothing in the wireframe says what happens when a summary reports itself
+    generating with nothing generating it — which is today's real behaviour, since no consumer moves a
+    journal daily summary out of `pending`. ITER18-004 Phase 4 resolves it by **keeping the control
+    enabled inside W8** rather than by having the card post on its own: the specification allows exactly
+    two mutations on this page, the inline task action and a *user-requested* regeneration, and the page
+    every sign-in lands on must not start a multi-second AI write on load. Making the state honest on
+    read belongs to ITER18-005, which owns summary freshness.
