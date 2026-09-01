@@ -9890,15 +9890,92 @@ complete in itself. Nothing depends on it, and no surface changes.
    same question about contact membership. A merge touching many tasks then publishes many events;
    that is what the outbox is for.
 
-#### Phase 1: Re-point Task Contact Links Through a Merge
+#### Phase 1: Re-point Task Contact Links Through a Merge ✅ COMPLETE
 
 **Prerequisites:** ITER18-001 Phase 11, ITER18-003 Phase 5.
 **Estimated diff:** ~140 production → **~840 tracked** (×6) — a port + adapter pair on an existing
-repository plus a publish site, which calibration rules 13 and 15 both push above ×4.
+repository plus a publish site, which calibration rules 13 and 15 both push above ×4. ·
+**Actual:** ~557 production → **~1,791 tracked** across 20 files (production 557 — port contract 84,
+SQL adapter 139, service 116, value object 60, event builder and the two event docstrings it
+corrected 67, merge call site 34, DI 44, projection docstring 5, exports 8 — 1,122 tests and
+fixtures, 112 docs).
 
-**Acceptance Criteria:** criteria 1–4 and 6 above.
+*What drove the overrun, since the follow-ups ask.* **Production came in ×4 the estimate, and it is
+the ITER18-003 Phase 8 shape again: production that is mostly prose.** The estimate costed the
+change as statements — two SQL statements, one publish loop, one call — and that count was right:
+the executable part is roughly the 140 lines predicted. What it did not cost was the *decisions*
+each of those places had to explain. The port contract is 84 lines of which 4 are a signature; the
+adapter is 139 lines of which perhaps 40 execute. Both exist to say why the collapse must precede
+the re-point, why the lock is `FOR UPDATE` and in ascending id order, and why the port is not
+`TaskRepository` — none of which the next reader can re-derive from the SQL. The test ratio (×2 over
+production) is correspondingly *lower* than ×4 and is not evidence of under-testing, exactly as that
+phase recorded. **Rule 1's "estimate production, then multiply" misreads any phase whose production
+is an argument rather than a mechanism.**
 
-**Required Test Coverage:** unit and integration as above. No e2e.
+**Acceptance Criteria:** criteria 1–4 and 6 above. All met.
+
+**Required Test Coverage:** unit and integration as above. No e2e. *Delivered:* 19 unit
+(6 in `test_task_contact_repointing.py`, 10 in `test_task_contact_merge_service.py`, 3 added to
+`test_contact_merge_service.py`) and 15 integration
+(`tests/integration/tasks/test_contact_merge_task_links_integration.py`), plus the guard's new write
+path. The dedupe requirement was verified the way it is worded — the collapse statement was removed
+and the duplicate-link test failed on `task_contacts_pkey`, then restored — and the classification
+guard was verified the same way, by blanking the write path's `ports` and watching
+`test_every_port_method_is_a_read_or_a_classified_write` name `repoint_contact_links`.
+
+**Decisions taken (Phase 1):**
+
+1. **Open decision 2 is settled as recommended: one event per task, reusing `TaskUpdated`** with
+   `{contact:{source}: (source, None), contact:{survivor}: (None, survivor)}`. No new type, no new
+   `_HANDLERS` entry, and no change to the contact-history aggregation predicate, which already
+   selects a person's task records by that field name. It reuses the vocabulary a manual link and
+   unlink land under, so a merge's removal and a person's removal of the same contact read as the
+   same kind of line. **The cost is recorded rather than hidden:** the payload does not say *which*
+   merge moved the task, where `TaskJournalLinksRepointed` names both journals. That was judged the
+   cheaper loss — a task caught in a contact merge has one absorbed contact in its `changed_fields`
+   already, so the "why" is recoverable from the row in a way the journal case's is not.
+2. **The port is a new ABC, `TaskContactRepository`, not a method on `TaskRepository`** — a
+   deliberate divergence from this phase's wording, which said "a new mutating `TaskRepository`
+   method". Every method on `TaskRepository` is owner-scoped by contract, and a contact merge has no
+   acting user's tasks to scope to: `contacts` has no `user_id` column at all. This is the situation
+   `TaskAnchorRepository` was created for — a second domain needing to move task link rows without
+   being handed the ability to write tasks — so the third domain gets the third port. **Criterion
+   4's intent is preserved rather than side-stepped:** the completeness guard was widened to declare
+   the new port, so the suite stayed red until the method was classified, which is verified above.
+3. **The re-point takes both contacts `FOR UPDATE` in ascending id order, and is the merge's step 0**,
+   though no criterion asked for either. Without the lock a concurrent `link_contact` can attach to the
+   absorbed contact after the re-point and before the merge's delete, and the `CASCADE` destroys that
+   link — this phase's own defect through a narrower window. Ascending id so two merges of the same
+   pair in opposite directions queue instead of deadlocking.
+
+   *This was wrong on the first pass, and the way it was wrong is the useful part.* The call was
+   placed at step **1d**, after the eight existing re-points, while its docstring claimed to be "the
+   merge's first write". Review caught it. Every one of those re-points writes
+   `contact_id = survivor_id` into a table with a foreign key to `contacts`, and PostgreSQL takes
+   `FOR KEY SHARE` on the survivor's row to validate each — so by 1d the transaction already held a
+   lock on one of the pair, and two merges into the same survivor would each hold `KEY SHARE` and each
+   then request `FOR UPDATE`: a deadlock rather than the queue the sort was there to produce. **A lock
+   order is a claim about a whole transaction, not about one statement**, and it is unverifiable by any
+   test this phase could reasonably write — the sorted `SELECT … FOR UPDATE` looks correct in isolation
+   and is correct in isolation. `SqlTaskAnchorRepository._lock_journals` had already recorded the same
+   trap in prose ("that is why the call is the first write in `merge_journals` rather than the last"),
+   and `merge_journals` honours it; this phase read the *mechanism* off that precedent and not the
+   *placement*. Moved to step 0, and the four places that stated the claim now state the condition it
+   depends on instead.
+
+4. **Criterion 4 is met with a recorded deviation.** It says each affected task "publishes an event
+   carrying the removal **and** the addition". A task linked to *both* contacts publishes the removal
+   alone, because it already referenced the survivor and gained nothing — announcing an arrival would
+   put a line in that person's own history for something that did not happen. The criterion was
+   written for the ordinary case; the collapsed case is the one the same criterion's first bullet
+   introduces, so the two are reconciled here rather than by making the event lie.
+
+**Documentation:** the `task_contacts` half of the "Known limitation" note in
+[database-design.md](../architecture/database-design.md) is retired and replaced by *A contact merge
+re-points task links*; the `CASCADE` row in the foreign-key table now names the merge exception; and
+[domain-architecture.md](../architecture/domain-architecture.md) gains *A contact merge carries the
+task's people* beside the journal delete guard, with the third port explained in the tasks domain's
+ports list. The history-row half of the limitation stays, pointing at Phase 2.
 
 #### Phase 2: Carry the Activity Records onto the Survivor
 
@@ -9912,6 +9989,14 @@ with the fixture cost a history re-point test always carries.
 survivor's feed after a merge; a task both contacts were linked to does not produce a duplicate row;
 rows belonging to other contacts are untouched; and the test must fail if the statement's conflict
 clause is removed. No e2e.
+
+**Inherited from Phase 1, and it complicates the timing.** Phase 1's re-point publishes a `TaskUpdated`
+whose `changed_fields` names the *absorbed* contact — the departure half — and that projects into a
+`field_history` row under `field_name='contact:{absorbed}'`. It is written by the outbox consumer
+**after** the merge commits, so a rewrite statement running inside the merge transaction cannot reach
+it: Phase 1 leaves behind one new orphan of exactly the kind Phase 2 exists to clear. Either the
+rewrite has to run after projection, or the departure row has to be reconsidered. Settle it with open
+decision 1 rather than discovering it mid-phase.
 
 ## Specification Coverage Map
 

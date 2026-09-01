@@ -52,6 +52,13 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
+from app.core.tasks.adapters.sql.task_contact_repository import (
+    SqlTaskContactRepository,
+)
+from app.core.tasks.services.task_contact_merge_service import (
+    TaskContactMergeService,
+)
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
 class RecordingEventPublisher(ContactEventPublisher):
@@ -100,6 +107,10 @@ async def merge_service(
         event_publisher=event_publisher,
         history_repo=history_repo,
         sync_metadata_repo=SyncMetadataRepository(async_connection),
+        task_merge_service=TaskContactMergeService(
+            task_contact_repo=SqlTaskContactRepository(async_connection),
+            event_publisher=OutboxEventPublisher(async_connection),
+        ),
     )
 
 

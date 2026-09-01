@@ -35,6 +35,9 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.core.tasks.services.task_contact_merge_service import (
+    TaskContactMergeService,
+)
 from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger(__name__)
@@ -72,6 +75,15 @@ class ContactMergeService:
     ITER12-003 Phase 2: the inline ``merged_from`` audit row is produced by the
     event-driven HistoryProjectionConsumer from the ``ContactUpdated`` event
     published here, rather than a synchronous ``history_service.record_*`` call.
+
+    **A merge is a list of tables, and that is the thing to remember about this
+    class.** It re-points exactly the tables that existed when each step was
+    written, and nothing fails when a new one is missed: ``task_contacts``
+    arrived two iterations after the rest with ``ON DELETE CASCADE`` on
+    ``contact_id``, which is right for *deleting* a contact and silently wrong
+    for merging one — the delete below took the task links with it, unnoticed,
+    for thirty-one phases. Every new table referencing ``contacts`` is a line
+    somebody has to add here.
     """
 
     def __init__(
@@ -82,6 +94,7 @@ class ContactMergeService:
         event_publisher: ContactEventPublisher,
         history_repo: FieldHistoryRepository,
         sync_metadata_repo: SyncMetadataRepository,
+        task_merge_service: TaskContactMergeService,
     ):
         self.contact_repo = contact_repo
         self.relationship_repo = relationship_repo
@@ -89,6 +102,7 @@ class ContactMergeService:
         self.event_publisher = event_publisher
         self.history_repo = history_repo
         self.sync_metadata_repo = sync_metadata_repo
+        self.task_merge_service = task_merge_service
 
     def has_scalar_conflicts(self, survivor: Contact, source: Contact) -> bool:
         """Report whether two contacts have conflicting scalar identity fields.
@@ -119,9 +133,9 @@ class ContactMergeService:
         """Absorb the source contact into the survivor, returning the unified contact.
 
         Re-points and dedupes the full aggregate (relationships, journal links,
-        methods, addresses, notes, important dates, tags), re-points the source's
-        top-level ``field_history`` rows onto the survivor so the unified record
-        carries both contacts' audit trail, applies the scalar
+        methods, addresses, notes, important dates, tags, task links), re-points
+        the source's top-level ``field_history`` rows onto the survivor so the
+        unified record carries both contacts' audit trail, applies the scalar
         identity fields, deletes the source, records an inline ``merged_from``
         history row carrying provenance, and requests regeneration of the
         survivor's AI summary. The whole operation is a single atomic unit of work.
@@ -143,6 +157,33 @@ class ContactMergeService:
         source_contact = await self.contact_repo.find_by_id(source_id)
         if source_contact is None:
             raise ContactNotFoundError(source_id)
+
+        # 0. Re-point the source's task links onto the survivor. This one is
+        #    not optional housekeeping: ``task_contacts.contact_id`` is
+        #    ON DELETE CASCADE, so without it the delete in step 3 destroys
+        #    every task link the absorbed contact held — silently, since a
+        #    cascade raises nothing. The tasks domain performs the move and
+        #    announces one event per task it touched, because a task's history
+        #    is the tasks domain's to write.
+        #
+        #    **It is step 0 for a locking reason**, exactly as the equivalent
+        #    call is the first write in ``merge_journals``. The re-point takes
+        #    both contacts FOR UPDATE in ascending id order so two merges queue
+        #    instead of deadlocking — and that only holds if nothing in this
+        #    transaction has already locked one of the pair. Every re-point
+        #    below writes ``contact_id = survivor_id`` into a table with a
+        #    foreign key to ``contacts``, and PostgreSQL takes FOR KEY SHARE on
+        #    the survivor's row to validate each one. Running the task re-point
+        #    after them would mean two merges into the same survivor both held
+        #    KEY SHARE on it and both then asked for FOR UPDATE, which is a
+        #    deadlock rather than a queue.
+        await self.task_merge_service.repoint_contact_links(
+            source_contact_id=source_id,
+            survivor_contact_id=survivor_id,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
 
         # 1. Re-point the relationship graph (Phase 1) and the sub-entities.
         await self.relationship_repo.repoint_contact(

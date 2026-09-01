@@ -1,5 +1,6 @@
 """Task domain models."""
 
+from .contact_repointing import TaskContactRepointing
 from .entities import Task
 from .exceptions import (
     TaskAnchorJournalNotFoundError,
@@ -43,6 +44,7 @@ __all__ = [
     "Task",
     "TaskAnchorJournalNotFoundError",
     "TaskContactRef",
+    "TaskContactRepointing",
     "TaskDomainError",
     "TaskDueJournalNotFutureError",
     "TaskJournalAnchor",

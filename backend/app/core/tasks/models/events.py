@@ -8,8 +8,12 @@ journal events do", each carrying provenance and the actor.
 This module holds creation, every change to the task's own fields — text, status
 and contact membership — due-journal retargeting, intermediate journal links,
 the re-point a journal merge performs, and hard deletion. That is the full event
-set the specification names plus the one it did not anticipate: a write on task
-rows performed from the **journal** domain. Everything here is projected into
+set the specification names plus the ones it did not anticipate: writes on task
+rows performed from **another domain**. There are two, and they are announced
+differently on purpose — a journal merge gets :class:`TaskJournalLinksRepointed`
+because it moves *anchors*, which no other write does, while a contact merge
+reuses :class:`TaskUpdated` because what it changes is contact membership, which
+is an ordinary field of the task. Everything here is projected into
 ``field_history`` by ``HistoryService``.
 
 **A task's text, status and contact changes share one event**, ``TaskUpdated``,
@@ -60,7 +64,11 @@ from enum import StrEnum
 from typing import Any
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
+from core_shared.models.tasks import (
+    TaskContactRepointing,
+    TaskJournalRepointing,
+    TaskStatus,
+)
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 #: The prefix every contact-membership key carries.
@@ -213,11 +221,25 @@ class TaskCreated(DomainEvent):
 class TaskUpdated(DomainEvent):
     """Event raised when a field of the task changes.
 
-    Three kinds of change reach this one type: a reword, a status move, and a
-    contact being linked or unlinked. They arrive from different write paths —
-    :meth:`TaskService.update_task` owns text and status, and
+    Four kinds of change reach this one type: a reword, a status move, a contact
+    being linked or unlinked, and a **contact merge** moving a task's people onto
+    the survivor. They arrive from different write paths —
+    :meth:`TaskService.update_task` owns text and status,
     :meth:`TaskService.link_contact` / :meth:`~TaskService.unlink_contact` own
-    membership — but each is one write announcing one event.
+    membership, and ``TaskContactMergeService`` owns the merge — but each is one
+    write announcing one event.
+
+    **The merge is here rather than in a type of its own**, unlike the journal
+    merge's :class:`TaskJournalLinksRepointed`, and the difference is what the
+    two merges change. A journal merge moves *anchors*, which nothing else
+    moves, and can delete links; a contact merge only changes which people a
+    task references, which is what a link and an unlink already change. Its
+    payload is :func:`contact_repointing_changed_fields` — the absorbed person
+    leaving and the survivor arriving, in the same ``contact:{id}`` vocabulary a
+    manual link and unlink land under, so that a merge's removal and a person's
+    removal of the same contact read as the same kind of line. The cost, stated
+    because it is real: this payload does not say *which* merge moved the task,
+    where ``TaskJournalLinksRepointed`` names both journals.
 
     **One event for one write**, carrying ``changed_fields`` in the
     ``{field: (old, new)}`` shape every other updated-event in this codebase
@@ -629,6 +651,44 @@ def _repointing_changed_fields(
         changed_fields[journal_field_name(target_journal_id)] = (
             target_journal_id,
             None,
+        )
+    return changed_fields
+
+
+def contact_repointing_changed_fields(
+    repointing: TaskContactRepointing,
+    source_contact_id: int,
+    survivor_contact_id: int,
+) -> dict[str, Any]:
+    """A contact merge's outcome for one task, as field changes.
+
+    Built here rather than by the caller for the reason
+    :func:`_repointing_changed_fields` is: the mapping from "what the merge did"
+    to "what a history row says" is a rule, and a rule spelt at the call site is
+    one each future caller can spell differently. It is public where that one is
+    private because the event it feeds is :class:`TaskUpdated` — reused rather
+    than given a type of its own (see that class) — so the builder has no
+    ``__init__`` to hide inside.
+
+    **Two rows for a link that moved, one for a link that was collapsed.** The
+    key names the person, so the absorbed contact leaves and the survivor
+    arrives. A task that already referenced the survivor gained nothing, and
+    claiming an arrival would tell that person's own history they were added to
+    a task they were already on.
+
+    Every pair is ``(old, new)`` **positionally** —
+    ``HistoryService._rows_from_changed_fields`` reads ``change[0]`` as the old
+    value and never looks at the key — so a pair built the wrong way round would
+    render the merge as having taken the survivor *off* the task, with nothing
+    downstream able to notice.
+    """
+    changed_fields: dict[str, Any] = {
+        contact_field_name(source_contact_id): (source_contact_id, None)
+    }
+    if repointing.survivor_link_added:
+        changed_fields[contact_field_name(survivor_contact_id)] = (
+            None,
+            survivor_contact_id,
         )
     return changed_fields
 
