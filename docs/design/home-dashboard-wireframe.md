@@ -157,3 +157,18 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     ordered by when it actually began and therefore leads the timed block. Recorded here as delivery
     rule 4 requires; settled in ITER18-004 Phase 5a, which pins it with
     `test_it_sorts_by_when_it_began_not_by_when_today_began`.
+13. **W9's cause clause is dropped; its reassurance is kept verbatim.** The wireframe words the
+    unavailable line *"No summary today — AI summaries are not configured. Everything below still
+    works."*, which names a cause. ITER18-004 Phase 2 ruled that *unavailable* also covers a day that
+    simply has **no summary yet** — a summary is not a list, so it has no empty state — and that is the
+    ordinary case, not the configured-AI one. A card that blamed configuration would therefore be wrong
+    more often than it was right, and it cannot tell the two apart: the wire deliberately does not carry
+    the distinction. ITER18-004 Phase 4 renders *"No summary today — everything below still works."* The
+    specification wins over the wireframe here (delivery rule 4): it asks only that the dashboard "says
+    so quietly in place, and the rest of the page still works", which is the half that survives.
+14. **W10's four pairs are a 2×2 block below `sm`.** The wireframe draws "a row of four label/value
+    pairs" at its 1440 px render width, and `W` numbers describe structure rather than pixels — but four
+    columns inside a card at 375 px is the kind of thing **W3**'s no-horizontal-overflow rule exists to
+    prevent, so ITER18-004 Phase 4 renders `grid-cols-2 sm:grid-cols-4`. The row is exactly as drawn from
+    `sm` up. Recorded here because it is a layout decision the wireframe could not have shown: it depicts
+    one viewport.
