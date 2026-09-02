@@ -129,10 +129,28 @@ test.describe('Contact Inline Editing', () => {
     await expect(nicknameField).toContainText('UpdatedNickname');
   });
 
-  // Note: the section shells rendered on the detail page — Contact Methods,
-  // Addresses, Activity Feed, and Relationships headings with their add
-  // buttons — are unit-tested in ContactMethodsList.test.tsx,
-  // ContactAddressesList.test.tsx, ActivityFeed.test.tsx, and
-  // RelationshipsList.test.tsx. The inline-editing tests above already load
-  // the real detail page, so its composition stays exercised end-to-end.
+  // Each section's own rendering (headings, add buttons, empty states) is
+  // unit-tested in ContactMethodsList.test.tsx, ContactAddressesList.test.tsx,
+  // ActivityFeed.test.tsx, and RelationshipsList.test.tsx. What only e2e can
+  // catch is a section dropping out of the detail page's composition — so one
+  // page load asserts all four are mounted, replacing the four separate
+  // display tests (and their four page loads) that stood here.
+  test('mounts all detail page sections', async ({ contactsWithData }) => {
+    const { page, contacts } = contactsWithData;
+
+    await page.goto(`/contacts/${contacts[0].id}`);
+
+    await expect(
+      page.getByRole('heading', { name: 'Contact Methods' })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Addresses' })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /activity|timeline/i })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /relationships/i })
+    ).toBeVisible();
+  });
 });
