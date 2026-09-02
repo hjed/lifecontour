@@ -167,6 +167,11 @@ export default defineConfig({
       BACKEND_URL: `http://localhost:${BACKEND_TEST_PORT}`, // Use test backend port
       NEXT_PUBLIC_API_URL: `http://localhost:${BACKEND_TEST_PORT}`,
       NEXT_PUBLIC_OAUTH_PROVIDER_URL: `http://localhost:${OAUTH_PUBLIC_TEST_PORT}`,
+      // The app's Docker builds use `output: standalone`, which `next start`
+      // explicitly does not support (it warns to use the standalone server
+      // instead). Build without it for the `next start`-served e2e server so
+      // the suite runs a supported configuration.
+      NEXT_OUTPUT_STANDALONE: 'false',
     },
   },
 });

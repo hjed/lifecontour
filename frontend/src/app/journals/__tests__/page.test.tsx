@@ -235,13 +235,19 @@ describe('JournalsPage', () => {
     it('clears the tag param when the URL tag is unchecked', async () => {
       const user = userEvent.setup();
       mockSearchParams = new URLSearchParams('tag=tag-1');
+      // clearTag performs a native shallow history update (router.push to a
+      // bare prerendered pathname is a silent no-op in production builds).
+      const pushStateSpy = jest
+        .spyOn(window.history, 'pushState')
+        .mockImplementation(() => {});
       renderWithQueryClient(<JournalsPage />);
 
       await user.click(screen.getByLabelText('Holidays'));
 
       await waitFor(() => {
-        expect(mockPush).toHaveBeenCalledWith('/journals');
+        expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/journals');
       });
+      pushStateSpy.mockRestore();
     });
 
     it('queries the union of the URL tag and an additionally selected tag', async () => {
@@ -259,6 +265,9 @@ describe('JournalsPage', () => {
     it('offers a dismissible badge so the tag stays clearable with filters hidden', async () => {
       const user = userEvent.setup();
       mockSearchParams = new URLSearchParams('tag=tag-1');
+      const pushStateSpy = jest
+        .spyOn(window.history, 'pushState')
+        .mockImplementation(() => {});
       renderWithQueryClient(<JournalsPage />);
 
       // Hide the filters sidebar — the badge must remain the escape hatch.
@@ -272,8 +281,9 @@ describe('JournalsPage', () => {
       );
 
       await waitFor(() => {
-        expect(mockPush).toHaveBeenCalledWith('/journals');
+        expect(pushStateSpy).toHaveBeenCalledWith(null, '', '/journals');
       });
+      pushStateSpy.mockRestore();
     });
 
     it('does not leave a phantom tag_ids key after the last tag is unchecked', async () => {
