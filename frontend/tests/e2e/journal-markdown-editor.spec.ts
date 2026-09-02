@@ -142,9 +142,30 @@ test.describe('Journal Markdown Editor', () => {
     await expect(content).not.toContainText('original content');
   });
 
-  // Note: toolbar formatting commands (Bold et al.) are unit-tested in
-  // MarkdownEditor.test.tsx; the inline-editor test above already covers the
-  // save round-trip in a real browser.
+  // The toolbar's wiring is unit-tested in MarkdownEditor.test.tsx, but that
+  // test mocks Tiptap (its command chain is a no-op), so only this browser
+  // test proves a toolbar command actually formats a real ProseMirror
+  // selection.
+  test('bold toolbar button formats the selection', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const content = await openJournalWithContent(
+      page,
+      testCleanup,
+      'plain words'
+    );
+
+    const editor = await openInlineEditor(page, content);
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.getByRole('button', { name: 'Bold' }).click();
+
+    await expect(editor.locator('strong')).toHaveText('plain words');
+
+    await page.getByTestId('journal-content-save').click();
+    await expect(content.locator('strong')).toHaveText('plain words');
+  });
 
   test('creates a journal with markdown via the create form', async ({
     authenticatedPage,
