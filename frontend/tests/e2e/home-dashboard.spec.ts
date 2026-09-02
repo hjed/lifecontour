@@ -77,15 +77,11 @@ function expectedAnchorLabel(anchorDate: string): string {
 
 test.describe('Home Dashboard — page shell', () => {
   test.describe('The page frame', () => {
-    test('renders the dashboard at the root route, headed Today', async ({
-      authenticatedPage: page,
-    }) => {
-      await page.setViewportSize(DESKTOP);
-      await openDashboard(page);
-
-      await expect(page).toHaveURL(/\/$/);
-      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Today');
-    });
+    // Note: the Today heading and framing line are unit-tested in
+    // DashboardPageHeader.test.tsx, and the root-route landing is covered by
+    // 'is the view an authenticated user lands on at the root' below. The
+    // anchor-day test stays as e2e because it reads the real server-side
+    // anchor from the API, which a unit test can only mock.
 
     test('labels the page with the day the server anchored it on', async ({
       authenticatedPage: page,
@@ -106,20 +102,15 @@ test.describe('Home Dashboard — page shell', () => {
         expectedAnchorLabel(anchorDate)
       );
     });
-
-    test('says what the page is for', async ({ authenticatedPage: page }) => {
-      await page.setViewportSize(DESKTOP);
-      await openDashboard(page);
-
-      await expect(
-        page.getByText(
-          /your day, what is coming up, and what you said you would do/i
-        )
-      ).toBeVisible();
-    });
   });
 
   test.describe('The three evidence sections', () => {
+    // Note: each section's labelled list, wireframe title/description, and
+    // empty line are unit-tested in DashboardSection.test.tsx,
+    // DashboardSectionCard.test.tsx, and section-cards.test.tsx. What stays
+    // here is the page-level composition: all three sections mounted together,
+    // in wireframe order.
+
     test('renders them in wireframe order, each a labelled region', async ({
       authenticatedPage: page,
     }) => {
@@ -132,42 +123,6 @@ test.describe('Home Dashboard — page shell', () => {
       for (const [index, name] of SECTION_NAMES.entries()) {
         await expect(regions.nth(index)).toHaveAccessibleName(name);
       }
-    });
-
-    test('gives each section a labelled list for its entries', async ({
-      authenticatedPage: page,
-    }) => {
-      await page.setViewportSize(DESKTOP);
-      await openDashboard(page);
-
-      for (const label of [
-        "Today's agenda",
-        'Tasks due in the next seven days',
-        'Upcoming contact dates',
-      ]) {
-        await expect(page.getByRole('list', { name: label })).toBeAttached();
-      }
-    });
-
-    test('shows each section header from the wireframe', async ({
-      authenticatedPage: page,
-    }) => {
-      await page.setViewportSize(DESKTOP);
-      await openDashboard(page);
-
-      await expect(
-        page.getByText("Today's schedule in time order, all-day items first.")
-      ).toBeVisible();
-      await expect(
-        page.getByText(
-          'Due in the next seven days, soonest first. Tick them off here.'
-        )
-      ).toBeVisible();
-      await expect(
-        page.getByText(
-          'Important dates for your contacts over the next seven days.'
-        )
-      ).toBeVisible();
     });
   });
 

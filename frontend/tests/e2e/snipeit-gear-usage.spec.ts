@@ -121,48 +121,8 @@ test.describe('Gear Usage Editor', () => {
     );
   });
 
-  test('hides buffer dates when Snipe-IT is disconnected', async ({
-    authenticatedPage,
-  }) => {
-    const page = authenticatedPage;
-    // Mock integrations endpoint to show Snipe-IT as disconnected
-    await page.route('**/api/integrations', async route => {
-      await route.fulfill({
-        status: 200,
-        json: {
-          data: [
-            {
-              id: 'snipeit',
-              type: 'integration',
-              attributes: {
-                name: 'Snipe-IT',
-                status: 'disconnected',
-                capabilities: ['gear_sync'],
-                needs_reauth: false,
-                needs_reconsent: false,
-                sync_summary: {
-                  sync_count: 0,
-                  error_count: 0,
-                  last_sync_time: null,
-                },
-              },
-            },
-          ],
-        },
-      });
-    });
-
-    await page.goto('/journals/new');
-
-    // Select Gear Usage type
-    await page.getByLabel(/^gear usage$/i).check();
-
-    // Verify gear item selector is visible
-    await expect(page.getByTestId('gear-usage-type-editor')).toBeVisible();
-    await expect(page.getByTestId('gear-item-selector')).toBeVisible();
-
-    // Verify buffer dates are NOT visible because Snipe-IT is disconnected
-    await expect(page.getByTestId('checkout-date-input')).toBeHidden();
-    await expect(page.getByTestId('checkin-date-input')).toBeHidden();
-  });
+  // Note: the disconnected case — buffer date inputs withheld while the gear
+  // selector stays — is unit-tested in GearUsageTypeEditor.test.tsx. The
+  // connected test above keeps the create-form wiring and payload shape
+  // covered end-to-end.
 });

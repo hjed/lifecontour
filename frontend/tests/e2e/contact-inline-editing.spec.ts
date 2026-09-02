@@ -129,59 +129,28 @@ test.describe('Contact Inline Editing', () => {
     await expect(nicknameField).toContainText('UpdatedNickname');
   });
 
-  test('should display contact methods section', async ({
-    contactsWithData,
-  }) => {
+  // Each section's own rendering (headings, add buttons, empty states) is
+  // unit-tested in ContactMethodsList.test.tsx, ContactAddressesList.test.tsx,
+  // ActivityFeed.test.tsx, and RelationshipsList.test.tsx. What only e2e can
+  // catch is a section dropping out of the detail page's composition — so one
+  // page load asserts all four are mounted, replacing the four separate
+  // display tests (and their four page loads) that stood here.
+  test('mounts all detail page sections', async ({ contactsWithData }) => {
     const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
 
-    await page.goto(`/contacts/${contact.id}`);
+    await page.goto(`/contacts/${contacts[0].id}`);
 
-    const contactMethodsHeading = page.getByRole('heading', {
-      name: 'Contact Methods',
-    });
-    await expect(contactMethodsHeading).toBeVisible();
-
-    const addMethodButton = page.getByRole('button', {
-      name: /add contact method/i,
-    });
-    await expect(addMethodButton).toBeVisible();
-  });
-
-  test('should display addresses section', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const addressesHeading = page.getByRole('heading', { name: 'Addresses' });
-    await expect(addressesHeading).toBeVisible();
-
-    const addAddressButton = page.getByRole('button', { name: /add address/i });
-    await expect(addAddressButton).toBeVisible();
-  });
-
-  test('should display activity feed section', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const activityHeading = page.getByRole('heading', {
-      name: /activity|timeline/i,
-    });
-    await expect(activityHeading).toBeVisible();
-  });
-
-  test('should display relationships section', async ({ contactsWithData }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[1];
-
-    await page.goto(`/contacts/${contact.id}`);
-
-    const relationshipsHeading = page.getByRole('heading', {
-      name: /relationships/i,
-    });
-    await expect(relationshipsHeading).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Contact Methods' })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Addresses' })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /activity|timeline/i })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /relationships/i })
+    ).toBeVisible();
   });
 });

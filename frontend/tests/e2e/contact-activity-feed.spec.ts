@@ -39,69 +39,9 @@ async function waitForContactHistoryEntry(
 }
 
 test.describe('Contact Activity Feed', () => {
-  test('should display Activity Feed section on contact detail page', async ({
-    contactsWithData,
-  }) => {
-    const { page, contacts } = contactsWithData;
-    const contact = contacts[0];
-
-    // Navigate to contact detail page
-    await page.goto(`/contacts/${contact.id}`);
-
-    // Wait for page to load
-    await expect(page).toHaveURL(new RegExp(`/contacts/${contact.id}`));
-
-    // Verify Activity Feed section is visible
-    const activityFeedHeading = page.getByRole('heading', {
-      name: /Activity/i,
-    });
-    await expect(activityFeedHeading).toBeVisible({ timeout: 10000 });
-  });
-
-  test('should show empty state when no activity history exists', async ({
-    emptyContactsPage,
-    testCleanup,
-  }) => {
-    const page = emptyContactsPage;
-
-    // Create a fresh contact without any edits
-    const response = await page.request.post('/api/contacts', {
-      headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify({
-        data: {
-          type: 'contacts',
-          attributes: {
-            first_name: `E2ETest_${Date.now()}`,
-            last_name: 'Contact',
-            is_favourite: false,
-          },
-        },
-      }),
-    });
-
-    expect(response.ok()).toBeTruthy();
-    const responseData = await response.json();
-    const contactId = responseData.data.id;
-
-    // Register cleanup
-    testCleanup(async () => {
-      await page.request.delete(`/api/contacts/${contactId}`);
-    });
-
-    // Navigate to contact detail page
-    await page.goto(`/contacts/${contactId}`);
-    await expect(page).toHaveURL(new RegExp(`/contacts/${contactId}`));
-
-    // Wait for page content to load
-    await expect(page.getByRole('heading', { name: /Activity/i })).toBeVisible({
-      timeout: 10000,
-    });
-
-    // Check for empty state or "No activity" message
-    // The empty state should show either "No activity" or similar message
-    const pageContent = page.locator('body');
-    await expect(pageContent).not.toBeEmpty();
-  });
+  // Note: the Activity Feed heading and its contact-specific empty-state copy
+  // are unit-tested in ActivityFeed.test.tsx; the history tests below load
+  // the real detail page, so the section's presence stays covered end-to-end.
 
   test('should display history entries after contact is updated', async ({
     contactsWithData,

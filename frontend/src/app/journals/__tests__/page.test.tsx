@@ -27,41 +27,9 @@ jest.mock('@/lib/api/journals', () => {
   return {
     __esModule: true,
     ...originalModule,
-    useInfiniteJournals: jest.fn(() => ({
-      data: {
-        pages: [
-          {
-            data: [
-              {
-                type: 'journals',
-                id: '1',
-                attributes: {
-                  title: 'Test Journal 1',
-                  content: 'Test content 1',
-                  event_date_range: { start: '2024-01-01', end: '2024-01-01' },
-                  types: [],
-                  type_data: {},
-                  contacts: [],
-                  tags: [],
-                  calendar: null,
-                  parent: null,
-                  children_count: 0,
-                  created_at: '2024-01-01T00:00:00Z',
-                  updated_at: '2024-01-01T00:00:00Z',
-                },
-              },
-            ],
-          },
-        ],
-        pageParams: [{ date_from: '2024-01-01', date_to: '2024-01-01' }],
-      },
-      isLoading: false,
-      error: null,
-      hasNextPage: false,
-      hasPreviousPage: false,
-      isFetchingNextPage: false,
-      isFetchingPreviousPage: false,
-    })),
+    // Default implementation lives in defaultInfiniteJournalsResponse below,
+    // re-applied in beforeEach so a per-test mockReturnValue cannot leak.
+    useInfiniteJournals: jest.fn(),
     useJournals: jest.fn(() => ({
       data: {
         data: [
@@ -114,6 +82,48 @@ jest.mock('@/components/auth/AuthGuard', () => ({
   AuthGuard: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+/**
+ * Default useInfiniteJournals response, re-applied in beforeEach.
+ * jest.clearAllMocks() clears call history but keeps implementations, so a
+ * test that sets its own mockReturnValue (e.g. the empty-state case) would
+ * otherwise leak that data into every test after it.
+ */
+const defaultInfiniteJournalsResponse = () => ({
+  data: {
+    pages: [
+      {
+        data: [
+          {
+            type: 'journals',
+            id: '1',
+            attributes: {
+              title: 'Test Journal 1',
+              content: 'Test content 1',
+              event_date_range: { start: '2024-01-01', end: '2024-01-01' },
+              types: [],
+              type_data: {},
+              contacts: [],
+              tags: [],
+              calendar: null,
+              parent: null,
+              children_count: 0,
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2024-01-01T00:00:00Z',
+            },
+          },
+        ],
+      },
+    ],
+    pageParams: [{ date_from: '2024-01-01', date_to: '2024-01-01' }],
+  },
+  isLoading: false,
+  error: null,
+  hasNextPage: false,
+  hasPreviousPage: false,
+  isFetchingNextPage: false,
+  isFetchingPreviousPage: false,
+});
+
 // Mock IntersectionObserver
 const mockIntersectionObserver = jest.fn();
 mockIntersectionObserver.mockReturnValue({
@@ -129,6 +139,9 @@ describe('JournalsPage', () => {
     mockSearchParams = new URLSearchParams();
     // clearAllMocks leaves implementations in place, so a per-test
     // mockReturnValue would otherwise leak into later tests.
+    (useInfiniteJournals as jest.Mock).mockImplementation(
+      defaultInfiniteJournalsResponse
+    );
     (useSearchJournals as jest.Mock).mockReturnValue({
       data: null,
       isLoading: false,
@@ -165,6 +178,22 @@ describe('JournalsPage', () => {
     renderWithQueryClient(<JournalsPage />);
 
     expect(screen.getByText('Test Journal 1')).toBeInTheDocument();
+  });
+
+  it('shows the empty state when no journals exist', () => {
+    (useInfiniteJournals as jest.Mock).mockReturnValue({
+      data: { pages: [{ data: [] }], pageParams: [] },
+      isLoading: false,
+      error: null,
+      hasNextPage: false,
+      hasPreviousPage: false,
+      isFetchingNextPage: false,
+      isFetchingPreviousPage: false,
+    });
+
+    renderWithQueryClient(<JournalsPage />);
+
+    expect(screen.getByText('No journals found')).toBeInTheDocument();
   });
 
   describe('tag deep link (/journals?tag=<id>)', () => {
