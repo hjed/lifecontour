@@ -61,6 +61,14 @@ SURVIVING_JOURNAL_ID = 66
 CONTACT_ID = 3
 OTHER_CONTACT_ID = 4
 
+# The two people a merge is between. Named rather than reusing ``CONTACT_ID``
+# and ``OTHER_CONTACT_ID`` for the reason the two journal ids above are: a merge
+# is described from the *contacts*' point of view — the absorbed person's links
+# move onto the survivor — and a payload built over the ids a task merely
+# references would read as correct while describing the wrong pair.
+ABSORBED_CONTACT_ID = 77
+SURVIVING_CONTACT_ID = 88
+
 ORIGINAL_TEXT = "return Sarah's book"
 # What a reword moves it to. Shared rather than redeclared per file because the
 # event tests assert the ``(old, new)`` pair the service tests produce, and two

@@ -655,9 +655,13 @@ class HistoryService:
     ) -> list[FieldHistoryEntry]:
         """One row per changed field: the text, the status, and each contact.
 
-        Three kinds of change reach this one event type, and none needs a branch
-        here. ``_rows_from_changed_fields`` reads ``change[0]`` as the old value
-        and never looks at the key, so a ``contact:{id}`` key linking somebody
+        Four kinds of change reach this one event type, and none needs a branch
+        here — a contact **merge** joining the reword, the status move and the
+        link is the fourth, and it needed no change at all: it publishes
+        ``TaskUpdated`` carrying ``contact:{id}`` keys, which is what a link
+        already published. ``_rows_from_changed_fields`` reads ``change[0]`` as
+        the old value and never looks at the key, so a ``contact:{id}`` key
+        linking somebody
         (``(None, id)``) or unlinking them (``(id, None)``) projects like any
         other field — one row, naming the person, the right way round.
 

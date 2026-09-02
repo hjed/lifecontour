@@ -87,6 +87,18 @@ def mock_sync_metadata_repo() -> AsyncMock:
 
 
 @pytest.fixture
+def mock_task_merge_service() -> AsyncMock:
+    """The tasks domain's half of the merge (ITER18-006 Phase 1).
+
+    A double rather than the real service because what the merge owes the tasks
+    domain is a *call*, in the right place: the row work and the events it
+    publishes are that service's own tests, and this file has no business
+    knowing that ``task_contacts`` exists.
+    """
+    return AsyncMock()
+
+
+@pytest.fixture
 def merge_service(
     mock_contact_repo,
     mock_relationship_repo,
@@ -94,6 +106,7 @@ def merge_service(
     mock_event_publisher,
     mock_history_repo,
     mock_sync_metadata_repo,
+    mock_task_merge_service,
 ) -> ContactMergeService:
     return ContactMergeService(
         contact_repo=mock_contact_repo,
@@ -102,6 +115,7 @@ def merge_service(
         event_publisher=mock_event_publisher,
         history_repo=mock_history_repo,
         sync_metadata_repo=mock_sync_metadata_repo,
+        task_merge_service=mock_task_merge_service,
     )
 
 
@@ -214,6 +228,85 @@ class TestContactMergeDelegation:
         # The re-point must run before the source row is deleted.
         ordered = [call[0] for call in manager.mock_calls]
         assert ordered.index("repoint") < ordered.index("delete")
+
+    @pytest.mark.asyncio
+    async def test_repoints_task_contact_links(
+        self,
+        merge_service,
+        mock_task_merge_service,
+        mock_transaction,
+    ) -> None:
+        """A merge carries a task's people with it (ITER18-006 Phase 1).
+
+        The tasks domain performs the move and announces it; the contacts domain
+        asks for it. Delegating rather than writing ``task_contacts`` here is
+        what keeps the contacts domain from constructing task events.
+        """
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        mock_task_merge_service.repoint_contact_links.assert_awaited_once_with(
+            source_contact_id=SOURCE_ID,
+            survivor_contact_id=SURVIVOR_ID,
+            transaction=mock_transaction,
+            source=Provenance.SYSTEM,
+            changed_by="system",
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_merging_actor_reaches_the_tasks_that_moved(
+        self,
+        merge_service,
+        mock_task_merge_service,
+        mock_transaction,
+    ) -> None:
+        """A merge is something a person did, and so are its consequences.
+
+        Filing the moved tasks under ``system`` would tell that user's own
+        history that part of what they did was not theirs — the same reasoning
+        the journal merge's re-point records.
+        """
+        await merge_service.merge_contacts(
+            SURVIVOR_ID,
+            SOURCE_ID,
+            transaction=mock_transaction,
+            changed_by="user-1",
+            source=Provenance.UI,
+        )
+
+        kwargs = mock_task_merge_service.repoint_contact_links.await_args.kwargs
+        assert kwargs["source"] == Provenance.UI
+        assert kwargs["changed_by"] == "user-1"
+
+    @pytest.mark.asyncio
+    async def test_repoints_task_links_then_deletes_source(
+        self,
+        merge_service,
+        mock_contact_repo,
+        mock_task_merge_service,
+        mock_transaction,
+    ) -> None:
+        """The ordering *is* the fix.
+
+        ``task_contacts.contact_id`` is ``ON DELETE CASCADE``, so a re-point
+        after the delete has nothing left to move: the links are already gone,
+        silently, which is the defect this phase repairs. Only the order
+        separates the fix from the bug, so only an assertion on the order can
+        stop it regressing.
+        """
+        manager = MagicMock()
+        manager.attach_mock(
+            mock_task_merge_service.repoint_contact_links, "repoint_tasks"
+        )
+        manager.attach_mock(mock_contact_repo.delete, "delete")
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        ordered = [call[0] for call in manager.mock_calls]
+        assert ordered.index("repoint_tasks") < ordered.index("delete")
 
 
 class TestContactMergeScalarPolicy:

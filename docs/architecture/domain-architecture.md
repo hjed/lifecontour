@@ -166,10 +166,20 @@ the *creating* journal where it arose and the *due* journal where it matters.
     outcome — and would deepen the merge lock-order inversion ITER18-002 Phase 6 exists to remove
 - **Ports**: `TaskRepository` (`backend/app/core/tasks/models/repositories.py`), implemented by
   `SqlTaskRepository` (`backend/app/core/tasks/adapters/sql/task_repository.py`) and provided at
-  request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`); and
+  request scope by `TaskProvider` (`backend/app/infrastructure/di/tasks.py`);
   `TaskAnchorRepository` in the same module, implemented by `SqlTaskAnchorRepository`
   (`backend/app/core/tasks/adapters/sql/task_anchor_repository.py`) — see
-  *[The journal delete guard](#the-journal-delete-guard)* below
+  *[The journal delete guard](#the-journal-delete-guard)* below; and `TaskContactRepository`,
+  implemented by `SqlTaskContactRepository`
+  (`backend/app/core/tasks/adapters/sql/task_contact_repository.py`) and provided by
+  `ContactProvider` — see *[A contact merge carries the task's
+  people](#a-contact-merge-carries-the-tasks-people)* below.
+  **The two extra ports exist for the same reason and it is not symmetry.** `TaskRepository` is
+  owner-scoped by contract, and each of the other two hands a *different domain* the narrow
+  capability its own data integrity needs — moving journal links, moving contact links — without
+  handing it the ability to change a task's text, status or existence. Neither is owner-scoped,
+  because each stands in for what a foreign key would otherwise do; `TaskContactRepository` could
+  not be in any case, since `contacts` has no `user_id` column
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below — and the
   link-role grouping a journal's task list is built on, see
@@ -1013,6 +1023,62 @@ a sync tidy-up.
 Journal **merge** is deliberately not guarded: it deletes the absorbed journal through
 `JournalRepository.delete` directly, and blocking it would break the calendar-sync workflows the journals
 specification depends on. Re-pointing task links through a merge is ITER18-002 Phase 3.
+
+### A contact merge carries the task's people
+
+A contact merge had the *opposite* failure to the journal delete guard's, and it is the more
+instructive one because nothing failed. `task_contacts.contact_id` is `ON DELETE CASCADE` — right for
+deleting a contact, silently wrong for merging one — and `ContactMergeService.merge_contacts` ends by
+deleting the absorbed contact. So a merge destroyed every task link that person held: a task that
+referenced them ended up referencing nobody, with no error anywhere. It survived thirty-one phases
+across two iterations (ITER18-006 Phase 1 closes it).
+
+**The general lesson, which outlives this fix: a merge is a list of tables, and every new table
+referencing the merged entity is a line somebody has to remember to add.** `task_contacts` arrived two
+iterations after the rest of that list. Nothing in the schema, the tests or the type checker notices
+the omission, because a cascade is not an error.
+
+The shape mirrors the journal merge's re-point exactly, one layer at a time:
+
+- `ContactMergeService` calls `TaskContactMergeService.repoint_contact_links(...)` — step **0**, its
+  first write, and inside the merge's existing unit of work, so a failed merge leaves the links as
+  they were. The contacts domain does not construct task events, for the reason the journal domain
+  does not.
+- `TaskContactRepository.repoint_contact_links` (`SqlTaskContactRepository`) runs **two** statements,
+  and the order is the design: delete the absorbed contact's link where the task already holds the
+  survivor's, so the re-point cannot violate `PRIMARY KEY (task_id, contact_id)` — `ON CONFLICT`
+  cannot rescue an `UPDATE` — then re-point what is left. Both carry `RETURNING`, joined back to
+  `tasks` for the owner id the event needs and the merge never read.
+- Both contacts are taken `FOR UPDATE` in **ascending id order** first. Inserting a task link takes
+  `FOR KEY SHARE` on the contact row to hold its own foreign key, and `FOR UPDATE` is the weakest mode
+  conflicting with it: without the lock a concurrent `link_contact` could attach to the absorbed
+  contact after the re-point and before the delete, and the cascade would take that link — the same
+  defect through a narrower window. Ascending id rather than source-then-survivor so two merges of the
+  same pair in opposite directions queue instead of deadlocking.
+  **The sort is worthless without the step-0 placement**, which is the half worth remembering: every
+  other re-point in the merge writes the survivor's id into a table referencing `contacts`, taking
+  `FOR KEY SHARE` on the survivor's row to validate the foreign key. Run after them, two merges into
+  one survivor would both hold `KEY SHARE` and both ask for `FOR UPDATE` — a deadlock rather than a
+  queue. This is why the journal re-point is also the first write in `merge_journals`.
+- The port returns `list[TaskContactRepointing]` in task-id order, and `TaskContactMergeService`
+  publishes one **`TaskUpdated`** per summary. The pair of facts is asymmetric: every reported task
+  lost the absorbed contact's link, so that departure is implicit, and what varies is whether it
+  *gained* the survivor's — it did not when it already had one and the duplicate was collapsed.
+
+**It reuses `TaskUpdated` where the journal merge got its own type**, and the difference is what each
+merge changes. A journal merge moves *anchors*, which no other write does, and can delete links; a
+contact merge only changes which people a task references, which is exactly what a link and an unlink
+already change — so its rows land under the same `contact:{id}` keys, and a merge's removal reads as
+the same kind of line as a person's. The cost is real and stated in the event's docstring: the payload
+does not say *which* merge moved the task, where `TaskJournalLinksRepointed` names both journals.
+
+`SqlTaskContactRepository` is provided by **`ContactProvider`**, not `TaskProvider`, for the reason
+`SqlTaskAnchorRepository` is provided by `JournalProvider`: Dishka validates the whole graph at
+construction, and taking the dependency the other way would force every container registering one
+provider to register the other.
+
+The absorbed contact's *existing* task history rows — `entity_type='task'` rows identified by their
+`contact:{id}` field name, which `repoint_entity_history` cannot address — are ITER18-006 Phase 2.
 
 ### Incomplete Outdoor Activities Review (read projection)
 

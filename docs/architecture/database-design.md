@@ -208,13 +208,14 @@ deployment this branch would surface another user's task on a shared contact's
 feed. Narrowing it means giving the contact domain an owner first, which is not
 a read-only change; recorded as a follow-up.
 
-*Known limitation.* `repoint_entity_history` moves `entity_type='contact'` rows
-on a merge, so a task record filed under the **absorbed** contact's id does not
-follow the survivor. It is a `task` row identified by field name, which that
-statement cannot address. Listed as a follow-up rather than repaired here; the
-merge does not re-point `task_contacts` either (the link cascades with the
-absorbed contact row), which is the larger half of the same gap and belongs to
-the tasks/merge seam rather than to the history read.
+*Known limitation, half repaired.* `repoint_entity_history` moves
+`entity_type='contact'` rows on a merge, so a task record filed under the
+**absorbed** contact's id does not follow the survivor. It is a `task` row
+identified by *field name*, which that statement cannot address; carrying those
+rows across is ITER18-006 Phase 2. The larger half — that the merge did not
+re-point `task_contacts` at all, so the link cascaded away with the absorbed
+contact row — was repaired by ITER18-006 Phase 1; see *[A contact merge
+re-points task links](#a-contact-merge-re-points-task-links)* below.
 
 On contact merge (ITER13-004), `FieldHistoryRepository.repoint_entity_history` moves the
 source contact's top-level (`entity_type='contact'`) rows onto the survivor so the unified
@@ -417,7 +418,7 @@ timezone, so they live in the service layer where REST and MCP both inherit them
 |---|---|---|---|
 | `tasks.creating_journal_id` / `due_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal that anchors a task is *blocked*, not cascaded. The explanatory failure that names the blocking tasks arrives with ITER18-002; until then the database refuses on its own rather than silently destroying tasks. **Merge is the exception** — it re-points the anchors onto the survivor first, so it is never blocked (see below). |
 | `task_intermediate_journals.journal_id` | `journals.id` | `CASCADE` | Deleting a journal that is only an intermediate link is permitted; the link goes and the task is unaffected. |
-| `task_contacts.contact_id` | `contacts.id` | `CASCADE` | Deleting a contact drops its task links without touching tasks. |
+| `task_contacts.contact_id` | `contacts.id` | `CASCADE` | Deleting a contact drops its task links without touching tasks. **Merge is the exception** — it re-points the links onto the survivor first, because otherwise this cascade destroys them (see below). |
 | both link tables' `task_id` | `tasks.id` | `CASCADE` | Deleting a task takes its links with it. |
 
 **A journal merge re-points task links rather than being blocked by them** (ITER18-002 Phase 3).
@@ -486,6 +487,54 @@ the journal domain can move task links without also being able to change a task'
 contacts. Like everything on that port it is **journal-scoped rather than owner-scoped**: it is data
 integrity for a journal about to be deleted, and a row skipped by an owner filter would fail the merge.
 The merge has already established that both journals share an owner.
+
+#### A contact merge re-points task links
+
+The same problem on the other link table, arrived at from the opposite direction (ITER18-006 Phase 1).
+Where the journal anchors are `RESTRICT` and so *refuse* a delete loudly, `task_contacts.contact_id` is
+`CASCADE` and so accepted one silently: `ContactMergeService.merge_contacts` ends by deleting the
+absorbed contact, and the cascade took every task link that contact held with it. A task that
+referenced the absorbed person came back referencing nobody, with nothing raised anywhere. It went
+unnoticed for thirty-one phases across two iterations, which is what a cascade doing the wrong thing
+looks like. **The generalisation is worth more than the fix: a merge is a list of tables, and every new
+table referencing the merged entity is a line somebody has to remember to add here.**
+
+`ContactMergeService` calls `TaskContactMergeService.repoint_contact_links(source_contact_id=…,
+survivor_contact_id=…)` as step **0** — its *first* write, well before it deletes the absorbed contact,
+and inside the merge's existing unit of work. `SqlTaskContactRepository` runs two statements whose order
+is the design:
+
+1. delete the absorbed contact's link where the task already holds the survivor's, so the re-point
+   cannot violate `PRIMARY KEY (task_id, contact_id)` — `ON CONFLICT` is unavailable on an `UPDATE`,
+   the same lesson the journal re-point above records and `JournalTagRepository.merge_into` before it;
+2. re-point what is left.
+
+Both carry `RETURNING`, joined back to `tasks` for the owner id: the merge reached these tasks through
+a contact and never read the task row — and could not have supplied an owner in any case, since
+`contacts` has no `user_id` column. Unlike the journal re-point there is **no pre-read**, because
+nothing here becomes unreadable once the statements run: which statement touched a task *is* the fact
+the summary carries, so the two `RETURNING` sets are the whole answer.
+
+Before either statement, **both** contacts are taken `FOR UPDATE`, in ascending id order. `FOR UPDATE`
+because inserting a task link takes `FOR KEY SHARE` on the contact row to hold its own foreign key and
+`FOR UPDATE` is the weakest mode conflicting with it — otherwise a concurrent `link_contact` could
+attach to the absorbed contact after the re-point and before the delete, and the cascade would destroy
+that link. Ascending id so two merges of the same pair in opposite directions queue instead of
+deadlocking.
+
+**The sort is worthless without the placement, and that is why this is step 0.** A lock order only
+prevents a deadlock if nothing in the transaction has already claimed one of the pair — and *every*
+other re-point in `merge_contacts` writes `contact_id = survivor_id` into a table with a foreign key to
+`contacts`, which makes PostgreSQL take `FOR KEY SHARE` on the survivor's row to validate it. Run after
+them, two merges into the same survivor would each hold `KEY SHARE` and each then ask for `FOR UPDATE`:
+a deadlock, not a queue. The journal re-point is the first write in `merge_journals` for the identical
+reason, and states it in `_lock_journals`.
+
+It sits on a third port, `TaskContactRepository`, rather than on `TaskRepository`, so the contacts
+domain can move task contact links without also being able to change a task's text, status, anchors or
+existence. It is **not owner-scoped and could not be**: `contacts` has no owner column, so a contact
+merge has no acting user's tasks to scope to, and the operation stands in for a foreign-key cascade —
+a row filtered away would come back as exactly the silent data loss the port exists to prevent.
 
 The link tables' **composite primary keys** are what make link adds idempotent at the repository
 level — a retry cannot create a duplicate row. `SqlTaskRepository` cashes that in with

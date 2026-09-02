@@ -42,6 +42,13 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.core.tasks.adapters.sql.task_contact_repository import (
+    SqlTaskContactRepository,
+)
+from app.core.tasks.models.repositories import TaskContactRepository
+from app.core.tasks.services.task_contact_merge_service import (
+    TaskContactMergeService,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.search_service import SearchService
 
@@ -154,6 +161,33 @@ class ContactProvider(Provider):
             contact_repo, relationship_repo, event_publisher
         )
 
+    @provide(provides=TaskContactRepository)
+    def get_task_contact_repository(
+        self, connection: AsyncConnection
+    ) -> SqlTaskContactRepository:
+        """The port a contact merge moves task links through.
+
+        Provided here rather than by ``TaskProvider``, for the reason
+        ``JournalProvider`` builds the anchor repository it needs: Dishka
+        validates the whole graph at construction, so a ``ContactProvider`` that
+        depended on something ``TaskProvider`` supplies would force every
+        container registering one to register the other. It needs only the
+        request connection this provider already has.
+        """
+        return SqlTaskContactRepository(connection)
+
+    @provide
+    def get_task_contact_merge_service(
+        self,
+        task_contact_repo: TaskContactRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> TaskContactMergeService:
+        """Provide the tasks domain's half of a contact merge."""
+        return TaskContactMergeService(
+            task_contact_repo=task_contact_repo,
+            event_publisher=event_publisher,
+        )
+
     @provide
     def get_contact_merge_service(
         self,
@@ -163,7 +197,16 @@ class ContactProvider(Provider):
         event_publisher: ContactEventPublisher,
         history_repo: FieldHistoryRepository,
         sync_metadata_repo: SyncMetadataRepository,
+        task_merge_service: TaskContactMergeService,
     ) -> ContactMergeService:
+        """Provide a ContactMergeService instance.
+
+        A merge moves task links onto the survivor before deleting the absorbed
+        contact, whose ``ON DELETE CASCADE`` would otherwise destroy them — and
+        the tasks it moves record it in their own history. Both are the tasks
+        domain's service to perform, so the contacts domain holds that rather
+        than the link repository itself.
+        """
         return ContactMergeService(
             contact_repo=contact_repo,
             relationship_repo=relationship_repo,
@@ -171,6 +214,7 @@ class ContactProvider(Provider):
             event_publisher=event_publisher,
             history_repo=history_repo,
             sync_metadata_repo=sync_metadata_repo,
+            task_merge_service=task_merge_service,
         )
 
     # Main contact service

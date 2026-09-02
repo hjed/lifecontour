@@ -52,12 +52,36 @@ from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_relationship_repository import (
+    SqlContactRelationshipRepository,
+)
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
 from app.core.history.services.history_service import _HANDLERS
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    SyncMetadataRepository,
+)
+from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+    SqlJournalContactRelationshipRepository,
+)
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.adapters.sql.task_contact_repository import (
+    SqlTaskContactRepository,
+)
 from app.core.tasks.models.events import contact_field_name
-from app.core.tasks.models.repositories import TaskAnchorRepository, TaskRepository
+from app.core.tasks.models.repositories import (
+    TaskAnchorRepository,
+    TaskContactRepository,
+    TaskRepository,
+)
+from app.core.tasks.services.task_contact_merge_service import (
+    TaskContactMergeService,
+)
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
@@ -136,6 +160,11 @@ class Seeded:
     task_id: int
     journal_id: int = 0
     contact_id: int = 0
+    # The contact a merge absorbs ``contact_id`` into. A second field rather
+    # than reusing ``journal_id``'s trick of "the other one", because a contact
+    # merge names both people and reading it back off a journal-shaped field is
+    # how the two would eventually be passed the wrong way round.
+    survivor_contact_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -177,6 +206,9 @@ class _Fixtures:
     # rather than from ``TaskService`` — which is the whole reason this
     # inventory keys on repository methods rather than on service methods.
     merges: JournalMergeService
+    # The contacts domain's merge, for the same reason and from a third domain:
+    # it moves a task's contact links before deleting the absorbed person.
+    contact_merges: ContactMergeService
 
 
 async def _seed_task(
@@ -389,6 +421,35 @@ async def _act_merge_the_due_journal_away(fixtures: _Fixtures, seeded: Seeded) -
     )
 
 
+async def _seed_task_and_a_contact_to_merge_into(fixtures: _Fixtures) -> Seeded:
+    """A task naming one person, and the person they are about to be merged into."""
+    absorbed_id = await create_contact(fixtures.connection, first_name="Sarah")
+    task_id = await _seed_task(fixtures, contact_ids=[absorbed_id])
+    survivor_id = await create_contact(fixtures.connection, first_name="Sara")
+    return Seeded(
+        task_id=task_id, contact_id=absorbed_id, survivor_contact_id=survivor_id
+    )
+
+
+async def _act_merge_the_contact_away(fixtures: _Fixtures, seeded: Seeded) -> None:
+    """The second action in this inventory performed by another domain.
+
+    A contact merge moves the task's links onto the survivor before deleting
+    the absorbed person — whose ``ON DELETE CASCADE`` would otherwise take them.
+    It goes through the *contacts* service rather than the tasks domain's own
+    merge service for the reason the journal merge above does: the write is
+    reached from there, and this inventory is about every write that reaches the
+    task tables announcing itself.
+    """
+    await fixtures.contact_merges.merge_contacts(
+        seeded.survivor_contact_id,
+        seeded.contact_id,
+        transaction=fixtures.connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+
+
 WRITE_PATHS: list[WritePath] = [
     WritePath(
         name="create",
@@ -482,6 +543,16 @@ WRITE_PATHS: list[WritePath] = [
         # action is performed by another domain.
         expects=["journals-repointed"],
     ),
+    WritePath(
+        name="contact merge",
+        ports=frozenset({"repoint_contact_links"}),
+        seed=_seed_task_and_a_contact_to_merge_into,
+        act=_act_merge_the_contact_away,
+        # Two contact keys in one ``TaskUpdated``: the absorbed person leaves
+        # and the survivor arrives. One event, because one thing happened to the
+        # task — the person it names became somebody else.
+        expects=["updated:contact-changed+contact-changed"],
+    ),
 ]
 
 
@@ -539,6 +610,20 @@ def fixtures(
             event_publisher=OutboxEventPublisher(async_connection),
             task_merge_service=TaskJournalMergeService(
                 task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+                event_publisher=OutboxEventPublisher(async_connection),
+            ),
+        ),
+        contact_merges=ContactMergeService(
+            contact_repo=SqlContactRepository(async_connection),
+            relationship_repo=SqlContactRelationshipRepository(async_connection),
+            journal_relationship_repo=SqlJournalContactRelationshipRepository(
+                async_connection
+            ),
+            event_publisher=OutboxEventPublisher(async_connection),
+            history_repo=SqlFieldHistoryRepository(async_connection),
+            sync_metadata_repo=SyncMetadataRepository(async_connection),
+            task_merge_service=TaskContactMergeService(
+                task_contact_repo=SqlTaskContactRepository(async_connection),
                 event_publisher=OutboxEventPublisher(async_connection),
             ),
         ),
@@ -741,8 +826,10 @@ class TestEveryPortWriteIsAccountedFor:
     """
 
     def test_every_port_method_is_a_read_or_a_classified_write(self) -> None:
-        declared = set(TaskRepository.__abstractmethods__) | set(
-            TaskAnchorRepository.__abstractmethods__
+        declared = (
+            set(TaskRepository.__abstractmethods__)
+            | set(TaskAnchorRepository.__abstractmethods__)
+            | set(TaskContactRepository.__abstractmethods__)
         )
         covered = {port for path in WRITE_PATHS for port in path.ports}
 
@@ -762,8 +849,10 @@ class TestEveryPortWriteIsAccountedFor:
         a ``WritePath.ports`` set, the new one would be unclassified, and only
         one of the two mistakes would be reported.
         """
-        declared = set(TaskRepository.__abstractmethods__) | set(
-            TaskAnchorRepository.__abstractmethods__
+        declared = (
+            set(TaskRepository.__abstractmethods__)
+            | set(TaskAnchorRepository.__abstractmethods__)
+            | set(TaskContactRepository.__abstractmethods__)
         )
         claimed = (
             PORT_READ_METHODS

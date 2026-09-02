@@ -27,7 +27,11 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 from core_shared.models.journals import BlockingTask
-from core_shared.models.tasks import Task, TaskJournalRepointing
+from core_shared.models.tasks import (
+    Task,
+    TaskContactRepointing,
+    TaskJournalRepointing,
+)
 
 
 class TaskRepository(ABC):
@@ -516,4 +520,88 @@ class TaskAnchorRepository(ABC):
             One summary per task this call moved, ordered by task id so a merge's
             events go out in the same order every time. Empty when the absorbed
             journal has no task on it, which is most merges.
+        """
+
+
+class TaskContactRepository(ABC):
+    """The tasks a contact is referenced by, for the contacts domain's merge.
+
+    Merging two contacts moves every link a task holds on the absorbed person
+    onto the survivor. That is the contacts domain asking about task rows it does
+    not own, so it lives here — the same seam, and for the same reason, as
+    :class:`TaskAnchorRepository` is for the journal domain.
+
+    **Kept apart from :class:`TaskRepository` because it answers a different
+    domain's question.** Its consumer is the contacts domain, which must not be
+    handed the ability to *write tasks* — to change a task's text, status or
+    anchors, or to delete one — in order to keep a merge from destroying its own
+    links. Re-pointing writes task link rows, and only their ``contact_id``.
+
+    **Nothing here is owner-scoped, and it could not be.** ``contacts`` has no
+    ``user_id`` column, so a contact merge has no acting user's tasks to scope
+    to; the operation stands in for a foreign-key cascade, and a row filtered
+    away would come back as the silent data loss this port exists to prevent.
+    Nothing is exposed that ``DELETE FROM contacts`` did not already reach.
+    """
+
+    @abstractmethod
+    async def repoint_contact_links(
+        self, *, source_contact_id: int, survivor_contact_id: int
+    ) -> list[TaskContactRepointing]:
+        """Move every task link off one contact and onto another.
+
+        Called by a contact merge **before** it deletes the absorbed contact.
+        ``task_contacts.contact_id`` is ``ON DELETE CASCADE``, which is right for
+        deleting a contact and silently wrong for merging one: after the delete
+        there is nothing left to move, and nothing failed to say so.
+
+        The resulting shape obeys the specification's rule that a merge produces
+        one unified record:
+
+        - a task that referenced the absorbed contact references the survivor;
+        - a task that referenced **both** references the survivor **once** — the
+          ``PRIMARY KEY (task_id, contact_id)`` makes the duplicate a hard error,
+          so the collapse is a correctness requirement rather than a tidy-up;
+        - a task that referenced neither is untouched;
+        - no task's ``status``, ``text`` or anchors change. A merge is a change
+          of who a task references, and nothing else.
+
+        An implementation must hold **both** contacts that exist for the rest of
+        the transaction, in a consistent order across callers. Inserting a task
+        link takes ``FOR KEY SHARE`` on the contact row to hold its own foreign
+        key, so without the lock a concurrent ``link_contact`` could attach to
+        the absorbed contact after the re-point and before the caller's delete —
+        and the cascade would then destroy that link, which is the whole defect
+        again by another route.
+
+        **Call this before the merge's other re-points, not merely before the
+        delete.** The lock order only buys anything if it is the transaction's
+        first claim on the pair, and every re-point that writes the survivor's
+        id into a table referencing ``contacts`` has already taken
+        ``FOR KEY SHARE`` on the survivor's row — after which two merges into
+        one survivor deadlock instead of queueing. This is the merge's *first*
+        write for the same reason ``repoint_journal_links`` is.
+
+        Idempotent: running it again with the same pair changes nothing, and
+        passing the same contact as both source and survivor is a no-op rather
+        than a self-collapse.
+
+        **It reports what it moved, per task**, because the tasks domain
+        publishes an event for each one and no caller can reconstruct the answer
+        afterwards: one of the two statements is a delete, and the rows the other
+        writes are indistinguishable from links the task already held. An
+        implementation must report a task **only** if it actually moved something
+        for it, since the caller turns each summary into a line in a user's
+        history — and a merge may never fail on a task, so a task that has been
+        deleted concurrently is one that moved nothing rather than an error.
+
+        Args:
+            source_contact_id: The contact being absorbed, which is about to be
+                deleted
+            survivor_contact_id: The surviving contact the links move onto
+
+        Returns:
+            One summary per task this call moved, ordered by task id so a merge's
+            events go out in the same order every time. Empty when the absorbed
+            contact is on no task, which is most merges.
         """
