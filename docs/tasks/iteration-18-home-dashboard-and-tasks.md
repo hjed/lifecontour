@@ -283,8 +283,9 @@ reserved. See *Task Query Keys* in `docs/architecture/frontend-design.md`.
   `DEFAULT_TIMEZONE` fallback (`app/core/settings/timezone_utils.py`).
 - Inputs are assembled by `DailySummaryInputAssembler` into `DailySummaryInput` (journals, journal
   count, event count, contact names, mood values) — **journal-only today**.
-- `DailySummaryEligibilityChecker.DEFAULT_MIN_JOURNALS = 2`, applied to every day including today
-  (superseded by ITER18-005 Phase 1: today, in the user's timezone, is always eligible).
+- `DailySummaryEligibilityChecker.DEFAULT_MIN_JOURNALS = 2` applies to past and future days; **today**, in
+  the user's configured timezone, is always eligible (ITER18-005 Phase 1 — before it the threshold applied
+  to every day, today included).
 - Cached in `journal_daily_summaries` (migration `0049`), unique on `(user_id, summary_date)`, with
   `status` ∈ pending/generating/generated/failed/disabled and the four counters the wireframe's stat
   footer (**W10**) displays. `JournalDailySummary.get_display_text()` returns text only when
