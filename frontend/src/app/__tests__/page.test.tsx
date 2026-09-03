@@ -37,6 +37,7 @@ const DASHBOARD_URL = '/api/home-dashboard';
  * the browser's clock instead of `meta.anchor.date` could not pass.
  */
 const ANCHOR_DATE = '2026-07-29';
+const TOMORROW_DATE = '2026-07-30';
 const ANCHOR_DISPLAY = 'Wednesday, 29 July 2026';
 
 function dashboardDocument(): HomeDashboardResponse {
@@ -56,7 +57,10 @@ function dashboardDocument(): HomeDashboardResponse {
             mood_average: 7.5,
           },
         },
-        agenda: { status: DashboardSectionStatus.READY, data: { entries: [] } },
+        agenda: {
+          status: DashboardSectionStatus.READY,
+          data: { entries: [], tomorrow: { date: TOMORROW_DATE, entries: [] } },
+        },
         tasks: { status: DashboardSectionStatus.READY, data: {} },
         upcoming_dates: { status: DashboardSectionStatus.READY, data: {} },
       },

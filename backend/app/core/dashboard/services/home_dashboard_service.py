@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from app.core.dashboard.models.sections import (
+    AgendaDay,
     AgendaSectionData,
     DashboardSection,
     HomeDashboard,
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.core.dashboard.models.repositories import AgendaRepository
+    from app.core.dashboard.models.sections import AgendaEntry
     from app.core.journal.services.daily_summary_repository import (
         JournalDailySummaryRepository,
     )
@@ -168,27 +170,46 @@ class HomeDashboardService:
     async def _load_agenda(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo
     ) -> AgendaSectionData:
-        """Today's event journals, in the order the card draws them.
+        """Today's event journals in the order the card draws them, then tomorrow's.
 
-        The window is the user's **local** day, built by ``local_day_window`` so
-        that a zone whose clocks change is the 23 or 25 hours it really is and a
-        day that ends in a repeated hour still ends where it ends. The anchor
-        goes with it because an all-day event happens on a *date* rather than at
-        instants and is matched by date; timed events are matched by overlap, so
-        a multi-day journal running through today is on it. The ordering rule is
-        applied here rather than in SQL because it belongs to the section, not to
-        the query.
+        Each day's window is the user's **local** day, built by
+        ``local_day_window`` so that a zone whose clocks change is the 23 or 25
+        hours it really is and a day that ends in a repeated hour still ends
+        where it ends. The day's date goes with it because an all-day event
+        happens on a *date* rather than at instants and is matched by date;
+        timed events are matched by overlap, so a multi-day journal running
+        through today is on it. The ordering rule is applied here rather than in
+        SQL because it belongs to the section, not to the query.
+
+        **Tomorrow is a second read of the same query, not a wider one.** The
+        page is one round trip, so tomorrow rides in this payload (open decision
+        5); but one two-day window split afterwards could not put a multi-day
+        event overlapping both days on both, and could not match all-day events
+        against two dates. Two reads inside the section's one SAVEPOINT can, and
+        a failure on either degrades the whole section rather than leaving a
+        payload that looks complete while quietly missing a day.
 
         A day with nothing on it returns an **empty payload**, not ``None``:
         "nothing scheduled today" is an answer this section can give, and it must
         not arrive looking like the section that could not answer at all.
-
-        Tomorrow's entries join this payload in Phase 6.
         """
-        entries = await self.agenda_repo.list_entries_in_window(
-            user_id, window=local_day_window(anchor, tz), anchor=anchor
+        tomorrow = anchor + datetime.timedelta(days=1)
+        return AgendaSectionData(
+            entries=await self._agenda_for(user_id, anchor, tz),
+            tomorrow=AgendaDay(
+                date=tomorrow,
+                entries=await self._agenda_for(user_id, tomorrow, tz),
+            ),
         )
-        return AgendaSectionData(entries=order_agenda_entries(entries))
+
+    async def _agenda_for(
+        self, user_id: str, day: datetime.date, tz: ZoneInfo
+    ) -> tuple[AgendaEntry, ...]:
+        """One local day's event journals, in the agenda's order."""
+        entries = await self.agenda_repo.list_entries_in_window(
+            user_id, window=local_day_window(day, tz), anchor=day
+        )
+        return order_agenda_entries(entries)
 
     async def _load_tasks(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo

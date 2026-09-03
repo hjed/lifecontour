@@ -121,16 +121,34 @@ export interface HomeDashboardAgendaEntry {
 }
 
 /**
+ * One day's event journals — the shape tomorrow arrives in (W19, W20).
+ *
+ * A *day* rather than a bare list: `date` is the local day the server windowed
+ * on, as `YYYY-MM-DD` in `meta.anchor.timezone`, and it is what the disclosure
+ * labels itself with — never a date the browser worked out in its own zone.
+ * The collapsed count is `entries.length`; the list is not capped, so no
+ * separate count is sent.
+ */
+export interface HomeDashboardAgendaDay {
+  date: string;
+  /** Same form and same order as today's entries; may be empty. */
+  entries: HomeDashboardAgendaEntry[];
+}
+
+/**
  * Today's event journals, in the order the card draws them: all-day entries
- * first, then timed ones ascending by start.
+ * first, then timed ones ascending by start — with tomorrow's beneath them.
  *
  * An **empty list is a real answer** — nothing is scheduled today — and is not
  * the same as the section being unavailable, where `data` is null instead.
  *
- * Tomorrow's entries and their count land in Phase 6.
+ * `tomorrow` rides in the same payload so the page stays one round trip, and
+ * it is always present on a ready agenda, so "nothing tomorrow" is an empty
+ * `entries` rather than a missing day.
  */
 export interface HomeDashboardAgenda {
   entries: HomeDashboardAgendaEntry[];
+  tomorrow: HomeDashboardAgendaDay;
 }
 
 /** Not-done tasks due in the next seven days. Fields land in Phase 13. */

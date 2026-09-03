@@ -8970,11 +8970,11 @@ section without the inline done action — the specification names that as an in
    Five matches the tasks section; the wireframe shows three rows and a show-more naming five.
 4. **Which date types count as "important dates" for the dashboard** — settled in **Phase 7**. All five
    types, or only the recurring ones? `first_met` with `year` precision has no in-window occurrence.
-5. **Whether "tomorrow" expansion is server-provided or lazily fetched** — settled in **Phase 6**
-   (payload) and **Phase 8** (disclosure). One round trip argues for including tomorrow in the payload;
-   collapsed-by-default argues for lazy. *(Pointer corrected in Phase 4: it read "settled in Phase 4",
-   which builds the summary card and has no tomorrow to expand. The phases that own the agenda's
-   tomorrow are 6 and 8.)*
+5. ~~**Whether "tomorrow" expansion is server-provided or lazily fetched**~~ — ✅ **settled in Phase 6:
+   server-provided, inside the payload** as `agenda.tomorrow = {date, entries}`; **Phase 8** owns the
+   disclosure that renders it. One round trip won; collapsed-by-default is a presentation state, not a
+   reason to fetch a second page of a small list. See *Decisions taken (Phase 6)*. *(Pointer corrected in
+   Phase 4: it read "settled in Phase 4", which builds the summary card and has no tomorrow to expand.)*
 
 #### Phase 1: Dashboard Endpoint Skeleton and Section Envelope
 
@@ -9865,23 +9865,88 @@ reviewer counting tests would otherwise read five proofs where there is one proo
   own, and it is read immediately after the summary, so the stand-in is gone and the test asserts
   against the real path — which is what Phase 1 recorded it was waiting for.
 
-#### Phase 6: Agenda — Cancelled Events and Tomorrow
+#### Phase 6: Agenda — Cancelled Events and Tomorrow ✅ COMPLETE
 
 **Prerequisites:** Phase 5.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Actual:** 153 production →
+**~1,050 tracked** (~1,050 insertions, ~85 deletions across 16 files: 153 production, 804 tests, ~95
+documentation of which ~75 is this document). **~2.4× the estimate, and the miss is almost entirely in
+tests against production that did not move.** Production came in at 1.4× (an `AgendaDay` model, a second
+read in the service, a schema and its renderer, and the TypeScript mirror — 20 of the 153 lines), but the
+tests ran at **5.3× production** rather than the ×4 budgeted, for a reason the estimate could have seen:
+the first acceptance criterion was **already delivered by 5b**, so its "unit — cancelled flagging"
+coverage is 137 lines of tests pinning zero lines of new production. The rest of the overrun is
+tomorrow's integration suite mirroring today's boundary tests one for one — which is the right call, since
+a tomorrow read that matched by instant would have exactly the west-of-UTC defect 5b fixed for today, and
+only the same discriminator can prove it does not. **Suggested refinement:** when a phase's criterion is
+already met by an earlier phase and the phase asks for tests of it, budget those tests at ×∞ of their
+production — that is, as a fixed cost — rather than folding them into the multiplier.
+
+**Delivery rule 3:** over the 500-line cap, but under calibration rule 16's ~1,500 for a phase that
+changes a payload contract end to end; and the seam 5b's retrospective named (a migration of somebody
+else's code) is not present here. Nothing was deferred.
 
 **Acceptance Criteria:**
 
-- [ ] Cancelled events are returned **flagged** rather than filtered, so the UI can mark them (**W18**);
-      the payload must never present a cancelled event as active.
-- [ ] Tomorrow's entries are resolved per open decision 5, with the event count available for the collapsed
-      label (**W19**).
-- [ ] Open decision 5 is constrained by the one-round-trip criterion: **tomorrow ships inside the payload**
-      unless that criterion is amended in the same PR and the divergence recorded here. It is one extra
-      day of a small list, not a second page of data.
+- [x] Cancelled events are returned **flagged** rather than filtered, so the UI can mark them (**W18**);
+      the payload must never present a cancelled event as active. — Delivered on the wire by 5b, and
+      **pinned here** at every layer it passes through: `_to_entry` maps only `CANCELLED` to the flag and
+      returns the full row (`tests/unit/dashboard/test_agenda_entry_mapping.py`); `order_agenda_entries`
+      keeps a cancelled entry in its slot rather than dropping or demoting it (`test_agenda_ordering.py`);
+      the service filters nothing on the way to either day (`TestTomorrow` in
+      `test_home_dashboard_service.py`); the renderer says so for tomorrow's rows as for today's
+      (`test_home_dashboard_serialisation.py`); and over HTTP a cancelled event tomorrow arrives flagged
+      beside a confirmed one (`TestACancelledEvent` in `test_home_dashboard_agenda.py`).
+- [x] Tomorrow's entries are resolved per open decision 5, with the event count available for the collapsed
+      label (**W19**). — `AgendaSectionData.tomorrow: AgendaDay(date, entries)`
+      (`app/core/dashboard/models/sections.py`), read by `HomeDashboardService._agenda_for` for
+      `anchor + 1` through `local_day_window`, ordered by 5a's rule, and serialised as `AgendaDaySchema`
+      (`app/api/home_dashboard/schemas.py`). The count is `tomorrow.entries.length` — see the decisions.
+      Mirrored in `frontend/src/lib/api/home-dashboard.ts` as `HomeDashboardAgendaDay`, so Phase 8 starts
+      from a typed payload.
+- [x] Open decision 5 is constrained by the one-round-trip criterion: **tomorrow ships inside the payload**.
+      — It does; the criterion stands unamended, and the decision is struck through in the list above.
 
 **Required Test Coverage:** unit — cancelled flagging and the tomorrow count. Integration — a cancelled
-journal appears flagged, not omitted; tomorrow's window is the user's local tomorrow. No e2e.
+journal appears flagged, not omitted; tomorrow's window is the user's local tomorrow. No e2e. —
+**Delivered (new in this phase):** 6 domain tests (`TestTomorrowOnTheAgenda`), 8 mapping tests
+(`test_agenda_entry_mapping.py`, parametrised cases counted), 2 ordering tests (`TestACancelledEntry`, added
+to the 11 from 5a), 9 service tests (`TestTomorrow`), 7 serialisation tests (`TestTomorrowOnTheWire`), and 14
+integration tests (`TestTomorrow`, `TestTomorrowsDayBoundary`, `TestAnAllDayEventTomorrow`, the tomorrow
+cancelled case, and the N+1 count parametrised over both days). No e2e: the phase has no user-visible
+surface — the card is Phase 7 and the disclosure Phase 8 — so wireframe conformance stays with Phase 17.
+
+**Decisions taken (Phase 6):**
+
+- **Tomorrow is a field beside `entries`, not a restructuring into `today`/`tomorrow`.** Phase 1 promised
+  that later phases *add* fields inside a payload and never rename or reshape one, and three frontend
+  fixtures plus the page shell already read `entries`. The asymmetry is the price of that promise; **W20**
+  is served regardless, because both days go through the same entry renderer and one test holds that a
+  tomorrow entry serialises byte-for-byte as a today one.
+- **Tomorrow is a *day* — `{date, entries}` — not a bare list.** The `date` is the local day the server
+  windowed on, carried for the reason Phase 1 gave for `meta.anchor`: a browser working "tomorrow" out in
+  its own zone can disagree with the rows it was just sent, and **W19**'s label must name the day the
+  entries belong to. **Phase 8 must read `tomorrow.date`** for the label, never `anchor + 1` in JavaScript.
+- **The collapsed count is `entries.length`; no count field is sent.** Tomorrow is not capped — unlike the
+  tasks section, whose show-more count is *not* derivable from a capped list — so a second field would be
+  derivable data that can drift from the list it describes. Pinned by a test that the day's keys are
+  exactly `date` and `entries`. **Cancelled entries count**: the label describes what expanding reveals,
+  a cancelled entry is revealed (marked, per **W18**), and a count that skipped them would be the first
+  step towards a list that did.
+- **Tomorrow is required on a ready agenda, not optional.** An optional field would make "nothing
+  tomorrow" and "tomorrow was never read" the same absence — the exact confusion the section envelope was
+  built to prevent between *ready* and *unavailable*. So `AgendaSectionData` takes it without a default,
+  and a failure on either day's read degrades the **whole** section rather than leaving a payload that
+  looks complete while quietly missing a day.
+- **Two reads of the existing query, not one wider window split afterwards.** One two-day window cannot
+  put a multi-day event overlapping both days on *both* lists, and cannot match all-day events against two
+  dates — both of which the integration suite now asserts. The port and adapter are untouched; the second
+  read sits inside the agenda's one SAVEPOINT; and "one query, not one per journal" still holds per day,
+  with the statement-count test parametrised over both. Two SQL statements is not two round trips.
+- **Cancellation was already on the wire; this phase pinned it rather than re-implementing it.** The 5b
+  scope note said so, and the honest reading of "unit — cancelled flagging" is therefore *tests, not
+  code*. Recorded because a reviewer counting production lines against the first criterion will find none
+  and should not go looking.
 
 #### Phase 7: Agenda — Card
 
@@ -9938,6 +10003,11 @@ the empty line, and accessible list labelling. E2E in Phase 17.
 **Required Test Coverage:** unit (RTL) — collapsed default, expand/collapse, chevron and `aria-expanded`
 state, count label, empty-tomorrow case. E2E in Phase 17, gating clicks on `aria-expanded` rather than
 visibility (the recorded Radix slide-in race).
+
+**Payload for this phase, settled by Phase 6:** `agenda.data.tomorrow` is `{date, entries}` and is always
+present on a ready agenda. Label the row from `tomorrow.date` (the server's local tomorrow), not from
+`meta.anchor.date + 1` computed in the browser; the count is `tomorrow.entries.length`, cancelled entries
+included; and the entries are in exactly today's form and order, so the same row component renders both.
 
 #### Phase 9: Important-Date Occurrence Resolution
 

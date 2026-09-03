@@ -43,6 +43,7 @@ def entry(
     all_day: bool = False,
     starts_at: datetime.datetime | None = None,
     ends_at: datetime.datetime | None = None,
+    cancelled: bool = False,
 ) -> AgendaEntry:
     """One agenda entry, with only the fields the ordering rule reads set."""
     start = starts_at if starts_at is not None else instant(9)
@@ -52,6 +53,7 @@ def entry(
         is_all_day=all_day,
         starts_at=start,
         ends_at=ends_at if ends_at is not None else start + datetime.timedelta(hours=1),
+        is_cancelled=cancelled,
     )
 
 
@@ -174,6 +176,34 @@ class TestTheWholeOrdering:
             "Lunch",
             "Dinner",
         ]
+
+
+class TestACancelledEntry:
+    """Cancellation is a marker, not a position: the rule neither drops nor moves it.
+
+    The specification allows a cancelled event to be shown marked or omitted,
+    and *omitted* is a decision for a surface, not for the ordering rule — a
+    rule that filtered would take the choice away from every card that reads it.
+    """
+
+    def test_keeps_its_place_among_the_timed_entries(self) -> None:
+        ordered = order_agenda_entries(
+            [
+                entry(1, starts_at=instant(17)),
+                entry(2, starts_at=instant(12), cancelled=True),
+                entry(3, starts_at=instant(9)),
+            ]
+        )
+
+        assert ids(ordered) == [3, 2, 1]
+        assert [item.is_cancelled for item in ordered] == [False, True, False]
+
+    def test_a_cancelled_all_day_entry_is_still_pinned_above(self) -> None:
+        ordered = order_agenda_entries(
+            [entry(1, starts_at=instant(0)), entry(2, all_day=True, cancelled=True)]
+        )
+
+        assert ids(ordered) == [2, 1]
 
 
 class TestTheEmptyDay:

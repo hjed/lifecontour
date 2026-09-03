@@ -472,10 +472,11 @@ rather than this API's taste:
   Regeneration is `POST /api/journals/daily-summary/{date}/regenerate`, and the
   date it needs is `meta.anchor.date`, which is present even when the section is
   not.
-- **The `agenda` section is the user's local day, read in one query.** Its
-  payload is `{entries: [...]}`, and an **empty list is a real answer** —
-  nothing is scheduled today — which is why the section stays `ready` rather
-  than reporting `unavailable`. An entry is
+- **The `agenda` section is the user's local day, read in one query — with
+  tomorrow beneath it, read the same way.** Its payload is
+  `{entries: [...], tomorrow: {date, entries: [...]}}`, and an **empty list is a
+  real answer** — nothing is scheduled today — which is why the section stays
+  `ready` rather than reporting `unavailable`. An entry is
   `{journal_id, title, is_all_day, starts_at, ends_at, start_time, end_time,
   timezone, location, calendar_color, is_cancelled, tags[], participants[]}`.
 
@@ -490,10 +491,11 @@ rather than this API's taste:
   | …and the zone they are in | `timezone` is the IANA zone `start_time`/`end_time` are expressed in — the **event's**, not the reader's, since migration 0045 derives them `AT TIME ZONE jci.timezone`. Render the clock values against it rather than against `meta.anchor.timezone`; `null` means UTC. Without it a 09:00 New York meeting on a Sydney reader's agenda reads as a morning event that sorts into their evening. The journals API sends the same field beside the same two values. |
   | Cancellation | Returned **flagged**, never filtered: the specification requires a cancelled event to be shown clearly marked, and a surface cannot mark an entry it was never sent. |
   | Participants | Contacts linked as `PARTICIPANT` **or** `INVITEE` — both ways of being at an event, and the type the Google worker writes synced attendees as. `MENTION` and `ABOUT` are people the journal is about and are not attendees. |
+  | Tomorrow | `tomorrow` is **always present on a ready agenda** and rides in this payload rather than behind a second request, so the page stays one round trip. It is a *day*, `{date, entries}`: `date` is the local day after `meta.anchor.date`, in the anchor's zone — label the disclosure from it, not from the browser's clock — and `entries` are in exactly today's form and order, so one renderer serves both. It is the same query run for the next local day (all-day events matched against that date, timed ones by overlap), which is why a multi-day event running through tonight is on **both** lists. The collapsed count is `entries.length`; the list is not capped, so no separate count is sent. Cancelled entries are flagged there as here, and they count. |
 
-  Tags and participants are aggregated in `LATERAL` sub-selects so the read is
-  **one statement whatever the day holds**; an integration test counts them,
-  because an N+1 is functionally invisible.
+  Tags and participants are aggregated in `LATERAL` sub-selects so each day is
+  **one statement whatever it holds** — two for the section; an integration test
+  counts them for both days, because an N+1 is functionally invisible.
 - **Sections embed denormalised refs; there is no compound document.**
   `relationships` + `included` is the specification's way to serve related
   resources in one round trip, and it was the live alternative here. It cannot

@@ -14,6 +14,7 @@ asked for or what the database gave back.
 
 import datetime
 import json
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -117,6 +118,23 @@ async def write_todays_summary(
         )
 
 
+def empty_agenda(document: dict[str, Any]) -> dict[str, Any]:
+    """The agenda a user with no events gets: ready, both days empty.
+
+    Tomorrow's date is read off the document's own anchor rather than a clock,
+    so a midnight crossing mid-test moves the expectation with the answer.
+    """
+    anchor = datetime.date.fromisoformat(document["meta"]["anchor"]["date"])
+    tomorrow = anchor + datetime.timedelta(days=1)
+    return {
+        "status": "ready",
+        "data": {
+            "entries": [],
+            "tomorrow": {"date": tomorrow.isoformat(), "entries": []},
+        },
+    }
+
+
 @pytest.mark.asyncio
 class TestTheSectionEnvelope:
     async def test_returns_all_four_sections_in_one_call(
@@ -134,7 +152,7 @@ class TestTheSectionEnvelope:
         # The agenda answers with an empty day — its own suite covers a populated
         # one — and the two Phases 11 and 13 have yet to fill answer with nothing.
         assert attributes["summary"] == {"status": "unavailable", "data": None}
-        assert attributes["agenda"] == {"status": "ready", "data": {"entries": []}}
+        assert attributes["agenda"] == empty_agenda(document)
         for name in ("tasks", "upcoming_dates"):
             assert attributes[name] == {"status": "ready", "data": {}}, name
 
@@ -327,9 +345,9 @@ class TestASqlErrorDoesNotPoisonTheRemainingSections:
         immediately after the broken one — so its reaching *ready* at all is the
         assertion, whatever this user's empty day puts in it.
         """
-        attributes = (await authenticated_client.get(URL)).json()["data"]["attributes"]
+        document = (await authenticated_client.get(URL)).json()
 
-        assert attributes["agenda"] == {"status": "ready", "data": {"entries": []}}
+        assert document["data"]["attributes"]["agenda"] == empty_agenda(document)
 
     async def test_the_anchor_and_the_untouched_sections_survive(
         self,

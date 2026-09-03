@@ -108,7 +108,10 @@ function dashboardDocument(
       id: 'user-1',
       attributes: {
         summary,
-        agenda: { status: DashboardSectionStatus.READY, data: { entries: [] } },
+        agenda: {
+          status: DashboardSectionStatus.READY,
+          data: { entries: [], tomorrow: { date: '2026-07-30', entries: [] } },
+        },
         tasks: { status: DashboardSectionStatus.READY, data: {} },
         upcoming_dates: { status: DashboardSectionStatus.READY, data: {} },
       },

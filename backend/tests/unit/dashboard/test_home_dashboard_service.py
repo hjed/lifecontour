@@ -23,6 +23,7 @@ from core_shared.models.journals.daily_summary import JournalDailySummary
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.dashboard.models.sections import (
+    AgendaDay,
     AgendaEntry,
     AgendaSectionData,
     DashboardSummaryState,
@@ -91,15 +92,23 @@ def connection() -> MagicMock:
     return connection
 
 
-def agenda_entry(journal_id: int, hour: int, *, all_day: bool = False) -> AgendaEntry:
-    """One entry on 31 July 2026, written as the hour a reader sees."""
-    starts_at = datetime.datetime(2026, 7, 31, hour, tzinfo=datetime.UTC)
+def agenda_entry(
+    journal_id: int,
+    hour: int,
+    *,
+    all_day: bool = False,
+    cancelled: bool = False,
+    day: datetime.date = datetime.date(2026, 7, 31),
+) -> AgendaEntry:
+    """One entry on 31 July 2026 (or ``day``), written as the hour a reader sees."""
+    starts_at = datetime.datetime.combine(day, datetime.time(hour), tzinfo=datetime.UTC)
     return AgendaEntry(
         journal_id=journal_id,
         title=f"Event {journal_id}",
         is_all_day=all_day,
         starts_at=starts_at,
         ends_at=starts_at + datetime.timedelta(hours=1),
+        is_cancelled=cancelled,
     )
 
 
@@ -300,7 +309,9 @@ class TestTheAnchorTimezoneObject:
             user_id: str, anchor: datetime.date, tz: ZoneInfo
         ) -> AgendaSectionData:
             seen.append((user_id, anchor, tz))
-            return AgendaSectionData()
+            return AgendaSectionData(
+                tomorrow=AgendaDay(date=anchor + datetime.timedelta(days=1))
+            )
 
         monkeypatch.setattr(service, "_load_agenda", record)
 
@@ -440,8 +451,10 @@ class TestTheAgendaSection:
 
         await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
 
-        window = mock_agenda_repo.list_entries_in_window.await_args.kwargs["window"]
+        today = mock_agenda_repo.list_entries_in_window.await_args_list[0]
+        window = today.kwargs["window"]
         sydney = ZoneInfo("Australia/Sydney")
+        assert today.kwargs["anchor"] == datetime.date(2026, 7, 31)
         assert window.start == datetime.datetime(2026, 7, 31, tzinfo=sydney)
         assert JUST_PAST_SYDNEY_MIDNIGHT.date() == datetime.date(2026, 7, 30)
 
@@ -461,7 +474,8 @@ class TestTheAgendaSection:
 
         await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
 
-        window = mock_agenda_repo.list_entries_in_window.await_args.kwargs["window"]
+        today = mock_agenda_repo.list_entries_in_window.await_args_list[0]
+        window = today.kwargs["window"]
         sydney = ZoneInfo("Australia/Sydney")
         next_midnight = datetime.datetime(2026, 8, 1, tzinfo=sydney)
         assert window.end == next_midnight - datetime.timedelta(microseconds=1)
@@ -471,7 +485,9 @@ class TestTheAgendaSection:
     ) -> None:
         await service.dashboard(USER_ID)
 
-        assert mock_agenda_repo.list_entries_in_window.await_args.args[0] == USER_ID
+        calls = mock_agenda_repo.list_entries_in_window.await_args_list
+        assert calls, "the agenda was never read"
+        assert all(call.args[0] == USER_ID for call in calls)
 
     async def test_returns_the_entries_in_the_agendas_order(
         self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
@@ -513,6 +529,192 @@ class TestTheAgendaSection:
         self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
     ) -> None:
         mock_agenda_repo.list_entries_in_window.side_effect = RuntimeError("db is down")
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.status is SectionStatus.UNAVAILABLE
+        assert dashboard.agenda.data is None
+        for name in ("summary", "tasks", "upcoming_dates"):
+            assert getattr(dashboard, name).status is SectionStatus.READY, name
+
+
+class TestTomorrow:
+    """Tomorrow rides inside the agenda payload, read the same way as today.
+
+    Open decision 5 is settled in favour of one round trip: the service asks the
+    same repository the same question about the next local day and hands both
+    answers back in one section. The tests here are about *which* day that is —
+    the user's local tomorrow, not UTC's — and about the answer arriving in the
+    same form as today's, because the disclosure renders it in the same form.
+    """
+
+    SYDNEY = ZoneInfo("Australia/Sydney")
+    LOCAL_TOMORROW = datetime.date(2026, 8, 1)
+
+    async def test_is_the_users_local_tomorrow_not_utcs(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        """Just past Sydney midnight on 31 July, tomorrow is 1 August.
+
+        UTC is still on the 30th, so a UTC reading would ask about the 31st and
+        call it tomorrow — and the boundary is a month end, so a date built by
+        adding one to the day number would be wrong in a second way.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        tomorrow = mock_agenda_repo.list_entries_in_window.await_args_list[1]
+        assert tomorrow.kwargs["anchor"] == self.LOCAL_TOMORROW
+        assert tomorrow.kwargs["window"].start == datetime.datetime(
+            2026, 8, 1, tzinfo=self.SYDNEY
+        )
+
+    async def test_its_window_ends_at_the_last_microsecond_of_that_day(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        window = mock_agenda_repo.list_entries_in_window.await_args_list[1].kwargs[
+            "window"
+        ]
+        day_after = datetime.datetime(2026, 8, 2, tzinfo=self.SYDNEY)
+        assert window.end == day_after - datetime.timedelta(microseconds=1)
+
+    async def test_is_read_once_after_today_and_nothing_else_is(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        """Exactly two reads: today, then tomorrow.
+
+        Not three — the agenda is two days, not a week — and not one wide read
+        split afterwards, because a multi-day event overlapping both days
+        belongs on both, which one window cannot say.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        anchors = [
+            call.kwargs["anchor"]
+            for call in mock_agenda_repo.list_entries_in_window.await_args_list
+        ]
+        assert anchors == [datetime.date(2026, 7, 31), datetime.date(2026, 8, 1)]
+
+    async def test_carries_the_date_it_was_windowed_on(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+    ) -> None:
+        """The disclosure labels itself from this, not from the browser's clock."""
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        dashboard = await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        assert dashboard.agenda.data is not None
+        assert dashboard.agenda.data.tomorrow.date == self.LOCAL_TOMORROW
+        assert dashboard.anchor_date == datetime.date(2026, 7, 31)
+
+    async def test_its_entries_come_back_in_the_agendas_order(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        """W20: the same form as today, which includes the same order."""
+        tomorrow = self.LOCAL_TOMORROW
+        mock_agenda_repo.list_entries_in_window.side_effect = [
+            [agenda_entry(1, 9)],
+            [
+                agenda_entry(11, 17, day=tomorrow),
+                agenda_entry(12, 9, day=tomorrow),
+                agenda_entry(13, 0, all_day=True, day=tomorrow),
+            ],
+        ]
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.data is not None
+        ordered = [e.journal_id for e in dashboard.agenda.data.tomorrow.entries]
+        assert ordered == [13, 12, 11]
+
+    async def test_todays_and_tomorrows_entries_do_not_mix(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        mock_agenda_repo.list_entries_in_window.side_effect = [
+            [agenda_entry(1, 9)],
+            [agenda_entry(11, 9, day=self.LOCAL_TOMORROW)],
+        ]
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.data is not None
+        assert [e.journal_id for e in dashboard.agenda.data.entries] == [1]
+        assert [e.journal_id for e in dashboard.agenda.data.tomorrow.entries] == [11]
+
+    async def test_the_count_is_what_the_repository_returned_cancelled_included(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        """W19's count is the length of the list, and nothing is filtered on the
+        way to it: a cancelled entry is shown marked when the day is expanded,
+        so it is counted when the day is collapsed.
+        """
+        tomorrow = self.LOCAL_TOMORROW
+        mock_agenda_repo.list_entries_in_window.side_effect = [
+            [agenda_entry(1, 9, cancelled=True)],
+            [
+                agenda_entry(11, 9, day=tomorrow),
+                agenda_entry(12, 10, day=tomorrow, cancelled=True),
+                agenda_entry(13, 11, day=tomorrow),
+            ],
+        ]
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.data is not None
+        agenda = dashboard.agenda.data
+        assert len(agenda.tomorrow.entries) == 3
+        assert [e.is_cancelled for e in agenda.tomorrow.entries] == [
+            False,
+            True,
+            False,
+        ]
+        assert [e.is_cancelled for e in agenda.entries] == [True]
+
+    async def test_nothing_tomorrow_is_a_ready_agenda_with_an_empty_day(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        """The disclosure shows a zero count and an empty line, not nothing."""
+        mock_agenda_repo.list_entries_in_window.side_effect = [
+            [agenda_entry(1, 9)],
+            [],
+        ]
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.agenda.status is SectionStatus.READY
+        assert dashboard.agenda.data is not None
+        assert dashboard.agenda.data.tomorrow.entries == ()
+        assert len(dashboard.agenda.data.entries) == 1
+
+    async def test_a_failure_reading_it_costs_only_the_agenda(
+        self, service: HomeDashboardService, mock_agenda_repo: AsyncMock
+    ) -> None:
+        """Both days are one section: half an agenda would be a payload that
+        looked complete while quietly missing a day, so the section degrades
+        whole and the other three still answer.
+        """
+        mock_agenda_repo.list_entries_in_window.side_effect = [
+            [agenda_entry(1, 9)],
+            RuntimeError("db is down"),
+        ]
 
         dashboard = await service.dashboard(USER_ID)
 

@@ -17,6 +17,7 @@ tested here because later phases inherit it:
 """
 
 import datetime
+from typing import Any
 
 import pytest
 
@@ -27,6 +28,7 @@ from app.api.home_dashboard.schemas import (
     to_home_dashboard_response,
 )
 from app.core.dashboard.models.sections import (
+    AgendaDay,
     AgendaEntry,
     AgendaParticipant,
     AgendaSectionData,
@@ -43,6 +45,7 @@ pytestmark = pytest.mark.unit
 
 USER_ID = "test-user-123"
 ANCHOR = datetime.date(2026, 7, 31)
+TOMORROW = ANCHOR + datetime.timedelta(days=1)
 BASE_URL = "http://testserver"
 
 GENERATED_SUMMARY = SummarySectionData(
@@ -76,11 +79,20 @@ COFFEE = AgendaEntry(
 )
 
 
+def agenda(
+    *entries: AgendaEntry, tomorrow: tuple[AgendaEntry, ...] = ()
+) -> AgendaSectionData:
+    """An agenda payload as the service builds one: today, and tomorrow's day."""
+    return AgendaSectionData(
+        entries=entries, tomorrow=AgendaDay(date=TOMORROW, entries=tomorrow)
+    )
+
+
 def dashboard(**overrides: object) -> HomeDashboard:
     """A dashboard with every section ready, as the service builds one."""
     sections: dict[str, object] = {
         "summary": DashboardSection.ready(GENERATED_SUMMARY),
-        "agenda": DashboardSection.ready(AgendaSectionData()),
+        "agenda": DashboardSection.ready(agenda()),
         "tasks": DashboardSection.ready(TasksSectionData()),
         "upcoming_dates": DashboardSection.ready(UpcomingDatesSectionData()),
     }
@@ -356,9 +368,7 @@ class TestTheAgendaSection:
 
     def test_an_entry_renders_field_for_field(self) -> None:
         document = to_home_dashboard_response(
-            dashboard(
-                agenda=DashboardSection.ready(AgendaSectionData(entries=(COFFEE,)))
-            )
+            dashboard(agenda=DashboardSection.ready(agenda(COFFEE)))
         ).model_dump(mode="json")
 
         assert document["data"]["attributes"]["agenda"]["data"]["entries"] == [
@@ -389,11 +399,7 @@ class TestTheAgendaSection:
             ends_at=NINE_AM + datetime.timedelta(hours=12),
         )
         document = to_home_dashboard_response(
-            dashboard(
-                agenda=DashboardSection.ready(
-                    AgendaSectionData(entries=(COFFEE, later))
-                )
-            )
+            dashboard(agenda=DashboardSection.ready(agenda(COFFEE, later)))
         ).model_dump(mode="json")
 
         entries = document["data"]["attributes"]["agenda"]["data"]["entries"]
@@ -409,9 +415,7 @@ class TestTheAgendaSection:
             ends_at=NINE_AM,
         )
         document = to_home_dashboard_response(
-            dashboard(
-                agenda=DashboardSection.ready(AgendaSectionData(entries=(all_day,)))
-            )
+            dashboard(agenda=DashboardSection.ready(agenda(all_day)))
         ).model_dump(mode="json")
 
         entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
@@ -430,9 +434,7 @@ class TestTheAgendaSection:
             is_cancelled=True,
         )
         document = to_home_dashboard_response(
-            dashboard(
-                agenda=DashboardSection.ready(AgendaSectionData(entries=(cancelled,)))
-            )
+            dashboard(agenda=DashboardSection.ready(agenda(cancelled)))
         ).model_dump(mode="json")
 
         entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
@@ -449,9 +451,7 @@ class TestTheAgendaSection:
         beside the same two values for the same reason.
         """
         document = to_home_dashboard_response(
-            dashboard(
-                agenda=DashboardSection.ready(AgendaSectionData(entries=(COFFEE,)))
-            )
+            dashboard(agenda=DashboardSection.ready(agenda(COFFEE)))
         ).model_dump(mode="json")
 
         entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
@@ -467,7 +467,7 @@ class TestTheAgendaSection:
             ends_at=NINE_AM,
         )
         document = to_home_dashboard_response(
-            dashboard(agenda=DashboardSection.ready(AgendaSectionData(entries=(bare,))))
+            dashboard(agenda=DashboardSection.ready(agenda(bare)))
         ).model_dump(mode="json")
 
         entry = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
@@ -488,7 +488,10 @@ class TestTheAgendaSection:
 
         assert document["data"]["attributes"]["agenda"] == {
             "status": "ready",
-            "data": {"entries": []},
+            "data": {
+                "entries": [],
+                "tomorrow": {"date": "2026-08-01", "entries": []},
+            },
         }
 
     def test_an_unavailable_agenda_carries_null_data(self) -> None:
@@ -497,3 +500,95 @@ class TestTheAgendaSection:
         ).model_dump(mode="json")
 
         assert document["data"]["attributes"]["agenda"]["data"] is None
+
+
+class TestTomorrowOnTheWire:
+    """Tomorrow rides beside today, as a day: its date and its entries.
+
+    Open decision 5 put tomorrow in the payload rather than behind a second
+    request, and **W20** renders it "in exactly the same form" as today — so it
+    is serialised through the same entry renderer, and the tests here are about
+    the shape around it: the date the disclosure labels itself with, the order
+    the service settled, and nothing derived alongside.
+    """
+
+    def tomorrow_of(self, document: dict[str, Any]) -> dict[str, Any]:
+        tomorrow: dict[str, Any] = document["data"]["attributes"]["agenda"]["data"][
+            "tomorrow"
+        ]
+        return tomorrow
+
+    def test_carries_the_date_and_the_entries(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.ready(agenda(tomorrow=(COFFEE,))))
+        ).model_dump(mode="json")
+
+        tomorrow = self.tomorrow_of(document)
+        assert tomorrow["date"] == "2026-08-01"
+        assert [entry["journal_id"] for entry in tomorrow["entries"]] == [42]
+
+    def test_an_entry_renders_in_exactly_the_form_todays_does(self) -> None:
+        """W20, on the wire: one renderer, so the two days cannot drift apart."""
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.ready(agenda(COFFEE, tomorrow=(COFFEE,))))
+        ).model_dump(mode="json")
+
+        today = document["data"]["attributes"]["agenda"]["data"]["entries"][0]
+        assert self.tomorrow_of(document)["entries"][0] == today
+
+    def test_keeps_the_order_the_service_put_the_entries_in(self) -> None:
+        later = AgendaEntry(
+            journal_id=43,
+            title="Dinner",
+            is_all_day=False,
+            starts_at=NINE_AM + datetime.timedelta(hours=10),
+            ends_at=NINE_AM + datetime.timedelta(hours=12),
+        )
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.ready(agenda(tomorrow=(COFFEE, later))))
+        ).model_dump(mode="json")
+
+        entries = self.tomorrow_of(document)["entries"]
+        assert [entry["journal_id"] for entry in entries] == [42, 43]
+
+    def test_a_cancelled_entry_tomorrow_says_so(self) -> None:
+        """W18 applies to tomorrow's rows exactly as to today's."""
+        cancelled = AgendaEntry(
+            journal_id=45,
+            title="Postponed standup",
+            is_all_day=False,
+            starts_at=NINE_AM,
+            ends_at=NINE_AM,
+            is_cancelled=True,
+        )
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.ready(agenda(tomorrow=(cancelled,))))
+        ).model_dump(mode="json")
+
+        entry = self.tomorrow_of(document)["entries"][0]
+        assert entry["is_cancelled"] is True
+        assert entry["title"] == "Postponed standup"
+
+    def test_nothing_tomorrow_is_a_dated_empty_list(self) -> None:
+        """The disclosure still renders, with a zero count and its date label."""
+        document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
+
+        assert self.tomorrow_of(document) == {"date": "2026-08-01", "entries": []}
+
+    def test_carries_no_count_beside_the_list(self) -> None:
+        """W19's count is ``entries.length``: tomorrow is not capped, so a count
+        on the wire would be derivable data that can drift from its list.
+        """
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.ready(agenda(tomorrow=(COFFEE,))))
+        ).model_dump(mode="json")
+
+        assert set(self.tomorrow_of(document)) == {"date", "entries"}
+
+    def test_is_always_present_on_a_ready_agenda(self) -> None:
+        """Absent tomorrow would read as "nothing tomorrow"; it must not be able to."""
+        document = to_home_dashboard_response(
+            dashboard(agenda=DashboardSection.ready(agenda(COFFEE)))
+        ).model_dump(mode="json")
+
+        assert "tomorrow" in document["data"]["attributes"]["agenda"]["data"]
