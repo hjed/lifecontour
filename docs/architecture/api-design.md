@@ -449,7 +449,7 @@ rather than this API's taste:
   |---|---|---|
   | no row (including AI not configured) | `unavailable` | — |
   | `failed` | `unavailable` | — |
-  | `disabled` (day below the summary threshold) | `unavailable` | — |
+  | `disabled` (a past or future day below the two-journal threshold; today is always eligible) | `unavailable` | — |
   | `pending` | `ready` | `generating` |
   | `generating` | `ready` | `generating` |
   | `generated` | `ready` | `generated` |
