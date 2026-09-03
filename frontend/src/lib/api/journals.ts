@@ -1396,6 +1396,42 @@ export function useUpdateJournalTag() {
 }
 
 /**
+ * The home dashboard has to be re-read after **any** journal write.
+ *
+ * Its headline is today's daily summary row and the four counters beside it are
+ * counts of that day's journals, events and contacts; the agenda section reads
+ * the same day's event journals with their tags and participants. So rather
+ * than deciding per mutation which of those fields it happens to touch — a
+ * judgement that would need redoing every time a section lands — every journal
+ * write invalidates the dashboard. Without it the app-wide five-minute
+ * `staleTime` lets a user edit a journal, return to `/`, and read the pre-edit
+ * page as though nothing had happened.
+ *
+ * **What this does not fix, and cannot.** The backend marks a summary stale
+ * *asynchronously*: the write commits an outbox event and `SearchIndexerConsumer`
+ * flips the row to `PENDING` afterwards. This invalidation marks the query stale
+ * rather than refetching it — the dashboard is not mounted while a journal is
+ * being edited, so it is an *inactive* query and React Query re-reads it on its
+ * next mount, by which time the consumer has almost always run. It is therefore
+ * right for the ordinary path and offers no guarantee on a consumer backlog.
+ *
+ * **Four backend gaps sit underneath it and no client invalidation can close
+ * them**, all recorded as follow-ups in the iteration document. Two are about
+ * the date the consumer works out: moving a journal off a day never marks that
+ * day stale (it reloads the journal after the write and sees only its new
+ * date), and deleting one marks nothing stale at all (`JournalDeleted` carries
+ * no date). Two are about which events it listens for — it invalidates on
+ * `JournalCreated`/`JournalUpdated`/`JournalDeleted` only, so a contact
+ * relationship change (`ContactSummaryRefreshRequested`) leaves `contact_count`
+ * stale, and a tag change (`JournalTagAssigned`/`Removed`) leaves the agenda's
+ * tags stale. In every case the row stays `GENERATED` with its old values, and
+ * re-reading it returns the same stale row — which is why these hooks still
+ * invalidate: being right about the cache is worth having even where the
+ * server is wrong about the row.
+ */
+const REFRESH_HOME_DASHBOARD = { queryKey: homeDashboardKeys.all };
+
+/**
  * Refreshes everything a journal tag mutation can change.
  *
  * The tag namespace feeds the sidebar tree and the detail page's tag editor;
@@ -1412,7 +1448,8 @@ function refreshAfterJournalTagMutation(
   return invalidateAfterMutation(
     queryClient,
     { queryKey: journalTagKeys.lists() },
-    { queryKey: journalKeys.all }
+    { queryKey: journalKeys.all },
+    REFRESH_HOME_DASHBOARD
   );
 }
 
@@ -1533,9 +1570,11 @@ export function useCreateJournal() {
     mutationFn: createJournal,
     onSuccess: () => {
       setTimeout(() => {
-        void invalidateAfterMutation(queryClient, {
-          queryKey: journalKeys.all,
-        });
+        void invalidateAfterMutation(
+          queryClient,
+          { queryKey: journalKeys.all },
+          REFRESH_HOME_DASHBOARD
+        );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_CREATED);
     },
@@ -1567,7 +1606,8 @@ export function useUpdateJournal() {
           // task query would answer. Moving a date into the past or cancelling
           // the journal is what *lapses* its due tasks, and the journal detail
           // view is showing those very tasks.
-          { queryKey: taskKeys.all }
+          { queryKey: taskKeys.all },
+          REFRESH_HOME_DASHBOARD
         );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_UPDATED);
@@ -1590,7 +1630,8 @@ export function useDeleteJournal() {
           { queryKey: journalKeys.lists() },
           // Deleting a journal that is only an *intermediate* link is
           // permitted, and it removes that link from every task that held it.
-          { queryKey: taskKeys.all }
+          { queryKey: taskKeys.all },
+          REFRESH_HOME_DASHBOARD
         );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_DELETED);
@@ -1630,7 +1671,8 @@ export function useMergeJournal() {
         { queryKey: reviewItemKeys.all },
         // A merge re-points the absorbed journal's task links at the survivor,
         // so a listing cached before it would omit the tasks that moved.
-        { queryKey: taskKeys.all }
+        { queryKey: taskKeys.all },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Journals merged successfully');
     },
@@ -1661,7 +1703,8 @@ export function useUpdateJournalField() {
         { queryKey: journalKeys.lists() },
         // See useUpdateJournal: a task embeds its journals, so an inline field
         // save — the date range above all — can change a task's lapse state.
-        { queryKey: taskKeys.all }
+        { queryKey: taskKeys.all },
+        REFRESH_HOME_DASHBOARD
       );
     },
     onError: (error: Error) => {
@@ -1688,7 +1731,8 @@ export function useAddJournalType() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Journal type added successfully');
     },
@@ -1713,7 +1757,8 @@ export function useRemoveJournalType() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Journal type removed successfully');
     },
@@ -1740,7 +1785,8 @@ export function useUpdateTypeData() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Type data updated successfully');
     },
@@ -1778,7 +1824,8 @@ export function useAddContactRelationship() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Contact relationship added successfully');
     },
@@ -1805,7 +1852,8 @@ export function useRemoveContactRelationship() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Contact relationship removed successfully');
     },
@@ -1843,7 +1891,8 @@ export function useUpdateContactRelationship() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Contact relationship updated successfully');
     },
@@ -1863,7 +1912,8 @@ export function useAddJournalTag() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Tag added successfully');
     },
@@ -1883,7 +1933,8 @@ export function useRemoveJournalTag() {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() }
+        { queryKey: journalKeys.lists() },
+        REFRESH_HOME_DASHBOARD
       );
       toast.success('Tag removed successfully');
     },
@@ -2313,7 +2364,8 @@ export function useAutoMergeReviewItems() {
         queryClient,
         { queryKey: reviewItemKeys.all },
         { queryKey: journalKeys.lists() },
-        { queryKey: journalKeys.details() }
+        { queryKey: journalKeys.details() },
+        REFRESH_HOME_DASHBOARD
       );
       if (merged_count > 0) {
         toast.success(

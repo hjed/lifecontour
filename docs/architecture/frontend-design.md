@@ -1136,11 +1136,28 @@ elements are numbered **W1**–**W33**.
     whole AI summary aloud unbidden on the post-sign-in default page. The
     change worth announcing — the regeneration the reader asked for — already
     announces itself through the toast, which is a live region.
-  - **`useRegenerateDailySummary` invalidates `homeDashboardKeys.all`.** The
+  - **Writes that change the summary invalidate `homeDashboardKeys.all`.** The
     invalidation belongs to the mutation, not to the card: regenerating from the
-    journals view leaves the dashboard just as stale. It is the first
-    invalidator of that key; the section phases that follow inherit the
-    convention.
+    journals view leaves the dashboard just as stale as regenerating from the
+    dashboard does. `useRegenerateDailySummary` does it, and so does **every**
+    journal writer through the shared `REFRESH_HOME_DASHBOARD` filter — the
+    summary's counters are counts of the day's journals and events, and the
+    agenda reads the same day's event journals with their tags and
+    participants. It is every writer rather than a chosen few because deciding
+    per mutation which payload fields it touches would need redoing each time a
+    section lands, and the list is enumerated by a table-driven test so the
+    contract cannot quietly lose one. Task and contact writes do not yet, and
+    are owned by the phases whose sections read them.
+  - **What that invalidation does not fix.** The backend marks a summary stale
+    *asynchronously*, through the outbox and `SearchIndexerConsumer`. The
+    dashboard is not mounted while a journal is edited, so its query is
+    inactive: it is marked stale and re-read on the next mount, by which time
+    the consumer has normally run. Underneath that sit two backend defects no
+    client invalidation can close — moving a journal off a day never marks that
+    day's summary stale (the consumer reloads the journal after the write and
+    sees only its new date), and deleting a journal marks nothing stale at all
+    (the `JournalDeleted` payload carries no date). Both are recorded as
+    follow-ups in the iteration document.
 - **Section semantics**: `DashboardSection` wraps each card in a
   `<section aria-labelledby>` whose `h2` is `sr-only`, with the visible title
   supplied by the card header (**W4**). Hiding the heading rather than dropping
