@@ -1095,9 +1095,52 @@ elements are numbered **W1**–**W33**.
     day that simply has no summary yet, which is the ordinary case; the card
     names no cause it cannot know and keeps the reassurance verbatim
     (wireframe gap 13).
-  - **W6's Regenerate control**, and the cache invalidation that follows it,
-    are documented below once Phase 4d adds them; this phase mounts the card
-    and adds no action to it.
+  - **Regenerate (W6) sits outside all three state branches** and stays enabled
+    in every one of them, including *generating* — nothing currently moves a
+    journal daily summary out of `pending`, so that control is the only way out
+    of the state. The card never fires it automatically: the page every sign-in
+    lands on must not start a multi-second AI write on load, and the
+    specification allows exactly two mutations here, the inline task action and
+    a user-requested regeneration. It is disabled only while the mutation is in
+    flight — where it carries `aria-busy` — and while there is no anchor day to
+    post to. That second case is the page's first load **and** a dashboard
+    request that failed, where **W9** is drawn beside a control that cannot be
+    used: the day to regenerate is the server's today in the user's configured
+    zone, and posting the browser's would regenerate the wrong day for anyone
+    whose zone differs. Recovering a failed request is a *retry*, not a
+    regeneration, and belongs to Phase 16.
+  - **It also refuses a day the anchor has outlived.** The query has one fixed
+    key, the app-wide five-minute `staleTime`, and no refetch scheduled at the
+    day boundary, so a dashboard left open and focused across local midnight
+    keeps yesterday's anchor. A stale *label* is Phase 16's to fix; a **write**
+    keyed on a stale anchor is not something to leave until then, because it
+    would rewrite yesterday's summary under a page headed "Today". The card
+    compares the anchor against the wall clock in the zone the payload itself
+    names and declines rather than guessing — leaving the control disabled
+    until the query refetches, exactly as before the first load arrives. An
+    unparseable zone trusts the anchor: the server resolved that day and the
+    browser cannot second-guess it.
+
+    Two details of that check are worth knowing, because both are easy to get
+    subtly wrong. `localDateIn` builds `YYYY-MM-DD` from
+    `Intl.DateTimeFormat().formatToParts`, **not** from `format`: which
+    separator a locale renders is CLDR data rather than a guarantee, so relying
+    on `en-CA` to yield dashes would disable the control on a current anchor
+    wherever it does not. And the check runs **inside the click handler** as
+    well as during render — the disabled state is computed while React renders,
+    and a dashboard left mounted across midnight need never render again, so
+    the render-time check alone would leave an enabled button closing over
+    yesterday's date.
+  - **The body is deliberately not an `aria-live` region.** Its first content
+    change is "loading" giving way to prose, so marking it live would read the
+    whole AI summary aloud unbidden on the post-sign-in default page. The
+    change worth announcing — the regeneration the reader asked for — already
+    announces itself through the toast, which is a live region.
+  - **`useRegenerateDailySummary` invalidates `homeDashboardKeys.all`.** The
+    invalidation belongs to the mutation, not to the card: regenerating from the
+    journals view leaves the dashboard just as stale. It is the first
+    invalidator of that key; the section phases that follow inherit the
+    convention.
 - **Section semantics**: `DashboardSection` wraps each card in a
   `<section aria-labelledby>` whose `h2` is `sr-only`, with the visible title
   supplied by the card header (**W4**). Hiding the heading rather than dropping

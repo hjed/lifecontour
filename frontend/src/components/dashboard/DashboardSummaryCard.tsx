@@ -15,7 +15,8 @@
  * Three declared states and no fourth (**W33**): generated (**W7**), generating
  * (**W8**), and unavailable (**W9**) — which covers "there is none today" as
  * well as "it could not be read", because a summary is not a list and so has no
- * empty state.
+ * empty state. **W6**'s Regenerate control sits *outside* all three branches
+ * and stays enabled in every one of them.
  *
  * There is one rendering the wireframe does not declare: a quiet line while the
  * page's query is still in flight. Wireframe gap 9 anticipates it — no
@@ -24,16 +25,22 @@
  * one-quiet-line idiom rather than as a fourth *state*, since nothing on the
  * wire produces it.
  *
- * **W6**'s Regenerate control lands in Phase 4c, which also settles what this
- * card does — and deliberately does not do — when the summary reports itself
- * generating with nothing generating it. This phase renders the states; that
- * one adds the only action the card will ever offer.
+ * **Regeneration is never automatic.** Nothing currently moves a journal daily
+ * summary out of `pending`, so a user who edits today's journal can see **W8**
+ * with nothing generating behind it — and the tempting fix is for this card to
+ * fire the regenerate endpoint when it sees `generating`. It does not: the page
+ * every sign-in lands on must not start a multi-second AI write on load, and
+ * the specification allows exactly two mutations here, the inline task action
+ * and a *user-requested* regeneration. The Regenerate control is what resolves
+ * that state, which is why it stays enabled inside it. Making the state honest
+ * on read belongs to ITER18-005, which owns summary freshness.
  */
 
 'use client';
 
-import { Sparkles } from 'lucide-react';
+import { RefreshCw, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { SummaryKeyStats } from './SummaryKeyStats';
 import {
@@ -41,12 +48,16 @@ import {
   DashboardSummaryState,
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
+import type { HomeDashboardAnchor } from '@/lib/api/home-dashboard';
+import { useRegenerateDailySummary } from '@/lib/api/journals';
+import { cn } from '@/lib/utils';
 
 const HEADING_ID = 'dashboard-summary-heading';
 
 /** The card's wireframe copy, in one place so the card and its tests agree. */
 const SUMMARY_COPY = {
   label: 'AI Daily Summary',
+  regenerate: 'Regenerate',
   generatingBadge: 'Generating...',
   generatingBody: 'Summary is being generated...',
   loading: "Loading today's summary...",
@@ -60,9 +71,62 @@ const SUMMARY_COPY = {
   unavailable: 'No summary today — everything below still works.',
 } as const;
 
+/**
+ * Whether the cached anchor is still the day it claims to be.
+ *
+ * The dashboard query has one fixed key and the app-wide `staleTime` is five
+ * minutes, with no refetch scheduled at the day boundary — a dashboard left
+ * open and focused across local midnight keeps yesterday's anchor. Phase 3
+ * recorded that as a follow-up owned by Phase 16, when the only consequence was
+ * a stale *label*.
+ *
+ * A **write** keyed on that anchor is a different matter: regenerating would
+ * rewrite yesterday's summary while the page says "Today". So the action checks
+ * the anchor against the wall clock in the zone the payload itself names, and
+ * declines rather than guessing — which leaves the control disabled until the
+ * query refetches, exactly as it is before the first load arrives.
+ *
+ * The comparison is built from `formatToParts` rather than `format`, because
+ * `format` returns *presentation* output: which separator a locale uses is
+ * CLDR data, not a guarantee, so a locale that renders `en-CA` with slashes
+ * would make every comparison false and disable the control on a perfectly
+ * current anchor. Reading the year, month and day parts and assembling
+ * `YYYY-MM-DD` ourselves is locale-independent. The zone lookup is still
+ * `Intl`'s, so there is no date arithmetic here and nothing for a DST
+ * transition to catch out. Scheduling the refetch that *fixes* the staleness is
+ * still Phase 16's; this only stops the write going to the wrong day.
+ */
+export function localDateIn(timeZone: string, now: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(candidate => candidate.type === type)?.value ?? '';
+
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function isStillToday(anchor: HomeDashboardAnchor, now: Date = new Date()) {
+  try {
+    return localDateIn(anchor.timezone, now) === anchor.date;
+  } catch {
+    // An unrecognised zone would throw. The server resolved this day and the
+    // browser cannot second-guess which one it meant, so trust the anchor.
+    return true;
+  }
+}
+
 export function DashboardSummaryCard() {
   const { data, isPending } = useHomeDashboard();
+  const { mutate: regenerate, isPending: isRegenerating } =
+    useRegenerateDailySummary();
 
+  const anchor = data?.meta.anchor;
+  // Only regenerate a day the anchor still agrees is today. See `isStillToday`.
+  const anchorDate = anchor && isStillToday(anchor) ? anchor.date : undefined;
   const section = data?.data.attributes.summary;
   const summary =
     section?.status === DashboardSectionStatus.READY ? section.data : null;
@@ -75,6 +139,17 @@ export function DashboardSummaryCard() {
       : null;
   const isGenerating = summary?.state === DashboardSummaryState.GENERATING;
 
+  const handleRegenerate = () => {
+    // Re-checked at click time, not just at render. The button's disabled state
+    // is computed while React renders, and a dashboard left mounted across
+    // local midnight need never render again — so the enabled button would
+    // still be closing over yesterday's anchor, which is the exact write this
+    // guard exists to prevent.
+    if (anchor && isStillToday(anchor)) {
+      regenerate(anchor.date);
+    }
+  };
+
   return (
     <section aria-labelledby={HEADING_ID}>
       <Card
@@ -82,7 +157,7 @@ export function DashboardSummaryCard() {
         data-testid='dashboard-summary-card'
       >
         <CardContent className='flex flex-col gap-3 p-4'>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center justify-between gap-2'>
             <div className='text-primary flex min-w-0 items-center gap-2'>
               <span className='bg-primary/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-md'>
                 <Sparkles className='h-4 w-4' aria-hidden='true' />
@@ -96,6 +171,40 @@ export function DashboardSummaryCard() {
                 </Badge>
               )}
             </div>
+            {/* Outside the state branches below, per W6: it is the action that
+                resolves W8's dead end and W9's absence alike.
+
+                Disabled only while it is already running, or while there is no
+                anchor day to post to. The second case is the page's first load
+                — but it is also a dashboard request that *failed*, where the
+                card shows W9 beside a control it cannot use. That is the least
+                wrong answer available: the day to regenerate is the server's
+                today in the user's configured zone, and posting the browser's
+                instead would regenerate the wrong day for anyone whose zone
+                differs, which is the same "a wrong date is worse than none"
+                rule the page header follows. Recovering a failed *request* is
+                a retry, not a regeneration, and belongs to Phase 16 with the
+                other whole-page resilience.
+
+                The same disabling covers a *stale* anchor — see
+                `isStillToday`: a dashboard held open across local midnight
+                would otherwise regenerate yesterday under a page headed
+                "Today". */}
+            <Button
+              variant='ghost'
+              size='sm'
+              className='text-muted-foreground hover:text-primary shrink-0 gap-2'
+              onClick={handleRegenerate}
+              disabled={!anchorDate || isRegenerating}
+              aria-busy={isRegenerating}
+              data-testid='dashboard-summary-regenerate'
+            >
+              <RefreshCw
+                className={cn('h-4 w-4', isRegenerating && 'animate-spin')}
+                aria-hidden='true'
+              />
+              {SUMMARY_COPY.regenerate}
+            </Button>
           </div>
 
           {/* Deliberately **not** an `aria-live` region. The change worth
