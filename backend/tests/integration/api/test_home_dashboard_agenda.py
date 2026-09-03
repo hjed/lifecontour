@@ -16,7 +16,9 @@ Four things are asserted here that no unit test can reach:
   the obvious implementation loops; the statement count says whether this one
   does, and a functional assertion never would.
 - **A cancelled event is flagged, not dropped**, so the payload can never present
-  one as still happening.
+  one as still happening — on today's list and on tomorrow's.
+- **Tomorrow is the user's local tomorrow**, read the same way as today and
+  carried in the same payload, so the page stays one round trip.
 
 A test cannot freeze the clock through HTTP, so journals are seeded relative to
 an instant read inside the test and the windows are chosen wide enough that a
@@ -66,6 +68,20 @@ def entries_of(response: Any) -> list[dict[str, Any]]:
     assert section["status"] == "ready", section
     entries: list[dict[str, Any]] = section["data"]["entries"]
     return entries
+
+
+def tomorrow_of(response: Any) -> dict[str, Any]:
+    tomorrow: dict[str, Any] = agenda_of(response)["data"]["tomorrow"]
+    return tomorrow
+
+
+def tomorrow_entries_of(response: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = tomorrow_of(response)["entries"]
+    return entries
+
+
+def anchor_of(response: Any) -> datetime.date:
+    return datetime.date.fromisoformat(response.json()["meta"]["anchor"]["date"])
 
 
 class EventSeeder:
@@ -522,7 +538,9 @@ class TestTheDayBoundary:
     NOON = "noon"
     NIGHT = "night"
 
-    async def seed_three_days(self, seeder: EventSeeder) -> None:
+    async def seed_three_days(
+        self, seeder: EventSeeder, offsets: tuple[int, ...] = (-1, 0, 1)
+    ) -> None:
         """Two events on each of yesterday, today and tomorrow, in FAR_EAST.
 
         12:00 local is 22:00 UTC on the previous UTC date; 22:00 local is 08:00
@@ -530,7 +548,7 @@ class TestTheDayBoundary:
         window: yesterday's night is 08:00 UTC, two hours before this local day
         opens, and tomorrow's noon is 22:00 UTC, twelve hours after it closes.
         """
-        for day_offset in (-1, 0, 1):
+        for day_offset in offsets:
             local_day = datetime.datetime.now(ZoneInfo(FAR_EAST)).date() + (
                 datetime.timedelta(days=day_offset)
             )
@@ -648,23 +666,50 @@ class TestACancelledEvent:
 
         assert flags == {"Postponed": True, "Going ahead": False}
 
+    async def test_a_cancelled_event_tomorrow_is_flagged_too(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        """W18 holds for the disclosure's rows as it does for today's."""
+        journal_id = await seeder.event(
+            title="Cancelled tomorrow", day_offset=1, hour=9, event_state="cancelled"
+        )
+        await seeder.event(title="Going ahead tomorrow", day_offset=1, hour=10)
+
+        entries = tomorrow_entries_of(await authenticated_client.get(URL))
+
+        assert {e["journal_id"]: e["is_cancelled"] for e in entries} == {
+            journal_id: True,
+            entries[1]["journal_id"]: False,
+        }
+        assert entries[0]["title"] == "Cancelled tomorrow"
+
 
 @pytest.mark.asyncio
 class TestTheNestedReadsAreNotAnNPlusOne:
+    @pytest.mark.parametrize(
+        ("day_offset", "listed"),
+        [(0, entries_of), (1, tomorrow_entries_of)],
+        ids=["today", "tomorrow"],
+    )
     async def test_eight_events_with_tags_and_participants_cost_what_two_do(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
         seeder: EventSeeder,
+        day_offset: int,
+        listed: Any,
     ) -> None:
         """The criterion is "one query, not one per journal", so it is counted.
 
         Functionally an N+1 is invisible — the answer is right either way — so
         only the statement count can tell a single aggregated read from a loop
-        over the day's events.
+        over the day's events. Tomorrow is a second read of the same query, so
+        it is held to the same count.
         """
         for index in range(2):
-            journal_id = await seeder.event(title=f"Early {index}", hour=8)
+            journal_id = await seeder.event(
+                title=f"Early {index}", hour=8, day_offset=day_offset
+            )
             await seeder.tag(journal_id, f"tag-{index}")
             await seeder.participant(journal_id, f"Person{index}")
 
@@ -672,14 +717,16 @@ class TestTheNestedReadsAreNotAnNPlusOne:
             await authenticated_client.get(URL)
 
         for index in range(2, 8):
-            journal_id = await seeder.event(title=f"Later {index}", hour=9)
+            journal_id = await seeder.event(
+                title=f"Later {index}", hour=9, day_offset=day_offset
+            )
             await seeder.tag(journal_id, f"tag-{index}")
             await seeder.participant(journal_id, f"Person{index}")
 
         with recorded_statements(async_connection) as many:
             response = await authenticated_client.get(URL)
 
-        assert len(entries_of(response)) == 8
+        assert len(listed(response)) == 8
         assert len(many) == len(few)
 
 
@@ -689,9 +736,15 @@ class TestADayWithNothingOnIt:
         self, authenticated_client: AsyncClient
     ) -> None:
         """The distinction the card's single quiet line depends on."""
-        assert agenda_of(await authenticated_client.get(URL)) == {
+        response = await authenticated_client.get(URL)
+
+        tomorrow = anchor_of(response) + datetime.timedelta(days=1)
+        assert agenda_of(response) == {
             "status": "ready",
-            "data": {"entries": []},
+            "data": {
+                "entries": [],
+                "tomorrow": {"date": tomorrow.isoformat(), "entries": []},
+            },
         }
 
 
@@ -912,4 +965,184 @@ class TestAnUnrecognisedStoredTimezone:
         anchor = response.json()["meta"]["anchor"]["date"]
         assert [entry["title"] for entry in entries_of(response)] == [
             f"Legacy {anchor}"
+        ]
+
+
+@pytest.mark.asyncio
+class TestTomorrow:
+    """Tomorrow rides in the same payload, read the same way as today.
+
+    Open decision 5 is settled by the one-round-trip criterion: the service
+    asks the same one-query read about the next local day and hands both back
+    together. What only the database can prove is that the two days are
+    actually separate sets — an event tomorrow is not on today's list and vice
+    versa — while an event genuinely on both days is on both.
+    """
+
+    async def test_an_event_tomorrow_is_under_tomorrow_and_not_today(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        journal_id = await seeder.event(title="Tomorrow's lunch", day_offset=1)
+
+        response = await authenticated_client.get(URL)
+
+        assert [e["journal_id"] for e in tomorrow_entries_of(response)] == [journal_id]
+        assert entries_of(response) == []
+
+    async def test_an_event_today_is_not_under_tomorrow(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        journal_id = await seeder.event(title="Today's lunch")
+
+        response = await authenticated_client.get(URL)
+
+        assert [e["journal_id"] for e in entries_of(response)] == [journal_id]
+        assert tomorrow_entries_of(response) == []
+
+    async def test_the_day_after_tomorrow_is_on_neither(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        """The agenda is two days, not a week."""
+        await seeder.event(title="Too far ahead", day_offset=2)
+
+        response = await authenticated_client.get(URL)
+
+        assert entries_of(response) == []
+        assert tomorrow_entries_of(response) == []
+
+    async def test_its_date_is_the_day_after_the_anchor(
+        self, authenticated_client: AsyncClient
+    ) -> None:
+        """The disclosure labels itself from this, not from the browser's clock."""
+        response = await authenticated_client.get(URL)
+
+        expected = anchor_of(response) + datetime.timedelta(days=1)
+        assert tomorrow_of(response)["date"] == expected.isoformat()
+
+    async def test_a_multi_day_event_spanning_both_days_is_on_both(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        """Overlap semantics, applied per day: a trip that runs through
+        tonight is happening today *and* tomorrow, and one wide window split
+        afterwards could not have said so.
+        """
+        journal_id = await seeder.event(title="Two-day trip", hour=9, ends_days_later=1)
+
+        response = await authenticated_client.get(URL)
+
+        assert [e["journal_id"] for e in entries_of(response)] == [journal_id]
+        assert [e["journal_id"] for e in tomorrow_entries_of(response)] == [journal_id]
+
+    async def test_arrives_in_the_same_form_and_order_as_today(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        """W20: all-day pinned above timed, timed ascending — and every field."""
+        late = await seeder.event(title="Late", day_offset=1, hour=17)
+        early = await seeder.event(
+            title="Early", day_offset=1, hour=9, location="The cafe"
+        )
+        whole_day = await seeder.event(title="Whole day", day_offset=1, all_day=True)
+        await seeder.tag(early, "social")
+        await seeder.participant(early, "Sam", "Taylor")
+
+        entries = tomorrow_entries_of(await authenticated_client.get(URL))
+
+        assert [e["journal_id"] for e in entries] == [whole_day, early, late]
+        assert entries[1]["location"] == "The cafe"
+        assert [tag["name"] for tag in entries[1]["tags"]] == ["social"]
+        assert [p["name"] for p in entries[1]["participants"]] == ["Sam Taylor"]
+        assert entries[0]["is_all_day"] is True
+
+    async def test_another_users_event_tomorrow_is_never_returned(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        await seeder.event(title="Somebody else's", day_offset=1, user_id=OTHER_USER_ID)
+
+        assert tomorrow_entries_of(await authenticated_client.get(URL)) == []
+
+
+@pytest.mark.asyncio
+class TestTomorrowsDayBoundary(TestTheDayBoundary):
+    """Tomorrow is the user's **local** tomorrow, by the same discriminator.
+
+    Inherits today's boundary tests — they must still hold with a second read
+    in the section — and adds tomorrow's: with the FAR_EAST pairs seeded on four
+    consecutive local days, tomorrow's pair both arrive under ``tomorrow`` and
+    neither today's nor the day after tomorrow's does. A UTC-anchored tomorrow
+    could return at most one of the pair.
+    """
+
+    async def test_one_local_tomorrow_arrives_whole_though_it_spans_two_utc_dates(
+        self,
+        authenticated_client: AsyncClient,
+        user_settings_repository: SqlUserSettingsRepository,
+        seeder: EventSeeder,
+    ) -> None:
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=FAR_EAST)
+        )
+        await self.seed_three_days(seeder, offsets=(-1, 0, 1, 2))
+
+        response = await authenticated_client.get(URL)
+
+        tomorrow = anchor_of(response) + datetime.timedelta(days=1)
+        assert tomorrow_of(response)["date"] == tomorrow.isoformat()
+        assert [e["title"] for e in tomorrow_entries_of(response)] == [
+            f"{tomorrow.isoformat()} {self.NOON}",
+            f"{tomorrow.isoformat()} {self.NIGHT}",
+        ]
+
+    async def test_today_and_the_day_after_tomorrow_stay_off_it(
+        self,
+        authenticated_client: AsyncClient,
+        user_settings_repository: SqlUserSettingsRepository,
+        seeder: EventSeeder,
+    ) -> None:
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=FAR_EAST)
+        )
+        await self.seed_three_days(seeder, offsets=(-1, 0, 1, 2))
+
+        response = await authenticated_client.get(URL)
+
+        anchor = anchor_of(response)
+        titles = {e["title"] for e in tomorrow_entries_of(response)}
+        for neighbour in (anchor, anchor + datetime.timedelta(days=2)):
+            assert f"{neighbour.isoformat()} {self.NOON}" not in titles
+            assert f"{neighbour.isoformat()} {self.NIGHT}" not in titles
+
+
+@pytest.mark.asyncio
+class TestAnAllDayEventTomorrow:
+    """All-day events are matched by date for tomorrow as for today.
+
+    The far-western Google case is the one that was actually broken for today;
+    a tomorrow read that matched by instant would put tomorrow's synced holiday
+    on today's list for the same user, so both sides of UTC are held here.
+    """
+
+    @pytest.mark.parametrize("timezone", [FAR_WEST, FAR_EAST])
+    async def test_a_google_written_event_on_tomorrows_date_lands_on_tomorrow(
+        self,
+        authenticated_client: AsyncClient,
+        user_settings_repository: SqlUserSettingsRepository,
+        seeder: EventSeeder,
+        timezone: str,
+    ) -> None:
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=timezone)
+        )
+        for offset in (0, 1, 2):
+            day = datetime.datetime.now(ZoneInfo(timezone)).date() + (
+                datetime.timedelta(days=offset)
+            )
+            await seeder.all_day_on(
+                day, title=f"Holiday {day.isoformat()}", written_in=None
+            )
+
+        response = await authenticated_client.get(URL)
+
+        tomorrow = anchor_of(response) + datetime.timedelta(days=1)
+        assert [e["title"] for e in tomorrow_entries_of(response)] == [
+            f"Holiday {tomorrow.isoformat()}"
         ]

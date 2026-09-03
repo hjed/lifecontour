@@ -19,7 +19,8 @@ meaningful says so with a ready payload instead; both kinds are in use, and whic
 a section is belongs to the section, not to this envelope.
 
 The payload types are declared here from the outset and filled by their own
-phases. Summary and agenda are filled; tasks and upcoming dates are still empty,
+phases. Summary and agenda (today and tomorrow) are filled; tasks and upcoming
+dates are still empty,
 which serialises as ``{}`` — ready, holding nothing — until the phases that give
 them fields land.
 """
@@ -183,18 +184,45 @@ class AgendaEntry:
 
 
 @dataclass(frozen=True)
-class AgendaSectionData:
-    """Today's event journals, in the order the card draws them.
+class AgendaDay:
+    """One day's event journals, in the order the card draws them.
+
+    The ``date`` is the local day the entries were windowed on — carried for the
+    same reason the projection carries its anchor: the disclosure's label
+    (**W19**) must name the day the entries actually belong to, and a browser
+    working "tomorrow" out in its own zone could disagree with the rows it was
+    sent.
 
     ``entries`` defaults to empty because a day with nothing scheduled is an
-    answer this section can give: *ready* holding no entries, which the card
-    renders as one quiet line, and which no caller can confuse with the section
-    having failed to answer at all.
-
-    Tomorrow's entries and their collapsed count (**W19**) land in Phase 6, as a
-    field beside this one.
+    answer: *ready* holding no entries, which the card renders as one quiet line.
+    The collapsed count **W19** shows is ``len(entries)`` rather than a second
+    field, because the list is not capped and a count kept beside it would be
+    derivable data that can drift from the thing it describes. Cancelled entries
+    count — they are shown when the day is expanded, marked (**W18**), and a
+    count that skipped them would be the first step towards a list that did.
     """
 
+    date: date
+    entries: tuple[AgendaEntry, ...] = ()
+
+
+@dataclass(frozen=True)
+class AgendaSectionData:
+    """Today's event journals, with tomorrow's beneath them.
+
+    ``entries`` is today, in the order the card draws it. It defaults to empty
+    because a day with nothing scheduled is an answer this section can give:
+    *ready* holding no entries, which the card renders as one quiet line, and
+    which no caller can confuse with the section having failed to answer at all.
+
+    ``tomorrow`` rides in the same payload rather than behind a second request
+    (open decision 5): the page is one round trip, and tomorrow is one extra day
+    of a small list, not a second page of data. It is **required**, not
+    optional, so that "nothing tomorrow" and "tomorrow was never read" can never
+    be the same absence — a ready agenda has both days, or it is not ready.
+    """
+
+    tomorrow: AgendaDay
     entries: tuple[AgendaEntry, ...] = ()
 
 

@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 from app.api.common.schemas import JsonApiLinks
 from app.core.dashboard.models.sections import (
+    AgendaDay,
     AgendaEntry,
     AgendaSectionData,
     DashboardSection,
@@ -225,11 +226,36 @@ class AgendaEntrySchema(BaseModel):
     )
 
 
-class AgendaSectionSchema(BaseModel):
-    """Today's event journals, in the order they should be rendered.
+class AgendaDaySchema(BaseModel):
+    """One day's event journals — the shape tomorrow arrives in.
 
-    Tomorrow's entries and their count join this payload in a later phase.
+    A *day* rather than a bare list, so the disclosure that renders it can label
+    itself with the date the entries were actually windowed on instead of one
+    the browser works out in its own zone.
     """
+
+    date: date_type = Field(
+        ...,
+        description=(
+            "The local day these entries were windowed on, as `YYYY-MM-DD` in "
+            "`meta.anchor.timezone`. Label the disclosure from this rather than "
+            "from the browser's clock, which can be on a different day."
+        ),
+    )
+    entries: list[AgendaEntrySchema] = Field(
+        default_factory=list,
+        description=(
+            "The day's events, in the same form and the same order as today's: "
+            "every all-day entry first, then the timed ones ascending by start. "
+            "The collapsed label's count is this list's length — it is not "
+            "capped, so no separate count is sent. An empty list is a real "
+            "answer: nothing is scheduled that day."
+        ),
+    )
+
+
+class AgendaSectionSchema(BaseModel):
+    """Today's event journals in the order they should be rendered, then tomorrow's."""
 
     entries: list[AgendaEntrySchema] = Field(
         default_factory=list,
@@ -238,6 +264,15 @@ class AgendaSectionSchema(BaseModel):
             "ascending by start. An **empty list is a real answer** — nothing is "
             "scheduled today — and is not the same as the section being "
             "unavailable, where `data` is null instead."
+        ),
+    )
+    tomorrow: AgendaDaySchema = Field(
+        ...,
+        description=(
+            "Tomorrow's events, in the same form, for the collapsed disclosure "
+            "beneath today's list. Always present on a ready agenda — it rides "
+            "in this payload so the page stays one round trip — and its "
+            "`entries` may be empty."
         ),
     )
 
@@ -390,9 +425,19 @@ def _agenda_entry(entry: AgendaEntry) -> AgendaEntrySchema:
     )
 
 
+def _agenda_day(day: AgendaDay) -> AgendaDaySchema:
+    """One day on the wire, through the same entry renderer as today's list."""
+    return AgendaDaySchema(
+        date=day.date, entries=[_agenda_entry(entry) for entry in day.entries]
+    )
+
+
 def _agenda(data: AgendaSectionData) -> AgendaSectionSchema:
     """The agenda payload, preserving the order the service settled on."""
-    return AgendaSectionSchema(entries=[_agenda_entry(entry) for entry in data.entries])
+    return AgendaSectionSchema(
+        entries=[_agenda_entry(entry) for entry in data.entries],
+        tomorrow=_agenda_day(data.tomorrow),
+    )
 
 
 def _summary(data: SummarySectionData) -> SummarySectionSchema:
