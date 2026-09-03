@@ -71,6 +71,10 @@ completeness test carried as its one **named exclusion**, asserted positively ra
 absent. Phase 10 closed it — `TaskJournalLinksRepointed`, one per task a merge moves, authored by the
 tasks domain and published inside the merge's own unit of work — and the exclusion list is now empty
 by assertion.
+**ITER18-005 Phase 1 complete: today is always eligible for a summary.** `DailySummaryEligibilityChecker`
+now judges the day it is given against the user's configured timezone — today qualifies whatever its
+journal count, a past or future day keeps the two-journal threshold — and `DailySummaryService` hands it
+the date and the timezone it already resolves, so REST and MCP inherit the rule with no surface logic.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -279,7 +283,9 @@ reserved. See *Task Query Keys* in `docs/architecture/frontend-design.md`.
   `DEFAULT_TIMEZONE` fallback (`app/core/settings/timezone_utils.py`).
 - Inputs are assembled by `DailySummaryInputAssembler` into `DailySummaryInput` (journals, journal
   count, event count, contact names, mood values) — **journal-only today**.
-- `DailySummaryEligibilityChecker.DEFAULT_MIN_JOURNALS = 2`, applied to every day including today.
+- `DailySummaryEligibilityChecker.DEFAULT_MIN_JOURNALS = 2` applies to past and future days; **today**, in
+  the user's configured timezone, is always eligible (ITER18-005 Phase 1 — before it the threshold applied
+  to every day, today included).
 - Cached in `journal_daily_summaries` (migration `0049`), unique on `(user_id, summary_date)`, with
   `status` ∈ pending/generating/generated/failed/disabled and the four counters the wireframe's stat
   footer (**W10**) displays. `JournalDailySummary.get_display_text()` returns text only when
@@ -10237,24 +10243,61 @@ journals view consumes the same summary, so it stands alone.
 4. **Prompt budget** — settled across **Phases 3–5**. Adding agenda, tasks and dates grows the prompt;
    decide whether any input group needs a cap, and record it so a busy day cannot silently drop material.
 
-#### Phase 1: Eligibility — Today Is Always Eligible
+#### Phase 1: Eligibility — Today Is Always Eligible ✅ COMPLETE
 
 **Prerequisites:** none.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Actual: 63 production, 419 tests, ~50
+documentation → ~530 tracked** (1.2× the estimate; the production estimate was high by ~1.7× because the
+rule reuses `today_in` and `resolve_timezone` rather than resolving the day itself).
 
 **Acceptance Criteria:**
 
-- [ ] Eligibility distinguishes **today** from a past day in the user's timezone: today is eligible
+- [x] Eligibility distinguishes **today** from a past day in the user's timezone: today is eligible
       regardless of journal count; a past day keeps the existing two-or-more-journals threshold and still
       produces no summary below it.
-- [ ] "Today" is resolved through the user's configured timezone, never UTC-today.
-- [ ] A day with zero journals still produces a summary attempt rather than a `DISABLED` row — the quiet-day
+- [x] "Today" is resolved through the user's configured timezone, never UTC-today.
+- [x] A day with zero journals still produces a summary attempt rather than a `DISABLED` row — the quiet-day
       case the dashboard headline exists for.
-- [ ] Future dates keep whatever behaviour they have today; this phase does not change them.
+- [x] Future dates keep whatever behaviour they have today; this phase does not change them.
 
 **Required Test Coverage:** unit — today with zero and one journal is eligible; a past day with one is not,
 with two is; the timezone boundary either side of local midnight. Integration — the service persists a
 generated (not disabled) summary for a journal-less today. No e2e (Phase 8).
+
+**Delivered.** `DailySummaryEligibilityChecker.is_eligible` now takes the `summary_date` and the user's
+`timezone` alongside the journal count, and answers "today" through `journal_date_resolver.today_in` over
+`resolve_timezone` — the same pair the tasks window and the home dashboard anchor on, so the three surfaces
+cannot disagree about when the user's day starts. The checker takes an injectable `clock` (default:
+`datetime.now(UTC)`) rather than `get_or_generate` growing a `now` parameter, which keeps the public
+service signature REST and MCP call unchanged while letting the local-midnight boundary be pinned through
+the service in unit tests. `DailySummaryService.get_or_generate` passes the date and the timezone it
+already resolves for input assembly, so `GET /api/journals/daily-summary/{date}` and MCP
+`get_daily_summary` inherit the rule with no code of their own; both docstrings now say so.
+
+**Tests.** Unit: today with zero and one journal is eligible, and ignores a raised threshold; a past day
+with one journal is not, with two is; a future day with one is not, with two is (behaviour unchanged);
+either side of local midnight — at 14:30 UTC, Sydney's 4 September is today with zero journals while UTC's
+3 September is a past day there, an hour earlier at 13:30 UTC Sydney's 3 September is still today, and
+Los Angeles's 3 September is today while its 4 September is future; a missing or unknown timezone falls
+back to UTC. Through the service with the real checker: a journal-less
+today is `GENERATED` (and passes through `GENERATING`), a one-journal past day is `DISABLED` and never
+marks `GENERATING`; and the checker receives the timezone the settings repository returned, not the
+default. Integration, against real Postgres with the real checker and a saved `Pacific/Auckland`
+timezone: a journal-less today persists a `GENERATED` row with `journal_count == 0`; a one-journal past
+day persists `DISABLED`.
+
+**E2E deferred to Phase 8**, as this phase states: no user-visible surface changes. One observation for
+Phase 8, recorded rather than acted on here, and one documentation change:
+
+- **Neither existing surface will *trigger* generation for a quiet today.** The journals page mounts
+  `DailySummaryView` only when a day group has two or more journals (`DayGroupedJournalList.tsx`), and the
+  dashboard's summary section is a pure read of the stored row by design. The always-eligible rule is
+  therefore a backend fact until a surface asks for today's summary on a quiet day — which surface, and
+  whether the journals-page gate should relax for today, is Phase 8's to settle. The existing e2e
+  `journals-daily-summary.spec.ts` ("Only one journal today" shows no summary) asserts that frontend gate
+  and is unaffected.
+- The `disabled` row in `docs/architecture/api-design.md`'s summary-section table now reads "a past or
+  future day below the two-journal threshold; today is always eligible".
 
 #### Phase 2: Freshness — Regenerate a Summary Not Generated Today
 

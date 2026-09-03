@@ -1,7 +1,7 @@
 """Unit tests for DailySummaryService."""
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,6 +10,9 @@ from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals.daily_summary import JournalDailySummary
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.services.daily_summary_eligibility import (
+    DailySummaryEligibilityChecker,
+)
 from app.core.journal.services.daily_summary_models import DailySummaryInput
 from app.core.journal.services.daily_summary_service import DailySummaryService
 
@@ -266,6 +269,128 @@ class TestDailySummaryServiceEligibility:
         assert result is not None
         assert result.status == SummaryStatus.DISABLED
         mock_summary_repo.upsert.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_checker_receives_the_date_and_the_users_timezone(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_eligibility_checker: MagicMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """Eligibility is judged against the user's configured timezone.
+
+        The service resolves the timezone once for input assembly; the same
+        value must reach the checker, so "today" is the user's local date and
+        never UTC's.
+        """
+        user_settings_repo = AsyncMock()
+        user_settings_repo.get_timezone.return_value = "Australia/Sydney"
+        service = DailySummaryService(
+            input_assembler=mock_input_assembler,
+            eligibility_checker=mock_eligibility_checker,
+            prompt_builder=mock_prompt_builder,
+            summary_repo=mock_summary_repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            user_settings_repo=user_settings_repo,
+            _gemini_response_override=json.dumps({"summary_text": "Quiet day."}),
+        )
+
+        await service.get_or_generate("user123", date(2026, 4, 27), transaction=_NO_TXN)
+
+        mock_eligibility_checker.is_eligible.assert_called_once_with(
+            3, summary_date=date(2026, 4, 27), timezone="Australia/Sydney"
+        )
+
+
+class TestDailySummaryServiceTodayIsAlwaysEligible:
+    """The real checker on an injected clock, driven through the service.
+
+    Pins the quiet-day case the dashboard headline exists for: a journal-less
+    today still produces a summary *attempt*, never a DISABLED row.
+    """
+
+    _NOW = datetime(2026, 9, 3, 14, 30, tzinfo=UTC)
+
+    def _service(
+        self,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+        *,
+        summary_date: date,
+        journal_count: int,
+        timezone: str,
+    ) -> DailySummaryService:
+        assembler = AsyncMock()
+        assembler.assemble.return_value = DailySummaryInput(
+            user_id="user123",
+            summary_date=summary_date,
+            journals=[],
+            journal_count=journal_count,
+            event_count=0,
+            contact_names=[],
+            mood_values=[],
+        )
+        user_settings_repo = AsyncMock()
+        user_settings_repo.get_timezone.return_value = timezone
+        return DailySummaryService(
+            input_assembler=assembler,
+            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
+            prompt_builder=mock_prompt_builder,
+            summary_repo=mock_summary_repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            user_settings_repo=user_settings_repo,
+            _gemini_response_override=json.dumps({"summary_text": "Quiet day."}),
+        )
+
+    @pytest.mark.asyncio
+    async def test_journal_less_today_is_generated_not_disabled(
+        self, mock_prompt_builder: MagicMock, mock_summary_repo: AsyncMock
+    ) -> None:
+        """14:30 UTC is already 4 September in Sydney, so that date is today."""
+        service = self._service(
+            mock_prompt_builder,
+            mock_summary_repo,
+            summary_date=date(2026, 9, 4),
+            journal_count=0,
+            timezone="Australia/Sydney",
+        )
+
+        result = await service.get_or_generate(
+            "user123", date(2026, 9, 4), transaction=_NO_TXN
+        )
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.journal_count == 0
+        assert result.summary_text == "Quiet day."
+        mock_summary_repo.update_status.assert_any_call(
+            "user123", date(2026, 9, 4), SummaryStatus.GENERATING.value
+        )
+
+    @pytest.mark.asyncio
+    async def test_utc_today_is_a_past_day_in_sydney_and_stays_disabled(
+        self, mock_prompt_builder: MagicMock, mock_summary_repo: AsyncMock
+    ) -> None:
+        """UTC's 3 September is yesterday in Sydney: one journal is not enough."""
+        service = self._service(
+            mock_prompt_builder,
+            mock_summary_repo,
+            summary_date=date(2026, 9, 3),
+            journal_count=1,
+            timezone="Australia/Sydney",
+        )
+
+        result = await service.get_or_generate(
+            "user123", date(2026, 9, 3), transaction=_NO_TXN
+        )
+
+        assert result is not None
+        assert result.status == SummaryStatus.DISABLED
+        mock_summary_repo.update_status.assert_not_called()
+        mock_prompt_builder.build.assert_not_called()
 
 
 class TestDailySummaryServiceFailure:

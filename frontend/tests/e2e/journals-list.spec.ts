@@ -887,26 +887,33 @@ test.describe('Journal List Page', () => {
       const parentCheckbox = filtersSection.getByLabel(parentTag.name);
       await expect(parentCheckbox).toHaveAttribute('aria-checked', 'false');
 
-      // Arm the wait before the click so the response cannot be missed, then
-      // click exactly once. No retry loop: the checkbox starts unchecked and
-      // Playwright waits for it to be actionable.
-      const parentFilterResponse = page.waitForResponse(
-        response =>
-          response.url().includes('/api/journals') &&
-          response.url().includes('tag_ids=') &&
-          response.status() === 200
-      );
-      await parentCheckbox.click();
-      await parentFilterResponse;
+      // The click can be swallowed while the tag list settles: Playwright
+      // reports it done, no handler runs, and a `waitForResponse` armed
+      // beforehand then times out although the page is fine (it failed exactly
+      // so on Firefox in CI). Retry level-triggered on the checkbox's own
+      // state — click only while it still reads unchecked, so a landed click
+      // is never repeated (a second one would clear the filter).
+      await expect(async () => {
+        if ((await parentCheckbox.getAttribute('aria-checked')) !== 'true') {
+          await parentCheckbox.click({ timeout: 2000 });
+        }
+        await expect(parentCheckbox).toHaveAttribute('aria-checked', 'true', {
+          timeout: 2000,
+        });
+      }).toPass({ timeout: 15000 });
 
+      // The list assertions double as the wait for the filtered fetch. The
+      // negative one goes first: the list still shows the unfiltered results
+      // until the refetch lands, and Crag Day is in those too, so asserting it
+      // visible first would pass against stale content and prove nothing.
+      await expect(
+        page.getByRole('heading', { name: /Untagged Errand/i })
+      ).toBeHidden({ timeout: 30000 });
       // The journal carries only the child tag, but the parent filter expands
       // to descendants server-side (ITER17-002 Phase 1).
       await expect(
         page.getByRole('heading', { name: /Crag Day/i })
-      ).toBeVisible({ timeout: 30000 });
-      await expect(
-        page.getByRole('heading', { name: /Untagged Errand/i })
-      ).toBeHidden();
+      ).toBeVisible();
     });
 
     test('should return the union of journals when multiple tags are selected', async ({

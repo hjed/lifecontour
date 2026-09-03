@@ -1,5 +1,32 @@
 import { test, expect } from './fixtures';
+import type { Locator, Page } from '@playwright/test';
 import { ContactTestHelpers } from './utils/test-helpers';
+
+/**
+ * Open the review queue sidebar from the journals page and return it.
+ *
+ * The Review Queue button shares the header row with Export Logbook, whose
+ * click was found to be swallowed by the journal list scrolling itself to
+ * today just after the page renders — so wait for `journals-list-ready`, the
+ * list's own post-scroll signal, before clicking. The click is then retried
+ * level-triggered on the sidebar itself: opening is `setQueueOpen(true)`, not
+ * a toggle, so a click landing while the sheet is already sliding in is
+ * harmless, and the retry cannot close what the first click opened.
+ */
+async function openReviewQueue(page: Page): Promise<Locator> {
+  await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+  const queueBtn = page.getByRole('button', { name: /Review Queue/i });
+  await expect(queueBtn).toBeVisible();
+
+  const sidebar = page.locator('[role="dialog"]', { hasText: 'Review Queue' });
+  await expect(async () => {
+    if (!(await sidebar.isVisible())) {
+      await queueBtn.click({ timeout: 2000 });
+    }
+    await expect(sidebar).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 15000 });
+  return sidebar;
+}
 
 test.describe('Journal Review Queue', () => {
   test('should display Needs Review badge on journal list and allow resolving via sidebar', async ({
@@ -63,15 +90,8 @@ test.describe('Journal Review Queue', () => {
     await expect(sourceHeading.getByText('Needs Review')).toBeVisible();
 
     // 5. Open Review Queue Sidebar
-    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
-    await expect(queueBtn).toBeVisible();
-    await queueBtn.click();
-
     // 6. Verify sidebar content
-    const sidebar = page.locator('[role="dialog"]', {
-      hasText: 'Review Queue',
-    });
-    await expect(sidebar).toBeVisible();
+    const sidebar = await openReviewQueue(page);
     await expect(sidebar).toContainText('duplicate journal');
     await expect(sidebar).toContainText('95% Match');
 
@@ -212,14 +232,7 @@ test.describe('Journal Review Queue', () => {
 
     await contactTestHelpers.navigateToAuthenticatedPage('/journals');
 
-    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
-    await expect(queueBtn).toBeVisible();
-    await queueBtn.click();
-
-    const sidebar = page.locator('[role="dialog"]', {
-      hasText: 'Review Queue',
-    });
-    await expect(sidebar).toBeVisible();
+    const sidebar = await openReviewQueue(page);
     await expect(sidebar).toContainText('Dismiss Candidate Duplicate');
 
     const dismissBtn = sidebar.getByTestId(
@@ -315,14 +328,7 @@ test.describe('Journal Review Queue', () => {
 
     // Navigate to journals and open the review queue
     await contactTestHelpers.navigateToAuthenticatedPage('/journals');
-    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
-    await expect(queueBtn).toBeVisible();
-    await queueBtn.click();
-
-    const sidebar = page.locator('[role="dialog"]', {
-      hasText: 'Review Queue',
-    });
-    await expect(sidebar).toBeVisible();
+    const sidebar = await openReviewQueue(page);
 
     // Click the "Merge All Identical" button and wait for both the POST
     // auto-merge response and the subsequent GET review-items refetch.
@@ -410,14 +416,7 @@ test.describe('Journal Review Queue', () => {
 
     // Navigate and open review queue
     await contactTestHelpers.navigateToAuthenticatedPage('/journals');
-    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
-    await expect(queueBtn).toBeVisible();
-    await queueBtn.click();
-
-    const sidebar = page.locator('[role="dialog"]', {
-      hasText: 'Review Queue',
-    });
-    await expect(sidebar).toBeVisible();
+    const sidebar = await openReviewQueue(page);
 
     // Click "Confirm Match" to open merge dialog
     const confirmBtn = sidebar
@@ -517,14 +516,7 @@ test.describe('Journal Review Queue', () => {
 
     // Navigate and open review queue
     await contactTestHelpers.navigateToAuthenticatedPage('/journals');
-    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
-    await expect(queueBtn).toBeVisible();
-    await queueBtn.click();
-
-    const sidebar = page.locator('[role="dialog"]', {
-      hasText: 'Review Queue',
-    });
-    await expect(sidebar).toBeVisible();
+    const sidebar = await openReviewQueue(page);
 
     // Click "Merge All Identical" and wait for both the POST and the
     // subsequent GET refetch so the sidebar has up-to-date items.
@@ -628,14 +620,7 @@ test.describe('Journal Review Queue', () => {
 
     // Navigate to journals page and open review queue
     await contactTestHelpers.navigateToAuthenticatedPage('/journals');
-    const queueBtn = page.getByRole('button', { name: /Review Queue/i });
-    await expect(queueBtn).toBeVisible();
-    await queueBtn.click();
-
-    const sidebar = page.locator('[role="dialog"]', {
-      hasText: 'Review Queue',
-    });
-    await expect(sidebar).toBeVisible();
+    const sidebar = await openReviewQueue(page);
     await expect(sidebar).toContainText('92% Match');
 
     // Click "Confirm Match" to start merge flow

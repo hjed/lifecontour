@@ -121,8 +121,13 @@ class DailySummaryService:
             user_id, summary_date, timezone
         )
 
-        # 3. Check eligibility
-        if not self._eligibility_checker.is_eligible(summary_input.journal_count):
+        # 3. Check eligibility. Today (in the user's timezone) is always
+        #    eligible; a past or future day needs the journal threshold.
+        if not self._eligibility_checker.is_eligible(
+            summary_input.journal_count,
+            summary_date=summary_date,
+            timezone=timezone,
+        ):
             logger.info(
                 "Day %s has %d journals, below threshold — not eligible",
                 summary_date,
@@ -164,7 +169,10 @@ class DailySummaryService:
         summary_input: DailySummaryInput,
         transaction: AsyncConnection,
     ) -> JournalDailySummary:
-        """Persist a DISABLED summary for an ineligible day (own unit of work)."""
+        """Persist a DISABLED summary for an ineligible day (own unit of work).
+
+        Only a past or future day can reach here — today is always eligible.
+        """
         disabled_summary = JournalDailySummary(
             user_id=user_id,
             summary_date=summary_date,
