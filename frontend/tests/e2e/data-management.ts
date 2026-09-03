@@ -1954,17 +1954,10 @@ export class TestDataManager {
    * teardown that throws replaces the test's real verdict with its own.
    */
   private async cleanupJournals(): Promise<void> {
-    for (const journalId of this.createdJournalIds) {
-      try {
-        await this.deleteJournalAndItsTasks(journalId);
-        console.debug(`🗑️ [Data Manager] Deleted journal ${journalId}`);
-      } catch (error) {
-        console.debug(
-          `⚠️ [Data Manager] Error deleting journal ${journalId}:`,
-          error
-        );
-      }
-    }
+    await this.deleteInBatches(this.createdJournalIds, 'journal', async id => {
+      await this.deleteJournalAndItsTasks(id);
+      return true;
+    });
   }
 
   private async cleanupSpecificItems(
@@ -1972,16 +1965,61 @@ export class TestDataManager {
     endpointPrefix: string,
     itemName: string
   ): Promise<void> {
-    for (const itemId of items) {
+    await this.deleteInBatches(items, itemName, async id => {
+      const response = await this.page.request.delete(
+        `${endpointPrefix}/${id}`
+      );
+      // 404 means already gone — that is the outcome cleanup wants.
+      return response.ok() || response.status() === 404;
+    });
+  }
+
+  /**
+   * Delete items in concurrent batches, then retry any failures once,
+   * sequentially and in order.
+   *
+   * The batches carry the speed: one HTTP round-trip per BATCH instead of per
+   * item. The sequential retry pass carries the correctness: hierarchies
+   * (parent/child tags, journals with children) can refuse a delete while a
+   * sibling in the same batch still holds a reference, and in the shared
+   * backend namespace a leaked item pollutes every test after this one — so
+   * an ordering casualty gets a second, conflict-free attempt rather than a
+   * log line.
+   */
+  private async deleteInBatches(
+    items: readonly string[],
+    itemName: string,
+    deleteOne: (id: string) => Promise<boolean>
+  ): Promise<void> {
+    const batchSize = 10;
+    const failed: string[] = [];
+
+    for (let i = 0; i < items.length; i += batchSize) {
+      const batch = items.slice(i, i + batchSize);
+      await Promise.allSettled(
+        batch.map(async itemId => {
+          try {
+            if (await deleteOne(itemId)) {
+              console.debug(`🗑️ [Data Manager] Deleted ${itemName} ${itemId}`);
+            } else {
+              failed.push(itemId);
+            }
+          } catch {
+            failed.push(itemId);
+          }
+        })
+      );
+    }
+
+    for (const itemId of failed) {
       try {
-        const response = await this.page.request.delete(
-          `${endpointPrefix}/${itemId}`
-        );
-        if (response.ok()) {
-          console.debug(`🗑️ [Data Manager] Deleted ${itemName} ${itemId}`);
+        if (await deleteOne(itemId)) {
+          console.debug(
+            `🗑️ [Data Manager] Deleted ${itemName} ${itemId} on retry`
+          );
         } else {
           console.debug(
-            `⚠️ [Data Manager] Failed to delete ${itemName} ${itemId}: ${response.status()}`
+            `⚠️ [Data Manager] Failed to delete ${itemName} ${itemId} after retry`
           );
         }
       } catch (error) {

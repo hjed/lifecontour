@@ -40,7 +40,15 @@ export default defineConfig({
   /* Retry failed tests to identify flaky tests vs genuine failures */
   retries: process.env.CI ? 2 : 0,
 
-  /* Use single worker to prevent OAuth race conditions between parallel tests */
+  /*
+   * Single worker — load-bearing, and NOT about OAuth: auth happens once in
+   * the setup project. All tests share one backend user and, more
+   * importantly, contacts and tags are global in the backend (no user_id
+   * column), so parallel workers would see each other's data and break every
+   * count/empty-state assertion. Fixtures like clearAllJournals() also
+   * assume they own the whole dataset. Raising this requires user-scoped
+   * contacts/tags (a product change) plus per-worker test users.
+   */
   workers: 1,
 
   /* Reporter configuration: GitHub annotations + HTML report on CI, list reporter locally */
