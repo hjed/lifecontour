@@ -526,20 +526,29 @@ test.describe('Journal List Page', () => {
       }
 
       const endLabel = `${rangeEnd.getUTCDate()} ${monthNames[rangeEnd.getUTCMonth()]} ${rangeEnd.getUTCFullYear()}`;
-      await endGrid
-        .getByRole('button', { name: new RegExp(`\\b${endLabel}\\b`) })
-        .click();
-
-      // The completed range, read off the trigger. This replaces a
-      // `waitForResponse` for a `/api/journals` call carrying `end_date`, which
-      // could never have gated anything: the *first* click already produces a
-      // complete one-day range, so it already sends `end_date`, and the wait was
-      // satisfied by that request rather than by this one.
-      await expect(dateRangeButton).toHaveText(
-        new RegExp(
-          `${displayDate(rangeStart)}\\s*-\\s*${displayDate(rangeEnd)}`
-        )
+      const fullRangeText = new RegExp(
+        `${displayDate(rangeStart)}\\s*-\\s*${displayDate(rangeEnd)}`
       );
+
+      // The end click can be swallowed the same way the start click could:
+      // painting the single-day selection re-renders the cells, and a click
+      // into that re-render reports success without any handler running (it
+      // failed exactly so in CI even with the commit-gate above). Retry it
+      // level-triggered on the trigger's own text — click only while the range
+      // still reads single-day, so a landed click is never repeated (a third
+      // click in range mode would restart the selection). The completed-range
+      // assertion doubles as the wait; a `waitForResponse` on `end_date` could
+      // never gate this, since the first click already sends one.
+      await expect(async () => {
+        if (!fullRangeText.test((await dateRangeButton.textContent()) ?? '')) {
+          await endGrid
+            .getByRole('button', { name: new RegExp(`\\b${endLabel}\\b`) })
+            .click({ timeout: 2000 });
+        }
+        await expect(dateRangeButton).toHaveText(fullRangeText, {
+          timeout: 2000,
+        });
+      }).toPass({ timeout: 15000 });
 
       // Verify only the Middle journal is visible (day2 is within the range)
       await expect(

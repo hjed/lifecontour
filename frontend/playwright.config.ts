@@ -145,11 +145,20 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'pnpm dev',
+    // CI runs a production build: `next dev` pays per-route compilation on
+    // every cold visit and renders slower throughout, which across the whole
+    // suite costs far more than one up-front `next build` — and prod mode
+    // also removes Fast Refresh as a flake source. Locally the dev server
+    // keeps iteration fast (no rebuild between runs).
+    // NEXT_PUBLIC_* vars are inlined at build time, and rewrites() reads
+    // BACKEND_URL when the config loads — both commands below run under the
+    // same env block, so build and serve see identical values.
+    command: process.env.CI ? 'pnpm build && pnpm start' : 'pnpm dev',
     url: FRONTEND_TEST_URL,
     // Default to a fresh repo-controlled frontend server for deterministic local runs.
     reuseExistingServer: SHOULD_REUSE_PLAYWRIGHT_WEB_SERVER,
-    timeout: 120 * 1000, // 2 minutes for dev server to start
+    // CI needs headroom for the production build before the server comes up.
+    timeout: (process.env.CI ? 300 : 120) * 1000,
     stdout: 'ignore', // Suppress dev server output to avoid cluttering test output
     stderr: 'pipe', // Show errors from dev server
     env: {
@@ -158,6 +167,11 @@ export default defineConfig({
       BACKEND_URL: `http://localhost:${BACKEND_TEST_PORT}`, // Use test backend port
       NEXT_PUBLIC_API_URL: `http://localhost:${BACKEND_TEST_PORT}`,
       NEXT_PUBLIC_OAUTH_PROVIDER_URL: `http://localhost:${OAUTH_PUBLIC_TEST_PORT}`,
+      // The app's Docker builds use `output: standalone`, which `next start`
+      // explicitly does not support (it warns to use the standalone server
+      // instead). Build without it for the `next start`-served e2e server so
+      // the suite runs a supported configuration.
+      NEXT_OUTPUT_STANDALONE: 'false',
     },
   },
 });

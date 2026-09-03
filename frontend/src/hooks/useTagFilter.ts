@@ -59,8 +59,16 @@ export function useTagFilter(
     params.delete(TAG_PARAM);
     const qs = params.toString();
     const target = qs ? `${pathname}?${qs}` : basePath;
-    router.push(target as Route);
-  }, [router, searchParams, pathname, basePath]);
+    // A native shallow history update rather than router.push: in production
+    // builds, pushing the bare prerendered pathname (e.g. `/journals` from
+    // `/journals?tag=x`) is silently ignored by the App Router — the param'd
+    // URL shares the static route's cache entry, so the push is treated as a
+    // no-op and "clear filter" does nothing. dev never prerenders, which is
+    // why only production hit it. The tag param is read exclusively through
+    // useSearchParams, which Next keeps in sync with history.pushState, so a
+    // shallow update is also the semantically right (and cheaper) operation.
+    window.history.pushState(null, '', target);
+  }, [searchParams, pathname, basePath]);
 
   return { tagId, setTag, clearTag };
 }
