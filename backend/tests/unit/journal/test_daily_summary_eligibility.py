@@ -200,9 +200,15 @@ class TestTodayIsResolvedInTheUsersTimezone:
 
 
 class TestDefaultClock:
-    """Without an injected clock the checker reads the real time."""
+    """Without an injected clock the checker reads the real time.
 
-    def test_default_clock_reads_now(self) -> None:
+    Asserted against a day decades past rather than against a second reading
+    of the real clock, which could straddle midnight and flip the answer.
+    """
+
+    def test_default_clock_treats_a_long_past_day_as_past(self) -> None:
         checker = DailySummaryEligibilityChecker()
-        today = datetime.now(tz=UTC).date()
-        assert checker.is_eligible(0, summary_date=today, timezone="UTC") is True
+        assert (
+            checker.is_eligible(1, summary_date=date(2000, 1, 1), timezone="UTC")
+            is False
+        )

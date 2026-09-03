@@ -9,7 +9,7 @@ input assembly are stubbed; the repository and connection are real.
 """
 
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -137,12 +137,15 @@ class TestDailySummaryEligibilityIntegration:
 
     The eligibility checker, the summary repository and the user-settings
     repository are all real; only input assembly and the AI call are stubbed.
-    "Today" is whatever the *saved* timezone says it is, computed at call time,
-    so the test never assumes the UTC date is the user's date.
+    "Today" is whatever the *saved* timezone says it is, so the test never
+    assumes the UTC date is the user's date — and it is derived from the same
+    fixed instant the checker's clock reports, so a real midnight passing
+    between the two reads cannot flip the outcome.
     """
 
     _USER = "user_ds_elig_integ"
     _TIMEZONE = "Pacific/Auckland"
+    _NOW = datetime(2026, 9, 3, 14, 30, tzinfo=UTC)
 
     @pytest.fixture
     async def today(self, async_connection) -> date:
@@ -150,7 +153,7 @@ class TestDailySummaryEligibilityIntegration:
         await settings_repo.save(
             UserSettings(user_id=self._USER, timezone=self._TIMEZONE)
         )
-        return today_in(resolve_timezone(self._TIMEZONE))
+        return today_in(resolve_timezone(self._TIMEZONE), self._NOW)
 
     def _service(
         self, async_connection, *, summary_date: date, journal_count: int
@@ -169,7 +172,7 @@ class TestDailySummaryEligibilityIntegration:
         prompt_builder.build.return_value = "prompt"
         return DailySummaryService(
             input_assembler=assembler,
-            eligibility_checker=DailySummaryEligibilityChecker(),
+            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
             prompt_builder=prompt_builder,
             summary_repo=SqlJournalDailySummaryRepository(async_connection),
             gemini_api_key="test-key",
