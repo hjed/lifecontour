@@ -105,7 +105,9 @@ class DailySummaryService:
         requests that both pass the cache check before either marks the row
         (two stale reads at 07:00, or two reads of an invalidated row) race for
         it, exactly one wins, and the loser returns the row the winner is
-        regenerating without calling the AI.
+        regenerating — or has already regenerated — without calling the AI. The
+        claim is keyed on the ``generated_at`` the cache check saw, so a slow
+        request cannot regenerate over a result a faster one finished meanwhile.
 
         Committing in the service layer (rather than relying on teardown) is
         required because the request connection has no commit backstop, so an
@@ -172,9 +174,14 @@ class DailySummaryService:
 
         # 4. Claim the GENERATING marker as its own short unit of work, so
         #    concurrent callers see it and the row lock is released before the
-        #    AI call. Losing the claim means another request got here between
-        #    our cache check and now: leave the generation to it.
-        if not await self._claim_generation(user_id, summary_date, transaction):
+        #    AI call. The claim carries the generated_at the cache check saw:
+        #    losing it means another request got here between then and now —
+        #    and may already have finished — so leave the generation to it and
+        #    hand back whatever it has produced.
+        seen_generated_at = existing.generated_at if existing else None
+        if not await self._claim_generation(
+            user_id, summary_date, seen_generated_at, transaction
+        ):
             logger.info(
                 "Daily summary for %s on %s was claimed by a concurrent request",
                 user_id,
@@ -226,16 +233,22 @@ class DailySummaryService:
 
     @transactional
     async def _claim_generation(
-        self, user_id: str, summary_date: date, transaction: AsyncConnection
+        self,
+        user_id: str,
+        summary_date: date,
+        seen_generated_at: datetime | None,
+        transaction: AsyncConnection,
     ) -> bool:
         """Commit the GENERATING claim as its own unit of work.
 
         Returns whether this run won it. The repository's claim is one atomic
-        statement that creates the row if needed and otherwise moves only the
-        status, so a previous generation's text and counters survive until the
-        new result replaces them.
+        compare-and-set on ``generated_at`` that creates the row if needed and
+        otherwise moves only the status, so a previous generation's text and
+        counters survive until the new result replaces them.
         """
-        return await self._summary_repo.claim_for_generation(user_id, summary_date)
+        return await self._summary_repo.claim_for_generation(
+            user_id, summary_date, seen_generated_at=seen_generated_at
+        )
 
     @transactional
     async def _persist_generated(

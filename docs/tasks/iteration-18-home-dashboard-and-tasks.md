@@ -10594,9 +10594,14 @@ last-writer-wins guards are untouched. The endpoint and tool docstrings say what
   returns the row the winner is regenerating, calling no AI — the same answer it gives when it sees
   `GENERATING` at the cache check. The claim creates the row when there is none (the `upsert` fallback
   the old marker needed is gone) and otherwise moves only the status, so the previous generation's text,
-  counters and `generated_at` survive until the new result replaces them. This is the honest reading of
-  "concurrent generation is still prevented": the guard now holds at the width of one statement rather than
-  the width of a request.
+  counters and `generated_at` survive until the new result replaces them. A second review round found the
+  remaining hole — a *slow* request that read the stale row, while a faster one claimed, generated and
+  finished, would find the row no longer `GENERATING` and claim it again, regenerating over the fresh
+  result — so the claim is a **compare-and-set on `generated_at`**: it carries the value the cache check
+  saw (`None` for no row) and loses when the row's has moved, since every completed generation moves it.
+  The loser then returns whatever the winner produced, which may already be the fresh summary. This is the
+  honest reading of "concurrent generation is still prevented": the guard now holds at the width of one
+  statement rather than the width of a request, however slow the request.
 - **The freshness checker is status-agnostic.** `is_stale` says *when* a row was generated relative to
   today; whether the row may be served is the caller's rule. `get_or_generate` consults it only for a
   `GENERATED` row (a `PENDING` or `FAILED` row regenerates on its own account, and a `GENERATING` row is
@@ -10616,8 +10621,9 @@ day is served however old, a `GENERATING` today-row is left alone, a lost claim 
 with no prompt built and no write, the checker receives the timezone the settings repository returned,
 and it is not consulted for a `PENDING` row. Repository (`test_daily_summary_repository.py`, real
 Postgres): a claim creates a missing row as `GENERATING`, claims a `GENERATED` row keeping its text,
-counters and `generated_at`, loses on a row already `GENERATING`, wins again once a `FAILED` run released
-it, and is scoped to one user and day. Dashboard
+counters and `generated_at`, loses on a row already `GENERATING`, loses when `generated_at` has moved since
+the caller looked (and when a caller that saw no row finds a generated one), wins a `FAILED` row that never
+generated, wins again once a `FAILED` run released it, and is scoped to one user and day. Dashboard
 (`test_summary_section.py`, `test_home_dashboard_service.py`): a stale generated row maps to *generating*
 with prose withheld and counters kept, `stale=True` changes nothing for any other status, the service judges
 staleness against the user's zone either side of Sydney midnight (the same instant reads as generated for a
@@ -10628,7 +10634,9 @@ its `generated_at` advances with one AI call; one from 00:30 is served from cach
 unchanged; yesterday's is served from cache; a second read arriving *during* the first's AI call sees the
 committed `GENERATING` marker, calls no AI, and the total is one; and the narrower race — a second
 request claiming the row *between* the first's cache check and its own claim, placed there during the
-first's input assembly — leaves the first standing down with no AI call and the row held by the second.
+first's input assembly — leaves the first standing down with no AI call and the row held by the second;
+and the widest race — the second request running to completion in that same window — leaves the first
+returning the second's fresh result with no AI call and nothing written over it.
 MCP
 (`test_daily_summary_freshness_mcp.py`): `get_daily_summary` through the mounted app, the real container
 and the real service — only the Gemini call stubbed and the DI-built checkers' clock pinned — returns the

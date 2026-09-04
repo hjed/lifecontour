@@ -382,7 +382,12 @@ class TestDailySummaryFreshnessIntegration:
         assembled = assembler.assemble.return_value
 
         async def b_claims_while_a_assembles(*args: object, **kwargs: object):
-            assert await repo_b.claim_for_generation(self._USER, today) is True
+            assert (
+                await repo_b.claim_for_generation(
+                    self._USER, today, seen_generated_at=self._LAST_NIGHT
+                )
+                is True
+            )
             return assembled
 
         assembler.assemble.side_effect = b_claims_while_a_assembles
@@ -396,6 +401,48 @@ class TestDailySummaryFreshnessIntegration:
         assert persisted is not None
         assert persisted.status == SummaryStatus.GENERATING
         assert persisted.summary_text == self._OLD_TEXT
+
+    @pytest.mark.asyncio
+    async def test_a_slow_stale_read_does_not_regenerate_over_a_finished_run(
+        self, async_connection, today: date
+    ):
+        """The widest race: B claims, generates and finishes while A is still
+        between its cache check and its claim.
+
+        A's claim carries the ``generated_at`` it saw; B's result moved it, so
+        A loses, calls no AI, and returns B's fresh summary instead of writing
+        its own over the top.
+        """
+        await self._seed_generated(async_connection, today, self._LAST_NIGHT)
+        a_calls: list[str] = []
+        b_calls: list[str] = []
+        a = self._service(async_connection, summary_date=today, ai_calls=a_calls)
+        b = self._service(async_connection, summary_date=today, ai_calls=b_calls)
+        assembler = cast(AsyncMock, a._input_assembler)
+        assembled = assembler.assemble.return_value
+
+        async def b_runs_to_completion_while_a_assembles(
+            *args: object, **kwargs: object
+        ):
+            finished = await b.get_or_generate(self._USER, today, async_connection)
+            assert finished is not None
+            assert finished.status == SummaryStatus.GENERATED
+            return assembled
+
+        assembler.assemble.side_effect = b_runs_to_completion_while_a_assembles
+
+        result = await a.get_or_generate(self._USER, today, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == self._NEW_TEXT
+        assert a_calls == []
+        assert len(b_calls) == 1
+        persisted = await SqlJournalDailySummaryRepository(
+            async_connection
+        ).find_by_user_and_date(self._USER, today)
+        assert persisted is not None
+        assert persisted.generated_at == result.generated_at
 
     @pytest.mark.asyncio
     async def test_concurrent_reads_of_a_stale_summary_generate_once(

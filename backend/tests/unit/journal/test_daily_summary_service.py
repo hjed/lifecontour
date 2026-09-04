@@ -371,7 +371,7 @@ class TestDailySummaryServiceTodayIsAlwaysEligible:
         assert result.journal_count == 0
         assert result.summary_text == "Quiet day."
         mock_summary_repo.claim_for_generation.assert_called_once_with(
-            "user123", date(2026, 9, 4)
+            "user123", date(2026, 9, 4), seen_generated_at=None
         )
 
     @pytest.mark.asyncio
@@ -481,8 +481,10 @@ class TestDailySummaryServiceFreshness:
             "user123", self._SYDNEY_TODAY, "Australia/Sydney"
         )
         # The existing pipeline ran: the GENERATING claim guards concurrency.
+        # ...carrying the generated_at this run saw, so a run that finished in
+        # between (moving it) makes this claim lose rather than overwrite.
         mock_summary_repo.claim_for_generation.assert_called_once_with(
-            "user123", self._SYDNEY_TODAY
+            "user123", self._SYDNEY_TODAY, seen_generated_at=self._LAST_NIGHT
         )
 
     @pytest.mark.asyncio
@@ -593,6 +595,41 @@ class TestDailySummaryServiceFreshness:
         mock_prompt_builder.build.assert_not_called()
         mock_summary_repo.upsert.assert_not_called()
         mock_summary_repo.update_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_slow_stale_read_does_not_regenerate_over_a_finished_run(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """The claim carries the generated_at this run saw, so it loses to a
+        run that claimed *and finished* in between — and returns that fresh
+        result rather than calling the AI over it."""
+        stale = self._generated(self._SYDNEY_TODAY, self._LAST_NIGHT)
+        finished_by_the_other = self._generated(
+            self._SYDNEY_TODAY, datetime(2026, 9, 3, 14, 20, tzinfo=UTC)
+        )
+        finished_by_the_other.summary_text = "The other run's."
+        mock_summary_repo.find_by_user_and_date.side_effect = [
+            stale,
+            finished_by_the_other,
+        ]
+        mock_summary_repo.claim_for_generation.return_value = False
+        service = self._service(
+            mock_input_assembler, mock_prompt_builder, mock_summary_repo
+        )
+
+        result = await service.get_or_generate(
+            "user123", self._SYDNEY_TODAY, transaction=_NO_TXN
+        )
+
+        assert result is finished_by_the_other
+        mock_summary_repo.claim_for_generation.assert_called_once_with(
+            "user123", self._SYDNEY_TODAY, seen_generated_at=self._LAST_NIGHT
+        )
+        mock_prompt_builder.build.assert_not_called()
+        mock_summary_repo.upsert.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_the_checker_receives_the_users_timezone(
