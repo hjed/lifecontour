@@ -2201,17 +2201,24 @@ async def _process_journal_upsert_event(
         if row.location:
             event_payload["location"] = row.location
 
-        # The stored bounds are UTC instants of local midnight, so the date the
-        # event falls on is read in the event's own zone, else the user's
-        # configured one (all-day events never carry a zone of their own),
-        # else UTC.
+        # The stored bounds are UTC instants of local midnight, so the date an
+        # all-day event falls on is read in the event's own zone, else the
+        # user's configured one, else UTC. A timed event's clock times are
+        # only anchored in the zone the row itself records: an imported
+        # event's times are local to the Google event's zone, which older
+        # rows never stored, and re-anchoring them in the user's zone would
+        # move the event. Without a zone the stored instants are pushed as
+        # they are.
+        timezone = row.timezone
+        if row.is_all_day and not timezone:
+            timezone = row.user_timezone
         calendar_info = CalendarInfo(
             calendar_id=row.calendar_id,
             journal_id=row.journal_id,
             start_time=row.start_time,
             end_time=row.end_time,
             is_all_day=bool(row.is_all_day),
-            timezone=row.timezone or row.user_timezone,
+            timezone=timezone,
             validate=False,
         )
         event_payload["start"], event_payload["end"] = google_event_times(
@@ -3352,6 +3359,23 @@ async def _save_calendar_sync_token(
     )
 
 
+def _iana_zone_name(value: object) -> str | None:
+    """``value`` when it names a zone ``ZoneInfo`` can resolve, else ``None``.
+
+    A stored setting is user input and a row column may be absent, so the
+    name is checked before it is trusted anywhere a bad one would raise.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    from zoneinfo import ZoneInfo
+
+    try:
+        ZoneInfo(value)
+    except Exception:  # noqa: BLE001
+        return None
+    return value
+
+
 async def _load_calendar_sync_token(
     session: Any,
     user_id: str | int,
@@ -3445,9 +3469,14 @@ async def sync_calendar_events(
             client = _create_google_client(session, user_id, google_account_email)
 
             # Fetch synced calendars from DB
+            # The user's configured zone rides along on each calendar row so an
+            # imported all-day event can be stored on the day the user reads
+            # it as, without a separate lookup per sync.
             cal_stmt = text("""
-                SELECT c.id as calendar_id, c.google_calendar_id, c.is_synced_to_google
+                SELECT c.id as calendar_id, c.google_calendar_id, c.is_synced_to_google,
+                       us.timezone AS user_timezone
                 FROM calendars c
+                LEFT JOIN user_settings us ON us.user_id = c.user_id
                 WHERE c.user_id = :user_id AND c.is_synced_to_google = true
             """)
             cal_result = await session.execute(cal_stmt, {"user_id": str(user_id)})
@@ -3465,6 +3494,7 @@ async def sync_calendar_events(
 
                 google_calendar_id = cal_row.google_calendar_id or "primary"
                 calendar_id = cal_row.calendar_id
+                user_timezone = _iana_zone_name(cal_row.user_timezone)
 
                 # Get existing per-calendar sync token
                 existing_sync_token = await _load_calendar_sync_token(
@@ -3797,6 +3827,7 @@ async def sync_calendar_events(
                             str(user_id),
                             uuid.UUID(str(calendar_id)),
                             self_email=google_account_email,
+                            all_day_timezone=user_timezone,
                         )
                         if transform_result is None:
                             metrics["events_skipped"] += 1
@@ -3823,6 +3854,7 @@ async def sync_calendar_events(
                             "end_time": calendar_info.end_time.isoformat()
                             if calendar_info.end_time
                             else None,
+                            "timezone": calendar_info.timezone,
                             "event_state": calendar_info.event_state.value
                             if hasattr(calendar_info.event_state, "value")
                             else calendar_info.event_state,

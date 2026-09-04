@@ -470,7 +470,7 @@ class TestProcessJournalEventTimezones:
         assert payload["end"] == {"date": "2026-09-05"}
 
     @pytest.mark.asyncio
-    async def test_timed_event_anchors_clock_times_in_the_users_timezone(self):
+    async def test_timed_event_anchors_clock_times_in_its_own_timezone(self):
         from datetime import time
 
         payload = await self._push(
@@ -478,7 +478,8 @@ class TestProcessJournalEventTimezones:
                 is_all_day=False,
                 start_time=time(9, 0),
                 end_time=time(10, 0),
-                user_timezone="Australia/Sydney",
+                timezone="Australia/Sydney",
+                user_timezone="America/Los_Angeles",
             )
         )
 
@@ -490,3 +491,27 @@ class TestProcessJournalEventTimezones:
             "dateTime": "2026-09-05T00:00:00Z",
             "timeZone": "Australia/Sydney",
         }
+
+    @pytest.mark.asyncio
+    async def test_timed_event_without_its_own_timezone_pushes_the_stored_instants(
+        self,
+    ):
+        """An imported event's clock times are local to the Google event's zone,
+        which the row does not record, so the user's zone must not re-anchor
+        them; the stored instants are the truth."""
+        from datetime import time
+
+        payload = await self._push(
+            self._session_factory(
+                is_all_day=False,
+                event_date_range_start=datetime(2026, 9, 4, 16, 0, tzinfo=UTC),
+                event_date_range_end=datetime(2026, 9, 4, 17, 0, tzinfo=UTC),
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                timezone=None,
+                user_timezone="Australia/Sydney",
+            )
+        )
+
+        assert payload["start"] == {"dateTime": "2026-09-04T16:00:00Z"}
+        assert payload["end"] == {"dateTime": "2026-09-04T17:00:00Z"}

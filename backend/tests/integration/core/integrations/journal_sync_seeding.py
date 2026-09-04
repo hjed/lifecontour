@@ -86,6 +86,7 @@ def sync_event(
     existing_journal_id: int | None = None,
     recurring_event_id: str | None = None,
     external_identity: str | None = None,
+    timezone: str | None = None,
 ) -> OutboxEvent:
     """A `journal_event.created` / `.updated` / `.cancelled` outbox event.
 
@@ -110,6 +111,7 @@ def sync_event(
         "calendar_info_data": {
             "calendar_id": calendar_id,
             "is_all_day": False,
+            **({"timezone": timezone} if timezone is not None else {}),
         },
         "sync_timestamp": datetime.now(UTC).isoformat(),
         "sync_action": event_type.split(".")[1],

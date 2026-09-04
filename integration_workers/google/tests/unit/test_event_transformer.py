@@ -1045,3 +1045,108 @@ class TestGoogleEventTimes:
 
         assert start == {"dateTime": "2023-10-27T10:00:00Z"}
         assert end == {"dateTime": "2023-10-27T11:00:00Z"}
+
+    def test_timed_event_without_a_timezone_pushes_the_stored_instants(self) -> None:
+        """Clock times are only meaningful in the zone they were entered in;
+        without one the stored instants are the truth."""
+        from event_transformer import google_event_times
+
+        start, end = google_event_times(
+            datetime(2026, 9, 4, 16, 0, tzinfo=UTC),
+            datetime(2026, 9, 4, 17, 0, tzinfo=UTC),
+            self._calendar_info(start_time=time(9, 0), end_time=time(10, 0)),
+        )
+
+        assert start == {"dateTime": "2026-09-04T16:00:00Z"}
+        assert end == {"dateTime": "2026-09-04T17:00:00Z"}
+
+
+class TestInboundAllDayTimezone:
+    """An imported all-day event is stored at local midnight in the zone the
+    user reads dates in, and that zone is recorded on the row.
+
+    Google gives a bare date. Stored at UTC midnight it reads a day early for
+    anyone west of UTC and cannot be pushed back on the right date without
+    guessing; stored at local midnight it matches what the app's own create
+    form writes.
+    """
+
+    def _all_day(self, start: str, end: str) -> GoogleEvent:
+        return GoogleEvent.model_validate(
+            {
+                "id": "birthday",
+                "summary": "Birthday",
+                "start": {"date": start},
+                "end": {"date": end},
+                "status": "confirmed",
+            }
+        )
+
+    def test_all_day_event_is_stored_at_local_midnight_in_the_users_zone(
+        self,
+    ) -> None:
+        result = GoogleEventTransformer().transform_event(
+            self._all_day("2026-09-05", "2026-09-06"),
+            "user_123",
+            uuid.uuid4(),
+            all_day_timezone="Australia/Sydney",
+        )
+        assert result is not None
+        journal, calendar_info = result
+
+        assert journal.event_date_range.start == datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
+        assert journal.event_date_range.end == datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
+        assert calendar_info.is_all_day is True
+        assert calendar_info.timezone == "Australia/Sydney"
+        assert calendar_info.event_start_date == date(2026, 9, 5)
+        assert calendar_info.event_end_date == date(2026, 9, 5)
+
+    def test_multi_day_all_day_event_keeps_its_last_day(self) -> None:
+        result = GoogleEventTransformer().transform_event(
+            self._all_day("2026-09-05", "2026-09-08"),
+            "user_123",
+            uuid.uuid4(),
+            all_day_timezone="Australia/Sydney",
+        )
+        assert result is not None
+        journal, calendar_info = result
+
+        # Google's end is exclusive: 5-8 Sept covers the 5th, 6th and 7th.
+        assert journal.event_date_range.end == datetime(2026, 9, 6, 14, 0, tzinfo=UTC)
+        assert calendar_info.event_end_date == date(2026, 9, 7)
+
+    def test_all_day_event_without_a_zone_keeps_utc_midnight(self) -> None:
+        result = GoogleEventTransformer().transform_event(
+            self._all_day("2026-09-05", "2026-09-06"), "user_123", uuid.uuid4()
+        )
+        assert result is not None
+        journal, calendar_info = result
+
+        assert journal.event_date_range.start == datetime(2026, 9, 5, tzinfo=UTC)
+        assert calendar_info.timezone is None
+
+    def test_a_timed_event_keeps_its_own_zone_over_the_users(self) -> None:
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "meeting",
+                "summary": "Meeting",
+                "start": {
+                    "dateTime": "2026-09-04T09:00:00-07:00",
+                    "timeZone": "America/Los_Angeles",
+                },
+                "end": {
+                    "dateTime": "2026-09-04T10:00:00-07:00",
+                    "timeZone": "America/Los_Angeles",
+                },
+                "status": "confirmed",
+            }
+        )
+
+        result = GoogleEventTransformer().transform_event(
+            google_event, "user_123", uuid.uuid4(), all_day_timezone="Australia/Sydney"
+        )
+        assert result is not None
+        _journal, calendar_info = result
+
+        assert calendar_info.timezone == "America/Los_Angeles"
+        assert calendar_info.start_time == time(9, 0)
