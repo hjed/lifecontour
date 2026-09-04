@@ -37,6 +37,7 @@ from core_shared.models.contacts.serialization import serialize_contact
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncCapability,
 )
+from core_shared.models.journals import CalendarInfo
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import SyncJobRepository
@@ -48,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api_models import ListConnectionsResponse
 
 # Import worker-specific services
+from event_transformer import google_event_times
 from google_auth_service import GoogleAuthService
 from google_client import GoogleAPIClient
 from google_settings import GoogleSettings
@@ -2092,9 +2094,13 @@ async def _process_journal_upsert_event(
                 j.event_date_range_end,
                 j.user_id,
                 jci.is_all_day,
+                jci.start_time,
+                jci.end_time,
+                jci.timezone,
                 jci.location,
                 jci.calendar_id,
                 jci.private_description,
+                us.timezone AS user_timezone,
                 c.is_synced_to_google,
                 c.google_calendar_id,
                 c.access_role,
@@ -2102,6 +2108,7 @@ async def _process_journal_upsert_event(
                 jeel.sync_status
             FROM journals j
             LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
+            LEFT JOIN user_settings us ON us.user_id = j.user_id
             LEFT JOIN calendars c ON jci.calendar_id = c.id
             LEFT JOIN journal_external_event_links jeel ON
                 j.id = jeel.journal_id AND jci.calendar_id = jeel.calendar_id
@@ -2194,16 +2201,22 @@ async def _process_journal_upsert_event(
         if row.location:
             event_payload["location"] = row.location
 
-        if row.is_all_day:
-            start_date = row.event_date_range_start.date().isoformat()
-            end_date = row.event_date_range_end.date() + timedelta(days=1)
-            event_payload["start"] = {"date": start_date}
-            event_payload["end"] = {"date": end_date.isoformat()}
-        else:
-            event_payload["start"] = {
-                "dateTime": row.event_date_range_start.isoformat()
-            }
-            event_payload["end"] = {"dateTime": row.event_date_range_end.isoformat()}
+        # The stored bounds are UTC instants of local midnight, so the date the
+        # event falls on is read in the event's own zone, else the user's
+        # configured one (all-day events never carry a zone of their own),
+        # else UTC.
+        calendar_info = CalendarInfo(
+            calendar_id=row.calendar_id,
+            journal_id=row.journal_id,
+            start_time=row.start_time,
+            end_time=row.end_time,
+            is_all_day=bool(row.is_all_day),
+            timezone=row.timezone or row.user_timezone,
+            validate=False,
+        )
+        event_payload["start"], event_payload["end"] = google_event_times(
+            row.event_date_range_start, row.event_date_range_end, calendar_info
+        )
 
         # Fetch and prune any orphaned links from other calendars (e.g. if the
         # journal was moved).

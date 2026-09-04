@@ -955,3 +955,93 @@ class TestGoogleEventTransformerPrivateDescription:
 
         assert "description" not in payload
         assert payload["summary"] == "Christmas"
+
+
+class TestGoogleEventTimes:
+    """The start/end block of an outbound Google payload.
+
+    Journal date-range bounds are UTC instants of *local* midnight, so the
+    calendar date Google receives must be read in the event's timezone, not
+    UTC. Sydney (UTC+10) is the sharpest case: local midnight is 14:00 UTC the
+    day before.
+    """
+
+    SYDNEY_MIDNIGHT_5_SEPT = datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
+
+    def _calendar_info(self, **overrides: Any) -> CalendarInfo:
+        fields: dict[str, Any] = {
+            "calendar_id": uuid.uuid4(),
+            "is_all_day": False,
+            "event_start_date": date(2026, 9, 5),
+            "event_end_date": date(2026, 9, 5),
+        }
+        fields.update(overrides)
+        return CalendarInfo(**fields)
+
+    def test_all_day_event_uses_the_local_date_in_the_event_timezone(self) -> None:
+        from event_transformer import google_event_times
+
+        start, end = google_event_times(
+            self.SYDNEY_MIDNIGHT_5_SEPT,
+            self.SYDNEY_MIDNIGHT_5_SEPT,
+            self._calendar_info(is_all_day=True, timezone="Australia/Sydney"),
+        )
+
+        assert start == {"date": "2026-09-05"}
+        assert end == {"date": "2026-09-06"}
+
+    def test_all_day_event_without_timezone_uses_the_utc_date(self) -> None:
+        from event_transformer import google_event_times
+
+        start, end = google_event_times(
+            datetime(2023, 12, 25, tzinfo=UTC),
+            datetime(2023, 12, 26, tzinfo=UTC),
+            self._calendar_info(
+                is_all_day=True,
+                event_start_date=date(2023, 12, 25),
+                event_end_date=date(2023, 12, 26),
+            ),
+        )
+
+        assert start == {"date": "2023-12-25"}
+        assert end == {"date": "2023-12-27"}
+
+    def test_timed_event_anchors_clock_times_to_the_local_date(self) -> None:
+        from event_transformer import google_event_times
+
+        start, end = google_event_times(
+            self.SYDNEY_MIDNIGHT_5_SEPT,
+            self.SYDNEY_MIDNIGHT_5_SEPT,
+            self._calendar_info(
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                timezone="Australia/Sydney",
+            ),
+        )
+
+        # 09:00 on 5 Sept in Sydney is 23:00 UTC on 4 Sept.
+        assert start == {
+            "dateTime": "2026-09-04T23:00:00Z",
+            "timeZone": "Australia/Sydney",
+        }
+        assert end == {
+            "dateTime": "2026-09-05T00:00:00Z",
+            "timeZone": "Australia/Sydney",
+        }
+
+    def test_timed_event_without_clock_times_pushes_the_stored_instants(
+        self,
+    ) -> None:
+        from event_transformer import google_event_times
+
+        start, end = google_event_times(
+            datetime(2023, 10, 27, 10, 0, tzinfo=UTC),
+            datetime(2023, 10, 27, 11, 0, tzinfo=UTC),
+            self._calendar_info(
+                event_start_date=date(2023, 10, 27),
+                event_end_date=date(2023, 10, 27),
+            ),
+        )
+
+        assert start == {"dateTime": "2023-10-27T10:00:00Z"}
+        assert end == {"dateTime": "2023-10-27T11:00:00Z"}

@@ -744,3 +744,69 @@ class TestOutboundPushKeepsDeDuplicatedLinks:
 
         client.delete_event.assert_not_called()
         assert await self._link_exists(db_session, journal_id, other_calendar)
+
+
+@pytest.mark.asyncio
+class TestProcessJournalEventTimezoneIntegration:
+    """An all-day event is pushed on the user's local date, not the UTC date."""
+
+    async def test_all_day_event_is_pushed_on_the_users_local_date(self, db_session):
+        user_id = str(uuid.uuid4())
+        google_email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+        calendar_id = str(uuid.uuid4())
+
+        journal_id = await _setup_journal_event_test_data(
+            db_session, user_id, google_email, calendar_id, "Birthday", False
+        )
+
+        # The create form stores local midnight as an instant: midnight on
+        # 5 Sept in Sydney (UTC+10) is 14:00 UTC on 4 Sept. The user has no
+        # per-event timezone (all-day events never carry one), only their
+        # configured setting.
+        sydney_midnight_5_sept = datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
+        await db_session.execute(
+            text("""
+            UPDATE journals
+            SET event_date_range_start = :at, event_date_range_end = :at
+            WHERE id = :journal_id
+            """),
+            {"at": sydney_midnight_5_sept, "journal_id": journal_id},
+        )
+        await db_session.execute(
+            text("""
+            UPDATE journal_calendar_info
+            SET is_all_day = true, timezone = NULL
+            WHERE journal_id = :journal_id
+            """),
+            {"journal_id": journal_id},
+        )
+        await db_session.execute(
+            text("""
+            INSERT INTO user_settings (user_id, timezone)
+            VALUES (:user_id, 'Australia/Sydney')
+            """),
+            {"user_id": user_id},
+        )
+        await db_session.commit()
+
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        mock_client = AsyncMock()
+        mock_client.create_event.return_value = {"id": "google_event_tz", "etag": "e"}
+
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            result = await process_journal_event(
+                ctx={"session_factory": mock_session_factory, "job_id": "tz_job"},
+                event_type="JournalCreated",
+                event_data={"journal_id": journal_id},
+            )
+
+        assert result["status"] == "success"
+        payload = mock_client.create_event.call_args[0][0]
+        assert payload["start"] == {"date": "2026-09-05"}
+        assert payload["end"] == {"date": "2026-09-06"}

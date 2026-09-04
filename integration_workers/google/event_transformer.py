@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from core_shared.models.journals import (
@@ -13,6 +13,68 @@ from core_shared.models.journals.event_state import EventState
 from calendar_models import GoogleEvent, GoogleEventStartEnd
 
 UTC_OFFSET_SUFFIX = "+00:00"
+
+
+def _local_datetime(dt_utc: datetime, timezone_str: str | None) -> datetime:
+    """``dt_utc`` read in ``timezone_str``, or unchanged when there is no zone."""
+    if not timezone_str:
+        return dt_utc
+    try:
+        from zoneinfo import ZoneInfo
+
+        return dt_utc.astimezone(ZoneInfo(timezone_str))
+    except Exception:  # noqa: BLE001
+        return dt_utc
+
+
+def google_event_times(
+    start_dt: datetime, end_dt: datetime, calendar_info: CalendarInfo
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The ``start`` and ``end`` blocks of a Google Calendar event payload.
+
+    Journal date-range bounds are UTC instants of *local* midnight, so the
+    calendar date an event falls on has to be read in the event's timezone:
+    midnight on 5 Sept in Sydney is 14:00 UTC on 4 Sept. Without a zone the
+    UTC date is used.
+
+    An all-day event becomes a ``date`` pair with Google's exclusive end (the
+    day after the last day). A timed event becomes a ``dateTime`` pair; stored
+    clock times are anchored to the local date in the event's zone, and an
+    event with no clock times pushes the stored instants as they are.
+    """
+    if calendar_info.is_all_day:
+        local_start = _local_datetime(start_dt, calendar_info.timezone)
+        local_end = _local_datetime(end_dt, calendar_info.timezone)
+        return (
+            {"date": local_start.strftime("%Y-%m-%d")},
+            {"date": (local_end + timedelta(days=1)).strftime("%Y-%m-%d")},
+        )
+
+    tz: tzinfo = UTC
+    if calendar_info.timezone:
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(calendar_info.timezone)
+        except Exception:  # noqa: BLE001
+            pass
+
+    if calendar_info.start_time is not None:
+        start_dt = datetime.combine(
+            start_dt.astimezone(tz).date(), calendar_info.start_time, tzinfo=tz
+        ).astimezone(UTC)
+    if calendar_info.end_time is not None:
+        end_dt = datetime.combine(
+            end_dt.astimezone(tz).date(), calendar_info.end_time, tzinfo=tz
+        ).astimezone(UTC)
+
+    # ISO 8601 with a 'Z' suffix for UTC; Google accepts offsets either way.
+    start_payload = {"dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")}
+    end_payload = {"dateTime": end_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")}
+    if calendar_info.timezone:
+        start_payload["timeZone"] = calendar_info.timezone
+        end_payload["timeZone"] = calendar_info.timezone
+    return start_payload, end_payload
 
 
 class GoogleEventTransformer:
@@ -121,15 +183,7 @@ class GoogleEventTransformer:
     ) -> datetime | None:
         if not dt_utc:
             return None
-        if not timezone_str:
-            return dt_utc
-        try:
-            from zoneinfo import ZoneInfo
-
-            tz = ZoneInfo(timezone_str)
-            return dt_utc.astimezone(tz)
-        except Exception:  # noqa: BLE001
-            return dt_utc
+        return _local_datetime(dt_utc, timezone_str)
 
     def _extract_timezone(self, google_event: GoogleEvent) -> str | None:
         """Extract IANA timezone from Google event start/end.
@@ -250,66 +304,9 @@ class GoogleEventTransformer:
         if calendar_info.location:
             payload["location"] = calendar_info.location
 
-        start_dt = journal.event_date_range.start
-        end_dt = journal.event_date_range.end
-
-        if calendar_info.is_all_day:
-            from datetime import timedelta
-
-            local_start_dt = self._extract_local_datetime(
-                start_dt, calendar_info.timezone
-            )
-            local_end_dt = self._extract_local_datetime(end_dt, calendar_info.timezone)
-
-            payload["start"] = {
-                "date": local_start_dt.strftime("%Y-%m-%d")
-                if local_start_dt
-                else start_dt.strftime("%Y-%m-%d")
-            }
-            payload["end"] = {
-                "date": ((local_end_dt or end_dt) + timedelta(days=1)).strftime(
-                    "%Y-%m-%d"
-                )
-            }
-        else:
-            from datetime import tzinfo
-
-            tz: tzinfo = UTC
-            if calendar_info.timezone:
-                try:
-                    from zoneinfo import ZoneInfo
-
-                    tz = ZoneInfo(calendar_info.timezone)
-                except Exception:  # noqa: BLE001
-                    pass
-
-            if calendar_info.start_time is not None:
-                local_start_dt = start_dt.astimezone(tz)
-                start_dt = datetime.combine(
-                    local_start_dt.date(), calendar_info.start_time, tzinfo=tz
-                ).astimezone(UTC)
-            if calendar_info.end_time is not None:
-                local_end_dt = end_dt.astimezone(tz)
-                end_dt = datetime.combine(
-                    local_end_dt.date(), calendar_info.end_time, tzinfo=tz
-                ).astimezone(UTC)
-
-            # Format datetime as ISO 8601. Add 'Z' manually if UTC, else Google handles offsets.
-            # Our backend expects UTC.
-            start_payload: dict[str, str] = {
-                "dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
-            }
-            end_payload: dict[str, str] = {
-                "dateTime": end_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
-            }
-
-            # Include timezone if set on the calendar info
-            if calendar_info.timezone:
-                start_payload["timeZone"] = calendar_info.timezone
-                end_payload["timeZone"] = calendar_info.timezone
-
-            payload["start"] = start_payload
-            payload["end"] = end_payload
+        payload["start"], payload["end"] = google_event_times(
+            journal.event_date_range.start, journal.event_date_range.end, calendar_info
+        )
 
         if calendar_info.sync_invitees and invitee_emails:
             payload["attendees"] = [{"email": email} for email in invitee_emails]
