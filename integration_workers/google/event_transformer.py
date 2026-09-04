@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from core_shared.models.journals import (
@@ -25,6 +25,37 @@ def _zone(timezone_str: str | None) -> tzinfo | None:
         return ZoneInfo(timezone_str)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _anchor(instant: datetime, clock: time, tz: tzinfo) -> datetime:
+    """``clock`` on the local date of ``instant`` in ``tz``, as a UTC instant.
+
+    On the day clocks go back a wall time in the repeated hour names two
+    instants, and the ``TIME`` column that held ``clock`` cannot say which.
+    The stored instant can: if the second pass reproduces it, that is the
+    one meant; otherwise the first pass, which is also what an unambiguous
+    time resolves to.
+    """
+    first = datetime.combine(instant.astimezone(tz).date(), clock, tzinfo=tz)
+    second = first.replace(fold=1)
+    # Compared in UTC: an ambiguous aware datetime never compares equal
+    # across zones (PEP 495), so a direct comparison would always be false.
+    if second.utcoffset() != first.utcoffset() and second.astimezone(UTC) == instant:
+        return second.astimezone(UTC)
+    return first.astimezone(UTC)
+
+
+def _previous_local_midnight(instant: datetime, timezone_str: str | None) -> datetime:
+    """The local midnight one calendar day before ``instant``, in UTC.
+
+    ``instant`` is itself a local midnight. Stepping back a *calendar* day
+    rather than 24 hours keeps the result at midnight across a clock change:
+    the day Sydney's clocks go forward is 23 hours long, and 24 hours before
+    the next midnight is before that day even starts.
+    """
+    tz = _zone(timezone_str) or UTC
+    previous_day = instant.astimezone(tz).date() - timedelta(days=1)
+    return datetime.combine(previous_day, time.min, tzinfo=tz).astimezone(UTC)
 
 
 def _local_datetime(dt_utc: datetime, timezone_str: str | None) -> datetime:
@@ -62,13 +93,9 @@ def google_event_times(
     tz = _zone(calendar_info.timezone)
     if tz is not None:
         if calendar_info.start_time is not None:
-            start_dt = datetime.combine(
-                start_dt.astimezone(tz).date(), calendar_info.start_time, tzinfo=tz
-            ).astimezone(UTC)
+            start_dt = _anchor(start_dt, calendar_info.start_time, tz)
         if calendar_info.end_time is not None:
-            end_dt = datetime.combine(
-                end_dt.astimezone(tz).date(), calendar_info.end_time, tzinfo=tz
-            ).astimezone(UTC)
+            end_dt = _anchor(end_dt, calendar_info.end_time, tz)
 
     # ISO 8601 with a 'Z' suffix for UTC; Google accepts offsets either way.
     start_payload = {"dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")}
@@ -134,10 +161,10 @@ class GoogleEventTransformer:
 
         is_all_day = start_is_all_day or end_is_all_day
 
-        from datetime import timedelta
-
+        # Google's all-day end is exclusive (the day after the last day); the
+        # journal's is inclusive. Step back a local calendar day, not 24 hours.
         if is_all_day and end_is_all_day and end_dt > start_dt:
-            end_dt = end_dt - timedelta(days=1)
+            end_dt = _previous_local_midnight(end_dt, all_day_timezone)
 
         # Validate that end_dt >= start_dt to avoid JournalValidationError
         if end_dt < start_dt:

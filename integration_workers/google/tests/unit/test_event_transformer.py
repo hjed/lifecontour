@@ -1060,6 +1060,44 @@ class TestGoogleEventTimes:
         assert start == {"dateTime": "2026-09-04T16:00:00Z"}
         assert end == {"dateTime": "2026-09-04T17:00:00Z"}
 
+    def test_an_ambiguous_clock_time_keeps_the_stored_instant(self) -> None:
+        """Los Angeles repeats 01:00-02:00 on 2026-11-01. A stored 01:30 names
+        two instants; the ``TIME`` column cannot record which, so the stored
+        instant decides. Here the event was in the second (PST) hour."""
+        from event_transformer import google_event_times
+
+        start, end = google_event_times(
+            datetime(2026, 11, 1, 9, 30, tzinfo=UTC),  # 01:30 PST, second pass
+            datetime(2026, 11, 1, 10, 30, tzinfo=UTC),  # 02:30 PST
+            self._calendar_info(
+                start_time=time(1, 30),
+                end_time=time(2, 30),
+                timezone="America/Los_Angeles",
+                event_start_date=date(2026, 11, 1),
+                event_end_date=date(2026, 11, 1),
+            ),
+        )
+
+        assert start["dateTime"] == "2026-11-01T09:30:00Z"
+        assert end["dateTime"] == "2026-11-01T10:30:00Z"
+
+    def test_an_ambiguous_clock_time_in_the_first_pass_stays_there(self) -> None:
+        from event_transformer import google_event_times
+
+        start, _end = google_event_times(
+            datetime(2026, 11, 1, 8, 30, tzinfo=UTC),  # 01:30 PDT, first pass
+            datetime(2026, 11, 1, 10, 30, tzinfo=UTC),
+            self._calendar_info(
+                start_time=time(1, 30),
+                end_time=time(2, 30),
+                timezone="America/Los_Angeles",
+                event_start_date=date(2026, 11, 1),
+                event_end_date=date(2026, 11, 1),
+            ),
+        )
+
+        assert start["dateTime"] == "2026-11-01T08:30:00Z"
+
 
 class TestInboundAllDayTimezone:
     """An imported all-day event is stored at local midnight in the zone the
@@ -1150,3 +1188,43 @@ class TestInboundAllDayTimezone:
 
         assert calendar_info.timezone == "America/Los_Angeles"
         assert calendar_info.start_time == time(9, 0)
+
+    def test_one_day_all_day_event_on_a_dst_start_day_is_kept(self) -> None:
+        """Sydney's clocks go forward on 2026-10-04, so its midnight is UTC+10
+        and the next day's is UTC+11: 23 elapsed hours apart. Google's
+        exclusive end is a calendar day, and must come off as one, or a
+        one-day event ends before it starts and is dropped."""
+        result = GoogleEventTransformer().transform_event(
+            self._all_day("2026-10-04", "2026-10-05"),
+            "user_123",
+            uuid.uuid4(),
+            all_day_timezone="Australia/Sydney",
+        )
+        assert result is not None
+        journal, calendar_info = result
+
+        assert journal.event_date_range.start == datetime(
+            2026, 10, 3, 14, 0, tzinfo=UTC
+        )
+        assert journal.event_date_range.end == datetime(2026, 10, 3, 14, 0, tzinfo=UTC)
+        assert calendar_info.event_start_date == date(2026, 10, 4)
+        assert calendar_info.event_end_date == date(2026, 10, 4)
+
+    def test_all_day_event_ending_on_a_dst_end_day_ends_at_local_midnight(
+        self,
+    ) -> None:
+        """Sydney's clocks go back on 2026-04-05: the last day is 25 hours.
+        The stored end must be that day's local midnight, as the create form
+        would write it, not the exclusive end minus 24 hours."""
+        result = GoogleEventTransformer().transform_event(
+            self._all_day("2026-04-04", "2026-04-06"),
+            "user_123",
+            uuid.uuid4(),
+            all_day_timezone="Australia/Sydney",
+        )
+        assert result is not None
+        journal, calendar_info = result
+
+        # Midnight on 5 April is still UTC+11 (clocks go back at 03:00).
+        assert journal.event_date_range.end == datetime(2026, 4, 4, 13, 0, tzinfo=UTC)
+        assert calendar_info.event_end_date == date(2026, 4, 5)
