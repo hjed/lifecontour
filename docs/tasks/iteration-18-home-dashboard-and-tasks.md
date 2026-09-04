@@ -10523,10 +10523,11 @@ Phase 8, recorded rather than acted on here, and one documentation change:
 #### Phase 2: Freshness — Regenerate a Summary Not Generated Today ✅ COMPLETE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~130 production → **~520 tracked** (×4) · **Actual: ~190 production (of which ~60 are
-docstrings and comments), ~930 tests, ~80 documentation → ~1,200 tracked** (2.3× the estimate; the test
+**Estimated diff:** ~130 production → **~520 tracked** (×4) · **Actual: ~250 production (of which ~80 are
+docstrings and comments), ~1,100 tests, ~100 documentation → ~1,450 tracked** (2.8× the estimate; the test
 count is high because the rule is pinned at four levels — checker, service, dashboard section and
-dashboard service — and integrated on three surfaces — service, REST dashboard and MCP).
+dashboard service — and integrated on three surfaces — service, REST dashboard and MCP — and the review
+round added the atomic claim with its own repository and race tests).
 
 **Acceptance Criteria:**
 
@@ -10556,9 +10557,8 @@ unchanged. `DailySummaryService` receives it through DI (a keyword with a defaul
 constructor call still works) and resolves the user's timezone once, before the cache check, so freshness,
 input assembly and eligibility all read "today" from one value. A stale `GENERATED` row falls through to
 exactly the path an invalidated (`PENDING`) row already takes — assemble, eligibility, `GENERATING`
-marker, AI call with no transaction held, guarded persist — so the concurrency guard needed no change to
-keep holding. `regenerate`, `invalidate` and both last-writer-wins guards are untouched. The endpoint and
-tool docstrings say what the surfaces inherit.
+marker, AI call with no transaction held, guarded persist. `regenerate`, `invalidate` and both
+last-writer-wins guards are untouched. The endpoint and tool docstrings say what the surfaces inherit.
 
 **Decisions taken:**
 
@@ -10585,6 +10585,18 @@ tool docstrings say what the surfaces inherit.
   how the dashboard *obtains* today's summary — the card fetching `GET /api/journals/daily-summary/{date}`
   when it sees *generating* being the obvious candidate — and this phase deliberately leaves the choice to
   the phase that owns the card end to end.
+- **The `GENERATING` marker became an atomic claim** (`JournalDailySummaryRepository.claim_for_generation`,
+  one `INSERT … ON CONFLICT DO UPDATE … WHERE status != 'generating' RETURNING id`). Review of the first
+  cut found the race this phase widens: the marker was an unconditional `update_status`, so two requests
+  that both passed the cache check before either marked the row — two stale reads at 07:00, or two reads
+  of an invalidated row, which had the same window all along — would both call the AI; only the
+  last-writer-wins guard kept the *result* single. Now exactly one request wins the claim and the loser
+  returns the row the winner is regenerating, calling no AI — the same answer it gives when it sees
+  `GENERATING` at the cache check. The claim creates the row when there is none (the `upsert` fallback
+  the old marker needed is gone) and otherwise moves only the status, so the previous generation's text,
+  counters and `generated_at` survive until the new result replaces them. This is the honest reading of
+  "concurrent generation is still prevented": the guard now holds at the width of one statement rather than
+  the width of a request.
 - **The freshness checker is status-agnostic.** `is_stale` says *when* a row was generated relative to
   today; whether the row may be served is the caller's rule. `get_or_generate` consults it only for a
   `GENERATED` row (a `PENDING` or `FAILED` row regenerates on its own account, and a `GENERATING` row is
@@ -10600,8 +10612,12 @@ user finds the same instant fresh; a missing, empty or unknown timezone falls ba
 `was_generated_on` reads a naive `generated_at` as UTC and ignores status. Through the service with the
 real checker on a fixed clock (`test_daily_summary_service.py`): a stale today-summary is regenerated (input
 assembled, `GENERATING` marked, new text returned), a fresh one is served from cache with no write, a past
-day is served however old, a `GENERATING` today-row is left alone, the checker receives the timezone the
-settings repository returned, and it is not consulted for a `PENDING` row. Dashboard
+day is served however old, a `GENERATING` today-row is left alone, a lost claim returns the winner's row
+with no prompt built and no write, the checker receives the timezone the settings repository returned,
+and it is not consulted for a `PENDING` row. Repository (`test_daily_summary_repository.py`, real
+Postgres): a claim creates a missing row as `GENERATING`, claims a `GENERATED` row keeping its text,
+counters and `generated_at`, loses on a row already `GENERATING`, wins again once a `FAILED` run released
+it, and is scoped to one user and day. Dashboard
 (`test_summary_section.py`, `test_home_dashboard_service.py`): a stale generated row maps to *generating*
 with prose withheld and counters kept, `stale=True` changes nothing for any other status, the service judges
 staleness against the user's zone either side of Sydney midnight (the same instant reads as generated for a
@@ -10609,8 +10625,11 @@ UTC user), and a stale row triggers no `upsert`, `update_status` or `invalidate_
 against real Postgres (`test_daily_summary_service_integration.py`, real repositories and checkers on one
 fixed clock, saved `Pacific/Auckland` timezone, counting AI stub): last night's summary is regenerated and
 its `generated_at` advances with one AI call; one from 00:30 is served from cache with none and the row
-unchanged; yesterday's is served from cache; and a second read arriving *during* the first's AI call sees the
-committed `GENERATING` marker, calls no AI, and the total is one. MCP
+unchanged; yesterday's is served from cache; a second read arriving *during* the first's AI call sees the
+committed `GENERATING` marker, calls no AI, and the total is one; and the narrower race — a second
+request claiming the row *between* the first's cache check and its own claim, placed there during the
+first's input assembly — leaves the first standing down with no AI call and the row held by the second.
+MCP
 (`test_daily_summary_freshness_mcp.py`): `get_daily_summary` through the mounted app, the real container
 and the real service — only the Gemini call stubbed and the DI-built checkers' clock pinned — returns the
 regenerated text for a stale row and the cached text for a fresh one, with one and zero AI calls

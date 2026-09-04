@@ -57,6 +57,25 @@ class JournalDailySummaryRepository(ABC):
         pass
 
     @abstractmethod
+    async def claim_for_generation(self, user_id: str, summary_date: date) -> bool:
+        """Atomically mark the summary GENERATING, unless it already is.
+
+        The marker two concurrent readers race for: exactly one wins. Creates
+        the row if none exists; on an existing row only the status moves, so
+        text, counters and ``generated_at`` from the previous generation are
+        kept until the new one replaces them.
+
+        Args:
+            user_id: The user ID
+            summary_date: The date
+
+        Returns:
+            True if this caller claimed the row; False if it was already
+            GENERATING, in which case nothing changed.
+        """
+        pass
+
+    @abstractmethod
     async def invalidate_for_date(self, user_id: str, summary_date: date) -> None:
         """Invalidate (set to PENDING) a daily summary for a date.
 

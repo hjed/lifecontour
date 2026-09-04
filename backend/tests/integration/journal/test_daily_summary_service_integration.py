@@ -10,6 +10,7 @@ input assembly are stubbed; the repository and connection are real.
 
 import json
 from datetime import UTC, date, datetime, timedelta
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -360,6 +361,41 @@ class TestDailySummaryFreshnessIntegration:
         assert result is not None
         assert result.summary_text == self._OLD_TEXT
         assert ai_calls == []
+
+    @pytest.mark.asyncio
+    async def test_two_stale_reads_that_both_pass_the_cache_check_generate_once(
+        self, async_connection, today: date
+    ):
+        """The GENERATING marker is an atomic claim, so the loser calls no AI.
+
+        The narrower race: both requests read the stale row *before* either
+        marks it. Request B's claim is placed exactly there — after A's cache
+        check and before A's own claim — by making it during A's input
+        assembly, the one await that sits between the two. A then finds the row
+        already claimed and stands down without calling the AI.
+        """
+        await self._seed_generated(async_connection, today, self._LAST_NIGHT)
+        a_calls: list[str] = []
+        a = self._service(async_connection, summary_date=today, ai_calls=a_calls)
+        repo_b = SqlJournalDailySummaryRepository(async_connection)
+        assembler = cast(AsyncMock, a._input_assembler)
+        assembled = assembler.assemble.return_value
+
+        async def b_claims_while_a_assembles(*args: object, **kwargs: object):
+            assert await repo_b.claim_for_generation(self._USER, today) is True
+            return assembled
+
+        assembler.assemble.side_effect = b_claims_while_a_assembles
+
+        result = await a.get_or_generate(self._USER, today, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATING
+        assert a_calls == []
+        persisted = await repo_b.find_by_user_and_date(self._USER, today)
+        assert persisted is not None
+        assert persisted.status == SummaryStatus.GENERATING
+        assert persisted.summary_text == self._OLD_TEXT
 
     @pytest.mark.asyncio
     async def test_concurrent_reads_of_a_stale_summary_generate_once(

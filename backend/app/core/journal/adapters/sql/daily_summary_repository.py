@@ -130,6 +130,35 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
             return None
         return self._row_to_entity(row)
 
+    async def claim_for_generation(self, user_id: str, summary_date: date) -> bool:
+        """Atomically mark the summary GENERATING, unless it already is.
+
+        One statement, so two callers cannot both win: the insert takes the
+        unique (user_id, summary_date) slot or, on conflict, updates the row
+        under its lock — and the conflict branch's WHERE lets a row that is
+        already GENERATING through untouched, returning nothing. Only the
+        status moves on an existing row.
+        """
+        query = text(
+            """
+            INSERT INTO journal_daily_summaries (user_id, summary_date, status)
+            VALUES (:user_id, :summary_date, :generating)
+            ON CONFLICT (user_id, summary_date) DO UPDATE
+                SET status = EXCLUDED.status, updated_at = NOW()
+                WHERE journal_daily_summaries.status != EXCLUDED.status
+            RETURNING id
+        """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": user_id,
+                "summary_date": summary_date,
+                "generating": SummaryStatus.GENERATING.value,
+            },
+        )
+        return result.fetchone() is not None
+
     async def invalidate_for_date(self, user_id: str, summary_date: date) -> None:
         """Set an existing summary to PENDING. No-op if none exists."""
         query = text(

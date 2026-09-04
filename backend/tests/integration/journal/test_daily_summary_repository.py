@@ -233,3 +233,86 @@ class TestSqlJournalDailySummaryRepository:
             )
             assert result is not None
             assert result.summary_text == f"Summary for {uid}"
+
+
+class TestClaimForGeneration:
+    """The atomic GENERATING claim two concurrent readers race for.
+
+    Exactly one caller may win a claim on a row that is not already generating;
+    a second claim on the same row answers ``False`` and changes nothing. That
+    is the property ``DailySummaryService`` relies on to call the AI once when
+    two stale reads pass the cache check together.
+    """
+
+    _USER = "user_claim_test"
+    _DATE = date(2026, 4, 27)
+
+    @pytest.mark.asyncio
+    async def test_claims_a_row_that_does_not_exist_yet(self, daily_summary_repo):
+        claimed = await daily_summary_repo.claim_for_generation(self._USER, self._DATE)
+
+        assert claimed is True
+        row = await daily_summary_repo.find_by_user_and_date(self._USER, self._DATE)
+        assert row is not None
+        assert row.status == SummaryStatus.GENERATING
+
+    @pytest.mark.asyncio
+    async def test_claims_a_generated_row_and_keeps_what_it_held(
+        self, daily_summary_repo
+    ):
+        """Only the status moves: text, counters and generated_at stay."""
+        generated_at = datetime(2026, 4, 26, 22, 0, tzinfo=UTC)
+        await daily_summary_repo.upsert(
+            JournalDailySummary(
+                user_id=self._USER,
+                summary_date=self._DATE,
+                summary_text="Last night's.",
+                journal_count=3,
+                status=SummaryStatus.GENERATED,
+                generated_at=generated_at,
+            )
+        )
+
+        claimed = await daily_summary_repo.claim_for_generation(self._USER, self._DATE)
+
+        assert claimed is True
+        row = await daily_summary_repo.find_by_user_and_date(self._USER, self._DATE)
+        assert row is not None
+        assert row.status == SummaryStatus.GENERATING
+        assert row.summary_text == "Last night's."
+        assert row.journal_count == 3
+        assert row.generated_at == generated_at
+
+    @pytest.mark.asyncio
+    async def test_a_second_claim_on_a_generating_row_loses(self, daily_summary_repo):
+        assert await daily_summary_repo.claim_for_generation(self._USER, self._DATE)
+
+        claimed_again = await daily_summary_repo.claim_for_generation(
+            self._USER, self._DATE
+        )
+
+        assert claimed_again is False
+        row = await daily_summary_repo.find_by_user_and_date(self._USER, self._DATE)
+        assert row is not None
+        assert row.status == SummaryStatus.GENERATING
+
+    @pytest.mark.asyncio
+    async def test_a_row_released_from_generating_can_be_claimed_again(
+        self, daily_summary_repo
+    ):
+        """A FAILED run must not hold the row forever."""
+        assert await daily_summary_repo.claim_for_generation(self._USER, self._DATE)
+        await daily_summary_repo.update_status(
+            self._USER, self._DATE, SummaryStatus.FAILED.value
+        )
+
+        assert await daily_summary_repo.claim_for_generation(self._USER, self._DATE)
+
+    @pytest.mark.asyncio
+    async def test_a_claim_is_scoped_to_one_user_and_day(self, daily_summary_repo):
+        assert await daily_summary_repo.claim_for_generation(self._USER, self._DATE)
+
+        assert await daily_summary_repo.claim_for_generation(
+            self._USER, date(2026, 4, 28)
+        )
+        assert await daily_summary_repo.claim_for_generation("someone_else", self._DATE)

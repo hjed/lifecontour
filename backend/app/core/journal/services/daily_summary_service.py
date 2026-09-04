@@ -101,6 +101,12 @@ class DailySummaryService:
         re-checking status first so a slower run can't overwrite a summary
         another request already completed (last-writer-wins prevention).
 
+        The marker is an atomic **claim**, not an unconditional write: two
+        requests that both pass the cache check before either marks the row
+        (two stale reads at 07:00, or two reads of an invalidated row) race for
+        it, exactly one wins, and the loser returns the row the winner is
+        regenerating without calling the AI.
+
         Committing in the service layer (rather than relying on teardown) is
         required because the request connection has no commit backstop, so an
         uncommitted write would be discarded at teardown (issue #945).
@@ -164,10 +170,17 @@ class DailySummaryService:
                 user_id, summary_date, summary_input, transaction
             )
 
-        # 4. Commit the GENERATING marker as its own short unit of work, so
+        # 4. Claim the GENERATING marker as its own short unit of work, so
         #    concurrent callers see it and the row lock is released before the
-        #    AI call.
-        await self._mark_generating(user_id, summary_date, transaction)
+        #    AI call. Losing the claim means another request got here between
+        #    our cache check and now: leave the generation to it.
+        if not await self._claim_generation(user_id, summary_date, transaction):
+            logger.info(
+                "Daily summary for %s on %s was claimed by a concurrent request",
+                user_id,
+                summary_date,
+            )
+            return await self._summary_repo.find_by_user_and_date(user_id, summary_date)
 
         # 5. Build prompt and call Gemini — with NO transaction held.
         try:
@@ -212,25 +225,17 @@ class DailySummaryService:
         return await self._summary_repo.upsert(disabled_summary)
 
     @transactional
-    async def _mark_generating(
+    async def _claim_generation(
         self, user_id: str, summary_date: date, transaction: AsyncConnection
-    ) -> None:
-        """Commit the GENERATING marker as its own unit of work.
+    ) -> bool:
+        """Commit the GENERATING claim as its own unit of work.
 
-        Uses ``update_status`` to preserve existing fields; falls back to
-        ``upsert`` if no row exists yet.
+        Returns whether this run won it. The repository's claim is one atomic
+        statement that creates the row if needed and otherwise moves only the
+        status, so a previous generation's text and counters survive until the
+        new result replaces them.
         """
-        updated = await self._summary_repo.update_status(
-            user_id, summary_date, SummaryStatus.GENERATING.value
-        )
-        if updated is None:
-            await self._summary_repo.upsert(
-                JournalDailySummary(
-                    user_id=user_id,
-                    summary_date=summary_date,
-                    status=SummaryStatus.GENERATING,
-                )
-            )
+        return await self._summary_repo.claim_for_generation(user_id, summary_date)
 
     @transactional
     async def _persist_generated(

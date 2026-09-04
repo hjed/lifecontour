@@ -60,6 +60,7 @@ def mock_summary_repo() -> AsyncMock:
     repo.find_by_user_and_date.return_value = None
     repo.upsert.side_effect = lambda s: s  # Return what's passed in
     repo.update_status.return_value = None  # No existing row by default
+    repo.claim_for_generation.return_value = True  # This run wins the marker
     repo.invalidate_for_date.return_value = None
     return repo
 
@@ -369,8 +370,8 @@ class TestDailySummaryServiceTodayIsAlwaysEligible:
         assert result.status == SummaryStatus.GENERATED
         assert result.journal_count == 0
         assert result.summary_text == "Quiet day."
-        mock_summary_repo.update_status.assert_any_call(
-            "user123", date(2026, 9, 4), SummaryStatus.GENERATING.value
+        mock_summary_repo.claim_for_generation.assert_called_once_with(
+            "user123", date(2026, 9, 4)
         )
 
     @pytest.mark.asyncio
@@ -392,7 +393,7 @@ class TestDailySummaryServiceTodayIsAlwaysEligible:
 
         assert result is not None
         assert result.status == SummaryStatus.DISABLED
-        mock_summary_repo.update_status.assert_not_called()
+        mock_summary_repo.claim_for_generation.assert_not_called()
         mock_prompt_builder.build.assert_not_called()
 
 
@@ -479,9 +480,9 @@ class TestDailySummaryServiceFreshness:
         mock_input_assembler.assemble.assert_called_once_with(
             "user123", self._SYDNEY_TODAY, "Australia/Sydney"
         )
-        # The existing pipeline ran: the GENERATING marker guards concurrency.
-        mock_summary_repo.update_status.assert_any_call(
-            "user123", self._SYDNEY_TODAY, SummaryStatus.GENERATING.value
+        # The existing pipeline ran: the GENERATING claim guards concurrency.
+        mock_summary_repo.claim_for_generation.assert_called_once_with(
+            "user123", self._SYDNEY_TODAY
         )
 
     @pytest.mark.asyncio
@@ -503,7 +504,7 @@ class TestDailySummaryServiceFreshness:
 
         assert result is fresh
         mock_input_assembler.assemble.assert_not_called()
-        mock_summary_repo.update_status.assert_not_called()
+        mock_summary_repo.claim_for_generation.assert_not_called()
         mock_summary_repo.upsert.assert_not_called()
 
     @pytest.mark.asyncio
@@ -554,6 +555,43 @@ class TestDailySummaryServiceFreshness:
 
         assert result is generating
         mock_input_assembler.assemble.assert_not_called()
+        mock_summary_repo.claim_for_generation.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_two_stale_reads_that_both_pass_the_cache_check_generate_once(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """The marker is an atomic claim, not an unconditional write.
+
+        Both requests read the same stale row before either marks it. The one
+        that loses the claim must not call the AI: it returns the row the
+        winner is regenerating, exactly as if it had seen GENERATING at the
+        cache check.
+        """
+        stale = self._generated(self._SYDNEY_TODAY, self._LAST_NIGHT)
+        claimed_by_the_other = self._generated(self._SYDNEY_TODAY, self._LAST_NIGHT)
+        claimed_by_the_other.status = SummaryStatus.GENERATING
+        # Reads in order: (1) the cache check finds the stale row; (2) after the
+        # lost claim, the row the winner now holds.
+        mock_summary_repo.find_by_user_and_date.side_effect = [
+            stale,
+            claimed_by_the_other,
+        ]
+        mock_summary_repo.claim_for_generation.return_value = False
+        service = self._service(
+            mock_input_assembler, mock_prompt_builder, mock_summary_repo
+        )
+
+        result = await service.get_or_generate(
+            "user123", self._SYDNEY_TODAY, transaction=_NO_TXN
+        )
+
+        assert result is claimed_by_the_other
+        mock_prompt_builder.build.assert_not_called()
+        mock_summary_repo.upsert.assert_not_called()
         mock_summary_repo.update_status.assert_not_called()
 
     @pytest.mark.asyncio
