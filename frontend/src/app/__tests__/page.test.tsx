@@ -17,7 +17,10 @@ import {
   DashboardSectionStatus,
   DashboardSummaryState,
 } from '@/lib/api/home-dashboard';
-import type { HomeDashboardResponse } from '@/lib/api/home-dashboard';
+import type {
+  HomeDashboardAgendaEntry,
+  HomeDashboardResponse,
+} from '@/lib/api/home-dashboard';
 
 // jest.setup.ts mocks @/lib/constants but omits the home-dashboard endpoint;
 // use the real constants rather than re-declaring the whole mock.
@@ -29,6 +32,33 @@ globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
 
 const DASHBOARD_URL = '/api/home-dashboard';
+
+/** Two of today's event journals, in the order the server sends them. */
+const STANDUP: HomeDashboardAgendaEntry = {
+  journal_id: 2,
+  title: 'Standup',
+  is_all_day: false,
+  starts_at: '2026-07-29T09:00:00+10:00',
+  ends_at: '2026-07-29T09:15:00+10:00',
+  start_time: '09:00:00',
+  end_time: '09:15:00',
+  timezone: 'Australia/Sydney',
+  location: null,
+  calendar_color: '#336699',
+  is_cancelled: false,
+  tags: [],
+  participants: [],
+};
+const LUNCH: HomeDashboardAgendaEntry = {
+  ...STANDUP,
+  journal_id: 3,
+  title: 'Lunch with Sam',
+  starts_at: '2026-07-29T12:30:00+10:00',
+  ends_at: '2026-07-29T13:30:00+10:00',
+  start_time: '12:30:00',
+  end_time: '13:30:00',
+  location: 'The cafe',
+};
 
 /**
  * The anchor every test renders against.
@@ -347,19 +377,53 @@ describe('HomePage — the dashboard shell', () => {
       ).toBeInTheDocument();
       expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
     });
+  });
 
-    /**
-     * Named for what it actually checks. The specification asks for
-     * independence in **both** directions, and this is not yet evidence of the
-     * second one: none of the three section cards reads the payload until
-     * Phases 7, 12 and 14, so an unavailable `agenda` envelope cannot affect
-     * anything rendered here and the assertion below would hold whatever the
-     * envelope said. What it does guard is that an unavailable sibling does not
-     * make the page *throw*, which is worth keeping and is all it is claimed
-     * to be. The real assertion belongs to the first phase whose card reads the
-     * query.
-     */
-    it('does not throw when a section envelope reports unavailable', async () => {
+  /**
+   * The specification asks for independence in **both** directions: a failed
+   * summary must not prevent the agenda from displaying, *and vice versa*.
+   * Until the agenda card read the payload, the second direction was not
+   * falsifiable — an unavailable `agenda` envelope could not affect anything
+   * the page rendered. Now it can, so both directions are asserted with data
+   * on the surviving side, which is what makes each a real claim.
+   */
+  describe('Sections render independently', () => {
+    it('renders the agenda entries when the summary is unavailable', async () => {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.summary = {
+              status: DashboardSectionStatus.UNAVAILABLE,
+              data: null,
+            };
+            document.data.attributes.agenda = {
+              status: DashboardSectionStatus.READY,
+              data: {
+                entries: [STANDUP, LUNCH],
+                tomorrow: { date: TOMORROW_DATE, entries: [] },
+              },
+            };
+            return document;
+          },
+        } as Response)
+      );
+
+      await renderHomePage();
+
+      expect(
+        await screen.findByTestId('dashboard-summary-unavailable')
+      ).toBeInTheDocument();
+      const agenda = screen.getByRole('list', { name: "Today's agenda" });
+      expect(
+        within(agenda)
+          .getAllByRole('listitem')
+          .map(row => within(row).getByRole('link').textContent)
+      ).toEqual(['Standup', 'Lunch with Sam']);
+    });
+
+    it('renders the summary when the agenda is unavailable', async () => {
       routeFetch(() =>
         Promise.resolve({
           ok: true,
@@ -379,7 +443,39 @@ describe('HomePage — the dashboard shell', () => {
       expect(
         await screen.findByTestId('dashboard-summary-text')
       ).toHaveTextContent('A quiet Wednesday.');
+      expect(await screen.findByTestId('agenda-unavailable')).toBeVisible();
+      expect(
+        screen.queryByText('Nothing scheduled today.')
+      ).not.toBeInTheDocument();
       expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+
+    it('still costs one dashboard request with the agenda card reading it', async () => {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.agenda = {
+              status: DashboardSectionStatus.READY,
+              data: {
+                entries: [STANDUP],
+                tomorrow: { date: TOMORROW_DATE, entries: [] },
+              },
+            };
+            return document;
+          },
+        } as Response)
+      );
+
+      await renderHomePage();
+      await screen.findByRole('link', { name: 'Standup' });
+      await screen.findByTestId('dashboard-summary-text');
+
+      const dashboardCalls = mockFetch.mock.calls.filter(
+        ([input]) => String(input) === DASHBOARD_URL
+      );
+      expect(dashboardCalls).toHaveLength(1);
     });
   });
 

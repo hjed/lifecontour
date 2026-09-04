@@ -63,6 +63,50 @@ describe('DashboardSectionCard', () => {
     });
   });
 
+  /**
+   * A section that has not answered yet, or answered `unavailable`, holds no
+   * entries either — but "nothing scheduled" would be a false claim about it.
+   * The placeholder is what a card shows *instead of* the empty line in those
+   * cases, so the three states cannot be confused.
+   */
+  describe('when given a placeholder', () => {
+    it('renders the placeholder in place of the empty line', () => {
+      render(
+        <DashboardSectionCard
+          {...CARD_PROPS}
+          placeholder={<p>Loading today&apos;s agenda...</p>}
+        />
+      );
+
+      expect(screen.getByText("Loading today's agenda...")).toBeInTheDocument();
+      expect(
+        screen.queryByText('Nothing scheduled today.')
+      ).not.toBeInTheDocument();
+    });
+
+    it('still keeps the labelled list present', () => {
+      render(
+        <DashboardSectionCard {...CARD_PROPS} placeholder={<p>Loading</p>} />
+      );
+
+      expect(
+        screen.getByRole('list', { name: "Today's agenda" })
+      ).toBeInTheDocument();
+      expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+    });
+
+    it('is ignored once the section holds entries', () => {
+      render(
+        <DashboardSectionCard {...CARD_PROPS} placeholder={<p>Loading</p>}>
+          <li>Standup</li>
+        </DashboardSectionCard>
+      );
+
+      expect(screen.getByRole('listitem')).toHaveTextContent('Standup');
+      expect(screen.queryByText('Loading')).not.toBeInTheDocument();
+    });
+  });
+
   describe('when it holds entries', () => {
     it('renders them in the labelled list and drops the empty line', () => {
       const entries = ['Standup', 'Lunch with Sam'];

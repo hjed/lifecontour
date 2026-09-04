@@ -1164,14 +1164,46 @@ elements are numbered **W1**–**W33**.
   it gives the page real landmarks to jump between without drawing the title
   twice.
 - **Section cards**: `AgendaCard`, `TasksCard` and `UpcomingDatesCard`
-  (**W11**, **W21**, **W30**) are thin — each supplies its wireframe copy to
-  the shared `DashboardSectionCard` shell, which draws the icon chip, title,
-  description, a labelled `<ul>` for the entries and the empty state. The list
-  is rendered whether or not it has entries, and deliberately **not**
-  `empty:hidden`: a `display:none` list is out of the accessibility tree, and
-  **W4** asks for a labelled list per section regardless. Empty states reuse
-  `WidgetEmptyState`, which is already **W29**'s idiom — a centred muted icon
-  over one line that reads as a good outcome rather than an error.
+  (**W11**, **W21**, **W30**) each supply their wireframe copy to the shared
+  `DashboardSectionCard` shell, which draws the icon chip, title, description,
+  a labelled `<ul>` for the entries and the empty state. The list is rendered
+  whether or not it has entries, and deliberately **not** `empty:hidden`: a
+  `display:none` list is out of the accessibility tree, and **W4** asks for a
+  labelled list per section regardless. Empty states reuse `WidgetEmptyState`,
+  which is already **W29**'s idiom — a centred muted icon over one line that
+  reads as a good outcome rather than an error. The shell also takes an
+  optional `placeholder`, drawn *instead of* the empty line while a section
+  holds no entries for some reason other than there being none — the query is
+  still in flight, or the section is `unavailable` — so "nothing scheduled" is
+  never a false claim. It is ignored once there are entries.
+- **Agenda card**: `AgendaCard` (**W11**–**W18**) reads `useHomeDashboard()`
+  itself and maps `agenda.data.entries` to one `AgendaEntryRow` each, **in the
+  server's order** — all-day first, then timed ascending by start instant is
+  the backend's rule (`order_agenda_entries`) and is pinned there, so the card
+  does not re-sort. Ready-and-empty draws the **W29** line (wireframe gap 1);
+  pending and unavailable each draw a quiet line of their own in **W9**'s
+  idiom (`agenda-loading`, `agenda-unavailable`) as placeholders until Phase
+  16's skeletons, so the three cannot be confused. A dashboard request that
+  fails outright has no envelope at all and reads as unavailable.
+  - **`AgendaEntryRow`** is a pure function of one payload entry, the same row
+    the tomorrow disclosure reuses: a bordered row with a left accent bar keyed
+    to `calendar_color` by inline style (a runtime hex value Tailwind cannot
+    class), `bg-chart-1` when the calendar has none (**W17**); the title as a
+    `Link` to `/journals/{id}` behind a calendar glyph (**W14** — the second,
+    type glyph is not drawn: the payload carries no journal types, wireframe
+    gap 16); `formatClockRange` in `src/lib/agenda-display.ts` writes the
+    clock values as `HH:MM – HH:MM` in `tabular-nums`, the event's own wall
+    time as the calendar views render it, with `· location` beside it
+    (**W13**), or an uppercase **ALL DAY** marker in its place (**W12**); tags
+    as `outline` badges with the tag's colour on border and text (**W15**);
+    and `AgendaParticipantStack` — up to three `ContactAvatar`s ringed in the
+    background colour, then a `+N` whose accessible label names the hidden
+    participants (**W16**, gap 18). A cancelled entry is dimmed, its accent
+    muted, its title struck through and badged **CANCELLED** in visible text
+    (**W18**), so it never reads as still happening and assistive technology
+    gets the same signal without extra ARIA. `nameParts` in
+    `src/lib/contact-names.ts` splits a display name for the avatar's initials
+    and is shared with `JournalTaskRow`.
 - **Navigation**: the sidebar carries a top-level **Home** link to `/`
   (`nav-link-home`), a deliberate addition to the wireframe, which shows only
   the header logo link (wireframe gap 4). It is a plain link rather than a
