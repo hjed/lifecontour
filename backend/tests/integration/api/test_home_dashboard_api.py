@@ -81,6 +81,9 @@ async def write_summary(
         "event_count": 2,
         "contact_count": 3,
         "mood_average": 7.5,
+        # Generated now, so today's row is fresh whichever day the anchor lands
+        # on; the staleness test overrides it.
+        "generated_at": datetime.datetime.now(datetime.UTC),
     }
     fields.update(overrides)
     await repository.upsert(
@@ -477,6 +480,51 @@ class TestTheSummarySection:
 
         assert document["data"]["attributes"]["summary"]["data"]["summary_text"] is None
         assert SUMMARY_TEXT not in json.dumps(document)
+
+    async def test_a_summary_generated_before_today_is_withheld_as_generating(
+        self,
+        authenticated_client: AsyncClient,
+        summary_repository: SqlJournalDailySummaryRepository,
+    ) -> None:
+        """A generated row from an earlier day must not be served as today's.
+
+        Two days old, so it is stale whichever of the bracketed dates the
+        anchor lands on. The page shows the generating state — whose exit is
+        the reader's own Regenerate control — and keeps the counters.
+        """
+        two_days_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=2)
+        await write_todays_summary(
+            summary_repository, SummaryStatus.GENERATED, generated_at=two_days_ago
+        )
+
+        document = (await authenticated_client.get(URL)).json()
+
+        section = document["data"]["attributes"]["summary"]
+        assert section["status"] == "ready"
+        assert section["data"]["state"] == "generating"
+        assert section["data"]["summary_text"] is None
+        assert section["data"]["journal_count"] == 4
+        assert SUMMARY_TEXT not in json.dumps(document)
+
+    async def test_withholding_a_stale_summary_writes_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        summary_repository: SqlJournalDailySummaryRepository,
+    ) -> None:
+        """A dashboard load must not write: the stale row is left exactly as it was."""
+        two_days_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=2)
+        await write_todays_summary(
+            summary_repository, SummaryStatus.GENERATED, generated_at=two_days_ago
+        )
+
+        document = (await authenticated_client.get(URL)).json()
+
+        anchor = datetime.date.fromisoformat(document["meta"]["anchor"]["date"])
+        row = await summary_repository.find_by_user_and_date(USER_ID, anchor)
+        assert row is not None
+        assert row.status is SummaryStatus.GENERATED
+        assert row.summary_text == SUMMARY_TEXT
+        assert row.generated_at == two_days_ago
 
     async def test_a_day_with_no_moods_recorded_reports_no_average(
         self,

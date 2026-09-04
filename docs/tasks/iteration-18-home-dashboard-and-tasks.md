@@ -75,6 +75,11 @@ by assertion.
 now judges the day it is given against the user's configured timezone — today qualifies whatever its
 journal count, a past or future day keeps the two-journal threshold — and `DailySummaryService` hands it
 the date and the timezone it already resolves, so REST and MCP inherit the rule with no surface logic.
+**ITER18-005 Phase 2 complete: today's summary is regenerated on read unless it was generated today.**
+`DailySummaryFreshnessChecker` derives staleness from `generated_at` in the user's timezone — no new
+column or status — and `get_or_generate` falls a stale today-row through to the existing generate path,
+so the `GENERATING` guard, REST and MCP are all unchanged. The dashboard judges the same rule on read and
+withholds stale prose as *generating*, still without writing.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -296,8 +301,11 @@ reserved. See *Task Query Keys* in `docs/architecture/frontend-design.md`.
   `DailySummaryView` inside `DayGroupedJournalList`.
 - **Cache invalidation lives in the search consumer**: `SearchIndexerConsumer`
   (`app/infrastructure/events/search_indexer_consumer.py`) invalidates summaries for
-  `_JOURNAL_INVALIDATION_EVENTS = {JournalCreated, JournalUpdated, JournalDeleted}`. There is **no**
-  staleness rule — a summary generated yesterday for today's date is served from cache today.
+  `_JOURNAL_INVALIDATION_EVENTS = {JournalCreated, JournalUpdated, JournalDeleted}`. Alongside it,
+  **today's** summary is served from cache only if it was generated today in the user's timezone
+  (`DailySummaryFreshnessChecker`, ITER18-005 Phase 2 — before it a summary generated yesterday for
+  today's date was served from cache today); the dashboard applies the same rule on read and presents a
+  stale row as *generating*, without writing.
 
 ### Journals
 
@@ -10439,13 +10447,17 @@ journals view consumes the same summary, so it stands alone.
 
 **Open decisions:**
 
-1. **Where the staleness check belongs** — settled in **Phase 2**. Inside `DailySummaryService.generate`
-   (so every caller, including MCP, gets it) versus at the read boundary. The service is the likely answer,
-   given the specification frames it as a property of the summary.
-2. **How "stale" is represented** — settled in **Phase 2**. A new status value versus comparing
-   `generated_at` against today in the user's timezone versus a nullable `invalidated_at` column. The lazy
-   invalidation in Phase 6 pushes toward an explicit marker so an input change can mark a summary stale
-   without regenerating it.
+1. **Where the staleness check belongs** — **settled in Phase 2: the service.**
+   `DailySummaryService.get_or_generate` serves a `GENERATED` row only when `DailySummaryFreshnessChecker`
+   says it is not stale, so REST and MCP inherit the rule with no logic of their own. The dashboard, which
+   reads the row and never generates, evaluates the same pure predicate and withholds stale prose.
+2. **How "stale" is represented** — **settled in Phase 2: derived from `generated_at` against today in
+   the user's timezone; no new column or status.** Phase 7's need — mark a summary stale on an input
+   change *without* regenerating it — is already met by `invalidate_for_date`, which sets `PENDING` and
+   keeps the old text, and which `get_or_generate` already treats as not-cached. The two mechanisms are
+   complementary: the `PENDING` marker says "the inputs changed", the derived rule says "the day changed".
+   A new column would duplicate the marker; a new status would break the dashboard's exhaustive status
+   table and the frontend enum for nothing.
 3. **Whether task and important-date invalidation stays in `SearchIndexerConsumer`** (where journal
    invalidation lives today, incidentally) or moves to a consumer that owns summary freshness — settled in
    **Phase 6**. Moving it is cleaner but touches existing behaviour.
@@ -10508,27 +10520,109 @@ Phase 8, recorded rather than acted on here, and one documentation change:
 - The `disabled` row in `docs/architecture/api-design.md`'s summary-section table now reads "a past or
   future day below the two-journal threshold; today is always eligible".
 
-#### Phase 2: Freshness — Regenerate a Summary Not Generated Today
+#### Phase 2: Freshness — Regenerate a Summary Not Generated Today ✅ COMPLETE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Estimated diff:** ~130 production → **~520 tracked** (×4) · **Actual: ~190 production (of which ~60 are
+docstrings and comments), ~930 tests, ~80 documentation → ~1,200 tracked** (2.3× the estimate; the test
+count is high because the rule is pinned at four levels — checker, service, dashboard section and
+dashboard service — and integrated on three surfaces — service, REST dashboard and MCP).
 
 **Acceptance Criteria:**
 
-- [ ] Today's summary is regenerated on read when it was **not generated today in the user's timezone** — a
+- [x] Today's summary is regenerated on read when it was **not generated today in the user's timezone** — a
       summary produced yesterday evening must not be served this morning.
-- [ ] The check lives where open decision 1 settles it, so REST **and** MCP inherit it without their own
+- [x] The check lives where open decision 1 settles it, so REST **and** MCP inherit it without their own
       logic.
-- [ ] Staleness representation per open decision 2, chosen so Phase 7 can mark a summary stale without
+- [x] Staleness representation per open decision 2, chosen so Phase 7 can mark a summary stale without
       regenerating it (a migration here if a column is chosen).
-- [ ] Otherwise caching is unchanged: a summary generated today is served from cache, and the existing
+- [x] Otherwise caching is unchanged: a summary generated today is served from cache, and the existing
       concurrent-generation guard still prevents double generation.
-- [ ] Past-day summaries are **not** subject to the staleness rule — only today's must reflect today.
+- [x] Past-day summaries are **not** subject to the staleness rule — only today's must reflect today.
 
 **Required Test Coverage:** unit — a summary generated at 22:00 yesterday is stale at 07:00 today; one
 generated at 00:30 today is not; past days unaffected; the user's timezone is the one used. Integration —
 stale read regenerates while a fresh read serves cache; concurrent reads still generate once; MCP
 `get_daily_summary` inherits both. No e2e (Phase 8).
+
+**Delivered.** `app/core/journal/services/daily_summary_freshness.py` holds the rule in two pieces: a pure
+`was_generated_on(summary, day, tz)` — true when `generated_at`'s local date in `tz` is `day`, false when
+there is no `generated_at` at all — and `DailySummaryFreshnessChecker.is_stale(summary, timezone=…)`, which
+is true only when the summary is *today's* (`today_in` over `resolve_timezone`, the same pair eligibility
+and the dashboard anchor on) and was not generated on that day. The checker takes the same injectable
+`clock` Phase 1 gave the eligibility checker, for the same reason: the local-midnight boundary is pinned in
+tests without `get_or_generate` growing a `now` parameter, and the public signature REST and MCP call is
+unchanged. `DailySummaryService` receives it through DI (a keyword with a default, so every existing
+constructor call still works) and resolves the user's timezone once, before the cache check, so freshness,
+input assembly and eligibility all read "today" from one value. A stale `GENERATED` row falls through to
+exactly the path an invalidated (`PENDING`) row already takes — assemble, eligibility, `GENERATING`
+marker, AI call with no transaction held, guarded persist — so the concurrency guard needed no change to
+keep holding. `regenerate`, `invalidate` and both last-writer-wins guards are untouched. The endpoint and
+tool docstrings say what the surfaces inherit.
+
+**Decisions taken:**
+
+- **No migration.** Time-based staleness is *derived* — nothing has to be written for a summary to go stale
+  at midnight — and input-based staleness already has its marker (open decision 2, above). A row that is
+  `GENERATED` but has no `generated_at` is treated as stale for today, since it cannot prove otherwise.
+- **The dashboard tension, which ITER18-004 Phases 2 and 4 handed to this phase, is settled as: withhold
+  stale prose, still never write.** The specification says a summary not generated today "must not be
+  served", and the dashboard is the surface most likely to serve last night's text at 07:00. It cannot
+  regenerate — a dashboard load must not write, and ITER18-004 Phase 4 declined to have the card fire the
+  regenerate endpoint on sight of *generating* — so `HomeDashboardService._load_summary` evaluates
+  `was_generated_on(row, anchor, tz)` with the anchor and zone it already holds and passes `stale=` to
+  `summary_section_for`, which folds a stale generated row into **generating** with the prose withheld:
+  the same fold `PENDING` already gets, for the same reason (to the reader, a summary that exists but is
+  not yet today's is one condition), with **W6**'s Regenerate control as the visible exit. The counters
+  are kept, since they are the day's own facts and not the model's words. Read-only is asserted, not
+  assumed: the dashboard unit and API tests check that a stale row is left exactly as it was.
+- **What this does *not* close, recorded for Phase 8.** Nothing on the dashboard moves a summary out of
+  *generating* — not for `PENDING`, and now not for a stale row either — until the user presses
+  Regenerate, opens the journals view, or an MCP client reads the day. Every morning the post-sign-in page
+  will therefore show **W8** with a Regenerate button rather than yesterday's prose, which is the honest
+  reading but not yet the useful one. Phase 8's own criterion ("on a day with fewer than two journals but
+  tasks due, the dashboard shows a generated summary") cannot pass on a pure read; that phase has to decide
+  how the dashboard *obtains* today's summary — the card fetching `GET /api/journals/daily-summary/{date}`
+  when it sees *generating* being the obvious candidate — and this phase deliberately leaves the choice to
+  the phase that owns the card end to end.
+- **The freshness checker is status-agnostic.** `is_stale` says *when* a row was generated relative to
+  today; whether the row may be served is the caller's rule. `get_or_generate` consults it only for a
+  `GENERATED` row (a `PENDING` or `FAILED` row regenerates on its own account, and a `GENERATING` row is
+  left to the run that owns it, whatever its `generated_at`), and a unit test pins that it is not asked
+  otherwise.
+
+**Tests.** Unit (`test_daily_summary_freshness.py`): the specification's two examples at 07:00 — 22:00
+yesterday is stale, 00:30 today is not; generated moments ago is not; a today-row with no `generated_at`
+is; a past day is never stale whether generated that evening, weeks later or never; a future day is not; at
+14:30 UTC Sydney (00:30 on the 4th) finds a 23:00 summary stale and a 00:10 one fresh and does not judge
+UTC's 3rd, which is its yesterday, while Los Angeles finds 05:00 UTC stale as its previous evening and a UTC
+user finds the same instant fresh; a missing, empty or unknown timezone falls back to UTC; and
+`was_generated_on` reads a naive `generated_at` as UTC and ignores status. Through the service with the
+real checker on a fixed clock (`test_daily_summary_service.py`): a stale today-summary is regenerated (input
+assembled, `GENERATING` marked, new text returned), a fresh one is served from cache with no write, a past
+day is served however old, a `GENERATING` today-row is left alone, the checker receives the timezone the
+settings repository returned, and it is not consulted for a `PENDING` row. Dashboard
+(`test_summary_section.py`, `test_home_dashboard_service.py`): a stale generated row maps to *generating*
+with prose withheld and counters kept, `stale=True` changes nothing for any other status, the service judges
+staleness against the user's zone either side of Sydney midnight (the same instant reads as generated for a
+UTC user), and a stale row triggers no `upsert`, `update_status` or `invalidate_for_date`. Integration
+against real Postgres (`test_daily_summary_service_integration.py`, real repositories and checkers on one
+fixed clock, saved `Pacific/Auckland` timezone, counting AI stub): last night's summary is regenerated and
+its `generated_at` advances with one AI call; one from 00:30 is served from cache with none and the row
+unchanged; yesterday's is served from cache; and a second read arriving *during* the first's AI call sees the
+committed `GENERATING` marker, calls no AI, and the total is one. MCP
+(`test_daily_summary_freshness_mcp.py`): `get_daily_summary` through the mounted app, the real container
+and the real service — only the Gemini call stubbed and the DI-built checkers' clock pinned — returns the
+regenerated text for a stale row and the cached text for a fresh one, with one and zero AI calls
+respectively. REST dashboard (`test_home_dashboard_api.py`): a generated row two days old arrives `ready` /
+`generating` with `summary_text: null`, the counters and no trace of the prose anywhere in the document,
+and the row is unchanged afterwards. The existing dashboard fixtures now write `generated_at`, since a
+generated row without one is — correctly — stale.
+
+**E2E deferred to Phase 8**, as this phase states: on the journals page the only change is that the
+page's own `GET` now regenerates a stale today-summary instead of serving last night's, which reads to the
+eye exactly as an invalidated row always has; and the dashboard's new *generating*-on-stale reading is a
+backend fact until Phase 8 wires the card.
 
 #### Phase 3: Extended Inputs — Today's Agenda
 

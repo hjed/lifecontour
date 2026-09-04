@@ -18,18 +18,25 @@ a reader waiting for words to appear, queued and in-flight are one condition. Th
 card declares three states, so a fourth on the wire would hand it a branch it has
 nowhere to render.
 
-**But nothing currently moves a journal daily summary out of ``PENDING``.**
-``SearchIndexerConsumer`` invalidates it; only ``DailySummaryService`` generates,
-and it is reached from the daily-summary endpoints alone — which this service
-deliberately does not call, because a page load must not write. So *generating*
-overstates what is happening until the user asks for a regeneration or opens the
-journals view. It is still the least wrong of the three states — the other two
-say "no summary today" over a summary that exists, or show prose the day has
-outgrown — and the card's Regenerate control sits outside all three, so the
-reader always has the action that resolves it. ITER18-005 makes the state honest
-by regenerating today's summary on read. Recorded as a follow-up on ITER18-004
-Phase 2 rather than settled here, because when a summary is regenerated is that
-iteration's subject and not this one's.
+A ``GENERATED`` row is not automatically current either. Today's summary must
+have been generated **today in the user's timezone** (the specification's
+freshness rule); one written yesterday evening is stale by the morning and its
+prose must not be served. The service decides that — it holds the anchor day
+and the zone — and passes ``stale``; a stale generated row takes the same fold
+as ``PENDING``, *generating* with the prose withheld, because to the reader it
+is the same condition: a summary exists, and it is not yet today's.
+
+**But nothing on the dashboard moves a summary out of that state.**
+``SearchIndexerConsumer`` invalidates it and midnight makes it stale; only
+``DailySummaryService`` generates, and it is reached from the daily-summary
+endpoints alone — which this service deliberately does not call, because a page
+load must not write. So *generating* overstates what is happening until the user
+asks for a regeneration or opens the journals view, or an MCP client reads the
+day. It is still the least wrong of the three states — the other two say "no
+summary today" over a summary that exists, or show prose the day has outgrown —
+and the card's Regenerate control sits outside all three, so the reader always
+has the action that resolves it. Closing the gap end to end is ITER18-005
+Phase 8's.
 """
 
 from __future__ import annotations
@@ -58,12 +65,15 @@ _SHOWABLE: dict[SummaryStatus, DashboardSummaryState] = {
 
 
 def summary_section_for(
-    summary: JournalDailySummary | None,
+    summary: JournalDailySummary | None, *, stale: bool = False
 ) -> SummarySectionData | None:
     """The summary section's payload, or ``None`` when there is none to show.
 
     Args:
         summary: Today's row, or ``None`` if the user has no summary for today.
+        stale: Whether the row, if generated, was not generated today in the
+            user's timezone. A stale generated row is shown as generating with
+            its prose withheld; the flag changes nothing for any other status.
 
     Returns:
         The payload the headline card renders, or ``None`` — which the service
@@ -75,12 +85,18 @@ def summary_section_for(
     state = _SHOWABLE.get(summary.status)
     if state is None:
         return None
+    if stale and state is DashboardSummaryState.GENERATED:
+        state = DashboardSummaryState.GENERATING
 
     return SummarySectionData(
         state=state,
         # The entity's own accessor, so the dashboard withholds prose on exactly
-        # the days the journals view does.
-        summary_text=summary.get_display_text(),
+        # the days the journals view does — and never yesterday's prose today.
+        summary_text=(
+            summary.get_display_text()
+            if state is DashboardSummaryState.GENERATED
+            else None
+        ),
         journal_count=summary.journal_count,
         event_count=summary.event_count,
         contact_count=summary.contact_count,

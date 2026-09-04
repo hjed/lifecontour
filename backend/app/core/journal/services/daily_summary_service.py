@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
 )
+from app.core.journal.services.daily_summary_freshness import (
+    DailySummaryFreshnessChecker,
+)
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )
@@ -51,10 +54,16 @@ class DailySummaryService:
         gemini_model: str,
         user_settings_repo: UserSettingsRepository | None = None,
         container: AsyncContainer | None = None,
+        freshness_checker: DailySummaryFreshnessChecker | None = None,
         _gemini_response_override: str | None = None,
     ) -> None:
         self._input_assembler = input_assembler
         self._eligibility_checker = eligibility_checker
+        self._freshness_checker = (
+            freshness_checker
+            if freshness_checker is not None
+            else DailySummaryFreshnessChecker()
+        )
         self._prompt_builder = prompt_builder
         self._summary_repo = summary_repo
         self._gemini_api_key = gemini_api_key
@@ -74,8 +83,14 @@ class DailySummaryService:
     ) -> JournalDailySummary | None:
         """Get a cached summary or generate a new one.
 
-        Returns the existing summary if already GENERATED, otherwise assembles
-        input and generates a new one.
+        Returns the existing summary if already GENERATED **and fresh**,
+        otherwise assembles input and generates a new one. Freshness is the
+        specification's rule that today's summary must reflect today: a
+        summary for today that was not generated today in the user's timezone
+        is regenerated on read, so one produced yesterday evening is never
+        served this morning. Any other day's summary is served from cache
+        however old it is. The rule lives here rather than at either surface so
+        REST and MCP inherit it without logic of their own.
 
         This orchestrator deliberately holds **no** transaction across the
         multi-second Gemini call (issue #970). Each write commits as its own
@@ -96,15 +111,28 @@ class DailySummaryService:
             )
             return None
 
-        # 1. Check cache (read — no transaction held)
+        # The user's zone anchors every day-based decision below: freshness,
+        # input assembly and eligibility all read "today" from it.
+        timezone = await self._resolve_timezone(user_id)
+
+        # 1. Check cache (read — no transaction held). A GENERATED row is
+        #    served unless it is today's and was not generated today, in which
+        #    case it falls through to the same generate path an invalidated
+        #    (PENDING) row takes — so the GENERATING guard below still holds.
         existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
         if existing and existing.status == SummaryStatus.GENERATED:
+            if not self._freshness_checker.is_stale(existing, timezone=timezone):
+                logger.info(
+                    "Returning cached daily summary for %s on %s",
+                    user_id,
+                    summary_date,
+                )
+                return existing
             logger.info(
-                "Returning cached daily summary for %s on %s",
+                "Daily summary for %s on %s was not generated today; regenerating",
                 user_id,
                 summary_date,
             )
-            return existing
 
         # Skip if currently generating (prevent concurrent generation)
         if existing and existing.status == SummaryStatus.GENERATING:
@@ -116,7 +144,6 @@ class DailySummaryService:
             return existing
 
         # 2. Assemble input (scoped to the user's local day — reads only)
-        timezone = await self._resolve_timezone(user_id)
         summary_input = await self._input_assembler.assemble(
             user_id, summary_date, timezone
         )

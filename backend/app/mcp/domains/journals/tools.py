@@ -4520,8 +4520,10 @@ async def get_daily_summary(
     """Get the AI-generated daily summary for a specific date.
 
     Today (in the user's configured timezone) is always eligible for a summary,
-    however few journals it has; any other date needs at least two journals and
-    otherwise comes back with status "disabled".
+    however few journals it has, and today's summary is regenerated on read if
+    it was not generated today in that timezone, so it always reflects today.
+    Any other date needs at least two journals and otherwise comes back with
+    status "disabled"; its summary is served from cache however old it is.
 
     Args:
         summary_date: The date to get the summary for (YYYY-MM-DD format)

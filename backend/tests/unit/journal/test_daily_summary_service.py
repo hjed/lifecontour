@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
 )
+from app.core.journal.services.daily_summary_freshness import (
+    DailySummaryFreshnessChecker,
+)
 from app.core.journal.services.daily_summary_models import DailySummaryInput
 from app.core.journal.services.daily_summary_service import DailySummaryService
 
@@ -391,6 +394,222 @@ class TestDailySummaryServiceTodayIsAlwaysEligible:
         assert result.status == SummaryStatus.DISABLED
         mock_summary_repo.update_status.assert_not_called()
         mock_prompt_builder.build.assert_not_called()
+
+
+class TestDailySummaryServiceFreshness:
+    """Today's summary is served from cache only if it was generated today.
+
+    The real freshness checker on an injected clock, driven through the
+    service, for a Sydney user at 00:30 on 4 September (14:30 UTC on the 3rd).
+    A summary written at 23:00 the night before is ninety minutes old and
+    already stale; one written at 00:10 is fresh. Past days are never judged.
+    """
+
+    _NOW = datetime(2026, 9, 3, 14, 30, tzinfo=UTC)
+    _SYDNEY_TODAY = date(2026, 9, 4)
+    _SYDNEY_YESTERDAY = date(2026, 9, 3)
+    # 23:00 on 3 September in Sydney.
+    _LAST_NIGHT = datetime(2026, 9, 3, 13, 0, tzinfo=UTC)
+    # 00:10 on 4 September in Sydney.
+    _JUST_PAST_MIDNIGHT = datetime(2026, 9, 3, 14, 10, tzinfo=UTC)
+
+    def _service(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+        *,
+        freshness_checker: DailySummaryFreshnessChecker | MagicMock | None = None,
+    ) -> DailySummaryService:
+        user_settings_repo = AsyncMock()
+        user_settings_repo.get_timezone.return_value = "Australia/Sydney"
+        return DailySummaryService(
+            input_assembler=mock_input_assembler,
+            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
+            prompt_builder=mock_prompt_builder,
+            summary_repo=mock_summary_repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            user_settings_repo=user_settings_repo,
+            freshness_checker=freshness_checker
+            or DailySummaryFreshnessChecker(clock=lambda: self._NOW),
+            _gemini_response_override=json.dumps({"summary_text": "This morning's."}),
+        )
+
+    @staticmethod
+    def _generated(summary_date: date, generated_at: datetime) -> JournalDailySummary:
+        return JournalDailySummary(
+            user_id="user123",
+            summary_date=summary_date,
+            summary_text="Last night's.",
+            status=SummaryStatus.GENERATED,
+            generated_at=generated_at,
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_today_summary_generated_yesterday_is_regenerated_on_read(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        stale = self._generated(self._SYDNEY_TODAY, self._LAST_NIGHT)
+        marked_generating = self._generated(self._SYDNEY_TODAY, self._LAST_NIGHT)
+        marked_generating.status = SummaryStatus.GENERATING
+        # Reads in order: (1) the cache check finds last night's row; (2) the
+        # final write's guard re-reads and sees the GENERATING marker this run
+        # committed, so it persists rather than treating it as a concurrent
+        # completion.
+        mock_summary_repo.find_by_user_and_date.side_effect = [
+            stale,
+            marked_generating,
+        ]
+        service = self._service(
+            mock_input_assembler, mock_prompt_builder, mock_summary_repo
+        )
+
+        result = await service.get_or_generate(
+            "user123", self._SYDNEY_TODAY, transaction=_NO_TXN
+        )
+
+        assert result is not None
+        assert result is not stale
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == "This morning's."
+        mock_input_assembler.assemble.assert_called_once_with(
+            "user123", self._SYDNEY_TODAY, "Australia/Sydney"
+        )
+        # The existing pipeline ran: the GENERATING marker guards concurrency.
+        mock_summary_repo.update_status.assert_any_call(
+            "user123", self._SYDNEY_TODAY, SummaryStatus.GENERATING.value
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_today_summary_generated_today_is_served_from_cache(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        fresh = self._generated(self._SYDNEY_TODAY, self._JUST_PAST_MIDNIGHT)
+        mock_summary_repo.find_by_user_and_date.return_value = fresh
+        service = self._service(
+            mock_input_assembler, mock_prompt_builder, mock_summary_repo
+        )
+
+        result = await service.get_or_generate(
+            "user123", self._SYDNEY_TODAY, transaction=_NO_TXN
+        )
+
+        assert result is fresh
+        mock_input_assembler.assemble.assert_not_called()
+        mock_summary_repo.update_status.assert_not_called()
+        mock_summary_repo.upsert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_past_day_summary_is_served_from_cache_however_old(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """UTC's 3 September is yesterday in Sydney: its summary is kept."""
+        old = self._generated(
+            self._SYDNEY_YESTERDAY, datetime(2026, 8, 20, 9, 0, tzinfo=UTC)
+        )
+        mock_summary_repo.find_by_user_and_date.return_value = old
+        service = self._service(
+            mock_input_assembler, mock_prompt_builder, mock_summary_repo
+        )
+
+        result = await service.get_or_generate(
+            "user123", self._SYDNEY_YESTERDAY, transaction=_NO_TXN
+        )
+
+        assert result is old
+        mock_input_assembler.assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_generating_today_row_is_still_left_to_the_run_that_owns_it(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """The concurrent-generation guard is unchanged by the freshness rule.
+
+        Another request found the summary stale and is regenerating it; this
+        one must wait on that run rather than start a second.
+        """
+        generating = self._generated(self._SYDNEY_TODAY, self._LAST_NIGHT)
+        generating.status = SummaryStatus.GENERATING
+        mock_summary_repo.find_by_user_and_date.return_value = generating
+        service = self._service(
+            mock_input_assembler, mock_prompt_builder, mock_summary_repo
+        )
+
+        result = await service.get_or_generate(
+            "user123", self._SYDNEY_TODAY, transaction=_NO_TXN
+        )
+
+        assert result is generating
+        mock_input_assembler.assemble.assert_not_called()
+        mock_summary_repo.update_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_the_checker_receives_the_users_timezone(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """Staleness is judged in the configured zone, the same one eligibility
+        and input assembly use, so the three cannot disagree about today."""
+        cached = self._generated(self._SYDNEY_TODAY, self._JUST_PAST_MIDNIGHT)
+        mock_summary_repo.find_by_user_and_date.return_value = cached
+        freshness_checker = MagicMock()
+        freshness_checker.is_stale.return_value = False
+        service = self._service(
+            mock_input_assembler,
+            mock_prompt_builder,
+            mock_summary_repo,
+            freshness_checker=freshness_checker,
+        )
+
+        await service.get_or_generate(
+            "user123", self._SYDNEY_TODAY, transaction=_NO_TXN
+        )
+
+        freshness_checker.is_stale.assert_called_once_with(
+            cached, timezone="Australia/Sydney"
+        )
+
+    @pytest.mark.asyncio
+    async def test_only_a_generated_row_is_asked_about(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """A PENDING row regenerates on its own account; freshness is not consulted."""
+        pending = self._generated(self._SYDNEY_TODAY, self._JUST_PAST_MIDNIGHT)
+        pending.status = SummaryStatus.PENDING
+        mock_summary_repo.find_by_user_and_date.return_value = pending
+        freshness_checker = MagicMock()
+        service = self._service(
+            mock_input_assembler,
+            mock_prompt_builder,
+            mock_summary_repo,
+            freshness_checker=freshness_checker,
+        )
+
+        result = await service.get_or_generate(
+            "user123", self._SYDNEY_TODAY, transaction=_NO_TXN
+        )
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        freshness_checker.is_stale.assert_not_called()
 
 
 class TestDailySummaryServiceFailure:

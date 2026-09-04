@@ -16,6 +16,10 @@ Two rules are worth stating because a reader could reasonably expect otherwise:
   ``DISABLED`` are rows, and both map to *nothing to show* — the wireframe's W9
   — because a failed generation and a day below the two-journal threshold are
   both days the user has no summary for.
+- **A generated row is not automatically current.** Today's summary must have
+  been generated today in the user's timezone; the service decides that and
+  passes ``stale``, and a stale generated row is shown as *generating* with its
+  prose withheld — the same fold an invalidated (``PENDING``) row gets.
 """
 
 import datetime
@@ -31,6 +35,7 @@ pytestmark = pytest.mark.unit
 
 USER_ID = "test-user-123"
 TODAY = datetime.date(2026, 7, 31)
+GENERATED_TODAY = datetime.datetime(2026, 7, 31, 6, 15, tzinfo=datetime.UTC)
 
 # The states that produce a payload, and the state each maps to. Kept beside the
 # unshowable statuses below so the two lists can be checked against
@@ -52,6 +57,7 @@ def summary(status: SummaryStatus, **overrides: object) -> JournalDailySummary:
         "event_count": 2,
         "contact_count": 3,
         "mood_average": 7.5,
+        "generated_at": GENERATED_TODAY,
     }
     fields.update(overrides)
     return JournalDailySummary(
@@ -95,6 +101,58 @@ class TestWhichStatusesTheDashboardCanShow:
         """
         assert SHOWABLE == _SHOWABLE
         assert set(SHOWABLE) | set(UNSHOWABLE) == set(SummaryStatus)
+
+
+class TestAStaleGeneratedRow:
+    """Generated, but not today: the prose must not be served."""
+
+    def test_is_shown_as_generating(self) -> None:
+        section = summary_section_for(summary(SummaryStatus.GENERATED), stale=True)
+
+        assert section is not None
+        assert section.state is DashboardSummaryState.GENERATING
+
+    def test_withholds_the_prose_the_day_has_outgrown(self) -> None:
+        section = summary_section_for(summary(SummaryStatus.GENERATED), stale=True)
+
+        assert section is not None
+        assert section.summary_text is None
+
+    def test_keeps_the_counters_the_footer_renders(self) -> None:
+        """The counts are the day's own facts, not the model's words."""
+        section = summary_section_for(summary(SummaryStatus.GENERATED), stale=True)
+
+        assert section is not None
+        assert (
+            section.journal_count,
+            section.event_count,
+            section.contact_count,
+            section.mood_average,
+        ) == (4, 2, 3, 7.5)
+
+    def test_a_fresh_generated_row_is_the_default_reading(self) -> None:
+        section = summary_section_for(summary(SummaryStatus.GENERATED))
+
+        assert section is not None
+        assert section.state is DashboardSummaryState.GENERATED
+
+    @pytest.mark.parametrize(
+        "status", [SummaryStatus.PENDING, SummaryStatus.GENERATING]
+    )
+    def test_changes_nothing_for_a_row_already_generating(
+        self, status: SummaryStatus
+    ) -> None:
+        section = summary_section_for(summary(status), stale=True)
+
+        assert section is not None
+        assert section.state is DashboardSummaryState.GENERATING
+        assert section.summary_text is None
+
+    @pytest.mark.parametrize("status", UNSHOWABLE)
+    def test_changes_nothing_for_a_row_with_nothing_to_show(
+        self, status: SummaryStatus
+    ) -> None:
+        assert summary_section_for(summary(status), stale=True) is None
 
 
 class TestTheStateVocabulary:
