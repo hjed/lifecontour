@@ -180,3 +180,19 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     two mutations on this page, the inline task action and a *user-requested* regeneration, and the page
     every sign-in lands on must not start a multi-second AI write on load. Making the state honest on
     read belongs to ITER18-005, which owns summary freshness.
+16. **W14's second glyph — the journal's type or calendar — is not drawn.** The wireframe shows a
+    calendar glyph before every title and, "where the journal has one, a second glyph for the journal's
+    type or calendar", while saying the glyph mapping itself is unspecified. The agenda payload carries
+    the calendar's *colour* (which W17's accent bar uses) but no journal types, and joining them is a
+    payload change that a card phase must not make (ITER18-004 Phase 5b recorded the gap and left the
+    decision to Phase 7). ITER18-004 Phase 7 draws the calendar glyph only. Revisitable if a later
+    phase adds journal types to the payload — the row is the one place a second glyph would go.
+17. **The agenda row shows the event's own wall time, without its zone.** W13 draws `HH:MM – HH:MM` and
+    says nothing about which zone. The payload's clock values are in the *event's* zone (Phase 5b), which
+    is what the existing calendar views render, so the agenda matches them rather than inventing a second
+    convention; a zone label would be new information the wireframe does not draw. Settled in
+    ITER18-004 Phase 7.
+18. **The participant stack draws three avatars before folding into `+N`.** W16 asks for a `+N` counter
+    "when the stack overflows" and fixes no cap. Three keeps a row to one line at 375 px beside its tags,
+    and the `+N` names the hidden participants in its accessible label so nothing is lost to assistive
+    technology. Settled in ITER18-004 Phase 7.

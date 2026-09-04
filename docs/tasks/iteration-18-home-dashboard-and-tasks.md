@@ -9948,49 +9948,169 @@ surface — the card is Phase 7 and the disclosure Phase 8 — so wireframe conf
   code*. Recorded because a reviewer counting production lines against the first criterion will find none
   and should not go looking.
 
-#### Phase 7: Agenda — Card 🔄 IN PROGRESS (as 7a + 7b)
+#### Phase 7: Agenda — Card ✅ COMPLETE (as 7a + 7b)
 
 **Prerequisites:** Phases 3 and 6.
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4) · **Actual: 376 production, 1,226 tests and
+56 documentation → ~1,660 tracked across two PRs** (2.8× the estimate, **4.4×** its own production;
+this document's own changed lines are excluded, as Phases 3 and 4 excluded theirs).
+
+| PR | Slice | Production | Tests | Docs | Tracked |
+|---|---|---:|---:|---:|---:|
+| **7a** | `AgendaEntryRow`, `AgendaParticipantStack`, `formatClockRange`, `nameParts` — no caller yet | 290 | 371 | — | 661 |
+| **7b** | `AgendaCard` over the query, the shell's `placeholder` slot, page-level resilience, e2e, docs | 86 | 855 | 56 | ~1,000 |
 
 **Split before work started, per delivery rule 3 and Phase 4's lesson.** Counting the files (calibration
 rule 17) put production at ~270 lines across six artefacts — a clock helper, a shared name split, the
 avatar stack, the entry row, the card wiring and a placeholder slot on the section shell — and the
 criteria enumerate states (all-day/timed, location/none, tags/none, participants/overflow, cancelled),
-which rule 14 budgets at ×6. **7a** ships the row, the stack and the two helpers with their unit tests
-and no caller yet, exactly as 4a shipped the stats footer; **7b** wires the card, makes the page's
-"sections render independently" claim falsifiable, and brings the e2e and this write-up.
+which rule 14 budgets at ×6. **7a** shipped the row, the stack and the two helpers with their unit tests
+and no caller yet, exactly as 4a shipped the stats footer; **7b** wired the card, made the page's
+"sections render independently" claim falsifiable, and brought the e2e and this write-up.
+
+**Calibration, tested.** Rule 17 held again: the title-derived estimate (150) was low by 2.5× while the
+file-by-file count (270) was within 1.4× of the 376 that landed — the miss is the row, which the count
+priced at ~120 and which came to 165 because W12–W18 are seven elements with two states each, not one
+component. Rule 14's ×6 did **not** quite materialise: the phase landed at ×4.4 against production, and
+the reason is that the states are enumerated *per element* rather than per card, so each is one short
+test rather than a matrix row. **Suggested refinement:** ×6 is right when the states *combine* (Phase
+4's three states × two questions); when they are independent per element, ×4–4.5 holds even though the
+criteria read as a list. The e2e block is the largest single artefact at ~410 lines, above rule 9's
+150–250 per spec, because five fixture-driven tests each seed a calendar, journals, tags and contacts
+through the API — the fixture cost rule 9 says to count. **7b landed at ~1,000 tracked**, over rule 3's
+500 for the reason 4b and 4d were: the tests *are* how the criteria are specified, and the only further
+seam — the e2e in its own PR — would have shipped a card with no end-to-end proof.
 
 **Acceptance Criteria:**
 
-- [ ] Card header and description per **W11**; entries as bordered rows with the type accent bar (**W17**)
-      and hover affordance.
-- [ ] Each entry shows its title linking to the journal (**W14**), its time in `tabular-nums` with location
+- [x] Card header and description per **W11**; entries as bordered rows with the type accent bar (**W17**)
+      and hover affordance. — Header unchanged from Phase 3 (`AGENDA_SECTION`); each entry is an
+      `AgendaEntryRow` (`frontend/src/components/dashboard/AgendaEntryRow.tsx`): `border-border rounded-lg
+      border ... transition-shadow hover:shadow-sm`, the task row's idiom, with a `w-1` accent bar whose
+      colour is `calendar_color` by inline style (a runtime hex Tailwind cannot class) and `bg-chart-1`
+      when the calendar has none. Pinned in `AgendaEntryRow.test.tsx` (colour, fallback, `aria-hidden`)
+      and end to end by `toHaveCSS('background-color')` against the seeded calendar's colour.
+- [x] Each entry shows its title linking to the journal (**W14**), its time in `tabular-nums` with location
       where present (**W13**), colour-coded tags (**W15**) and participants as an overlapping avatar stack
-      with overflow count (**W16**).
-- [ ] All-day entries render their uppercase marker instead of a time and appear above timed entries
-      (**W12**).
-- [ ] Cancelled entries render struck through, muted, with the cancelled badge (**W18**).
-- [ ] Nothing scheduled today renders a **single line**, not an empty container (wireframe gap 1, in the
-      **W29** idiom).
+      with overflow count (**W16**). — Title is a `Link` to `/journals/{journal_id}` behind a `CalendarDays`
+      glyph; `formatClockRange` (`frontend/src/lib/agenda-display.ts`) writes `HH:MM – HH:MM` in a
+      `tabular-nums` span behind a clock icon, `· location` beside it when present and the start alone
+      when there is no end; tags are `outline` badges with the tag's colour on border and text (the
+      `JournalDetail` technique); `AgendaParticipantStack` draws up to three `ContactAvatar`s in
+      `-space-x-2` ringed in `ring-background`, then a `+N` whose accessible label names the hidden
+      people. Every element has its presence *and* absence pinned in the row tests; the tag colour, the
+      participants' names and the `+1` overflow are asserted end to end.
+- [x] All-day entries render their uppercase marker instead of a time and appear above timed entries
+      (**W12**). — An uppercase muted **ALL DAY** span on the title row, no time element (row tests). The
+      ordering is the **server's** and the card does not re-sort: `AgendaCard.test.tsx` serves all-day
+      then timed and asserts DOM order equals payload order, and the e2e seeds three events out of
+      creation order and compares their rows' `y` positions.
+- [x] Cancelled entries render struck through, muted, with the cancelled badge (**W18**). — `opacity-60`
+      on the row, `bg-muted-foreground/40` on the accent bar with no inline colour, `line-through
+      text-muted-foreground` on the title link, and a bold uppercase **CANCELLED** `outline` badge beside
+      it — visible text, so assistive technology gets the signal without extra ARIA. Four row tests plus
+      an e2e that cancels one of two seeded events through the real endpoint (asserting the 2xx) and
+      checks the marker and the strike-through on exactly that row.
+- [x] Nothing scheduled today renders a **single line**, not an empty container (wireframe gap 1, in the
+      **W29** idiom). — Phase 3's line, now driven by a ready-and-empty payload: `AgendaCard.test.tsx`
+      asserts the line, no list items and no `alert`; the e2e serves an empty agenda from a route mock —
+      for the reason Phase 4 gave for `unavailable`, the account is shared across the run — and asserts
+      the same.
 
 **Required Test Coverage:** unit (RTL) — ordering as rendered, each entry element, the cancelled treatment,
-the empty line, and accessible list labelling. E2E in Phase 17.
+the empty line, and accessible list labelling. ~~E2E in Phase 17.~~ **E2E landed here** on the same ground
+Phases 3 and 4 used: every phase with a user-visible surface brings its own. — **Delivered:** 5 helper
+tests (`agenda-display`), 5 (`contact-names`), 5 over the stack, 19 over the row, 10 over the card
+against the real hook and a routed fetch, 3 new over the shell's `placeholder`, and 3 page-level tests
+that make the specification's "sections render independently, *and vice versa*" claim falsifiable for the
+first time — an unavailable summary beside two agenda **entries**, an unavailable agenda beside generated
+prose, and the one-request guarantee with the card reading the query. **E2E: 5 tests, green on both
+`firefox` and `Mobile Chrome`** — ordering and elements with the title link, tags and participants, the
+cancelled marker, the mocked empty line, and mobile overflow with a long title, four tags and four
+participants. No backend change, so the gate is the endpoint's own suites re-run:
+`backend/tests/unit/dashboard/` (86) and the two agenda/api integration files (70) — all green.
 
-**Payload gaps left for this phase, recorded by Phase 5b so they are not discovered late:**
+**Phase 17's scope is left intact**, as Phase 4 left it: its checklist asks for each state "with its own
+fixtures", and the agenda's empty state here is served from a mock. The four fixture-driven tests are the
+working set Phase 17 inherits for W12–W18; its own criteria stay `[ ]`.
+
+**Follow-up found by the e2e, not fixed here — app-created timed events on one day all share one start
+instant, so the agenda cannot order them.** The first fixture seeded three events at noon UTC with
+different `start_time`s and the card drew Dinner (19:00) above Standup (09:00): the backend orders timed
+entries by `event_date_range_start` (wireframe gap 12, "ascending by start *instant*") and ties fall to
+journal id. That is exactly what the app's own create form produces — `JournalCreateForm` sends
+`dateRange.from.toISOString()` (local midnight) whatever the clock times say, `event_date_range` is
+stored as sent, and `EventTypeEditor`'s later clock edits never touch it — so **for app-created events
+W13's "ascending by start time" holds only by creation order**, while Google-synced events carry real
+instants and order correctly. Gap 12's premise ("for every event that begins and ends within the day the
+two are the same") is true of synced rows and false of app rows. The fix is not this card's: either the
+write path derives the instant from the date and clock in the event's zone (which also settles the
+all-day case `agenda_repository.py` records as knowingly unserved), or `order_agenda_entries` breaks
+ties on `start_time`. Both are backend, and the second is the smaller change — **owned by Phase 16**
+alongside the other agenda correctness follow-ups, or by a journals-domain fix if one lands first. The
+e2e fixtures here set each event's instant from its clock time, as a correctly-stored event looks, and
+say so in `todayAtUtc`'s docstring.
+
+**Local e2e infrastructure notes (not repo defects), recorded for whoever runs the suite next:**
+
+- **Export the workspace env before `playwright test`, or every run cold-starts Docker.** The global
+  setup's "already running" check shells out to `docker compose ps` with the process environment, and
+  without `COMPOSE_PROJECT_NAME` from `scripts/workspace_env.py export` it looks at the wrong project,
+  finds nothing, and force-recreates the whole `test` profile — which is also why the recorded
+  cold-start flake exists at all.
+- **After that force-recreate, the OAuth login-consent UI's host port can stop answering** (the
+  container is healthy inside; `curl 127.0.0.1:<OAUTH_UI_TEST_PORT>/health` resets) and `auth.setup`
+  fails in a second with `ERR_CONNECTION_RESET` on the `/login?login_challenge=` hop.
+  `docker restart <prefix>-oauth-login-consent` rebinds it. Seen three runs in a row here; not
+  reproduced after the restart.
+
+**Decisions taken (Phase 7):**
+
+- **W14's second glyph is not drawn** — wireframe gap 16. The payload carries `calendar_color` and no
+  journal types (5b left the decision here), and joining types is a payload change a card phase must not
+  make; the wireframe itself says the glyph mapping is unspecified. The row draws the calendar glyph only.
+  Revisitable in the row if a later phase adds types to the payload.
+- **Clock values are the event's own wall time, unlabelled** — gap 17. Exactly what 5b recorded and what
+  the calendar views render; a zone label would be new information the wireframe does not draw. A timed
+  entry with no `end_time` shows its start alone rather than a dangling dash.
+- **The card renders the server's order and does not re-sort.** All-day-first / ascending-by-instant is
+  one rule in one place (Phase 5a, `order_agenda_entries`), pinned there; a second copy in the card would
+  be a second place for the two to disagree. The card's "ordering as rendered" test therefore asserts DOM
+  order equals payload order, with the payload served in wireframe order.
+- **The stack shows three, then `+N`** — gap 18. The wireframe fixes no cap; three keeps a row to one
+  line at 375 px beside its tags. The `+N` names the hidden participants in its label, so a screen-reader
+  user hears the whole guest list rather than "plus two".
+- **Three ways to hold nothing, kept apart.** The card reads the query itself (Phase 3's arrangement),
+  which makes "still loading" and "unavailable" real renderings it has to choose. Both are one quiet line
+  in **W9**'s idiom — `Loading today's agenda...` and `Today's agenda is unavailable.` — passed to the
+  shell through a new `placeholder` prop that displaces the empty line, so "nothing scheduled" is never a
+  false claim about a pending or failed read. A dashboard request that fails outright has no envelope at
+  all and reads as unavailable. These are placeholders until **Phase 16** (wireframe gap 9), exactly as
+  the summary card's loading line was.
+- **`nameParts` moved out of `JournalTaskRow` into `lib/contact-names.ts`** rather than being duplicated
+  in the stack: one call site, so the extraction is a two-line change, and the task row and the agenda
+  row now derive the same initials for the same person.
+- **The page-level "and vice versa" test is now evidence.** Phase 4 recorded that the direction was not
+  falsifiable and named the first phase whose card reads the query as its owner. That test is replaced by
+  three that put data on the surviving side, which is what makes each a claim.
+- **The section-cards table lost the agenda card.** `section-cards.test.tsx` rendered the three shells
+  without providers; the agenda card now needs the query client, so its shell assertions (W11 title and
+  description, decorative icons, the labelled list) moved into `AgendaCard.test.tsx` beside its states.
+
+**Payload gaps recorded by Phase 5b — both resolved above** (the glyph: not drawn, gap 16; the clock
+zone: the event's own, gap 17). Retained here for the record:
 
 - **The accent colour (W17) is supplied; the type glyph (W14) is not.** Phase 5's acceptance criteria
   enumerate the fields the query returns and a colour was not among them, so 5b left it out — until
   review pointed out that the accent then had no source, and it was added as `calendar_color` off a
   `LEFT JOIN calendars`. Journal *types* are not joined at all and are the larger of the two if the
-  glyph is wanted; this phase still owns that decision.
+  glyph is wanted.
 - **`start_time` is a clock value in the *event's* timezone, not the reader's.** The column is a bare
   `TIME` beside `journal_calendar_info.timezone`, and this is what the existing calendar surface renders
   (`toCalendarEvent`, `frontend/src/lib/calendarEventHelpers.ts`), so the agenda matches it deliberately
   rather than inventing a second convention. The visible consequence is narrow: an event stored in
   another zone shows that zone's wall time. Changing it would be an app-wide divergence needing its own
-  decision, not a card-phase choice — and the entry also carries `starts_at`, the true instant, if this
-  phase decides otherwise.
+  decision, not a card-phase choice — and the entry also carries `starts_at`, the true instant.
 
 #### Phase 8: Tomorrow Disclosure
 
@@ -10197,6 +10317,13 @@ top — roughly **~180 production → ~700 tracked** for the phase.
       dashboard left open across local midnight stops showing yesterday's anchor and yesterday's **W2**
       date. Schedule it for the next midnight in `meta.anchor.timezone` — the zone the payload echoes —
       not on a fixed interval. Rule-defining logic with DST boundaries: budget ×6 (calibration rule 14).
+- [ ] **Inherited from Phase 7:** app-created timed events on one day all carry the day's midnight as
+      their start instant, so the agenda's ascending-by-instant order (wireframe gap 12) degenerates to
+      creation order for them. Break ties on `start_time` in `order_agenda_entries` (backend, with a
+      unit test seeding equal instants and different clocks), or derive the instant at the write path;
+      see *Follow-up found by the e2e* under Phase 7. Replace Phase 7's placeholder loading and
+      unavailable lines (`agenda-loading`, `agenda-unavailable`) with this phase's skeleton and
+      unavailable treatment at the same time.
 
 **Required Test Coverage:** unit (RTL) — per-section loading and error rendering with the other sections
 still present; **keyboard traversal order across all interactive elements**; section and list labelling after
