@@ -10576,6 +10576,18 @@ last-writer-wins guards are untouched. The endpoint and tool docstrings say what
   not yet today's is one condition), with **W6**'s Regenerate control as the visible exit. The counters
   are kept, since they are the day's own facts and not the model's words. Read-only is asserted, not
   assumed: the dashboard unit and API tests check that a stale row is left exactly as it was.
+- **What the claim does *not* cover, recorded for Phase 7: an invalidation that lands while a generation
+  is in flight is lost.** `invalidate_for_date` moves only `status` (to `PENDING`) and `updated_at`;
+  `generated_at` stays, so a journal change committed after a request assembled its input — before its
+  claim, or during its AI call — neither fails the claim nor stops `_persist_generated`, which writes
+  `GENERATED` over the `PENDING` marker with a summary built from pre-change inputs. The third review
+  round named the narrower half of this window (assembly → claim); the wider half (claim → persist)
+  has been there since the summary was first cached, and the two share one fix: a marker the persist
+  step can compare — the `invalidated_at` column open decision 2 anticipated, or an inputs version —
+  so a result that was invalidated underneath stays `PENDING` and the next read regenerates. That is
+  invalidation semantics, which are Phase 7's subject, and it is added there as an acceptance criterion
+  rather than half-closed here with an `updated_at` comparison the test fixture could not exercise
+  (`NOW()` is one value for a whole test transaction).
 - **What this does *not* close, recorded for Phase 8.** Nothing on the dashboard moves a summary out of
   *generating* — not for `PENDING`, and now not for a stale row either — until the user presses
   Regenerate, opens the journals view, or an MCP client reads the day. Every morning the post-sign-in page
@@ -10749,6 +10761,12 @@ and dates. No e2e (Phase 8).
       birthday currently publishes nothing. Either add the missing event (and count its cost against
       calibration rule 6) or record "an edited important date does not invalidate today's summary until the
       next journal or task change" as an accepted limitation, in this document.
+- [ ] **An invalidation that lands while a generation is in flight is not lost** (found in ITER18-005
+      Phase 2's review, recorded there): today `invalidate_for_date` leaves `generated_at` untouched, so a
+      request whose input was assembled before the change still wins its claim and `_persist_generated`
+      writes `GENERATED` over the `PENDING` marker with a pre-change summary. The persist step must be
+      able to tell the row was invalidated after the claim (an `invalidated_at` column per open decision
+      2, or an inputs version compared at persist) and leave it `PENDING` so the next read regenerates.
 - [ ] Placement per open decision 3, with the consumer table in
       `docs/architecture/integration-architecture.md` updated if subscriptions change.
 
