@@ -9948,10 +9948,18 @@ surface — the card is Phase 7 and the disclosure Phase 8 — so wireframe conf
   code*. Recorded because a reviewer counting production lines against the first criterion will find none
   and should not go looking.
 
-#### Phase 7: Agenda — Card
+#### Phase 7: Agenda — Card 🔄 IN PROGRESS (as 7a + 7b)
 
 **Prerequisites:** Phases 3 and 6.
 **Estimated diff:** ~150 production → **~600 tracked** (×4)
+
+**Split before work started, per delivery rule 3 and Phase 4's lesson.** Counting the files (calibration
+rule 17) put production at ~270 lines across six artefacts — a clock helper, a shared name split, the
+avatar stack, the entry row, the card wiring and a placeholder slot on the section shell — and the
+criteria enumerate states (all-day/timed, location/none, tags/none, participants/overflow, cancelled),
+which rule 14 budgets at ×6. **7a** ships the row, the stack and the two helpers with their unit tests
+and no caller yet, exactly as 4a shipped the stats footer; **7b** wires the card, makes the page's
+"sections render independently" claim falsifiable, and brings the e2e and this write-up.
 
 **Acceptance Criteria:**
 
