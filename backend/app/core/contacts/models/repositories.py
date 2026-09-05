@@ -19,6 +19,7 @@ from core_shared.models.contacts.important_date_types import CustomDateType
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.importance import ContactImportance
+from app.core.contacts.models.upcoming_dates import ContactImportantDate
 from app.core.history.models import FieldHistoryEntry, FieldHistoryRepository
 
 
@@ -686,5 +687,43 @@ class ContactImportanceRepository(ABC):
             row are **absent** rather than present with zeros: a contact that
             does not exist has no signals, which is not the same claim as a
             contact nobody has touched.
+        """
+        pass
+
+
+class UpcomingImportantDateRepository(ABC):
+    """Fetches the important dates that could fall in a window of days.
+
+    The **candidates**, not the answer. A stored row carries loose components —
+    a month and a day, sometimes a year — so whether it falls in the next seven
+    days is a question about the recurrence rule rather than about a column, and
+    that rule lives in ``resolve_occurrence``. What this port asks the database
+    is the narrow question it can answer cheaply: which rows carry one of a
+    given set of ``(month, day)`` pairs.
+
+    Keeping the split there is what stops a second copy of the recurrence
+    appearing in SQL, where no unit test could reach it.
+
+    Like ``ContactImportanceRepository``, this takes no ``user_id``: ``contacts``
+    carries no owner column in this schema and every other contacts repository is
+    likewise unscoped. When contacts gain an owner, this port and its callers are
+    part of the same change.
+    """
+
+    @abstractmethod
+    async def candidates_for(
+        self, month_days: Sequence[tuple[int, int]]
+    ) -> list[ContactImportantDate]:
+        """Every stored important date carrying one of ``month_days``.
+
+        Args:
+            month_days: The ``(month, day)`` pairs to match, as
+                ``window_month_days`` builds them. An empty sequence is answered
+                with an empty list and no query.
+
+        Returns:
+            The rows, each with the contact it belongs to already attached so a
+            caller need make no per-row follow-up. Nothing is resolved, ranked
+            or filtered beyond the pair match.
         """
         pass
