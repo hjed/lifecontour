@@ -98,6 +98,52 @@ describe('InlineEditDateRange with a configured zone the browser does not share'
     expect(saved).toEqual({ start: newYearsEve, end: newYearsEve });
   });
 
+  /**
+   * The configured zone is not known on the first render — the settings read
+   * has not landed — so the editor starts on the browser's zone and switches
+   * when it does. Anything the picker resolved under the old zone has to
+   * follow, or a save combines days resolved in one zone with an anchor in
+   * another: the very mismatch this component was changed to remove.
+   */
+  it('follows the configured zone when it resolves after the editor opened', async () => {
+    // Read in Sydney this is the 15th (11:00); in New York it is still the
+    // evening of the 14th. So the two zones disagree about which day the
+    // picker should be sitting on.
+    const legacyUtcMidnight = '2025-01-15T00:00:00.000Z';
+    const onSave = jest.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    // The settings read has not landed yet: the browser's zone stands in.
+    mockUseUserTimezone.mockReturnValue('Australia/Sydney');
+    const { rerender } = render(
+      <InlineEditDateRange
+        value={{ start: legacyUtcMidnight, end: legacyUtcMidnight }}
+        onSave={onSave}
+      />
+    );
+
+    await user.click(screen.getByRole('button'));
+    expect(await screen.findByLabelText('Save date range')).toBeVisible();
+
+    // ...and now it lands, with a zone the browser does not share.
+    mockUseUserTimezone.mockReturnValue('America/New_York');
+    rerender(
+      <InlineEditDateRange
+        value={{ start: legacyUtcMidnight, end: legacyUtcMidnight }}
+        onSave={onSave}
+      />
+    );
+
+    await user.click(screen.getByLabelText('Save date range'));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    // The New York day, not the Sydney day written with a New York anchor.
+    expect(onSave.mock.calls[0][0]).toEqual({
+      start: '2025-01-14T05:00:00.000Z',
+      end: '2025-01-14T05:00:00.000Z',
+    });
+  });
+
   it('normalises a legacy UTC-midnight range onto the day it displays', async () => {
     // What the pre-#1385 Google sync left behind, read by a New York user: the
     // evening of the 14th, so the picker opens on the 14th and saving has to

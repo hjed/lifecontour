@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Calendar as CalendarIcon, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -64,35 +64,43 @@ export function InlineEditDateRange({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const openOn = useCallback(
-    (range: EventDateRange): { from: Date; to: Date } => ({
-      from: zonedCalendarDay(range.start, timezone),
-      to: zonedCalendarDay(range.end, timezone),
+  // The stored bounds as calendar days in the current zone. Derived rather
+  // than held in state, because `timezone` changes underneath this component:
+  // the settings read has not landed on the first render, so the editor starts
+  // on the browser's zone and switches when it does. State seeded once would
+  // keep the days the *old* zone resolved and then let the save anchor them
+  // with the new one — a mismatch between read and write zone, which is the
+  // whole defect this component was changed to remove.
+  const opened = useMemo(
+    () => ({
+      from: zonedCalendarDay(value.start, timezone),
+      to: zonedCalendarDay(value.end, timezone),
     }),
-    [timezone]
+    [value.start, value.end, timezone]
   );
 
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
-    openOn(value)
-  );
+  // Only the user's own selection is state, and it wins while it exists. A day
+  // they picked is a day they picked: it needs no re-resolving when the zone
+  // arrives, it just gets written in that zone.
+  const [selected, setSelected] = useState<DateRange | undefined>(undefined);
+  const dateRange = selected ?? opened;
 
-  // Formatted from the resolved days rather than the raw bounds, so the label
+  // Labelled from the resolved days rather than the raw bounds, so the button
   // names the day the picker will open on and the day a save will write.
-  const opened = openOn(value);
   const displayValue = formatDateRange(opened.from, opened.to);
 
   const startEdit = useCallback(() => {
     if (disabled) return;
     setIsEditing(true);
     setError(null);
-    setDateRange(openOn(value));
-  }, [disabled, openOn, value]);
+    setSelected(undefined);
+  }, [disabled]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
     setError(null);
-    setDateRange(openOn(value));
-  }, [openOn, value]);
+    setSelected(undefined);
+  }, []);
 
   const saveEdit = useCallback(async () => {
     if (!dateRange?.from || !dateRange?.to) {
@@ -184,7 +192,7 @@ export function InlineEditDateRange({
           <Calendar
             mode='range'
             selected={dateRange}
-            onSelect={setDateRange}
+            onSelect={setSelected}
             numberOfMonths={2}
             disabled={isLoading}
           />

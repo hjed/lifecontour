@@ -175,6 +175,28 @@ describe('AuthProvider', () => {
     });
   });
 
+  /**
+   * An explicit logout is not the only way a session ends. A server-side
+   * expiry, a failed session check and a plain unauthenticated first load all
+   * dispatch `SESSION_EXPIRED` without going near the logout mutation, and a
+   * cache left behind by any of them would stand in for the *next* account
+   * while its own settings read is still in flight.
+   */
+  it('clears the cached timezone whenever no user is authenticated', async () => {
+    localStorage.setItem(TIMEZONE_STORAGE_KEY, 'America/New_York');
+
+    (fetch as jest.Mock).mockResolvedValueOnce(
+      createMockResponses.sessionNotAuthenticated()
+    );
+
+    renderWithProviders(<TestComponent />);
+
+    // No logout is performed: the session check alone settles unauthenticated.
+    await waitFor(() => {
+      expect(localStorage.getItem(TIMEZONE_STORAGE_KEY)).toBeNull();
+    });
+  });
+
   it('should clear error when clearError is called', async () => {
     const user = userEvent.setup();
 
