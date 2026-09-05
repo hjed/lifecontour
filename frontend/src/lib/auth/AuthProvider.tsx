@@ -30,6 +30,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { clearCachedTimezone } from '@/lib/api/settings';
 
 // Initial auth state
 const initialState: AuthState = {
@@ -266,6 +267,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     onSuccess: () => {
       dispatch({ type: 'LOGOUT_SUCCESS' });
       queryClient.clear();
+      // `queryClient.clear()` empties the in-memory caches; the timezone also
+      // has a localStorage one, and that is keyed by browser rather than by
+      // account. Left behind it would answer for whoever signs in next.
+      clearCachedTimezone();
       toast.success(SUCCESS_MESSAGES.SIGNED_OUT);
     },
     onError: error => {

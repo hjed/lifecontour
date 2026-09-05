@@ -28,6 +28,14 @@ export const userSettingsKeys = {
   detail: () => [...userSettingsKeys.all, 'detail'] as const,
 };
 
+/** The zone the browser reports. `'UTC'` during SSR, where there is none. */
+export function getBrowserTimezone(): string {
+  if (typeof window === 'undefined') {
+    return 'UTC';
+  }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 /**
  * The user's default timezone from the localStorage cache, falling back to the
  * browser's. Synchronous, so a caller can use it without awaiting the settings
@@ -35,19 +43,33 @@ export const userSettingsKeys = {
  *
  * It lives here rather than beside the settings UI that writes it because the
  * cache key does, and because `lib/api/` must not depend on `components/`.
+ *
+ * A caller that *can* see the settings read should prefer
+ * {@link useUserTimezone}: this answer is a guess, and a guess is only the
+ * right thing while the real answer is still in flight.
  */
 export function getDefaultTimezone(): string {
   if (typeof window === 'undefined') {
     return 'UTC';
   }
   const stored = localStorage.getItem(TIMEZONE_STORAGE_KEY);
-  return stored || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return stored || getBrowserTimezone();
 }
 
 /** Write the timezone to the localStorage cache (no-op during SSR). */
 export function cacheTimezone(timezone: string): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(TIMEZONE_STORAGE_KEY, timezone);
+}
+
+/**
+ * Drop the cached timezone. Called on logout: the cache is keyed by browser,
+ * not by account, so left in place it would answer for whoever signs in next —
+ * indefinitely, for a user who has configured no zone of their own.
+ */
+export function clearCachedTimezone(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(TIMEZONE_STORAGE_KEY);
 }
 
 export async function fetchUserSettings(): Promise<UserSettingsResponse> {
@@ -97,25 +119,33 @@ export function useUserSettings() {
 }
 
 /**
- * The zone to anchor a user-facing day boundary on: the **configured** one,
- * the localStorage cache while that read is in flight, then the browser's.
+ * The zone to anchor a user-facing day boundary on.
  *
- * The order is the point. A journal's `event_date_range` bounds are stored as
- * the UTC instant of midnight *on some day in some zone*, and which zone that
- * is has to be the same one on the way in and on the way out or an untouched
- * range drifts a calendar day (issue #1401). The browser's zone cannot be that
- * anchor — it changes when the user travels — so the configured zone wins
- * whenever there is one.
+ * A journal's `event_date_range` bounds are stored as the UTC instant of
+ * midnight *on some day in some zone*, and which zone that is has to be the
+ * same one on the way in and on the way out or an untouched range drifts a
+ * calendar day (issue #1401). The browser's zone cannot be that anchor — it
+ * changes when the user travels — so the configured zone wins whenever there
+ * is one.
  *
- * A user who has configured nothing gets the browser's zone rather than the
- * server's `UTC` default, which is why the API's `timezone` attribute is
- * nullable: `'UTC'` here would mean "they chose UTC", and answering that for
- * the unconfigured majority would move every write a day for anyone ahead of
- * UTC.
+ * **The cache is a stand-in for a read that has not landed, and nothing more.**
+ * Once the settings read resolves it is the answer, including when it answers
+ * `null`: a user who has configured nothing gets the *browser's* zone, not
+ * whatever `pms-default-timezone` happens to hold. That distinction is the
+ * whole reason the API's `timezone` is nullable rather than defaulting to
+ * `'UTC'`, and skipping it would undo it — the key is keyed by browser rather
+ * than by account, so a stale value would otherwise anchor an unconfigured
+ * user's writes in the previous account's zone for as long as they used that
+ * browser. (Logout clears it too, via {@link clearCachedTimezone}, for the
+ * callers that cannot see the read at all.)
  */
 export function useUserTimezone(): string {
-  const { data } = useUserSettings();
-  return data?.data.attributes.timezone ?? getDefaultTimezone();
+  const { data, isPending } = useUserSettings();
+
+  if (isPending) {
+    return getDefaultTimezone();
+  }
+  return data?.data.attributes.timezone ?? getBrowserTimezone();
 }
 
 export function useUpdateTimezone() {
@@ -130,6 +160,12 @@ export function useUpdateTimezone() {
       if (saved) {
         cacheTimezone(saved);
       }
+      // Seeded, not merely invalidated. The invalidation below is
+      // fire-and-forget, so until its refetch lands the query still holds the
+      // zone the user has just replaced — and a non-null stored value outranks
+      // everything else in `useUserTimezone`. Without this, a journal saved in
+      // that window is anchored in the old zone despite a successful save.
+      queryClient.setQueryData(userSettingsKeys.detail(), response);
       // **Changing the zone changes what the server thinks "today" is**, and
       // two answers are derived from that rather than stored: whether a task
       // has *lapsed*, and the journal list's `tasks_due_count`, which is the

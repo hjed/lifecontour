@@ -14,6 +14,7 @@ import {
   TEST_CONSTANTS,
 } from '@/test-utils';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { TIMEZONE_STORAGE_KEY } from '@/lib/api/settings';
 import { OAuthProvider } from '@/types/auth';
 
 // Test component to access auth context
@@ -147,6 +148,30 @@ describe('AuthProvider', () => {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
       });
+    });
+  });
+
+  /**
+   * The cached timezone is keyed by *browser*, not by account, and it is what
+   * `getDefaultTimezone` answers with while a settings read is in flight. Left
+   * behind at logout it would anchor the next user's new events — and, for a
+   * user who configures no zone of their own, their journal date writes — in
+   * the previous account's zone (#1401 review).
+   */
+  it('clears the cached timezone so it cannot outlive the session', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(TIMEZONE_STORAGE_KEY, 'America/New_York');
+
+    (fetch as jest.Mock)
+      .mockResolvedValueOnce(createMockResponses.sessionNotAuthenticated())
+      .mockResolvedValueOnce(createMockResponses.logoutSuccess());
+
+    renderWithProviders(<TestComponent />);
+
+    await user.click(screen.getByTestId(TEST_CONSTANTS.TEST_IDS.LOGOUT));
+
+    await waitFor(() => {
+      expect(localStorage.getItem(TIMEZONE_STORAGE_KEY)).toBeNull();
     });
   });
 
