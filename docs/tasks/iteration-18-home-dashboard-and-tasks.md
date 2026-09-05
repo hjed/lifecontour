@@ -10780,6 +10780,21 @@ rather than the invention D4 rules out: an instant expressed in a second zone is
 zone rides with the *time*, so an all-day entry names none — it happens on a date and has no clock value
 to qualify.
 
+**A span that leaves the day carries its dates**, for the same underlying reason found one round later.
+The agenda matches timed events by overlap *precisely* so that a multi-day trip appears on the days in the
+middle of it, and for those the two clock values belong to different dates: a Monday-to-Wednesday trip on
+the Tuesday rendered as `09:00-17:00`, an ordinary Tuesday appointment, and — in the common case where a
+trip starts and ends at the same hour — as `09:00-09:00`, an event of no duration at all. Both invite the
+model to reason about a clash that is not there and to miss the one that is. An entry with either end
+outside the day now reads `27 Apr 09:00 - 29 Apr 09:00: Bushwalking trip`; entries inside the day stay
+terse, because dates on every row would bury the ones that need them.
+
+Deriving the reader's time from the instant for *every* timed entry, rather than only foreign-zone ones,
+made this one code path instead of two — the two sources agree by construction for a same-zone entry — and
+it immediately exposed two unit fixtures whose `start_time` and `starts_at` could not both have been true.
+*A rendering that reads two fields which the schema guarantees are consistent will find the fixtures where
+they are not.*
+
 **Tone.** The prompt keeps every constraint it had and gains four lines: keep it short; do not invent
 commitments the user did not make; do not restate the day's agenda, journals or other listed material item
 by item, because the user can already see those lists; and a statement of where the value actually is —
@@ -10874,9 +10889,13 @@ replacement asks about today and seeds the event on the neighbouring day instead
 It also caught that every one of these tests read the clock twice — once in the helper computing the date
 to assert against, once inside `EventSeeder.event` choosing the day to seed — so a local-midnight crossing
 mid-test could make the two disagree and fail a correct implementation. `EventSeeder.event` gained an
-optional `on_day`, and each test now reads its local day **once** and passes it to both. *The same rule as
-the service's: a test that computes a date to assert against must seed from that date, not from a second
-reading of the clock.*
+optional `on_day`; and a round later, that the hole was still open at the *other* end, because `assemble`
+was taking a third reading inside `_agenda_for`. Each test now takes **one** instant, derives its local
+date from it, seeds with it and passes it to `assemble`. The consequence worth recording is asymmetric:
+the positive cases would have failed loudly, but the **absence cases would have passed while exercising no
+SQL at all** — the assembler's current-day guard answering before the query — so nothing would have
+signalled the loss. *The same rule as the service's, and for the same reason: a test that computes a date
+to assert against must derive every other date it uses from that same reading.*
 
 Unit (`test_daily_summary_prompt_builder.py`, timezone rendering): a foreign zone is named beside the time,
 the user's own is not (naming every row would make the exception invisible), a null zone reads as UTC and
