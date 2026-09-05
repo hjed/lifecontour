@@ -176,14 +176,18 @@ services:
     command: -c "hydra migrate sql -e --yes && hydra serve -c /etc/config/hydra/hydra.yml all --dev"
 
   oauth-login-consent:
+    # Runs the image as built: dependencies are installed by `npm ci` at build
+    # time and app.js is copied in, so the container is listening within a
+    # second or two of starting. A bind mount plus a runtime `npm install`
+    # used to sit here, which made readiness depend on npm's network speed
+    # (4s on a good CI run, minutes on a bad one) and let Playwright's
+    # auth.setup start before the OAuth redirect had anywhere to land.
+    # Edits to app.js need `docker compose ... up --build`.
     build:
       context: docker/oauth-login-consent
       dockerfile: Dockerfile
     container_name: ${CONTAINER_PREFIX:-pms}-oauth-login-consent
     profiles: [dev, test]
-    working_dir: /app
-    volumes:
-      - ./docker/oauth-login-consent:/app
     ports:
       - "${OAUTH_UI_PORT:-3001}:3001"
     environment:
@@ -194,7 +198,12 @@ services:
       - oauth-provider
     networks:
       - personal-management
-    command: sh -c "npm install && npm start"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   oauth-init:
     image: curlimages/curl:latest

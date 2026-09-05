@@ -22,6 +22,7 @@ import {
   MCP_TEST_CALLBACK_URL,
   MCP_TEST_MOUNT_PATH,
   OAUTH_ADMIN_TEST_PORT,
+  OAUTH_UI_TEST_PORT,
   MEILI_TEST_PORT,
   workspaceEnv,
 } from './e2e/utils/frontend-test-config';
@@ -393,6 +394,14 @@ async function verifyCoreServiceHealth(
   dependencies.logger.log('🔍 Checking OAuth provider health...');
   await dependencies.waitForService(
     `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
+  );
+
+  // Hydra answers the authorize request with a redirect to this UI, so the
+  // OAuth flow in auth.setup is connection-reset until it is listening on its
+  // host port — a healthy Hydra on its own proves nothing about that hop.
+  dependencies.logger.log('🔍 Checking OAuth login-consent UI health...');
+  await dependencies.waitForService(
+    `http://localhost:${OAUTH_UI_TEST_PORT}/health`
   );
 
   dependencies.logger.log('🔍 Waiting for OAuth client to be created...');

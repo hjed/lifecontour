@@ -10,6 +10,7 @@ import {
   MCP_TEST_CALLBACK_URL,
   MCP_TEST_MOUNT_PATH,
   OAUTH_ADMIN_TEST_PORT,
+  OAUTH_UI_TEST_PORT,
   MEILI_TEST_PORT,
 } from '../../../tests/e2e/utils/frontend-test-config';
 
@@ -90,8 +91,14 @@ describe('runGlobalSetup', () => {
       2,
       `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
     );
+    // Hydra redirects the browser to the login-consent UI, so a healthy Hydra
+    // alone is not enough for auth.setup to complete.
     expect(waitForService).toHaveBeenNthCalledWith(
       3,
+      `http://localhost:${OAUTH_UI_TEST_PORT}/health`
+    );
+    expect(waitForService).toHaveBeenNthCalledWith(
+      4,
       `http://localhost:${MEILI_TEST_PORT}/health`
     );
   });
@@ -138,8 +145,14 @@ describe('runGlobalSetup', () => {
       2,
       `http://localhost:${OAUTH_ADMIN_TEST_PORT}/health/ready`
     );
+    // Hydra redirects the browser to the login-consent UI, so a healthy Hydra
+    // alone is not enough for auth.setup to complete.
     expect(waitForService).toHaveBeenNthCalledWith(
       3,
+      `http://localhost:${OAUTH_UI_TEST_PORT}/health`
+    );
+    expect(waitForService).toHaveBeenNthCalledWith(
+      4,
       `http://localhost:${MEILI_TEST_PORT}/health`
     );
   });

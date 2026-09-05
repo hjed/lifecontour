@@ -964,6 +964,27 @@ jobs:
             sleep 5
           done
 
+          # Wait for the OAuth login-consent UI. Hydra answers the authorize
+          # request with a redirect to this service on the host port, so a
+          # healthy Hydra alone is not enough: if this is still starting when
+          # auth.setup runs, the redirect is connection-reset and every spec
+          # is skipped (LOCAL-140).
+          echo "Waiting for OAuth login-consent UI..."
+          for i in {1..60}; do
+            if curl -f -s http://localhost:3002/health > /dev/null 2>&1; then
+              echo "✅ OAuth login-consent UI is ready!"
+              break
+            fi
+            echo "OAuth login-consent UI not ready yet... ($i/60)"
+            if [ $i -eq 60 ]; then
+              echo "❌ OAuth login-consent UI failed to start. Checking logs..."
+              docker compose --profile test ps oauth-login-consent
+              docker compose --profile test logs oauth-login-consent
+              exit 1
+            fi
+            sleep 5
+          done
+
           # Wait for MeiliSearch to be healthy
           echo "Waiting for MeiliSearch..."
           for i in {1..60}; do
@@ -997,6 +1018,10 @@ jobs:
           echo "Testing OAuth provider health..."
           curl -f -s http://localhost:4446/health/ready || (echo "❌ OAuth provider health check failed" && exit 1)
           echo "✅ OAuth provider health check passed"
+
+          echo "Testing OAuth login-consent UI health..."
+          curl -f -s http://localhost:3002/health || (echo "❌ OAuth login-consent UI health check failed" && exit 1)
+          echo "✅ OAuth login-consent UI health check passed"
 
           echo "Testing MeiliSearch health..."
           curl -f -s http://localhost:7701/health || (echo "❌ MeiliSearch health check failed" && exit 1)
