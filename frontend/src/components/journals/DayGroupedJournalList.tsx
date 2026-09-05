@@ -153,15 +153,24 @@ export function DayGroupedJournalList({
     }
   }, [journals, isLoadingPrevious]);
 
-  // Record the first genuine scroll. Only attached once the initial
-  // scroll-to-today above has settled, so that programmatic scroll is not
-  // mistaken for the user reaching for older entries.
+  // Record the reader's first reach for older entries. Only attached once the
+  // initial scroll-to-today above has settled, so that programmatic scroll is
+  // not mistaken for the user reaching.
+  //
+  // The gestures count as well as the movement they produce: a short history
+  // can leave the page with nothing to scroll, and then a `scroll` event can
+  // never fire no matter how hard the reader spins the wheel — which would
+  // strand them on the initial chunk with no way to page into the past.
   useEffect(() => {
     if (!hasScrolled || userHasScrolled) return;
 
-    const handleScroll = () => setUserHasScrolled(true);
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+    const handleReach = () => setUserHasScrolled(true);
+    const events = ['scroll', 'wheel', 'touchmove'] as const;
+    events.forEach(event =>
+      window.addEventListener(event, handleReach, { passive: true })
+    );
+    return () =>
+      events.forEach(event => window.removeEventListener(event, handleReach));
   }, [hasScrolled, userHasScrolled]);
 
   // Track sentinel visibility for bi-directional scroll fetching. The
@@ -220,41 +229,49 @@ export function DayGroupedJournalList({
   // position to protect, and expanding is how the user finds their entries.
   const mayExpandIntoThePast = userHasScrolled || journals.length === 0;
 
+  // Both directions are decided here, in one effect, because a list too short
+  // to fill the viewport leaves both sentinels on screen at once. Two separate
+  // effects would each call in the same commit, before either loading flag
+  // updates, and the second call cancels the first — while the cancelled
+  // direction has already spent its per-visit token. On a list that short the
+  // sentinel never leaves the viewport to reset it, so the past a reader
+  // reached for would never load at all (#1398). One request per commit, and
+  // the past wins the tie: the reader asked for it, while forward paging is
+  // eager and is still waiting on the next commit.
   useEffect(() => {
-    if (!topInView || isLoadingPrevious || isLoadingNext || isRefetching) {
-      return;
-    }
-    if (!mayExpandIntoThePast) return;
-    if (topFetchedThisVisitRef.current) return;
-    if (hasPreviousPage && fetchPreviousPage) {
+    if (isLoadingPrevious || isLoadingNext || isRefetching) return;
+
+    if (
+      topInView &&
+      mayExpandIntoThePast &&
+      !topFetchedThisVisitRef.current &&
+      hasPreviousPage &&
+      fetchPreviousPage
+    ) {
       topFetchedThisVisitRef.current = true;
       fetchPreviousPage();
+      return;
+    }
+
+    if (
+      bottomInView &&
+      !bottomFetchedThisVisitRef.current &&
+      hasNextPage &&
+      fetchNextPage
+    ) {
+      bottomFetchedThisVisitRef.current = true;
+      fetchNextPage();
     }
   }, [
     topInView,
+    bottomInView,
     hasPreviousPage,
+    hasNextPage,
     isLoadingPrevious,
     isLoadingNext,
     isRefetching,
     mayExpandIntoThePast,
     fetchPreviousPage,
-  ]);
-
-  useEffect(() => {
-    if (!bottomInView || isLoadingPrevious || isLoadingNext || isRefetching) {
-      return;
-    }
-    if (bottomFetchedThisVisitRef.current) return;
-    if (hasNextPage && fetchNextPage) {
-      bottomFetchedThisVisitRef.current = true;
-      fetchNextPage();
-    }
-  }, [
-    bottomInView,
-    hasNextPage,
-    isLoadingPrevious,
-    isLoadingNext,
-    isRefetching,
     fetchNextPage,
   ]);
 

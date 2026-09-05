@@ -7,6 +7,7 @@
 
 import { test, expect } from './fixtures';
 import { waitForContactSearchIndexing } from './utils/test-helpers';
+import { reachForMoreJournals } from './utils/journal-list-scroll';
 
 /**
  * Generate an ISO datetime string offset from today by the given number of days.
@@ -1940,14 +1941,14 @@ test.describe('Journal List Page', () => {
       );
 
       // The 8-day-old journal sits outside the initial today±3 window, and the
-      // list only expands into the past once the reader scrolls up to it — so
-      // reach for the top of the list before the empty week can exist. toPass
-      // retries the scroll because a single scrollIntoViewIfNeeded does not
-      // reliably fire the IntersectionObserver in headless CI.
-      const topSentinel = page.getByTestId('journal-top-sentinel');
+      // list only expands into the past once the reader reaches for it — so
+      // ask for older entries before the empty week can exist. The two-journal
+      // fixture leaves the list short enough that the top sentinel is already
+      // on screen with the page at the top of its scroll range, so the reach
+      // has to be a gesture rather than a scroll that would never happen.
       await expect(async () => {
-        await topSentinel.scrollIntoViewIfNeeded();
-        await expect(gapGroup).toBeVisible({ timeout: 5000 });
+        await reachForMoreJournals(page, 'past');
+        await expect(gapGroup).toBeVisible({ timeout: 3000 });
       }).toPass({ timeout: 30000 });
 
       await expect(gapGroup).toContainText(/empty days/i);
