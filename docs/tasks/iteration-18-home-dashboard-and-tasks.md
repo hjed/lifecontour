@@ -10216,9 +10216,11 @@ that rule gets tested. Worth Phase 16 revisiting as it hardens the other three s
   configured timezone) and asserts only its own rows.
 
 **Note for Phase 17 — the region count.** The page-shell e2e asserts exactly three regions inside
-`dashboard-sections`. The expanded panel is a fourth. Nothing breaks today, because no shell test expands
-it and the panel is unmounted while shut; a Phase 17 test that expands the disclosure and then counts
-regions would need scoping to the agenda card, as this phase's own tests are.
+`dashboard-sections`. The expanded panel is a fourth. Nothing breaks today, and **not** because the panel
+is unmounted — Radix keeps `CollapsibleContent` in the DOM with `hidden` while shut, removing only its
+children — but because a `hidden` element is out of the accessibility tree and so invisible to a role
+query. A Phase 17 test that *expands* the disclosure and then counts regions would see four, and needs
+scoping to the agenda card as this phase's own tests are.
 
 **Sizing, and rule 3.** At ~960 tracked this is over the 500-line ceiling and the overrun was **not**
 recorded before work started, which rule 3 requires — the estimate said 480 and the production count came

@@ -363,15 +363,18 @@ describe('AgendaCard', () => {
 
     /**
      * The same failure one step further in, in both directions: a `tomorrow`
-     * that is there but carries no list, and one that carries a list but no
-     * date. From the disclosure's seat these are indistinguishable from a
-     * missing `tomorrow` — its first two lines read `date` and
-     * `entries.length` — so the guard is on the whole shape, not on the key
-     * and not on one field.
+     * that is there but carries no list, and ones whose date is absent, empty
+     * or unreadable. From the disclosure's seat these are indistinguishable
+     * from a missing `tomorrow` — its first two lines read `date` and
+     * `entries.length`, and `format(parseISO(''))` throws exactly as reading a
+     * property of `undefined` does — so each field is checked for what would
+     * actually break it, not for the shape last remembered.
      */
     it.each([
       ['no entries list', { date: TOMORROW_DATE }],
       ['no date', { entries: [] }],
+      ['an empty date', { date: '', entries: [] }],
+      ['an unparseable date', { date: 'tomorrow', entries: [] }],
     ])('keeps today drawn when tomorrow arrives with %s', async (_, day) => {
       serveAgenda({
         status: DashboardSectionStatus.READY,

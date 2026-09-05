@@ -1192,11 +1192,16 @@ elements are numbered **W1**–**W33**.
   fails outright has no envelope at all and reads as unavailable.
   - **`TomorrowDisclosure`** (**W19**, **W20**) hangs off that `footer` slot,
     shut until asked. It is drawn **only on a ready agenda**, and guarded on
-    `agenda.tomorrow` itself rather than on the section: the type promises the
-    day on every ready agenda, but a payload that broke that promise once threw
-    out of render and took the whole page with it — the specification's
+    the two fields it reads rather than on the section — a formattable
+    `tomorrow.date` (`isIsoCalendarDate`) and an `entries` array. The type
+    promises both on every ready agenda, but a payload that broke either threw
+    out of render and took the whole page with it: the specification's
     *"sections render independently"* has to survive a section that breaks its
-    contract, not only one that reports `unavailable`. The label is
+    contract, not only one that reports `unavailable`. Note what the guard is
+    **not**: blanket protection against an arbitrarily malformed section wants
+    an error boundary around the section, which is Phase 16's scope. Checking
+    fields one at a time as each new bad shape is found is how a guard ends up
+    protecting against the last failure rather than its class. The label is
     `formatIsoWeekdayDate(tomorrow.date)`, **the server's** local tomorrow
     parsed as a local calendar date; computing `anchor + 1` in the browser
     would be a second opinion about what tomorrow is, and a wrong one in any

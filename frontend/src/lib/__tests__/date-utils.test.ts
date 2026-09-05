@@ -8,6 +8,7 @@ import {
   formatIsoDate,
   formatIsoDateLong,
   formatIsoWeekdayDate,
+  isIsoCalendarDate,
 } from '../date-utils';
 
 describe('formatDateOnly', () => {
@@ -142,5 +143,29 @@ describe('formatIsoWeekdayDate', () => {
 
   it('handles a leap day', () => {
     expect(formatIsoWeekdayDate('2024-02-29')).toBe('Thursday, 29 February');
+  });
+});
+
+describe('isIsoCalendarDate', () => {
+  it('accepts an ISO calendar date', () => {
+    expect(isIsoCalendarDate('2026-08-01')).toBe(true);
+    expect(isIsoCalendarDate('2024-02-29')).toBe(true);
+  });
+
+  /**
+   * Everything a caller's types promised and its payload did not deliver.
+   * These fail identically from the formatter's seat — `format(parseISO(x))`
+   * throws a RangeError — so the guard answers them identically too.
+   */
+  it.each([
+    ['an empty string', ''],
+    ['a word', 'tomorrow'],
+    ['a day that does not exist', '2026-02-31'],
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 20260801],
+    ['an object', { date: '2026-08-01' }],
+  ])('rejects %s', (_, value) => {
+    expect(isIsoCalendarDate(value)).toBe(false);
   });
 });

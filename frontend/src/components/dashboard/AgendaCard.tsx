@@ -39,6 +39,7 @@ import {
   DashboardSectionStatus,
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
+import { isIsoCalendarDate } from '@/lib/date-utils';
 
 /** The section's wireframe copy, in one place so the page and its tests agree. */
 export const AGENDA_SECTION = {
@@ -64,17 +65,23 @@ export function AgendaCard() {
   const agenda =
     section?.status === DashboardSectionStatus.READY ? section.data : null;
 
-  // Both fields the disclosure reads on its first line, not just one of them:
-  // the type promises a `tomorrow` carrying a date *and* an entries array on
+  // Both fields the disclosure reads, each checked for what would actually
+  // break it rather than for the one malformed shape last remembered: the type
+  // promises a `tomorrow` carrying a formattable date *and* an entries array on
   // every ready agenda, but a payload that broke either half used to throw out
   // of render and take the *whole page* with it — the summary, the tasks and
   // the dates included. The specification's "sections render independently"
   // has to survive a section that breaks its contract, not only one that
-  // reports itself unavailable, and a missing date, a missing list and a
-  // missing `tomorrow` all fail identically from the reader's seat.
+  // reports itself unavailable, and a missing `tomorrow`, an absent list and an
+  // unparseable date all fail identically from the reader's seat.
+  //
+  // This guards the two fields *this* card reads. Blanket protection against an
+  // arbitrarily malformed section — a bad entry inside the list, say — wants an
+  // error boundary around the section rather than a longer list of checks here,
+  // and that is Phase 16's scope (Section Resilience).
   const tomorrow = agenda?.tomorrow;
   const hasTomorrow =
-    typeof tomorrow?.date === 'string' && Array.isArray(tomorrow.entries);
+    isIsoCalendarDate(tomorrow?.date) && Array.isArray(tomorrow?.entries);
 
   return (
     <DashboardSectionCard

@@ -5,7 +5,7 @@
  * with proper timezone handling and Australian locale support.
  */
 
-import { format, parseISO } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { enAU } from 'date-fns/locale';
 
 /**
@@ -112,4 +112,19 @@ export function formatIsoDateLong(date: string): string {
  */
 export function formatIsoWeekdayDate(date: string): string {
   return format(parseISO(date), 'EEEE, d MMMM', { locale: enAU });
+}
+
+/**
+ * Is `value` an ISO **calendar date** (`YYYY-MM-DD`) a formatter can read?
+ *
+ * Presence, type and parseability in one question, for a caller holding a
+ * value its types promise but its payload might not deliver. `''`, `null`,
+ * `'tomorrow'` and `'2026-02-31'` are all answered the same way, because from
+ * the formatter's seat they fail identically: `format(parseISO(...))` throws a
+ * `RangeError` on an invalid date and takes the render down with it.
+ *
+ * Written as a type guard so a caller that asks this can then use the value.
+ */
+export function isIsoCalendarDate(value: unknown): value is string {
+  return typeof value === 'string' && isValid(parseISO(value));
 }
