@@ -182,7 +182,10 @@ class DailySummaryPromptBuilder:
             "Entries marked [CANCELLED] did not go ahead — never describe one as "
             "something the user is doing.",
         ]
-        lines.extend(self._agenda_line(entry, timezone) for entry in shown)
+        lines.extend(
+            self._agenda_line(entry, timezone, summary_input.summary_date)
+            for entry in shown
+        )
         if omitted:
             lines.append(
                 f"({omitted} further events on this day are not listed; the agenda "
@@ -191,7 +194,7 @@ class DailySummaryPromptBuilder:
         return "\n".join(lines)
 
     @classmethod
-    def _agenda_line(cls, entry: AgendaEntry, timezone: str) -> str:
+    def _agenda_line(cls, entry: AgendaEntry, timezone: str, day: date) -> str:
         """One agenda entry as a single line.
 
         **The time comes from the clock columns, never from the instant.** An
@@ -228,14 +231,17 @@ class DailySummaryPromptBuilder:
 
         if entry.is_all_day:
             parts.append("All day:")
-        elif elsewhere and entry.start_time is not None:
-            reader = resolve_timezone(timezone)
-            local = cls._span(
-                to_user_tz(entry.starts_at, reader), to_user_tz(entry.ends_at, reader)
-            )
-            parts.append(f"{local} ({cls._event_local_time(entry)} {zone}):")
         elif entry.start_time is not None:
-            parts.append(f"{cls._event_local_time(entry)}:")
+            reader = resolve_timezone(timezone)
+            local = cls._reader_span(
+                to_user_tz(entry.starts_at, reader),
+                to_user_tz(entry.ends_at, reader),
+                day,
+            )
+            if elsewhere:
+                parts.append(f"{local} ({cls._event_local_time(entry)} {zone}):")
+            else:
+                parts.append(f"{local}:")
 
         parts.append(entry.title)
         if entry.location:
@@ -256,6 +262,29 @@ class DailySummaryPromptBuilder:
     def _span(start: datetime | time, end: datetime | time | None) -> str:
         """``HH:MM-HH:MM``, or just the start when there is no end."""
         return f"{start:%H:%M}-{end:%H:%M}" if end is not None else f"{start:%H:%M}"
+
+    @staticmethod
+    def _reader_span(start: datetime, end: datetime, day: date) -> str:
+        """The entry's span in the reader's zone, dated when it leaves ``day``.
+
+        **A timed entry can begin before this day and end after it.** The agenda
+        matches timed events by overlap precisely so that a multi-day trip
+        appears on the days in the middle of it, and for those the two clock
+        values belong to different dates: a Monday-to-Wednesday event shows
+        ``09:00`` and ``17:00`` that are two days apart. Rendered as
+        ``09:00-17:00`` on the Tuesday it reads as an ordinary Tuesday
+        appointment, and as ``09:00-09:00`` — the common case, where a trip
+        starts and ends at the same hour — it reads as an event of no duration
+        at all. Both invite the model to reason about a clash that does not
+        exist and to miss the one that does.
+
+        So the dates are shown whenever either end falls outside ``day``, and
+        omitted when neither does, which is the ordinary case and the one that
+        should stay terse.
+        """
+        if start.date() == day and end.date() == day:
+            return f"{start:%H:%M}-{end:%H:%M}"
+        return f"{start:%d %b %H:%M} - {end:%d %b %H:%M}"
 
     @classmethod
     def _event_local_time(cls, entry: AgendaEntry) -> str:

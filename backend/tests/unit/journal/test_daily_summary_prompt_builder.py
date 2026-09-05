@@ -493,9 +493,18 @@ class TestAnEventInAnotherTimezone:
     """
 
     def test_the_readers_time_leads_and_the_events_own_follows(self) -> None:
+        """A real 09:00 New York meeting, as a Sydney reader sees it.
+
+        The instant and the clock column agree the way migration 0045
+        guarantees: 09:00 EDT is 13:00 UTC, which is 23:00 in Sydney.
+        """
         builder = DailySummaryPromptBuilder()
-        # 09:00-09:30 UTC is 19:00-19:30 in Sydney (AEST, +10 in late April).
-        entry = _agenda_entry(title="New York sync", timezone="America/New_York")
+        entry = _agenda_entry(
+            title="New York sync",
+            timezone="America/New_York",
+            starts_at=datetime(2026, 4, 27, 13, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 27, 13, 30, tzinfo=UTC),
+        )
 
         prompt = builder.build(
             _make_input(summary_date=_TODAY, agenda=[entry]),
@@ -503,7 +512,7 @@ class TestAnEventInAnotherTimezone:
             timezone="Australia/Sydney",
         )
 
-        assert "19:00-19:30 (09:00-09:30 America/New_York): New York sync" in prompt
+        assert "23:00-23:30 (09:00-09:30 America/New_York): New York sync" in prompt
 
     def test_an_event_whose_own_date_is_the_day_before(self) -> None:
         """23:00 on a New York Monday sits in a Sydney user's Tuesday.
@@ -538,7 +547,12 @@ class TestAnEventInAnotherTimezone:
     def test_the_users_own_zone_is_not_named(self) -> None:
         """Naming the zone on every row would make the exception invisible."""
         builder = DailySummaryPromptBuilder()
-        entry = _agenda_entry(timezone="Australia/Sydney")
+        # 09:00 Sydney on the 27th is 23:00 UTC on the 26th.
+        entry = _agenda_entry(
+            timezone="Australia/Sydney",
+            starts_at=datetime(2026, 4, 26, 23, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 26, 23, 30, tzinfo=UTC),
+        )
 
         prompt = builder.build(
             _make_input(summary_date=_TODAY, agenda=[entry]),
@@ -591,3 +605,45 @@ class TestAnEventInAnotherTimezone:
         )
 
         assert "Every time below is the user's own local time" in prompt
+
+
+class TestAMultiDayEvent:
+    """A timed event can begin before this day and end after it.
+
+    The agenda matches timed events by overlap precisely so a multi-day trip
+    appears on the days in the middle of it, and for those the two clock values
+    belong to different dates.
+    """
+
+    def test_a_span_leaving_the_day_carries_its_dates(self) -> None:
+        """Otherwise a Monday-to-Wednesday trip reads as a Tuesday appointment."""
+        builder = DailySummaryPromptBuilder()
+        entry = AgendaEntry(
+            journal_id=4,
+            title="Bushwalking trip",
+            is_all_day=False,
+            starts_at=datetime(2026, 4, 27, 9, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 29, 9, 0, tzinfo=UTC),
+            start_time=time(9, 0),
+            end_time=time(9, 0),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=date(2026, 4, 28), agenda=[entry]),
+            now=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+        )
+
+        assert "27 Apr 09:00 - 29 Apr 09:00: Bushwalking trip" in prompt
+        # The bare form would read as an event of no duration at all.
+        assert "09:00-09:00" not in prompt
+
+    def test_a_span_inside_the_day_stays_terse(self) -> None:
+        """Dates on every row would bury the ones that need them."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[_agenda_entry()]), now=_NOW
+        )
+
+        assert "09:00-09:30: Design review" in prompt
+        assert "Apr" not in prompt.split("## Today's Agenda")[1]

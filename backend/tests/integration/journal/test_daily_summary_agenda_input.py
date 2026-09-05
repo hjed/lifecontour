@@ -71,8 +71,22 @@ def event_seeder(async_connection: AsyncConnection) -> EventSeeder:
     return EventSeeder(async_connection)
 
 
-def today_in_zone(timezone: str) -> datetime.date:
-    return datetime.datetime.now(ZoneInfo(timezone)).date()
+def an_instant() -> datetime.datetime:
+    """One reading of the clock, for the whole of a test.
+
+    Every date a test computes and every window the assembler builds must come
+    from this single instant. Two readings — one to choose the day to seed, one
+    inside ``assemble`` to decide whether that day is *today* — can straddle
+    local midnight, and then the assembler skips the agenda query for a day the
+    test has just seeded: the positive cases fail and, worse, the absence cases
+    pass without exercising any SQL at all.
+    """
+    return datetime.datetime.now(datetime.UTC)
+
+
+def day_of(moment: datetime.datetime, timezone: str) -> datetime.date:
+    """The local date ``moment`` falls on in ``timezone``."""
+    return moment.astimezone(ZoneInfo(timezone)).date()
 
 
 def titles(agenda: list[AgendaEntry]) -> list[str]:
@@ -88,14 +102,15 @@ class TestTodaysAgendaAgainstRealJournals:
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
         """Times, location and participants all travel with the entry."""
-        today = today_in_zone("UTC")
+        now = an_instant()
+        today = day_of(now, "UTC")
         timed = await event_seeder.event(
             title="Design review", hour=9, location="Level 3 boardroom", on_day=today
         )
         await event_seeder.participant(timed, "Alice", "Smith")
         await event_seeder.all_day_on(today, title="Public holiday", written_in="UTC")
 
-        result = await assembler.assemble(USER_ID, today, "UTC")
+        result = await assembler.assemble(USER_ID, today, "UTC", now=now)
 
         # All-day is pinned above the timed entry, as the agenda orders them.
         assert titles(result.agenda) == ["Public holiday", "Design review"]
@@ -108,12 +123,13 @@ class TestTodaysAgendaAgainstRealJournals:
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
         """A note about the day is not something scheduled on it."""
-        today = today_in_zone("UTC")
+        now = an_instant()
+        today = day_of(now, "UTC")
         await event_seeder.event(
             title="Just a note", with_calendar_info=False, on_day=today
         )
 
-        result = await assembler.assemble(USER_ID, today, "UTC")
+        result = await assembler.assemble(USER_ID, today, "UTC", now=now)
 
         assert result.agenda == []
 
@@ -121,12 +137,13 @@ class TestTodaysAgendaAgainstRealJournals:
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
         """Nothing in a summary is shared between users."""
-        today = today_in_zone("UTC")
+        now = an_instant()
+        today = day_of(now, "UTC")
         await event_seeder.event(
             title="Their standup", user_id=OTHER_USER_ID, on_day=today
         )
 
-        result = await assembler.assemble(USER_ID, today, "UTC")
+        result = await assembler.assemble(USER_ID, today, "UTC", now=now)
 
         assert result.agenda == []
 
@@ -134,10 +151,11 @@ class TestTodaysAgendaAgainstRealJournals:
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
         """The prompt cannot mark an entry the assembler never handed it."""
-        today = today_in_zone("UTC")
+        now = an_instant()
+        today = day_of(now, "UTC")
         await event_seeder.event(title="Dentist", event_state="cancelled", on_day=today)
 
-        result = await assembler.assemble(USER_ID, today, "UTC")
+        result = await assembler.assemble(USER_ID, today, "UTC", now=now)
 
         assert titles(result.agenda) == ["Dentist"]
         assert result.agenda[0].is_cancelled is True
@@ -152,12 +170,13 @@ class TestTodaysAgendaAgainstRealJournals:
         that the event is found, but that it is found on a day UTC has not
         started yet.
         """
-        local_today = today_in_zone(FAR_EAST)
+        now = an_instant()
+        local_today = day_of(now, FAR_EAST)
         await event_seeder.event(
             title="Morning swim", timezone=FAR_EAST, hour=7, on_day=local_today
         )
 
-        result = await assembler.assemble(USER_ID, local_today, FAR_EAST)
+        result = await assembler.assemble(USER_ID, local_today, FAR_EAST, now=now)
 
         assert titles(result.agenda) == ["Morning swim"]
 
@@ -172,7 +191,8 @@ class TestTodaysAgendaAgainstRealJournals:
         UTC+14 is *this* UTC day, so a window anchored on UTC's date would put
         tomorrow's event on today's agenda; the local window must not.
         """
-        local_today = today_in_zone(FAR_EAST)
+        now = an_instant()
+        local_today = day_of(now, FAR_EAST)
         await event_seeder.event(
             title="Tomorrow's swim",
             timezone=FAR_EAST,
@@ -181,7 +201,7 @@ class TestTodaysAgendaAgainstRealJournals:
             on_day=local_today,
         )
 
-        result = await assembler.assemble(USER_ID, local_today, FAR_EAST)
+        result = await assembler.assemble(USER_ID, local_today, FAR_EAST, now=now)
 
         assert result.agenda == []
 
@@ -195,13 +215,14 @@ class TestOnlyTheCurrentDayReadsAnAgenda:
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
         """Yesterday really has an event on it, and still gets no agenda."""
-        today = today_in_zone("UTC")
+        now = an_instant()
+        today = day_of(now, "UTC")
         yesterday = today - datetime.timedelta(days=1)
         await event_seeder.event(
             title="Yesterday's standup", day_offset=-1, on_day=today
         )
 
-        result = await assembler.assemble(USER_ID, yesterday, "UTC")
+        result = await assembler.assemble(USER_ID, yesterday, "UTC", now=now)
 
         assert result.agenda == []
         # The day's journals are still assembled — only the agenda is withheld.
@@ -211,11 +232,12 @@ class TestOnlyTheCurrentDayReadsAnAgenda:
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
         """The rule is "the current day", not "today or later"."""
-        today = today_in_zone("UTC")
+        now = an_instant()
+        today = day_of(now, "UTC")
         tomorrow = today + datetime.timedelta(days=1)
         await event_seeder.event(title="Tomorrow's standup", day_offset=1, on_day=today)
 
-        result = await assembler.assemble(USER_ID, tomorrow, "UTC")
+        result = await assembler.assemble(USER_ID, tomorrow, "UTC", now=now)
 
         assert result.agenda == []
         assert result.journal_count == 1
