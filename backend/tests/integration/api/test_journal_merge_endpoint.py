@@ -512,6 +512,47 @@ async def test_merge_journal_with_overrides(
 
 
 @pytest.mark.integration
+async def test_merge_applies_type_data_override_for_a_source_only_type(
+    authenticated_client: AsyncClient,
+    clean_database: None,
+) -> None:
+    """An override lands even when only the source has a row for that type.
+
+    The target carries no MOOD_RATING, so the merge moves the source's row
+    wholesale — the branch that used to ignore ``type_data`` entirely.
+    """
+    target_id = await _create_journal(authenticated_client, "Target Title", "01")
+    source_id = await _create_journal(
+        authenticated_client,
+        "Source Title",
+        "01",
+        types=["MOOD_RATING"],
+        type_data={"MOOD_RATING": {"mood_value": 8, "energy_level": 8}},
+    )
+
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {"type_data": {"MOOD_RATING": {"mood_value": 3}}},
+                },
+            }
+        },
+    )
+
+    assert merge_res.status_code == 200, merge_res.text
+    mood = merge_res.json()["data"]["attributes"]["type_data"]["mood_rating"]
+
+    # The override wins over the value the moved row carried.
+    assert mood["mood_value"] == 3
+    # Everything the caller did not override rides along on the moved row.
+    assert mood["energy_level"] == 8
+
+
+@pytest.mark.integration
 async def test_merge_journal_with_route(
     authenticated_client: AsyncClient,
     async_connection: AsyncConnection,
@@ -836,7 +877,13 @@ async def test_merge_journals_moves_source_only_external_link(
 
 
 async def _create_journal(
-    client: AsyncClient, title: str, day: str, parent_id: int | None = None
+    client: AsyncClient,
+    title: str,
+    day: str,
+    parent_id: int | None = None,
+    *,
+    types: list[str] | None = None,
+    type_data: dict[str, Any] | None = None,
 ) -> int:
     """Create a journal via the API and return its id."""
     attributes: dict[str, Any] = {
@@ -849,6 +896,10 @@ async def _create_journal(
     }
     if parent_id is not None:
         attributes["parent_id"] = parent_id
+    if types is not None:
+        attributes["types"] = types
+    if type_data is not None:
+        attributes["type_data"] = type_data
 
     res = await client.post(
         "/api/journals",
