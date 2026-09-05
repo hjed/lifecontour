@@ -9,6 +9,7 @@ import {
   formatIsoDateLong,
   formatIsoWeekdayDate,
   isIsoCalendarDate,
+  localMidnight,
 } from '../date-utils';
 
 describe('formatDateOnly', () => {
@@ -183,5 +184,50 @@ describe('isIsoCalendarDate', () => {
     ['a basic-format date', '20260801'],
   ])('rejects %s, which parseISO would otherwise accept', (_, value) => {
     expect(isIsoCalendarDate(value)).toBe(false);
+  });
+});
+
+/**
+ * `localMidnight` is the write half of the `event_date_range` convention: a
+ * bound is stored as the UTC instant of *local* midnight. The read half is
+ * already `new Date(iso)` plus a local-timezone format, so the two only agree
+ * if the write zeroes the **local** clock rather than the UTC one.
+ *
+ * These cases hold in any ambient zone, which is why they say nothing about
+ * offsets; the offset-sensitive half is covered where the component that
+ * writes the value is tested, with a zone pinned.
+ */
+describe('localMidnight', () => {
+  it('zeroes the local clock components', () => {
+    const midnight = localMidnight(new Date(2026, 8, 5, 13, 47, 22, 501));
+
+    expect([
+      midnight.getHours(),
+      midnight.getMinutes(),
+      midnight.getSeconds(),
+      midnight.getMilliseconds(),
+    ]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('keeps the local calendar date it was given', () => {
+    // Late enough in the local day that a UTC-based implementation would land
+    // on the following date anywhere behind UTC.
+    const midnight = localMidnight(new Date(2026, 8, 5, 23, 30));
+
+    expect(formatDateOnly(midnight)).toBe('2026-09-05');
+  });
+
+  it('is idempotent', () => {
+    const once = localMidnight(new Date(2026, 8, 5, 9, 15));
+
+    expect(localMidnight(once).toISOString()).toBe(once.toISOString());
+  });
+
+  it('does not mutate the date it is given', () => {
+    const original = new Date(2026, 8, 5, 9, 15);
+
+    localMidnight(original);
+
+    expect(original.getHours()).toBe(9);
   });
 });
