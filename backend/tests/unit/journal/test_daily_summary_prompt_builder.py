@@ -2,6 +2,17 @@
 
 from datetime import UTC, date, datetime, time, timedelta
 
+import pytest
+from core_shared.models.tasks import (
+    Task,
+    TaskContactRef,
+    TaskJournalRef,
+    TaskReadModel,
+    UpcomingTasks,
+    build_task_read_model,
+    upcoming_window,
+)
+
 from app.core.journal.models.agenda import AgendaEntry, AgendaParticipant
 from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
@@ -11,8 +22,17 @@ from app.core.journal.services.daily_summary_prompt_builder import (
     MAX_AGENDA_ENTRIES,
     MAX_AGENDA_PARTICIPANTS,
     MAX_CONTENT_LENGTH,
+    MAX_TASK_CONTACTS,
+    MAX_TASK_ENTRIES,
+    MAX_TASK_TEXT_LENGTH,
     DailySummaryPromptBuilder,
 )
+
+# Both daily-summary suites are pure and mock-backed, but neither carried the
+# marker CI selects on, so none of their tests ran there. Added with the phase
+# that puts new assertions in them: a test outside the selection is a test that
+# does not run.
+pytestmark = pytest.mark.unit
 
 
 def _make_input(**overrides: object) -> DailySummaryInput:
@@ -57,16 +77,23 @@ class TestDailySummaryPromptBuilder:
         """One grounding rule, listing all of them.
 
         Tool results have always counted alongside the journals; the agenda
-        joined them when it became an input. It is named in the *same* sentence
-        rather than a second one, because two grounding rules that list
-        different sources are a contradiction the model is free to resolve
-        either way — and resolving it the wrong way discards the agenda this
-        phase exists to supply.
+        joined them when it became an input, and the week's tasks joined them
+        next. Each is named in the *same* sentence rather than a second one,
+        because two grounding rules that list different sources are a
+        contradiction the model is free to resolve either way — and resolving it
+        the wrong way discards whichever group is newest.
+
+        The superseded forms are asserted absent, so widening the sentence again
+        cannot leave a narrower claim standing beside it.
         """
         builder = DailySummaryPromptBuilder()
         prompt = builder.build(_make_input())
 
-        assert "not present in the journals, the agenda or the tool results" in prompt
+        assert (
+            "not present in the journals, the agenda, the tasks or the tool results"
+            in prompt
+        )
+        assert "not present in the journals, the agenda or the tool" not in prompt
         assert "not present in the journals or tool results" not in prompt
 
     def test_output_format_requests_two_paragraphs(self) -> None:
@@ -647,3 +674,317 @@ class TestAMultiDayEvent:
 
         assert "09:00-09:30: Design review" in prompt
         assert "Apr" not in prompt.split("## Today's Agenda")[1]
+
+
+def _task(
+    task_id: int,
+    *,
+    due_date: date,
+    text: str = "book the venue",
+    journal_title: str = "Monday standup",
+    contacts: tuple[TaskContactRef, ...] = (),
+) -> TaskReadModel:
+    """One assembled task, built the way the read service builds one.
+
+    Through ``build_task_read_model`` so ``lapse_reason`` is derived rather than
+    hand-set, the reasoning ``tests/unit/tasks/test_task_upcoming_window`` gives
+    for its own helper.
+    """
+    due_journal = TaskJournalRef(
+        id=900 + task_id, title=journal_title, date=due_date, cancelled=False
+    )
+    return build_task_read_model(
+        task=Task(
+            id=task_id,
+            user_id="user123",
+            text=text,
+            creating_journal_id=1,
+            due_journal_id=due_journal.id,
+        ),
+        creating_journal=TaskJournalRef(
+            id=1, title="where it arose", date=_TODAY, cancelled=False
+        ),
+        due_journal=due_journal,
+        intermediate_journals=[],
+        contacts=contacts,
+        today=_TODAY,
+    )
+
+
+def _due_soon(*tasks: TaskReadModel, days_ahead: int = 7) -> UpcomingTasks:
+    """The listing's answer for the current day, window and all."""
+    return UpcomingTasks(window=upcoming_window(_TODAY, days_ahead), tasks=tasks)
+
+
+class TestUpcomingTasksSection:
+    """The week's commitments, on the current day's prompt and no other."""
+
+    def test_todays_prompt_carries_the_task_and_its_journal(self) -> None:
+        """Text, due date and the journal it is due in all reach the model."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "## Tasks Due Soon" in prompt
+        assert "Due 27 Apr (today): book the venue" in prompt
+        assert '(in "Monday standup")' in prompt
+
+    def test_linked_contacts_travel_with_the_task(self) -> None:
+        """The connective work needs the person, not just the commitment."""
+        builder = DailySummaryPromptBuilder()
+        task = _task(
+            1,
+            due_date=_TODAY,
+            contacts=(
+                TaskContactRef(id=5, display_name="Alice Smith", photo_url=None),
+                TaskContactRef(id=6, display_name="Bob Jones", photo_url=None),
+            ),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_tasks=_due_soon(task)),
+            now=_NOW,
+        )
+
+        assert "with Alice Smith, Bob Jones" in prompt
+
+    def test_a_task_with_no_contacts_has_no_dangling_with(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "book the venue with" not in prompt
+        assert "with \n" not in prompt
+
+    def test_due_dates_are_labelled_relative_to_today(self) -> None:
+        """A date alone makes the model do the arithmetic; the label does not."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(
+                    _task(1, due_date=_TODAY, text="today's"),
+                    _task(2, due_date=_TODAY + timedelta(days=1), text="tomorrow's"),
+                    _task(3, due_date=_TODAY + timedelta(days=3), text="later"),
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "Due 27 Apr (today): today's" in prompt
+        assert "Due 28 Apr (tomorrow): tomorrow's" in prompt
+        assert "Due 30 Apr (in 3 days): later" in prompt
+
+    def test_the_section_states_the_window_it_describes(self) -> None:
+        """The window travels with the tasks so the prompt can name it."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "the next 7 days" in prompt
+        assert "04 May" in prompt
+
+    def test_the_section_says_what_is_deliberately_absent(self) -> None:
+        """Otherwise silence reads as "this is everything the user has on"."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "done, cancelled or lapsed" in prompt
+
+    def test_task_cap_states_the_overflow(self) -> None:
+        """A crowded week is capped, and the prompt says so rather than cutting."""
+        builder = DailySummaryPromptBuilder()
+        tasks = [
+            _task(i, due_date=_TODAY, text=f"Task-{i:02d}")
+            for i in range(MAX_TASK_ENTRIES + 3)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_tasks=_due_soon(*tasks)),
+            now=_NOW,
+        )
+
+        assert f"Task-{MAX_TASK_ENTRIES - 1:02d}" in prompt
+        assert f"Task-{MAX_TASK_ENTRIES:02d}" not in prompt
+        assert "3 further tasks" in prompt
+
+    def test_contact_cap_states_the_overflow(self) -> None:
+        """A widely-shared commitment is capped per task, and counted."""
+        builder = DailySummaryPromptBuilder()
+        task = _task(
+            1,
+            due_date=_TODAY,
+            contacts=tuple(
+                TaskContactRef(id=i, display_name=f"Person-{i:02d}", photo_url=None)
+                for i in range(MAX_TASK_CONTACTS + 2)
+            ),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_tasks=_due_soon(task)),
+            now=_NOW,
+        )
+
+        assert f"Person-{MAX_TASK_CONTACTS - 1:02d}" in prompt
+        assert f"Person-{MAX_TASK_CONTACTS:02d}" not in prompt
+        assert "and 2 more" in prompt
+
+
+class TestNoForwardLookingTasksOnAnyOtherDay:
+    """A past-day summary describes that day; a future one is not today either."""
+
+    def test_a_past_day_carries_no_task_material(self) -> None:
+        """The same input, judged a day late, renders none of it."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY - timedelta(days=1),
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "## Tasks Due Soon" not in prompt
+        assert "book the venue" not in prompt
+
+    def test_a_future_day_carries_no_task_material(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY + timedelta(days=1),
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "## Tasks Due Soon" not in prompt
+        assert "book the venue" not in prompt
+
+
+class TestAQuietWeekAddsNoHeading:
+    """An empty heading reads as a section the model must account for."""
+
+    def test_an_empty_window_adds_no_heading(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_tasks=_due_soon()), now=_NOW
+        )
+
+        assert "## Tasks Due Soon" not in prompt
+
+    def test_a_day_that_gathered_nothing_adds_no_heading(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_tasks=None), now=_NOW
+        )
+
+        assert "## Tasks Due Soon" not in prompt
+
+
+class TestTheToneInstructionsCoverTasks:
+    """A new input group widens an existing rule; it never gets a second one."""
+
+    def test_the_grounding_rule_names_the_tasks(self) -> None:
+        """Two grounding sentences listing different sources contradict."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input(summary_date=_TODAY), now=_NOW)
+
+        assert (
+            "Do not invent information not present in the journals, the agenda, "
+            "the tasks or the tool results you were given." in prompt
+        )
+
+    def test_the_do_not_restate_rule_names_the_tasks(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input(summary_date=_TODAY), now=_NOW)
+
+        assert (
+            "Do not restate the day's agenda, journals, tasks or other listed "
+            "material item by item" in prompt
+        )
+
+
+class TestAnUnboundedTaskTextIsCapped:
+    """``tasks.text`` is deliberately unbounded, so the prompt bounds it.
+
+    Capping the *number* of tasks does nothing about the size of one, and a
+    single arbitrarily large row would push the whole request past the model's
+    limit — failing that day's summary outright rather than degrading it.
+    """
+
+    def test_a_long_text_is_truncated_and_marked(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        text = "x" * (MAX_TASK_TEXT_LENGTH + 50) + "TAIL"
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY, text=text)),
+            ),
+            now=_NOW,
+        )
+
+        assert "x" * MAX_TASK_TEXT_LENGTH + "..." in prompt
+        assert "TAIL" not in prompt
+
+    def test_a_text_at_the_limit_is_left_alone(self) -> None:
+        """The boundary from the other side, so the cap cannot be off by one."""
+        builder = DailySummaryPromptBuilder()
+        text = "y" * MAX_TASK_TEXT_LENGTH
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY, text=text)),
+            ),
+            now=_NOW,
+        )
+
+        assert text in prompt
+        assert text + "..." not in prompt
+
+    def test_an_ordinary_task_is_untouched(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "book the venue (in" in prompt
+        assert "..." not in prompt

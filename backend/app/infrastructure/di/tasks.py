@@ -37,6 +37,14 @@ class TaskProvider(Provider):
     resolves. Both the application container and the integration-test container
     register all of them; tests use
     ``tests/integration/tasks/task_seeding.make_task_container``.
+
+    **The requirement is now mutual.** ``JournalProvider``'s daily-summary input
+    assembler consumes ``TaskReadService`` from here, because the summary's
+    forward-looking input *is* the upcoming-task listing. Providers may depend
+    on each other in both directions — Dishka validates a graph of types, and
+    that graph is still acyclic, since everything the tasks domain reaches for
+    is a journal **port** and none of it reaches back. What it does mean is that
+    a container holding either provider holds both.
     """
 
     @provide(scope=Scope.REQUEST)

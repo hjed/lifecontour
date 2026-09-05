@@ -31,9 +31,12 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from app.infrastructure.di.contacts import ContactProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
+from app.infrastructure.di.integrations import IntegrationProvider
 from app.infrastructure.di.journal import JournalProvider
 from app.infrastructure.di.settings import SettingsProvider
+from app.infrastructure.di.tasks import TaskProvider
 
 USER_ID = "test-user-123"
 
@@ -172,9 +175,14 @@ class TestDependencyInjection:
     ):
         """Resolving it wires in the settings repository on the request connection.
 
-        ``InfrastructureProvider`` is present because Dishka validates the whole
-        graph up front and ``JournalProvider``'s other factories need ``Settings``
-        — it is not a dependency of the resolver itself.
+        None of the other providers is a dependency of the resolver itself.
+        They are here because Dishka validates the whole graph up front:
+        ``JournalProvider``'s other factories need ``Settings``
+        (``InfrastructureProvider``) and, since the daily-summary assembler
+        began consuming the upcoming-task listing, ``TaskReadService``
+        (``TaskProvider``, which reaches for ``ContactProvider``, which reaches
+        for ``IntegrationProvider``). This was the one container in the repo
+        that did not already register them.
         """
 
         class _ConnectionProvider(Provider):
@@ -189,7 +197,10 @@ class TestDependencyInjection:
         container = make_async_container(
             _ConnectionProvider(async_connection),
             InfrastructureProvider(),
+            ContactProvider(),
+            IntegrationProvider(),
             JournalProvider(),
+            TaskProvider(),
             SettingsProvider(),
         )
         try:

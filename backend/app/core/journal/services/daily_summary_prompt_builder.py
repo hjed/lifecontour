@@ -5,10 +5,10 @@ actual journal content and metadata.
 
 **Forward-looking material is rendered for the current day only.** A summary of
 last Tuesday describes last Tuesday, not what was scheduled after it, so the
-agenda section is emitted only when the day being summarised is today in the
-user's timezone — the same judgement the assembler makes before reading it. Two
-guards for one rule is deliberate: the assembler's saves a query, this one is
-what the rule can be asserted at without a database.
+agenda and task sections are emitted only when the day being summarised is
+today in the user's timezone — the same judgement the assembler makes before
+reading either. Two guards for one rule is deliberate: the assembler's saves a
+query, this one is what the rule can be asserted at without a database.
 """
 
 from __future__ import annotations
@@ -26,11 +26,26 @@ from app.core.settings.timezone_utils import (
 if TYPE_CHECKING:
     from datetime import date, datetime, time
 
+    from core_shared.models.tasks import TaskReadModel
+
     from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.services.daily_summary_models import DailySummaryInput
 
 # Truncate content beyond this length to keep prompts bounded
 MAX_CONTENT_LENGTH = 500
+
+# And the same bound on a task's text, which needs one for the same reason.
+#
+# **Two columns reach this prompt unbounded, and these are they.** Every other
+# string interpolated below comes from a bounded ``VARCHAR`` — a journal title
+# is 500, a contact name 100, a location 500 — so it cannot be the thing that
+# blows a request. ``journals.content`` is ``TEXT``, which is why
+# ``MAX_CONTENT_LENGTH`` has always existed; ``tasks.text`` is ``TEXT`` too, and
+# migration 0105 calls it "deliberately unbounded". One arbitrarily large task
+# would otherwise push the whole request past the model's limit and fail the
+# day's summary outright — a per-day outage caused by a single row. Raised by
+# the pull request's automated review.
+MAX_TASK_TEXT_LENGTH = 500
 
 # Caps on the agenda material one prompt may carry. Adding the agenda, and later
 # the week's tasks and contact dates, grows a prompt that used to hold journals
@@ -40,6 +55,49 @@ MAX_CONTENT_LENGTH = 500
 # shortened list will describe it as complete.
 MAX_AGENDA_ENTRIES = 20
 MAX_AGENDA_PARTICIPANTS = 10
+
+# The week's tasks get the same treatment and the same numbers, deliberately:
+# two groups of one-line commitments budgeted differently would need a reason,
+# and there is none. What bounds the group underneath is the seven-day window
+# itself; these bound the pathological week within it.
+MAX_TASK_ENTRIES = 20
+MAX_TASK_CONTACTS = 10
+
+
+def _capped(value: str, cap: int) -> str:
+    """``value`` at most ``cap`` characters, with an ellipsis when it was cut.
+
+    Used for the two values in this prompt that come from unbounded ``TEXT``
+    columns — a journal's content and a task's text. The ellipsis is the point:
+    a model that can see the value was cut will not treat a sentence that stops
+    mid-word as the whole commitment, which is the same honesty the counted
+    remainders give the capped *lists*.
+    """
+    return value if len(value) <= cap else value[:cap] + "..."
+
+
+def _with_people(names: list[str], cap: int) -> str | None:
+    """``with A, B and 2 more`` — or nothing at all when there is nobody.
+
+    Shared by the agenda's participants and a task's contacts because it is one
+    concept, not two that happen to look alike: name the people, cap the list,
+    and **count** what was left out rather than trimming it silently. A model
+    told "and 2 more" can say a meeting was crowded; one handed a quietly
+    shortened list will describe it as complete.
+
+    Returning ``None`` rather than an empty string keeps the caller's decision
+    ("is there a clause to append?") at the caller, where the rest of the line
+    is being assembled.
+    """
+    if not names:
+        return None
+
+    shown = names[:cap]
+    omitted = len(names) - len(shown)
+    clause = f"with {', '.join(shown)}"
+    if omitted:
+        clause += f" and {omitted} more"
+    return clause
 
 
 class DailySummaryPromptBuilder:
@@ -60,9 +118,10 @@ class DailySummaryPromptBuilder:
         1. System instructions
         2. Day overview (date, counts)
         3. Today's agenda (current day only)
-        4. Journal entries (title, content, types, contacts, mood)
-        5. Previous summary (for incremental update)
-        6. Output format specification
+        4. Tasks due in the week ahead (current day only)
+        5. Journal entries (title, content, types, contacts, mood)
+        6. Previous summary (for incremental update)
+        7. Output format specification
         """
         sections: list[str] = []
 
@@ -82,18 +141,23 @@ class DailySummaryPromptBuilder:
         if agenda_section:
             sections.append(agenda_section)
 
-        # 4. Journal entries
+        # 4. The week's commitments — nothing at all for any other day
+        tasks_section = self._build_upcoming_tasks(summary_input, temporal_context)
+        if tasks_section:
+            sections.append(tasks_section)
+
+        # 5. Journal entries
         entries_section = self._build_journal_entries(summary_input)
         if entries_section:
             sections.append(entries_section)
 
-        # 5. Previous summary
+        # 6. Previous summary
         if summary_input.previous_summary:
             sections.append(
                 self._build_previous_summary(summary_input.previous_summary)
             )
 
-        # 6. Output format
+        # 7. Output format
         sections.append(self._build_output_format())
 
         return "\n\n".join(sections)
@@ -112,12 +176,15 @@ class DailySummaryPromptBuilder:
             "Look for open follow-ups, commitments, or upcoming events the user should remember or action today.\n"
             "Keep the summary short.\n"
             "Be practical and descriptive rather than speculative.\n"
-            "Do not invent information not present in the journals, the agenda or "
-            "the tool results you were given.\n"
+            # Widened rather than joined by a second sentence: two grounding
+            # rules naming different sources is a contradiction the model is
+            # free to resolve by discarding whichever group is newest.
+            "Do not invent information not present in the journals, the agenda, "
+            "the tasks or the tool results you were given.\n"
             "Do not invent commitments the user did not make.\n"
             "Do not rewrite the journal record — just summarise.\n"
-            "Do not restate the day's agenda, journals or other listed material item "
-            "by item — the user can already see those lists.\n"
+            "Do not restate the day's agenda, journals, tasks or other listed "
+            "material item by item — the user can already see those lists.\n"
             "Your value is in connecting them: what one implies for another, what "
             "needs preparing, what is likely to clash.\n"
             "If mood data is present, mention the general mood direction."
@@ -247,14 +314,11 @@ class DailySummaryPromptBuilder:
         if entry.location:
             parts.append(f"(at {entry.location})")
 
-        names = [person.name for person in entry.participants]
-        if names:
-            shown = names[:MAX_AGENDA_PARTICIPANTS]
-            omitted = len(names) - len(shown)
-            with_clause = f"with {', '.join(shown)}"
-            if omitted:
-                with_clause += f" and {omitted} more"
-            parts.append(with_clause)
+        people = _with_people(
+            [person.name for person in entry.participants], MAX_AGENDA_PARTICIPANTS
+        )
+        if people:
+            parts.append(people)
 
         return f"- {' '.join(parts)}"
 
@@ -291,6 +355,107 @@ class DailySummaryPromptBuilder:
         """The entry's clock columns — its own local time, whatever zone that is."""
         return cls._span(entry.start_time, entry.end_time) if entry.start_time else ""
 
+    @classmethod
+    def _build_upcoming_tasks(
+        cls, summary_input: DailySummaryInput, temporal_context: str
+    ) -> str:
+        """The commitments due in the week ahead, for the current day and no other.
+
+        The second of the two guards on the same rule, the first being the
+        assembler's — which does not read the listing at all unless the day is
+        the user's today. Each resolves the local date through the same pair
+        underneath, so the two cannot disagree, and having the rendering half
+        here is what makes "a past-day prompt carries no forward-looking
+        material" assertable without a database.
+
+        **What is absent is stated, because silence would mislead.** The listing
+        has already dropped done, cancelled and lapsed tasks, so a model handed
+        the survivors alone would reasonably read them as everything the user
+        has on. Saying so also stops it describing a quiet week as an idle one.
+
+        An empty week contributes nothing rather than an empty heading, the
+        stance :meth:`_build_agenda` already takes and for the same reason.
+
+        The overflow sentence below deliberately stays a copy of the agenda's
+        rather than being lifted alongside :func:`_with_people`. That helper is
+        one concept in two places; this is two sentences that share a shape —
+        what is left out of an agenda is *events on this day*, and what is left
+        out here is *tasks due in this window*. Parameterising the noun and the
+        phrase would leave a template neither caller could read.
+        """
+        upcoming = summary_input.upcoming_tasks
+        if temporal_context != "Today" or upcoming is None or not upcoming.tasks:
+            return ""
+
+        shown = upcoming.tasks[:MAX_TASK_ENTRIES]
+        omitted = len(upcoming.tasks) - len(shown)
+
+        lines = [
+            "## Tasks Due Soon",
+            "The user's outstanding commitments, soonest first, due between today "
+            f"and {upcoming.window.last_day:%d %b} — the next "
+            f"{upcoming.window.days_ahead} days.",
+            "Tasks already done, cancelled or lapsed are deliberately absent, so "
+            "every line below is still outstanding.",
+        ]
+        lines.extend(
+            cls._task_line(model, upcoming.window.first_day) for model in shown
+        )
+        if omitted:
+            lines.append(
+                f"({omitted} further tasks due in this window are not listed; the "
+                f"list above is capped at {MAX_TASK_ENTRIES}.)"
+            )
+        return "\n".join(lines)
+
+    @classmethod
+    def _task_line(cls, model: TaskReadModel, today: date) -> str:
+        """One commitment as a single line.
+
+        **No timezone is named and none is needed.** ``TaskJournalRef.date`` is
+        a date the read service already resolved in the acting user's zone, so
+        unlike an agenda entry — whose clock columns are the *event's* local
+        time — there is no second zone here for a reader to be misled by. Do not
+        "fix" this by qualifying it.
+
+        The relative label is not decoration: the model is being asked to notice
+        what needs preparing, and a bare ``30 Apr`` makes it do date arithmetic
+        against a system time several sections earlier to find out whether that
+        is urgent.
+
+        **The text is capped**, unlike the journal title beside it. ``tasks.text``
+        is the only unbounded column this line reads — see
+        :data:`MAX_TASK_TEXT_LENGTH` — and capping the *number* of tasks does
+        nothing about the size of one.
+        """
+        parts = [
+            f"Due {model.due_journal.date:%d %b} "
+            f"({cls._relative_day(model.due_journal.date, today)}):",
+            _capped(model.task.text, MAX_TASK_TEXT_LENGTH),
+            f'(in "{model.due_journal.title}")',
+        ]
+
+        people = _with_people(
+            [contact.display_name for contact in model.contacts], MAX_TASK_CONTACTS
+        )
+        if people:
+            parts.append(people)
+
+        return f"- {' '.join(parts)}"
+
+    @staticmethod
+    def _relative_day(due: date, today: date) -> str:
+        """How far off a due date is, in the words a person would use."""
+        days = (due - today).days
+        if days <= 0:
+            # A forward window starts today, so a negative gap is unreachable
+            # through the listing; reading it as "today" beats inventing a
+            # phrase for a case that would mean the window was built wrong.
+            return "today"
+        if days == 1:
+            return "tomorrow"
+        return f"in {days} days"
+
     def _build_journal_entries(self, summary_input: DailySummaryInput) -> str:
         if not summary_input.journals:
             return ""
@@ -311,10 +476,7 @@ class DailySummaryPromptBuilder:
                 lines.append(f"Mood: {entry.mood_value}")
             if entry.energy_level is not None:
                 lines.append(f"Energy: {entry.energy_level}")
-            content = entry.content
-            if len(content) > MAX_CONTENT_LENGTH:
-                content = content[:MAX_CONTENT_LENGTH] + "..."
-            lines.append(f"Content: {content}")
+            lines.append(f"Content: {_capped(entry.content, MAX_CONTENT_LENGTH)}")
 
         return "\n".join(lines)
 
