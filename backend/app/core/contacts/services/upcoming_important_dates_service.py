@@ -107,8 +107,10 @@ class UpcomingImportantDatesService:
                 seven days the dashboard shows.
             today: Today's date, already resolved in the user's timezone. Pass
                 it when the caller has one — the dashboard resolves a single
-                anchor for all four of its sections — and the clock is then not
-                read here at all.
+                anchor for all four of its sections — and no second timezone
+                lookup happens here. It pins the **day** and only the day: the
+                signals cutoff is ``now``'s, so a caller wanting the whole read
+                as at one instant passes both.
             now: The instant this read is "as at". It resolves ``today`` when
                 ``today`` was not supplied, and in **either** case it is the
                 instant the importance signals measure their thirty-day recency

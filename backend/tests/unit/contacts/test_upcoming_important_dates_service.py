@@ -244,11 +244,18 @@ class TestWhoseDayItIs:
 
         assert result.window.first_day == datetime.date(2026, 8, 11)
 
-    async def test_a_supplied_today_is_used_and_no_clock_is_read(
+    async def test_a_supplied_today_is_used_and_the_settings_row_is_not_read(
         self, service: UpcomingImportantDatesService, settings_repo: AsyncMock
     ) -> None:
         """The dashboard resolves the anchor once for all four sections and hands
-        it down, so this path must not resolve a second one."""
+        it down, so this path must not resolve a second timezone.
+
+        Named for the **settings** read, which is what it asserts. It was named
+        for the clock until the review on #1404 pointed out that a supplied
+        ``today`` does not stop the clock being sampled — the signals cutoff
+        still needs an instant — and a test whose name overstates its assertion
+        is how a docstring comes to claim the same thing.
+        """
         result = await service.upcoming_dates(USER_ID, today=TODAY)
 
         assert result.window.first_day == TODAY
