@@ -133,6 +133,7 @@ class EventSeeder:
         event_state: str = "confirmed",
         with_calendar_info: bool = True,
         records_zone_as: str | None = _KEEP,
+        on_day: datetime.date | None = None,
     ) -> int:
         """One journal, optionally with the calendar info that makes it an event.
 
@@ -141,11 +142,16 @@ class EventSeeder:
         two, so a test can put an event squarely on the reader's day while the
         row still claims a different zone, which is what the stored clock values
         actually mean.
+
+        ``on_day`` is the local day to place it on, ``day_offset`` days from
+        there. Without it the seeder reads the clock itself, which is fine for a
+        test that only asks the endpoint about "now" — but a test that *also*
+        computes a date to assert against must pass the day it computed, or the
+        two readings can straddle local midnight and disagree.
         """
         tz = ZoneInfo(timezone)
-        local_day = datetime.datetime.now(tz).date() + datetime.timedelta(
-            days=day_offset
-        )
+        anchor = on_day if on_day is not None else datetime.datetime.now(tz).date()
+        local_day = anchor + datetime.timedelta(days=day_offset)
         start = datetime.datetime.combine(local_day, datetime.time(hour), tz)
         end = start + datetime.timedelta(hours=duration_hours, days=ends_days_later)
 

@@ -485,10 +485,16 @@ class TestAnEventInAnotherTimezone:
     jci.timezone``, so a 09:00 New York meeting stores ``09:00`` for a Sydney
     user too. Rendering it bare tells the model the user has a morning
     appointment — the failure the API design document names.
+
+    Naming the zone is not enough either, because the entry reached this agenda
+    by *instant* overlap and its own local date can be the neighbouring one. So
+    a foreign-zone entry leads with the reader's clock time and carries its own
+    behind it.
     """
 
-    def test_a_foreign_zone_is_named_beside_the_time(self) -> None:
+    def test_the_readers_time_leads_and_the_events_own_follows(self) -> None:
         builder = DailySummaryPromptBuilder()
+        # 09:00-09:30 UTC is 19:00-19:30 in Sydney (AEST, +10 in late April).
         entry = _agenda_entry(title="New York sync", timezone="America/New_York")
 
         prompt = builder.build(
@@ -497,7 +503,37 @@ class TestAnEventInAnotherTimezone:
             timezone="Australia/Sydney",
         )
 
-        assert "09:00-09:30 (America/New_York): New York sync" in prompt
+        assert "19:00-19:30 (09:00-09:30 America/New_York): New York sync" in prompt
+
+    def test_an_event_whose_own_date_is_the_day_before(self) -> None:
+        """23:00 on a New York Monday sits in a Sydney user's Tuesday.
+
+        The clock column says 23:00 and the zone says New York, but the event is
+        happening at 14:00 on the reader's Tuesday afternoon. Rendering only the
+        event's own clock would put a late-night commitment on a day that has
+        none — the ambiguity naming the zone alone does not resolve.
+        """
+        builder = DailySummaryPromptBuilder()
+        entry = AgendaEntry(
+            journal_id=9,
+            title="Late call",
+            is_all_day=False,
+            # Monday 23:00 in New York (EDT, -4) is Tuesday 03:00 UTC.
+            starts_at=datetime(2026, 4, 28, 3, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 28, 4, 0, tzinfo=UTC),
+            start_time=time(23, 0),
+            end_time=time(0, 0),
+            timezone="America/New_York",
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=date(2026, 4, 28), agenda=[entry]),
+            now=datetime(2026, 4, 28, 3, 0, tzinfo=UTC),
+            timezone="Australia/Sydney",
+        )
+
+        # Tuesday 03:00 UTC is Tuesday 13:00 in Sydney (AEST, +10).
+        assert "13:00-14:00 (23:00-00:00 America/New_York): Late call" in prompt
 
     def test_the_users_own_zone_is_not_named(self) -> None:
         """Naming the zone on every row would make the exception invisible."""
@@ -524,7 +560,8 @@ class TestAnEventInAnotherTimezone:
             timezone="Australia/Sydney",
         )
 
-        assert "09:00-09:30 (UTC): Design review" in prompt
+        # 09:00-09:30 UTC is 19:00-19:30 in Sydney (AEST, +10 in late April).
+        assert "19:00-19:30 (09:00-09:30 UTC): Design review" in prompt
 
     def test_an_all_day_entry_names_no_zone(self) -> None:
         """An all-day event happens on a date; there is no clock value to qualify."""
@@ -553,4 +590,4 @@ class TestAnEventInAnotherTimezone:
             _make_input(summary_date=_TODAY, agenda=[_agenda_entry()]), now=_NOW
         )
 
-        assert "clock time on the event itself" in prompt
+        assert "Every time below is the user's own local time" in prompt

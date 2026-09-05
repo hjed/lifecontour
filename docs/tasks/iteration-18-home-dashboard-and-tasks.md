@@ -10757,15 +10757,28 @@ all-day entry, and **no time at all** for a timed entry whose clock columns are 
 re-anchored into the user's zone to manufacture one: the row records its own zone, and asserting an hour in
 a zone the row does not record is precisely the defect `SqlAgendaRepository`'s docstring exists to prevent.
 
-**And the zone those clock times are in is named when it is not the reader's.** The first cut rendered them
-bare under the line "Times are the user's local clock times", which is false: migration 0045 derives the
-columns `AT TIME ZONE jci.timezone`, so they are the **event's** local time and a null zone means UTC.
-[API Design](../architecture/api-design.md) already spells out the consequence for any surface that
-renders them bare — *"a 09:00 New York meeting on a Sydney reader's agenda reads as a morning event that
-sorts into their evening"* — which is exactly what the model would have been told. An entry whose zone is
-not the user's now renders `09:00-09:30 (America/New_York): …`, and the section says such times cannot be
-compared with the rest without converting them. The zone rides with the *time*, so an all-day entry names
-none: it happens on a date and has no clock value to qualify. Caught in review.
+**A foreign-zone event leads with the reader's clock time and carries its own behind it** —
+`19:00-19:30 (09:00-09:30 America/New_York): New York sync`. This took two review rounds to get right, and
+the intermediate state is the instructive one.
+
+The first cut rendered the clock columns bare under the line "Times are the user's local clock times",
+which is false: migration 0045 derives them `AT TIME ZONE jci.timezone`, so they are the **event's** local
+time and a null zone means UTC. [API Design](../architecture/api-design.md) already spells out the
+consequence for any surface that renders them bare — *"a 09:00 New York meeting on a Sydney reader's
+agenda reads as a morning event that sorts into their evening"* — which is exactly what the model was
+being told. The obvious repair, naming the zone beside the time, **is not sufficient**, and the second
+round said why: an entry is on this agenda by *instant overlap*, so its own local date can be the
+neighbouring one. 23:00 on a New York Monday is on a Sydney user's Tuesday, and `23:00
+(America/New_York)` under a Tuesday heading still reads as a late-night Tuesday commitment when the event
+is really happening at 13:00 that Tuesday afternoon. The zone resolves *which clock*; it does not resolve
+*which day*, and the model has no way to supply the missing date.
+
+Leading with the reader's time settles both, and makes every time on the agenda directly comparable —
+which is what the model needs in order to notice a clash, the connective work the specification says is
+the summary's whole value. The reader's time is derived from the stored instant, which is arithmetic
+rather than the invention D4 rules out: an instant expressed in a second zone is still that instant. The
+zone rides with the *time*, so an all-day entry names none — it happens on a date and has no clock value
+to qualify.
 
 **Tone.** The prompt keeps every constraint it had and gains four lines: keep it short; do not invent
 commitments the user did not make; do not restate the day's agenda, journals or other listed material item
@@ -10857,6 +10870,13 @@ Review caught one test that proved nothing on its own terms: asserting an empty 
 never reached the query, because the current-day guard answers before the database is asked. **A negative
 agenda assertion is only worth writing for a day the query actually runs on** — which is why the
 replacement asks about today and seeds the event on the neighbouring day instead.
+
+It also caught that every one of these tests read the clock twice — once in the helper computing the date
+to assert against, once inside `EventSeeder.event` choosing the day to seed — so a local-midnight crossing
+mid-test could make the two disagree and fail a correct implementation. `EventSeeder.event` gained an
+optional `on_day`, and each test now reads its local day **once** and passes it to both. *The same rule as
+the service's: a test that computes a date to assert against must seed from that date, not from a second
+reading of the clock.*
 
 Unit (`test_daily_summary_prompt_builder.py`, timezone rendering): a foreign zone is named beside the time,
 the user's own is not (naming every row would make the exception invisible), a null zone reads as UTC and

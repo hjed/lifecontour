@@ -19,10 +19,12 @@ from app.core.settings.timezone_utils import (
     DEFAULT_TIMEZONE,
     format_datetime,
     now_in_tz,
+    resolve_timezone,
+    to_user_tz,
 )
 
 if TYPE_CHECKING:
-    from datetime import date, datetime
+    from datetime import date, datetime, time
 
     from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.services.daily_summary_models import DailySummaryInput
@@ -174,9 +176,9 @@ class DailySummaryPromptBuilder:
         lines = [
             "## Today's Agenda",
             "The events scheduled on this day, in the order the user sees them.",
-            "Each time is the clock time on the event itself. Where that is not "
-            "the user's own timezone the zone is named after it, and those times "
-            "cannot be compared with the rest without converting them.",
+            "Every time below is the user's own local time, so they can be "
+            "compared with each other directly. Where an event belongs to a "
+            "different timezone, its own local time and zone follow in brackets.",
             "Entries marked [CANCELLED] did not go ahead — never describe one as "
             "something the user is doing.",
         ]
@@ -188,8 +190,8 @@ class DailySummaryPromptBuilder:
             )
         return "\n".join(lines)
 
-    @staticmethod
-    def _agenda_line(entry: AgendaEntry, timezone: str) -> str:
+    @classmethod
+    def _agenda_line(cls, entry: AgendaEntry, timezone: str) -> str:
         """One agenda entry as a single line.
 
         **The time comes from the clock columns, never from the instant.** An
@@ -201,27 +203,39 @@ class DailySummaryPromptBuilder:
         **And those clock times are the *event's*, not the reader's.** Migration
         0045 derives them ``AT TIME ZONE jci.timezone``, so a 09:00 New York
         meeting stores ``09:00`` however far from New York the user is; a null
-        zone means UTC. A zone that is not the user's is therefore named beside
-        the time, because otherwise that meeting reads to the model as a morning
-        appointment on a Sydney day — the failure the API design document
-        predicts for any surface that renders these values bare.
+        zone means UTC.
+
+        Naming the zone beside such a time is **not enough on its own**, because
+        the entry is on this agenda by *instant* overlap and its own local date
+        may be the day before or after: 23:00 on a New York Monday is on a
+        Sydney user's Tuesday, and "23:00 (America/New_York)" under a Tuesday
+        heading reads as a late-night Tuesday event when it is really 15:00
+        Tuesday afternoon. So an entry in another zone leads with the **user's**
+        clock time — derived from the stored instant, which is arithmetic rather
+        than invention — and carries the event's own time and zone behind it.
+        Every time on the agenda is then directly comparable with every other,
+        which is what the model needs to notice a clash.
         """
         parts: list[str] = []
         if entry.is_cancelled:
             parts.append("[CANCELLED]")
 
-        # Only a rendered time can be misread as the user's, so the zone is
-        # named with the time or not at all: an all-day entry happens on a date
-        # and has no clock value for a zone to qualify.
+        # Only a rendered time can be misread, so the zone travels with the time
+        # or not at all: an all-day entry happens on a date and has no clock
+        # value for a zone to qualify.
         zone = entry.timezone or DEFAULT_TIMEZONE
-        elsewhere = f" ({zone})" if zone != timezone else ""
+        elsewhere = zone != timezone
 
         if entry.is_all_day:
             parts.append("All day:")
-        elif entry.start_time is not None and entry.end_time is not None:
-            parts.append(f"{entry.start_time:%H:%M}-{entry.end_time:%H:%M}{elsewhere}:")
+        elif elsewhere and entry.start_time is not None:
+            reader = resolve_timezone(timezone)
+            local = cls._span(
+                to_user_tz(entry.starts_at, reader), to_user_tz(entry.ends_at, reader)
+            )
+            parts.append(f"{local} ({cls._event_local_time(entry)} {zone}):")
         elif entry.start_time is not None:
-            parts.append(f"{entry.start_time:%H:%M}{elsewhere}:")
+            parts.append(f"{cls._event_local_time(entry)}:")
 
         parts.append(entry.title)
         if entry.location:
@@ -237,6 +251,16 @@ class DailySummaryPromptBuilder:
             parts.append(with_clause)
 
         return f"- {' '.join(parts)}"
+
+    @staticmethod
+    def _span(start: datetime | time, end: datetime | time | None) -> str:
+        """``HH:MM-HH:MM``, or just the start when there is no end."""
+        return f"{start:%H:%M}-{end:%H:%M}" if end is not None else f"{start:%H:%M}"
+
+    @classmethod
+    def _event_local_time(cls, entry: AgendaEntry) -> str:
+        """The entry's clock columns — its own local time, whatever zone that is."""
+        return cls._span(entry.start_time, entry.end_time) if entry.start_time else ""
 
     def _build_journal_entries(self, summary_input: DailySummaryInput) -> str:
         if not summary_input.journals:
