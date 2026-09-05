@@ -521,50 +521,14 @@ async def test_merge_applies_type_data_override_for_a_source_only_type(
     The target carries no MOOD_RATING, so the merge moves the source's row
     wholesale — the branch that used to ignore ``type_data`` entirely.
     """
-    target_res = await authenticated_client.post(
-        "/api/journals",
-        json={
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Target Title",
-                    "content": "Target Content",
-                    "event_date_range": {
-                        "start": "2024-01-01T00:00:00Z",
-                        "end": "2024-01-01T01:00:00Z",
-                    },
-                },
-            }
-        },
+    target_id = await _create_journal(authenticated_client, "Target Title", "01")
+    source_id = await _create_journal(
+        authenticated_client,
+        "Source Title",
+        "01",
+        types=["MOOD_RATING"],
+        type_data={"MOOD_RATING": {"mood_value": 8, "energy_level": 8}},
     )
-    assert target_res.status_code == 201, target_res.text
-    target_id = int(target_res.json()["data"]["id"])
-
-    source_res = await authenticated_client.post(
-        "/api/journals",
-        json={
-            "data": {
-                "type": "journals",
-                "attributes": {
-                    "title": "Source Title",
-                    "content": "Source Content",
-                    "event_date_range": {
-                        "start": "2024-01-01T00:00:00Z",
-                        "end": "2024-01-01T01:00:00Z",
-                    },
-                    "types": ["MOOD_RATING"],
-                    "type_data": {
-                        "MOOD_RATING": {
-                            "mood_value": 8,
-                            "energy_level": 8,
-                        }
-                    },
-                },
-            }
-        },
-    )
-    assert source_res.status_code == 201, source_res.text
-    source_id = int(source_res.json()["data"]["id"])
 
     merge_res = await authenticated_client.post(
         f"/api/journals/{target_id}/merge",
@@ -573,22 +537,19 @@ async def test_merge_applies_type_data_override_for_a_source_only_type(
                 "type": "journal-merge",
                 "attributes": {
                     "source_journal_id": source_id,
-                    "overrides": {
-                        "type_data": {"MOOD_RATING": {"mood_value": 3}},
-                    },
+                    "overrides": {"type_data": {"MOOD_RATING": {"mood_value": 3}}},
                 },
             }
         },
     )
 
     assert merge_res.status_code == 200, merge_res.text
-    type_data = merge_res.json()["data"]["attributes"].get("type_data", {})
+    mood = merge_res.json()["data"]["attributes"]["type_data"]["mood_rating"]
 
-    assert "mood_rating" in type_data
     # The override wins over the value the moved row carried.
-    assert type_data["mood_rating"]["mood_value"] == 3
+    assert mood["mood_value"] == 3
     # Everything the caller did not override rides along on the moved row.
-    assert type_data["mood_rating"]["energy_level"] == 8
+    assert mood["energy_level"] == 8
 
 
 @pytest.mark.integration
@@ -916,7 +877,13 @@ async def test_merge_journals_moves_source_only_external_link(
 
 
 async def _create_journal(
-    client: AsyncClient, title: str, day: str, parent_id: int | None = None
+    client: AsyncClient,
+    title: str,
+    day: str,
+    parent_id: int | None = None,
+    *,
+    types: list[str] | None = None,
+    type_data: dict[str, Any] | None = None,
 ) -> int:
     """Create a journal via the API and return its id."""
     attributes: dict[str, Any] = {
@@ -929,6 +896,10 @@ async def _create_journal(
     }
     if parent_id is not None:
         attributes["parent_id"] = parent_id
+    if types is not None:
+        attributes["types"] = types
+    if type_data is not None:
+        attributes["type_data"] = type_data
 
     res = await client.post(
         "/api/journals",

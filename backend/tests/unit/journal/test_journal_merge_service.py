@@ -1,6 +1,6 @@
 """Unit tests for JournalMergeService."""
 
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -135,10 +135,20 @@ def _column_type_rows(column_types: dict[str, str]) -> list[Any]:
     return rows
 
 
+_SOURCE_TIMED_CALENDAR_ROW = {
+    "journal_id": 2,
+    "calendar_id": "cal-1",
+    "start_time": time(19, 30),
+    "end_time": time(22, 0),
+    "is_all_day": False,
+    "location": None,
+    "sync_invitees": False,
+    "timezone": None,
+}
+
+
 def _mock_calendar_execute(query, params=None):
     """Two timed events on one calendar, plus the column types of their table."""
-    from datetime import time
-
     q_str = str(query)
     mock_res = MagicMock()
     mock_res.fetchone.return_value = None
@@ -162,16 +172,7 @@ def _mock_calendar_execute(query, params=None):
             mock_res.fetchone.return_value = row
         elif params and (params.get("source_id") == 2 or params.get("id") == 2):
             row = MagicMock()
-            row._mapping = {
-                "journal_id": 2,
-                "calendar_id": "cal-1",
-                "start_time": time(19, 30),
-                "end_time": time(22, 0),
-                "is_all_day": False,
-                "location": None,
-                "sync_invitees": False,
-                "timezone": None,
-            }
+            row._mapping = _SOURCE_TIMED_CALENDAR_ROW
             mock_res.fetchone.return_value = row
     return mock_res
 
@@ -181,6 +182,8 @@ _MOOD_COLUMN_TYPES = {
     "mood_value": "integer",
     "energy_level": "integer",
 }
+
+_SOURCE_MOOD_ROW = {"journal_id": 2, "mood_value": 8, "energy_level": 8}
 
 
 def _mock_source_only_execute(
@@ -210,6 +213,52 @@ def _mock_source_only_execute(
         return mock_res
 
     return _execute
+
+
+def _arrange_source_only_merge(
+    mock_journal_repo: Any,
+    mock_transaction: Any,
+    table_name: str,
+    source_row: dict[str, Any],
+    column_types: dict[str, str],
+) -> None:
+    """Set up a merge where only the source carries a row for ``table_name``."""
+    target = create_test_journal(id=1, title="Target Title")
+    source = create_test_journal(id=2, title="Source Title")
+
+    mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+        target if j_id == 1 else source
+    )
+    mock_journal_repo.save.return_value = target
+    mock_transaction.execute.side_effect = _mock_source_only_execute(
+        table_name, source_row, column_types
+    )
+
+
+def _arrange_source_only_calendar_merge(
+    mock_journal_repo: Any, mock_transaction: Any
+) -> None:
+    """The source's timed event moves onto a target that has no calendar row."""
+    _arrange_source_only_merge(
+        mock_journal_repo,
+        mock_transaction,
+        "journal_calendar_info",
+        _SOURCE_TIMED_CALENDAR_ROW,
+        _CALENDAR_COLUMN_TYPES,
+    )
+
+
+def _arrange_source_only_mood_merge(
+    mock_journal_repo: Any, mock_transaction: Any
+) -> None:
+    """The source's mood row moves onto a target that has none."""
+    _arrange_source_only_merge(
+        mock_journal_repo,
+        mock_transaction,
+        "journal_mood_data",
+        _SOURCE_MOOD_ROW,
+        _MOOD_COLUMN_TYPES,
+    )
 
 
 def _override_updates(mock_transaction, table_name: str) -> list[Any]:
@@ -458,18 +507,7 @@ class TestJournalMergeService:
         override where both journals have a row — but a REST payload or the
         ``merge_journals`` MCP tool can, and the values used to be dropped.
         """
-        target = create_test_journal(id=1, title="Target Title")
-        source = create_test_journal(id=2, title="Source Title")
-
-        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
-            target if j_id == 1 else source
-        )
-        mock_journal_repo.save.return_value = target
-        mock_transaction.execute.side_effect = _mock_source_only_execute(
-            "journal_mood_data",
-            {"journal_id": 2, "mood_value": 8, "energy_level": 8},
-            _MOOD_COLUMN_TYPES,
-        )
+        _arrange_source_only_mood_merge(mock_journal_repo, mock_transaction)
 
         overrides = {"type_data": {"MOOD_RATING": {"mood_value": 3}}}
 
@@ -491,18 +529,7 @@ class TestJournalMergeService:
         self, merge_service, mock_journal_repo, mock_transaction
     ):
         """The read API's lowercase type key works here too, as it does elsewhere."""
-        target = create_test_journal(id=1, title="Target Title")
-        source = create_test_journal(id=2, title="Source Title")
-
-        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
-            target if j_id == 1 else source
-        )
-        mock_journal_repo.save.return_value = target
-        mock_transaction.execute.side_effect = _mock_source_only_execute(
-            "journal_mood_data",
-            {"journal_id": 2, "mood_value": 8, "energy_level": 8},
-            _MOOD_COLUMN_TYPES,
-        )
+        _arrange_source_only_mood_merge(mock_journal_repo, mock_transaction)
 
         overrides = {"type_data": {"mood_rating": {"mood_value": 3}}}
 
@@ -517,29 +544,7 @@ class TestJournalMergeService:
         self, merge_service, mock_journal_repo, mock_transaction
     ):
         """A JSON time override reaches the moved row's TIME column as a ``time``."""
-        from datetime import time
-
-        target = create_test_journal(id=1, title="Plain Journal")
-        source = create_test_journal(id=2, title="Timed Event")
-
-        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
-            target if j_id == 1 else source
-        )
-        mock_journal_repo.save.return_value = target
-        mock_transaction.execute.side_effect = _mock_source_only_execute(
-            "journal_calendar_info",
-            {
-                "journal_id": 2,
-                "calendar_id": "cal-1",
-                "start_time": time(19, 30),
-                "end_time": time(22, 0),
-                "is_all_day": False,
-                "location": None,
-                "sync_invitees": False,
-                "timezone": None,
-            },
-            _CALENDAR_COLUMN_TYPES,
-        )
+        _arrange_source_only_calendar_merge(mock_journal_repo, mock_transaction)
 
         overrides = {"type_data": {"event": {"start_time": "20:15:00"}}}
 
@@ -554,29 +559,7 @@ class TestJournalMergeService:
         self, merge_service, mock_journal_repo, mock_transaction
     ):
         """An all-day event carries no clock times, however it became all-day."""
-        from datetime import time
-
-        target = create_test_journal(id=1, title="Plain Journal")
-        source = create_test_journal(id=2, title="Timed Event")
-
-        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
-            target if j_id == 1 else source
-        )
-        mock_journal_repo.save.return_value = target
-        mock_transaction.execute.side_effect = _mock_source_only_execute(
-            "journal_calendar_info",
-            {
-                "journal_id": 2,
-                "calendar_id": "cal-1",
-                "start_time": time(19, 30),
-                "end_time": time(22, 0),
-                "is_all_day": False,
-                "location": None,
-                "sync_invitees": False,
-                "timezone": None,
-            },
-            _CALENDAR_COLUMN_TYPES,
-        )
+        _arrange_source_only_calendar_merge(mock_journal_repo, mock_transaction)
 
         overrides = {"type_data": {"event": {"is_all_day": True}}}
 
@@ -594,31 +577,9 @@ class TestJournalMergeService:
         self, merge_service, mock_journal_repo, mock_transaction
     ):
         """Nonsense in a typed column is a 400 here too, not a driver crash."""
-        from datetime import time
-
         from core_shared.models.journals.exceptions import JournalValidationError
 
-        target = create_test_journal(id=1, title="Plain Journal")
-        source = create_test_journal(id=2, title="Timed Event")
-
-        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
-            target if j_id == 1 else source
-        )
-        mock_journal_repo.save.return_value = target
-        mock_transaction.execute.side_effect = _mock_source_only_execute(
-            "journal_calendar_info",
-            {
-                "journal_id": 2,
-                "calendar_id": "cal-1",
-                "start_time": time(19, 30),
-                "end_time": time(22, 0),
-                "is_all_day": False,
-                "location": None,
-                "sync_invitees": False,
-                "timezone": None,
-            },
-            _CALENDAR_COLUMN_TYPES,
-        )
+        _arrange_source_only_calendar_merge(mock_journal_repo, mock_transaction)
 
         overrides = {"type_data": {"event": {"start_time": "half past seven"}}}
 
