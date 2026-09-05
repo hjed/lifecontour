@@ -37,6 +37,10 @@ _TASK_COLUMN_NAMES = (
 
 _TASK_COLUMNS = ", ".join(_TASK_COLUMN_NAMES)
 
+# The same list qualified for the two statements that join ``journals``, where
+# an unqualified ``id`` or ``user_id`` would be ambiguous.
+_TASK_COLUMNS_PREFIXED = ", ".join(f"t.{column}" for column in _TASK_COLUMN_NAMES)
+
 
 # The journal list's indicator. Built once at module level, with the status
 # bound here rather than passed per call: it is the statement's own definition
@@ -51,6 +55,23 @@ _COUNT_DUE_BY_JOURNAL = text(
     GROUP BY due_journal_id
     """
 ).bindparams(status=TaskStatus.NOT_DONE.value)
+
+
+# The daily summary's past-day read. Built once at module level like the
+# indicator above, and — unlike it — with **no status bound at all**: reporting
+# how a day resolved means reporting the done and cancelled tasks too, so the
+# absence of that predicate is the statement's whole point rather than an
+# omission.
+_TASKS_DUE_IN_JOURNALS = text(
+    f"""
+    SELECT {_TASK_COLUMNS_PREFIXED}
+    FROM tasks t
+    JOIN journals j ON j.id = t.due_journal_id
+    WHERE t.due_journal_id = ANY(:ids)
+      AND t.user_id = :user_id
+    ORDER BY j.event_date_range_start, t.id
+    """
+)
 
 
 def _row_to_task(row: Any) -> Task:
@@ -336,7 +357,7 @@ class SqlTaskRepository(TaskRepository):
         """
         query = text(
             f"""
-            SELECT {", ".join(f"t.{column}" for column in _TASK_COLUMN_NAMES)}
+            SELECT {_TASK_COLUMNS_PREFIXED}
             FROM tasks t
             JOIN journals j ON j.id = t.due_journal_id
             WHERE t.user_id = :user_id
@@ -353,6 +374,31 @@ class SqlTaskRepository(TaskRepository):
                 "window_start": window_start,
                 "window_end": window_end,
             },
+        )
+        return [_row_to_task(row) for row in result.fetchall()]
+
+    async def find_tasks_due_in_journals(
+        self, journal_ids: list[int], user_id: str
+    ) -> list[Task]:
+        """The user's tasks due in any of these journals, in every status.
+
+        The second join to ``journals`` in this repository and, like
+        :meth:`find_upcoming_tasks`'s, an inner one on the due anchor:
+        ``due_journal_id`` is ``NOT NULL`` with an ``ON DELETE RESTRICT``
+        foreign key, so every task has exactly one row to match and the join can
+        neither drop a task nor duplicate one. Here it earns its place for the
+        **order** rather than for the filter — the ids alone already select the
+        rows — so that a day's tasks come back in the day's own sequence.
+
+        The ids go in as a single ``integer[]`` rather than a bind parameter
+        each, following :data:`_COUNT_DUE_BY_JOURNAL`: the parameter count stays
+        at one whatever the day holds.
+        """
+        if not journal_ids:
+            return []
+
+        result = await self.conn.execute(
+            _TASKS_DUE_IN_JOURNALS, {"ids": journal_ids, "user_id": user_id}
         )
         return [_row_to_task(row) for row in result.fetchall()]
 

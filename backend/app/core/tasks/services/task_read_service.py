@@ -353,6 +353,96 @@ class TaskReadService:
         )
         return select_upcoming_tasks(models, window)
 
+    async def read_models_due_in_journals(
+        self,
+        user_id: str,
+        journal_ids: Sequence[int],
+        *,
+        now: datetime.datetime | None = None,
+        timezone: ZoneInfo | None = None,
+    ) -> list[TaskReadModel]:
+        """The tasks due in these journals, whatever became of each of them.
+
+        The daily summary's past-day read. The upcoming window asks *what is
+        still outstanding*; this asks *what was due here, and how did it
+        resolve* — so where that listing drops done, cancelled and lapsed tasks,
+        this one drops nothing at all. The finished tasks are the answer.
+
+        **The status is the current one, and there is no reconstruction.** The
+        row is read as it stands; ``field_history`` is never replayed and no
+        point-in-time state is rebuilt. The consequence is deliberate and
+        user-visible: a past day regenerated after a lapsed task was finally
+        completed describes that task as **done**. That is the honest answer to
+        "what became of this", and it is what the user already sees on the
+        journal — a summary insisting the commitment was still outstanding would
+        be the one contradicting the product.
+
+        **A task retargeted off the day is absent**, for the same reason. The due
+        anchor is read as it is now, so a commitment that has moved to next week
+        is no longer part of how that day resolved. Nothing here reaches for
+        where a task *used* to be due.
+
+        **The day arrives as journal ids, not as a window.** The caller has
+        already selected the day's journals — by overlap, so a multi-day journal
+        running through the day is one of them — and re-deriving that span here
+        would be a second definition of "that day" quietly different from the one
+        the prompt is describing. It is also what makes the read cost nothing on
+        a day with no journals.
+
+        **Both halves of "which day is it" are injectable from birth.** ``now``
+        fixes the instant and ``timezone`` the zone; the lapse verdict on every
+        row hangs on the resulting date. The upcoming window gained its zone
+        parameter from a review that found the asymmetry — a caller which had
+        already read ``user_settings`` caused a second read, and two reads in one
+        request are two statements a concurrent settings change can land between.
+        This listing's only caller is exactly that caller, so it starts with
+        both.
+
+        Args:
+            user_id: The acting user; every read below is scoped to them
+            journal_ids: The day's journals. Empty reads nothing at all.
+            now: The instant to judge "today" from, for tests that need a
+                specific side of a day boundary. Production hands one down.
+            timezone: The acting user's zone, when the caller has **already
+                resolved it**. Omit it and this resolves its own.
+
+        Returns:
+            The models, in the query's order — the due journal's start, then the
+            task id, which is the day's own sequence. Not re-sorted here: the
+            statement already decided it, and a second ordering could disagree.
+
+        Raises:
+            JournalNotFoundError: An anchor journal is missing, which the
+                foreign keys make unreachable.
+        """
+        if not journal_ids:
+            return []
+
+        zone = (
+            timezone
+            if timezone is not None
+            else await self.date_resolver.timezone_for(user_id)
+        )
+        tasks = await self.task_repo.find_tasks_due_in_journals(
+            list(journal_ids), user_id
+        )
+        task_ids = [task.id for task in tasks if task.id is not None]
+
+        mentions = await self.task_repo.list_intermediate_journal_ids_for_tasks(
+            task_ids, user_id
+        )
+        contacts = await self.task_repo.list_contact_ids_for_tasks(task_ids, user_id)
+
+        models, _ = await self._assemble(
+            user_id,
+            tasks,
+            mentions=mentions,
+            contacts=contacts,
+            today=today_in(zone, now),
+            timezone=zone,
+        )
+        return models
+
     async def due_task_counts(
         self,
         user_id: str,

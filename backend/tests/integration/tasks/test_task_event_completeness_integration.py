@@ -578,6 +578,12 @@ PORT_READ_METHODS = frozenset(
         # publishes nothing, so there is no event to owe. The guard did its job
         # again here — this test was the phase's first failure.
         "count_not_done_tasks_by_due_journal",
+        # The daily summary's past-day read (ITER18-005 Phase 5). Returns the
+        # tasks due in a set of journals in every status, so that a summary of a
+        # day gone by can say how each commitment resolved. It reads the current
+        # rows and nothing else — no history replay, no write, no event — and the
+        # guard caught it too, on the phase's first full integration run.
+        "find_tasks_due_in_journals",
     }
 )
 
