@@ -102,6 +102,33 @@ async def _history(
     )
 
 
+async def _contact_method(
+    connection: AsyncConnection, method_id: int, contact_id: int
+) -> None:
+    """One contact method, with its id under the test's control."""
+    await connection.execute(
+        text("""
+            INSERT INTO contact_methods
+                (id, contact_id, method_type, value, created_at, updated_at)
+            VALUES (:id, :contact_id, 'email', 'someone@example.com', :now, :now)
+        """),
+        {"id": method_id, "contact_id": contact_id, "now": NOW},
+    )
+
+
+async def _contact_note(
+    connection: AsyncConnection, note_id: int, contact_id: int
+) -> None:
+    """One contact note, with its id under the test's control."""
+    await connection.execute(
+        text("""
+            INSERT INTO contact_notes (id, contact_id, content, created_at, updated_at)
+            VALUES (:id, :contact_id, 'A note', :now, :now)
+        """),
+        {"id": note_id, "contact_id": contact_id, "now": NOW},
+    )
+
+
 class TestTheWindow:
     """What "recent" includes, exactly."""
 
@@ -242,6 +269,85 @@ class TestActivity:
         assert signals[1].activity_count_30d == 0
         assert signals[2].journal_count_30d == 1
         assert signals[2].activity_count_30d == 1
+
+    async def test_a_colliding_id_on_another_contacts_child_is_not_counted(
+        self,
+        async_connection: AsyncConnection,
+        repository: SqlContactImportanceRepository,
+    ) -> None:
+        """The entity type has to name the table the id was drawn from.
+
+        The four child tables have independent id sequences, so a note and a
+        method sharing an id is ordinary rather than exotic. Matching the type
+        set and the id set independently — which the predicate did until
+        #1396 — counts contact 2's note edit against contact 1, because
+        contact 1 owns *a* child row numbered 5.
+        """
+        await _contact(async_connection, 1)
+        await _contact(async_connection, 2)
+        await _contact_method(async_connection, 5, 1)
+        await _contact_note(async_connection, 5, 2)
+        await _history(
+            async_connection,
+            entity_type="contact_note",
+            entity_id=5,
+            created_at=NOW - timedelta(days=1),
+        )
+
+        signals = await repository.for_contacts([1, 2], now=NOW)
+
+        assert signals[1].activity_count_30d == 0
+        assert signals[2].activity_count_30d == 1
+
+    async def test_a_colliding_id_on_another_contact_does_not_move_last_activity(
+        self,
+        async_connection: AsyncConnection,
+        repository: SqlContactImportanceRepository,
+    ) -> None:
+        """The same mismatch inflated the instant as well as the count.
+
+        ``last_activity_at`` is the maximum over the rows the predicate
+        matches, so a foreign row it wrongly matched made a long-untouched
+        contact look freshly active.
+        """
+        await _contact(async_connection, 1, updated_at=NOW - timedelta(days=200))
+        await _contact(async_connection, 2)
+        await _contact_method(async_connection, 5, 1)
+        await _contact_note(async_connection, 5, 2)
+        await _history(
+            async_connection,
+            entity_type="contact_note",
+            entity_id=5,
+            created_at=NOW - timedelta(days=1),
+        )
+
+        signals = await repository.for_contacts([1], now=NOW)
+
+        assert signals[1].last_activity_at == NOW - timedelta(days=200)
+
+    async def test_a_type_naming_a_table_the_contact_has_no_such_row_in_is_not_counted(
+        self,
+        async_connection: AsyncConnection,
+        repository: SqlContactImportanceRepository,
+    ) -> None:
+        """One contact's own ids do not vouch for each other either.
+
+        Contact 1 owns method 11 and no tag at all, so a ``contact_tag`` row
+        numbered 11 is some other contact's tag — or none — and is activity on
+        neither.
+        """
+        await _contact(async_connection, 1)
+        await _contact_method(async_connection, 11, 1)
+        await _history(
+            async_connection,
+            entity_type="contact_tag",
+            entity_id=11,
+            created_at=NOW - timedelta(days=1),
+        )
+
+        signals = await repository.for_contacts([1], now=NOW)
+
+        assert signals[1].activity_count_30d == 0
 
 
 class TestLastActivity:

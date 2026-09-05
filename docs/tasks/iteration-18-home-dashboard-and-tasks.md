@@ -10332,7 +10332,7 @@ MeiliSearch unavailable. No e2e.
 - **`journal_mentions` stayed in the indexer.** Journal *titles* are search text, not an importance signal;
   a shared read carrying them would hand the dashboard a payload it must ignore. The indexer keeps a
   titles-only query, so its two importance-related statements are still two.
-- **The `field_history` predicate was carried over verbatim, including its flaw** — see the follow-up below.
+- **The `field_history` predicate was carried over verbatim, including its flaw** — see the follow-up below, since resolved in #1396.
 - **The read is not user-scoped.** `contacts` has no owner column in this schema and every other contacts
   repository is likewise unscoped, so this **diverges from the dashboard ports' rule that every method takes
   a `user_id`** — recorded here rather than left as a silent inconsistency. Scoping the journal half alone
@@ -10362,13 +10362,29 @@ empty batch — and each boundary is a test carrying the arithmetic that makes i
 estimate and its own calibration entry disagree, take the calibration entry**: ~120 production at ×6 is
 ~720, which would have called for the split before work started rather than after it, as rule 3 asks.
 
-**Follow-up — the activity predicate over-counts.** The `field_history` filter matches the four child
-`entity_type` values against an `entity_id` drawn from a `UNION` of all four child tables **without pairing
-a type to its table**, so a `contact_note` row whose `entity_id` equals one of the same contact's
-`contact_method` ids is counted. It has been that way since the signal was added, it is a small over-count
-in an already-coarse ranking input, and this phase's criterion is that documents do not change — so it moved
-across unaltered rather than being corrected inside an extraction nobody would review as a ranking change.
-Correcting it is a standalone change with its own before/after on the search documents.
+**Follow-up — the activity predicate over-counted. Resolved in #1396.** The `field_history` filter matched
+the four child `entity_type` values against an `entity_id` drawn from a `UNION` of all four child tables
+**without pairing a type to its table**, so a `contact_note` row whose `entity_id` equalled one of a
+contact's `contact_method` ids was counted — for that contact and, since the four tables have independent
+id sequences, for whichever *other* contact owned the colliding row. It had been that way since the signal
+was added, it was a small over-count in an already-coarse ranking input, and this phase's criterion was that
+documents do not change — so it moved across unaltered rather than being corrected inside an extraction
+nobody would review as a ranking change.
+
+**How it was corrected.** The shape the contact history feed already had — one `OR` branch per entity type,
+each against its own table — is now rendered by `contact_owned_history_predicate` in
+`app/core/history/models.py` and used by *both* reads, the feed appending its further branches
+(relationships, important dates, the summary, task links) after it. The bug was a second transcription of a
+predicate that was already right elsewhere, so the fix is one renderer rather than a corrected second copy,
+and a unit test fails if either caller spells it out again.
+
+**What changes, and the reindex position.** `activity_count_30d` falls, and `last_activity_at` can move
+earlier, for contacts that had a colliding child id — a ranking input only: no contact's content moves and
+nothing is disclosed either way. Indexed documents correct themselves the next time each contact is
+written, and the existing bulk reindex (`ReindexService`) applies it to the whole index at once if that is
+wanted; **no reindex is forced**, because the signal only breaks ties within an already-coarse ordering.
+Whether relationship, important-date and summary edits *should* count as contact activity — the feed reads
+them and this signal does not — was left open rather than answered inside the correction.
 
 #### Phase 11: Upcoming Dates — Windowed Query, Ranking and MCP Tool
 

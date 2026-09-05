@@ -24,15 +24,18 @@ contact's own ``updated_at``, its newest journal and its newest recorded change:
 PostgreSQL's ``GREATEST`` ignores NULL arguments and returns NULL only when all
 of them are NULL, and ``contacts.updated_at`` is ``NOT NULL``.
 
-**The activity predicate is carried over verbatim, including its flaw.** It
-matches the four child ``entity_type`` values against an ``entity_id`` drawn
-from a ``UNION`` of all four child tables *without pairing a type to its table*,
-so a ``contact_note`` row whose ``entity_id`` happens to equal one of this
-contact's ``contact_method`` ids is counted. That is a real, small over-count in
-today's ranking. This phase's acceptance criterion is that the search documents
-do not change, so the predicate moves across unaltered and the correction is
-recorded as a follow-up in the iteration document — a ranking change smuggled
-inside an extraction is a change nobody reviewed.
+**The activity predicate is rendered from the contact history feed's own, not
+transcribed from it.** ``contact_owned_history_predicate`` pairs each child
+``entity_type`` with the single table its ``entity_id`` is drawn from. The
+extraction that created this repository carried across a copy that tested the
+type set and the id set *independently*, so a ``contact_note`` row numbered 5
+counted for any contact owning a ``contact_method`` numbered 5 — an over-count
+this read has now stopped making (#1396). Sharing the renderer is the point of
+the fix: the bug was a second transcription of a predicate that was already
+right elsewhere, and one renderer cannot drift from itself. The feed's further
+branches — relationships, important dates, the summary, task links — stay with
+the feed; whether those edits are *activity* is a separate question this change
+does not answer.
 
 **Not scoped by user**, because ``contacts`` has no owner column in this schema
 and every other contacts repository is likewise unscoped. Adding a scope to the
@@ -52,13 +55,20 @@ from app.core.contacts.models.importance import (
     ContactImportance,
 )
 from app.core.contacts.models.repositories import ContactImportanceRepository
+from app.core.history.models import contact_owned_history_predicate
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
-_IMPORTANCE_QUERY = text("""
+# The rows that count as activity on the contact, correlated to ``c.id`` because
+# the aggregate is computed inside a lateral over ``contacts``.
+_ACTIVITY_PREDICATE = contact_owned_history_predicate(
+    "c.id", table_alias="fh", indent=" " * 12
+)
+
+_IMPORTANCE_QUERY = text(f"""
     SELECT
         c.id,
         c.is_favourite,
@@ -84,19 +94,7 @@ _IMPORTANCE_QUERY = text("""
             MAX(fh.created_at) AS latest_at
         FROM field_history fh
         WHERE
-            (fh.entity_type = 'contact' AND fh.entity_id = c.id)
-            OR (fh.entity_type IN (
-                    'contact_method', 'contact_address', 'contact_note', 'contact_tag'
-                )
-                AND fh.entity_id IN (
-                    SELECT id FROM contact_methods WHERE contact_id = c.id
-                    UNION
-                    SELECT id FROM contact_addresses WHERE contact_id = c.id
-                    UNION
-                    SELECT id FROM contact_notes WHERE contact_id = c.id
-                    UNION
-                    SELECT tag_id FROM contact_tags WHERE contact_id = c.id
-                ))
+            {_ACTIVITY_PREDICATE}
     ) recent_activity ON TRUE
     WHERE c.id = ANY(:contact_ids)
 """)
