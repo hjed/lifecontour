@@ -77,6 +77,7 @@ def _make_journal_event_data(
     contact_relationships: list[dict[str, str]] | None = None,
     recurring_event_id: str | None = None,
     external_identity: str | None = None,
+    timezone: str | None = None,
 ) -> dict[str, Any]:
     """Build a sample journal_event outbox payload."""
     return {
@@ -93,6 +94,7 @@ def _make_journal_event_data(
             "location": "Conference Room A",
             "start_time": "10:00:00",
             "end_time": "11:00:00",
+            **({"timezone": timezone} if timezone is not None else {}),
         },
         "integration_source": "google",
         "external_event_id": external_event_id,
@@ -830,6 +832,36 @@ class TestJournalOutboxEventProcessor:
         calendar_call = _execute_call_with_sql(mock_connection, "journal_calendar_info")
         sql_text = str(calendar_call[0][0].text)
         assert "updated_at" in sql_text
+
+    @pytest.mark.asyncio
+    async def test_calendar_info_upsert_persists_the_event_timezone(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Clock times are local to the Google event's zone, so the zone is
+        stored with them; without it the outbound push cannot anchor them."""
+        event = _make_outbox_event(
+            event_type="journal_event.created",
+            sync_action="created",
+            timezone="America/Los_Angeles",
+        )
+
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _find_external_event_link
+            MagicMock(),  # _save_calendar_info
+            MagicMock(),  # _create_external_event_link
+        ]
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        calendar_call = _call_writing_to(mock_connection, "journal_calendar_info")
+        assert "timezone" in str(calendar_call.args[0].text)
+        assert calendar_call.args[1]["timezone"] == "America/Los_Angeles"
 
     # ── Invitee sync: only mutates INVITEE type ───────────────────────
 

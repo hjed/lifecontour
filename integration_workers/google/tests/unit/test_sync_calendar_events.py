@@ -1338,3 +1338,121 @@ class TestIdentityBackfill:
         assert result["status"] == "success"
         mock_session.add.assert_not_called()
         assert result["events_skipped"] == 1
+
+
+class TestSyncCalendarEventsTimezones:
+    """What the inbound sync records about an event's zone.
+
+    Clock times are only meaningful in the zone they were entered in, and an
+    all-day event's date only in the zone it is read in, so both travel with
+    the event into the outbox payload.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
+            yield mock_mc
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    @pytest.fixture
+    def mock_ctx(self, mock_session: AsyncMock) -> dict[str, Any]:
+        factory = MagicMock()
+        factory.return_value = mock_session
+        return make_arq_ctx(session_factory=factory, redis=make_mock_redis())
+
+    @staticmethod
+    async def _sync_one(
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        raw_event: dict[str, Any],
+        *,
+        user_timezone: str | None = None,
+    ) -> Any:
+        """Run a full sync over one new event and return the outbox event."""
+        from worker import sync_calendar_events
+
+        synced_cal = _make_calendar_row(is_synced_to_google=True)
+        synced_cal.user_timezone = user_timezone
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [synced_cal]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        mock_session.execute.side_effect = [
+            cal_result,
+            token_result,
+            link_result,
+            MagicMock(),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.list_events = AsyncMock(
+            return_value={"items": [raw_event], "nextSyncToken": "tok"}
+        )
+        with patch("worker._create_google_client", return_value=mock_client):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        return mock_session.add.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_a_timed_event_carries_its_google_zone(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        raw_event = _make_google_event(
+            start_dt="2026-09-04T09:00:00-07:00", end_dt="2026-09-04T10:00:00-07:00"
+        )
+        raw_event["start"]["timeZone"] = "America/Los_Angeles"
+        raw_event["end"]["timeZone"] = "America/Los_Angeles"
+
+        outbox_event = await self._sync_one(mock_ctx, mock_session, raw_event)
+
+        calendar_info = outbox_event.event_data["calendar_info_data"]
+        assert calendar_info["timezone"] == "America/Los_Angeles"
+        assert calendar_info["start_time"] == "09:00:00"
+
+    @pytest.mark.asyncio
+    async def test_an_all_day_event_is_stored_at_local_midnight_in_the_users_zone(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        raw_event = _make_google_event()
+        raw_event["start"] = {"date": "2026-09-05"}
+        raw_event["end"] = {"date": "2026-09-06"}
+
+        outbox_event = await self._sync_one(
+            mock_ctx, mock_session, raw_event, user_timezone="Australia/Sydney"
+        )
+
+        journal_data = outbox_event.event_data["journal_data"]
+        calendar_info = outbox_event.event_data["calendar_info_data"]
+        assert journal_data["event_date_range_start"] == "2026-09-04T14:00:00+00:00"
+        assert journal_data["event_date_range_end"] == "2026-09-04T14:00:00+00:00"
+        assert calendar_info["is_all_day"] is True
+        assert calendar_info["timezone"] == "Australia/Sydney"
+
+    @pytest.mark.asyncio
+    async def test_an_all_day_event_without_a_user_zone_stays_at_utc_midnight(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        raw_event = _make_google_event()
+        raw_event["start"] = {"date": "2026-09-05"}
+        raw_event["end"] = {"date": "2026-09-06"}
+
+        outbox_event = await self._sync_one(mock_ctx, mock_session, raw_event)
+
+        journal_data = outbox_event.event_data["journal_data"]
+        calendar_info = outbox_event.event_data["calendar_info_data"]
+        assert journal_data["event_date_range_start"] == "2026-09-05T00:00:00+00:00"
+        assert calendar_info["timezone"] is None

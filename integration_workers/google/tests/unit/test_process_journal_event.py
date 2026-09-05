@@ -26,6 +26,10 @@ class TestProcessJournalEvent:
         mock_row.external_event_id = None
         mock_row.sync_status = None
         mock_row.private_description = False
+        mock_row.start_time = None
+        mock_row.end_time = None
+        mock_row.timezone = None
+        mock_row.user_timezone = None
 
         mock_result.fetchone.return_value = mock_row
 
@@ -111,6 +115,10 @@ class TestProcessJournalEvent:
         mock_row.external_event_id = "existing_event_id"
         mock_row.sync_status = "synced"
         mock_row.private_description = False
+        mock_row.start_time = None
+        mock_row.end_time = None
+        mock_row.timezone = None
+        mock_row.user_timezone = None
         mock_result.fetchone.return_value = mock_row
 
         mock_auth_result = MagicMock()
@@ -149,8 +157,8 @@ class TestProcessJournalEvent:
                     "summary": "Test Journal",
                     "description": "Content",
                     "location": "Test Location",
-                    "start": {"dateTime": "2024-01-01T10:00:00+00:00"},
-                    "end": {"dateTime": "2024-01-01T11:00:00+00:00"},
+                    "start": {"dateTime": "2024-01-01T10:00:00Z"},
+                    "end": {"dateTime": "2024-01-01T11:00:00Z"},
                 },
                 calendar_id="test-google-cal-id",
             )
@@ -290,6 +298,10 @@ class TestProcessJournalEvent:
             mock_row.external_event_id = "new_event_id"
             mock_row.sync_status = "synced"
             mock_row.private_description = False
+            mock_row.start_time = None
+            mock_row.end_time = None
+            mock_row.timezone = None
+            mock_row.user_timezone = None
             mock_result.fetchone.return_value = mock_row
 
             mock_auth_result = MagicMock()
@@ -345,3 +357,161 @@ class TestProcessJournalEvent:
                 "Did not execute UPDATE journal_external_event_links to set errored state"
             )
             assert update_call[0][1]["calendar_id"] == "test-cal-id-old"
+
+
+class TestProcessJournalEventTimezones:
+    """Outbound push reads the stored instants in the event's timezone.
+
+    Journal date-range bounds are UTC instants of local midnight. Sydney
+    (UTC+10) local midnight on 5 Sept is 14:00 UTC on 4 Sept, so an outbound
+    push that reads the UTC date sends the event a day early.
+    """
+
+    SYDNEY_MIDNIGHT_5_SEPT = datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
+
+    @staticmethod
+    def _session_factory(**row_overrides):
+        mock_row = MagicMock()
+        mock_row.journal_id = 1
+        mock_row.title = "Birthday"
+        mock_row.content = "Content"
+        mock_row.event_date_range_start = (
+            TestProcessJournalEventTimezones.SYDNEY_MIDNIGHT_5_SEPT
+        )
+        mock_row.event_date_range_end = (
+            TestProcessJournalEventTimezones.SYDNEY_MIDNIGHT_5_SEPT
+        )
+        mock_row.user_id = 1
+        mock_row.is_all_day = True
+        mock_row.start_time = None
+        mock_row.end_time = None
+        mock_row.timezone = None
+        mock_row.user_timezone = None
+        mock_row.location = None
+        mock_row.calendar_id = "test-cal-id"
+        mock_row.google_calendar_id = "test-google-cal-id"
+        mock_row.is_synced_to_google = True
+        mock_row.access_role = "owner"
+        mock_row.external_event_id = None
+        mock_row.sync_status = None
+        mock_row.private_description = False
+        for name, value in row_overrides.items():
+            setattr(mock_row, name, value)
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = mock_row
+
+        mock_auth_row = MagicMock()
+        mock_auth_row.google_account_email = "test@example.com"
+        mock_auth_result = MagicMock()
+        mock_auth_result.fetchone.return_value = mock_auth_row
+
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [mock_result, mock_auth_result] + [
+            MagicMock() for _ in range(10)
+        ]
+
+        mock_factory = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        return mock_factory
+
+    @staticmethod
+    async def _push(session_factory) -> dict:
+        from worker import process_journal_event
+
+        mock_client = AsyncMock()
+        mock_client.create_event.return_value = {"id": "new_event_id", "etag": "e"}
+
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            result = await process_journal_event(
+                ctx={"session_factory": session_factory, "job_id": "job123"},
+                event_type="JournalCreated",
+                event_data={"journal_id": 1},
+            )
+
+        assert result["status"] == "success"
+        mock_client.create_event.assert_called_once()
+        return mock_client.create_event.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_all_day_event_uses_the_users_configured_timezone(self):
+        payload = await self._push(
+            self._session_factory(user_timezone="Australia/Sydney")
+        )
+
+        assert payload["start"] == {"date": "2026-09-05"}
+        assert payload["end"] == {"date": "2026-09-06"}
+
+    @pytest.mark.asyncio
+    async def test_the_events_own_timezone_wins_over_the_users(self):
+        # 12:00 UTC on 4 Sept is midnight on 5 Sept in Auckland (UTC+12) but
+        # still 4 Sept in Los Angeles.
+        payload = await self._push(
+            self._session_factory(
+                event_date_range_start=datetime(2026, 9, 4, 12, 0, tzinfo=UTC),
+                event_date_range_end=datetime(2026, 9, 4, 12, 0, tzinfo=UTC),
+                timezone="Pacific/Auckland",
+                user_timezone="America/Los_Angeles",
+            )
+        )
+
+        assert payload["start"] == {"date": "2026-09-05"}
+        assert payload["end"] == {"date": "2026-09-06"}
+
+    @pytest.mark.asyncio
+    async def test_no_timezone_anywhere_falls_back_to_the_utc_date(self):
+        payload = await self._push(self._session_factory())
+
+        assert payload["start"] == {"date": "2026-09-04"}
+        assert payload["end"] == {"date": "2026-09-05"}
+
+    @pytest.mark.asyncio
+    async def test_timed_event_anchors_clock_times_in_its_own_timezone(self):
+        from datetime import time
+
+        payload = await self._push(
+            self._session_factory(
+                is_all_day=False,
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                timezone="Australia/Sydney",
+                user_timezone="America/Los_Angeles",
+            )
+        )
+
+        assert payload["start"] == {
+            "dateTime": "2026-09-04T23:00:00Z",
+            "timeZone": "Australia/Sydney",
+        }
+        assert payload["end"] == {
+            "dateTime": "2026-09-05T00:00:00Z",
+            "timeZone": "Australia/Sydney",
+        }
+
+    @pytest.mark.asyncio
+    async def test_timed_event_without_its_own_timezone_pushes_the_stored_instants(
+        self,
+    ):
+        """An imported event's clock times are local to the Google event's zone,
+        which the row does not record, so the user's zone must not re-anchor
+        them; the stored instants are the truth."""
+        from datetime import time
+
+        payload = await self._push(
+            self._session_factory(
+                is_all_day=False,
+                event_date_range_start=datetime(2026, 9, 4, 16, 0, tzinfo=UTC),
+                event_date_range_end=datetime(2026, 9, 4, 17, 0, tzinfo=UTC),
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                timezone=None,
+                user_timezone="Australia/Sydney",
+            )
+        )
+
+        assert payload["start"] == {"dateTime": "2026-09-04T16:00:00Z"}
+        assert payload["end"] == {"dateTime": "2026-09-04T17:00:00Z"}

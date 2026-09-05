@@ -1660,15 +1660,16 @@ class JournalOutboxEventProcessor:
             text("""
                 INSERT INTO journal_calendar_info
                     (journal_id, calendar_id, is_all_day, location,
-                     start_time, end_time, event_state)
+                     start_time, end_time, timezone, event_state)
                 VALUES
                     (:journal_id, :calendar_id, :is_all_day, :location,
-                     :start_time, :end_time, :event_state)
+                     :start_time, :end_time, :timezone, :event_state)
                 ON CONFLICT (journal_id) DO UPDATE SET
                     is_all_day = :is_all_day,
                     location = :location,
                     start_time = :start_time,
                     end_time = :end_time,
+                    timezone = :timezone,
                     event_state = :event_state,
                     updated_at = :now
             """),
@@ -1679,6 +1680,10 @@ class JournalOutboxEventProcessor:
                 "location": calendar_info_data.get("location"),
                 "start_time": start_time,
                 "end_time": end_time,
+                # The zone the clock times are local to (the Google event's for
+                # a timed event, the user's for an all-day one); the outbound
+                # push anchors the times only in a zone the row records.
+                "timezone": calendar_info_data.get("timezone"),
                 "event_state": event_state,
                 "now": datetime.now(UTC),
             },

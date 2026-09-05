@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from core_shared.models.journals import (
@@ -15,6 +15,97 @@ from calendar_models import GoogleEvent, GoogleEventStartEnd
 UTC_OFFSET_SUFFIX = "+00:00"
 
 
+def _zone(timezone_str: str | None) -> tzinfo | None:
+    """The zone ``timezone_str`` names, or ``None`` when absent or unknown."""
+    if not timezone_str:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(timezone_str)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _anchor(instant: datetime, clock: time, tz: tzinfo) -> datetime:
+    """``clock`` on the local date of ``instant`` in ``tz``, as a UTC instant.
+
+    On the day clocks go back a wall time in the repeated hour names two
+    instants, and the ``TIME`` column that held ``clock`` cannot say which.
+    The stored instant can: if the second pass reproduces it, that is the
+    one meant; otherwise the first pass, which is also what an unambiguous
+    time resolves to.
+    """
+    first = datetime.combine(instant.astimezone(tz).date(), clock, tzinfo=tz)
+    second = first.replace(fold=1)
+    # Compared in UTC: an ambiguous aware datetime never compares equal
+    # across zones (PEP 495), so a direct comparison would always be false.
+    if second.utcoffset() != first.utcoffset() and second.astimezone(UTC) == instant:
+        return second.astimezone(UTC)
+    return first.astimezone(UTC)
+
+
+def _previous_local_midnight(instant: datetime, timezone_str: str | None) -> datetime:
+    """The local midnight one calendar day before ``instant``, in UTC.
+
+    ``instant`` is itself a local midnight. Stepping back a *calendar* day
+    rather than 24 hours keeps the result at midnight across a clock change:
+    the day Sydney's clocks go forward is 23 hours long, and 24 hours before
+    the next midnight is before that day even starts.
+    """
+    tz = _zone(timezone_str) or UTC
+    previous_day = instant.astimezone(tz).date() - timedelta(days=1)
+    return datetime.combine(previous_day, time.min, tzinfo=tz).astimezone(UTC)
+
+
+def _local_datetime(dt_utc: datetime, timezone_str: str | None) -> datetime:
+    """``dt_utc`` read in ``timezone_str``, or unchanged when there is no zone."""
+    tz = _zone(timezone_str)
+    return dt_utc if tz is None else dt_utc.astimezone(tz)
+
+
+def google_event_times(
+    start_dt: datetime, end_dt: datetime, calendar_info: CalendarInfo
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The ``start`` and ``end`` blocks of a Google Calendar event payload.
+
+    Journal date-range bounds are UTC instants of *local* midnight, so the
+    calendar date an event falls on has to be read in the event's timezone:
+    midnight on 5 Sept in Sydney is 14:00 UTC on 4 Sept. Without a zone the
+    UTC date is used.
+
+    An all-day event becomes a ``date`` pair with Google's exclusive end (the
+    day after the last day). A timed event becomes a ``dateTime`` pair. Its
+    clock times are only meaningful in the zone they were entered in, so they
+    are anchored to the local date in the event's *own* zone and otherwise
+    left alone: an event with no zone, or no clock times, pushes the stored
+    instants as they are. (An imported event's times are local to the Google
+    event's zone; re-anchoring them in any other zone would move the event.)
+    """
+    if calendar_info.is_all_day:
+        local_start = _local_datetime(start_dt, calendar_info.timezone)
+        local_end = _local_datetime(end_dt, calendar_info.timezone)
+        return (
+            {"date": local_start.strftime("%Y-%m-%d")},
+            {"date": (local_end + timedelta(days=1)).strftime("%Y-%m-%d")},
+        )
+
+    tz = _zone(calendar_info.timezone)
+    if tz is not None:
+        if calendar_info.start_time is not None:
+            start_dt = _anchor(start_dt, calendar_info.start_time, tz)
+        if calendar_info.end_time is not None:
+            end_dt = _anchor(end_dt, calendar_info.end_time, tz)
+
+    # ISO 8601 with a 'Z' suffix for UTC; Google accepts offsets either way.
+    start_payload = {"dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")}
+    end_payload = {"dateTime": end_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")}
+    if calendar_info.timezone:
+        start_payload["timeZone"] = calendar_info.timezone
+        end_payload["timeZone"] = calendar_info.timezone
+    return start_payload, end_payload
+
+
 class GoogleEventTransformer:
     """Transforms events between Google Calendar API and internal Journal formats."""
 
@@ -24,6 +115,8 @@ class GoogleEventTransformer:
         user_id: str,
         calendar_id: uuid.UUID,
         self_email: str | None = None,
+        *,
+        all_day_timezone: str | None = None,
     ) -> tuple[Journal, CalendarInfo] | None:
         """
         Transform a GoogleEvent into a Journal and CalendarInfo tuple.
@@ -34,6 +127,13 @@ class GoogleEventTransformer:
             calendar_id: The calendar UUID for the CalendarInfo
             self_email: The user's email to match against attendees for
                         responseStatus → event_state mapping
+            all_day_timezone: The zone an all-day event's date is read in —
+                        the user's configured zone. Google gives a bare date;
+                        it is stored as local midnight in this zone, matching
+                        what the app's own create form writes, and the zone is
+                        recorded on the CalendarInfo. Without one the date is
+                        stored at UTC midnight with no zone. A timed event
+                        keeps the zone Google reports and ignores this.
 
         Returns None if the event is cancelled or should not be synced.
         """
@@ -41,8 +141,12 @@ class GoogleEventTransformer:
             return None
 
         # Parse start dates
-        start_dt, start_is_all_day = self._parse_event_time(google_event.start)
-        end_dt, end_is_all_day = self._parse_event_time(google_event.end)
+        start_dt, start_is_all_day = self._parse_event_time(
+            google_event.start, all_day_timezone
+        )
+        end_dt, end_is_all_day = self._parse_event_time(
+            google_event.end, all_day_timezone
+        )
 
         # If the event doesn't specify end time, make it equal to start time
         if not end_dt:
@@ -57,10 +161,10 @@ class GoogleEventTransformer:
 
         is_all_day = start_is_all_day or end_is_all_day
 
-        from datetime import timedelta
-
+        # Google's all-day end is exclusive (the day after the last day); the
+        # journal's is inclusive. Step back a local calendar day, not 24 hours.
         if is_all_day and end_is_all_day and end_dt > start_dt:
-            end_dt = end_dt - timedelta(days=1)
+            end_dt = _previous_local_midnight(end_dt, all_day_timezone)
 
         # Validate that end_dt >= start_dt to avoid JournalValidationError
         if end_dt < start_dt:
@@ -84,7 +188,9 @@ class GoogleEventTransformer:
         event_state = self._resolve_event_state(google_event, self_email)
 
         # Extract timezone from Google event (prefer start timezone)
-        event_timezone = self._extract_timezone(google_event)
+        event_timezone = (
+            all_day_timezone if is_all_day else self._extract_timezone(google_event)
+        )
 
         local_start_dt = self._extract_local_datetime(start_dt, event_timezone)
         local_end_dt = self._extract_local_datetime(end_dt, event_timezone)
@@ -121,15 +227,7 @@ class GoogleEventTransformer:
     ) -> datetime | None:
         if not dt_utc:
             return None
-        if not timezone_str:
-            return dt_utc
-        try:
-            from zoneinfo import ZoneInfo
-
-            tz = ZoneInfo(timezone_str)
-            return dt_utc.astimezone(tz)
-        except Exception:  # noqa: BLE001
-            return dt_utc
+        return _local_datetime(dt_utc, timezone_str)
 
     def _extract_timezone(self, google_event: GoogleEvent) -> str | None:
         """Extract IANA timezone from Google event start/end.
@@ -181,7 +279,9 @@ class GoogleEventTransformer:
         return base_state
 
     def _parse_event_time(
-        self, time_data: GoogleEventStartEnd | None
+        self,
+        time_data: GoogleEventStartEnd | None,
+        all_day_timezone: str | None = None,
     ) -> tuple[datetime | None, bool]:
         """
         Parse GoogleEventStartEnd into UTC datetime and a boolean flag for all-day.
@@ -190,23 +290,31 @@ class GoogleEventTransformer:
             return None, False
 
         if time_data.date:
-            return self._parse_all_day_date(time_data.date)
+            return self._parse_all_day_date(time_data.date, all_day_timezone)
         elif time_data.date_time:
             return self._parse_timed_datetime(time_data.date_time, time_data.time_zone)
 
         return None, False
 
-    def _parse_all_day_date(self, date_str: str) -> tuple[datetime | None, bool]:
+    def _parse_all_day_date(
+        self, date_str: str, timezone_str: str | None = None
+    ) -> tuple[datetime | None, bool]:
+        """A bare date as the UTC instant of its midnight in ``timezone_str``.
+
+        Journal date-range bounds are instants of *local* midnight, so a
+        Sydney user's 5 Sept is 14:00 UTC on 4 Sept. With no zone the date is
+        pinned to UTC midnight.
+        """
         try:
             from datetime import date
 
             parsed_date = date.fromisoformat(date_str)
-            dt_utc = datetime(
-                parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=UTC
-            )
-            return dt_utc, True
         except ValueError:
             return None, False
+        local_midnight = datetime.combine(
+            parsed_date, datetime.min.time(), tzinfo=_zone(timezone_str) or UTC
+        )
+        return local_midnight.astimezone(UTC), True
 
     def _parse_timed_datetime(
         self, date_time_str: str, time_zone_str: str | None
@@ -250,66 +358,9 @@ class GoogleEventTransformer:
         if calendar_info.location:
             payload["location"] = calendar_info.location
 
-        start_dt = journal.event_date_range.start
-        end_dt = journal.event_date_range.end
-
-        if calendar_info.is_all_day:
-            from datetime import timedelta
-
-            local_start_dt = self._extract_local_datetime(
-                start_dt, calendar_info.timezone
-            )
-            local_end_dt = self._extract_local_datetime(end_dt, calendar_info.timezone)
-
-            payload["start"] = {
-                "date": local_start_dt.strftime("%Y-%m-%d")
-                if local_start_dt
-                else start_dt.strftime("%Y-%m-%d")
-            }
-            payload["end"] = {
-                "date": ((local_end_dt or end_dt) + timedelta(days=1)).strftime(
-                    "%Y-%m-%d"
-                )
-            }
-        else:
-            from datetime import tzinfo
-
-            tz: tzinfo = UTC
-            if calendar_info.timezone:
-                try:
-                    from zoneinfo import ZoneInfo
-
-                    tz = ZoneInfo(calendar_info.timezone)
-                except Exception:  # noqa: BLE001
-                    pass
-
-            if calendar_info.start_time is not None:
-                local_start_dt = start_dt.astimezone(tz)
-                start_dt = datetime.combine(
-                    local_start_dt.date(), calendar_info.start_time, tzinfo=tz
-                ).astimezone(UTC)
-            if calendar_info.end_time is not None:
-                local_end_dt = end_dt.astimezone(tz)
-                end_dt = datetime.combine(
-                    local_end_dt.date(), calendar_info.end_time, tzinfo=tz
-                ).astimezone(UTC)
-
-            # Format datetime as ISO 8601. Add 'Z' manually if UTC, else Google handles offsets.
-            # Our backend expects UTC.
-            start_payload: dict[str, str] = {
-                "dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
-            }
-            end_payload: dict[str, str] = {
-                "dateTime": end_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")
-            }
-
-            # Include timezone if set on the calendar info
-            if calendar_info.timezone:
-                start_payload["timeZone"] = calendar_info.timezone
-                end_payload["timeZone"] = calendar_info.timezone
-
-            payload["start"] = start_payload
-            payload["end"] = end_payload
+        payload["start"], payload["end"] = google_event_times(
+            journal.event_date_range.start, journal.event_date_range.end, calendar_info
+        )
 
         if calendar_info.sync_invitees and invitee_emails:
             payload["attendees"] = [{"email": email} for email in invitee_emails]
