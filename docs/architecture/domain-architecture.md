@@ -1033,6 +1033,30 @@ returned uncapped within it — ITER18-004 settles that the dashboard's five-ite
 *show more* costs no second request. There is deliberately no unbounded task listing anywhere in this
 product, and this is the endpoint that would most easily become one.
 
+**Its second caller is the daily summary, and that settled where the DI edge goes.**
+`DailySummaryInputAssembler` gathers the current day's forward-looking input by calling this listing rather
+than querying tasks itself, so the summary and the dashboard's tasks section cannot disagree about what the
+user has coming up. The read itself stays where it is — these are task rows, and the summary is a caller,
+not an owner, which is the mirror of the argument that moved the *agenda* read into the journal domain. What
+moved instead is the provider edge: `JournalProvider` consumes `TaskReadService` from `TaskProvider`.
+
+That reverses a stance recorded in two DI docstrings, and the condition attached to it is why. Those
+factories build tasks-domain objects by hand so that a container registering one provider need not register
+the other, on the stated grounds that *"it needs nothing but the connection, so there is no graph cost"* —
+and both still need nothing but the connection, so both stay. `TaskReadService` needs five collaborators
+from three domains, so hand-building it would mean reaching around the container for two other domains'
+adapters and would produce a second instance beside the one `TaskProvider` already provides. **A provider
+reaching around the container for another domain's adapter is usually a boundary complaining; needing to do
+it twice for one object is the boundary saying the edge belongs in the graph.** Providers may require each
+other in both directions — Dishka validates a graph of *types*, and that graph stays acyclic because
+everything the tasks domain reaches for is a journal port and none of it reaches back.
+
+**A caller of this listing must hand it the instant it is judging.** `read_models_for_upcoming_window`
+defaults `now` to the wall clock, and a caller that also asks what day it is — as the summary's assembler
+does, to decide whether to call at all — would otherwise take two readings that can straddle local
+midnight. One reading per request, passed down, is the rule; the same one the service applies internally
+between its window and its lapse verdict.
+
 ### The journal delete guard
 
 A task can never exist without both of its journal anchors, so the

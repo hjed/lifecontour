@@ -8,6 +8,12 @@ rather than through a query of this module's own. The summary and the home
 dashboard are two renderings of one day, and a second implementation of "the
 user's event journals on this local day" is the way they start disagreeing
 about it.
+
+**The week's tasks come through the tasks domain's own listing**, on the same
+reasoning: ``TaskReadService.read_models_for_upcoming_window`` is the query the
+dashboard's tasks section consumes, exclusions and ordering included, and a
+summary that re-derived "what is coming up" would eventually describe a week the
+dashboard beneath it does not show.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 from core_shared.models.contacts.entities import SummaryStatus
+from core_shared.models.tasks import DEFAULT_UPCOMING_DAYS_AHEAD
 
 from app.core.journal.services.agenda import agenda_for_day
 from app.core.journal.services.daily_summary_models import (
@@ -29,6 +36,8 @@ from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, resolve_timezone
 if TYPE_CHECKING:
     from zoneinfo import ZoneInfo
 
+    from core_shared.models.tasks import UpcomingTasks
+
     from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.models.repositories import (
         AgendaRepository,
@@ -37,10 +46,21 @@ if TYPE_CHECKING:
         JournalSeriesRepository,
         MoodDataRepository,
     )
+    from app.core.tasks.services.task_read_service import TaskReadService
 
     from .daily_summary_repository import JournalDailySummaryRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    """The wall clock, in one place so a test can count the readings.
+
+    Named rather than inlined because "how many times did one assembly ask what
+    time it is" is the question the answer below turns on, and a module-level
+    function is what makes it assertable.
+    """
+    return datetime.now(UTC)
 
 
 class DailySummaryInputAssembler:
@@ -54,6 +74,7 @@ class DailySummaryInputAssembler:
         summary_repo: JournalDailySummaryRepository,
         series_repo: JournalSeriesRepository | None = None,
         agenda_repo: AgendaRepository | None = None,
+        task_read_service: TaskReadService | None = None,
     ) -> None:
         self._journal_repo = journal_repo
         self._mood_repo = mood_repo
@@ -61,6 +82,7 @@ class DailySummaryInputAssembler:
         self._summary_repo = summary_repo
         self._series_repo = series_repo
         self._agenda_repo = agenda_repo
+        self._task_read_service = task_read_service
 
     async def assemble(
         self,
@@ -77,14 +99,25 @@ class DailySummaryInputAssembler:
         in the user's ``timezone`` (then converted to UTC for the query) so the
         summary covers the user's local day rather than the UTC day.
 
-        When ``summary_date`` is **today** in that timezone, the day's agenda is
-        gathered too. It is not for any other day: forward-looking material
-        belongs to the current day, and a past day should cost no extra read.
+        When ``summary_date`` is **today** in that timezone, the day's agenda
+        and the week's tasks are gathered too. Neither is for any other day:
+        forward-looking material belongs to the current day, and a past day
+        should cost no extra read.
+
+        **The clock is read once, here, and imposed on everything below it.**
+        Left to default, the agenda guard, the tasks guard and the tasks read
+        would each sample the wall clock, and an assembly crossing local
+        midnight between two of them would gather a window for one day while the
+        rest of the input describes another. One reading cannot disagree with
+        itself. ``DailySummaryService`` already hands an instant down for the
+        same reason; this closes the hole for every other caller.
 
         ``now`` exists only so the local-midnight boundary can be pinned in
         tests, as ``DailySummaryFreshnessChecker``'s injectable clock is —
         defaulted, so no caller has to hold a clock to ask for a summary.
         """
+        moment = now if now is not None else _utc_now()
+
         # Build the day's bounds in the user's timezone, then convert to UTC
         # for the (UTC-stored) query.
         tz = resolve_timezone(timezone)
@@ -196,7 +229,10 @@ class DailySummaryInputAssembler:
             contact_names=all_contact_names,
             mood_values=mood_values,
             previous_summary=previous_summary,
-            agenda=await self._agenda_for(user_id, summary_date, tz, now),
+            agenda=await self._agenda_for(user_id, summary_date, tz, moment),
+            upcoming_tasks=await self._upcoming_tasks_for(
+                user_id, summary_date, tz, moment
+            ),
         )
 
     async def _agenda_for(
@@ -204,7 +240,7 @@ class DailySummaryInputAssembler:
         user_id: str,
         summary_date: date,
         tz: ZoneInfo,
-        now: datetime | None,
+        now: datetime,
     ) -> list[AgendaEntry]:
         """The day's scheduled events, when the day is the user's today.
 
@@ -217,3 +253,40 @@ class DailySummaryInputAssembler:
         if self._agenda_repo is None:
             return []
         return list(await agenda_for_day(self._agenda_repo, user_id, summary_date, tz))
+
+    async def _upcoming_tasks_for(
+        self,
+        user_id: str,
+        summary_date: date,
+        tz: ZoneInfo,
+        now: datetime,
+    ) -> UpcomingTasks | None:
+        """The week's outstanding commitments, when the day is the user's today.
+
+        The dashboard's listing, reused whole rather than re-queried. Its three
+        exclusions come with it — done, cancelled and **lapsed** — so a task
+        whose due journal has been cancelled is never handed to the model as
+        something still outstanding, which is exactly what the phase asks for
+        and what a second query would have had to re-derive.
+
+        ``None`` for any other day, and distinct from an empty answer: a past
+        day was never asked, while a today with nothing due is a fact about the
+        user's week. The read is skipped rather than filtered afterwards,
+        because the answer would be discarded and a past-day summary should cost
+        no extra round trip.
+
+        **The instant travels; the timezone does not.** ``read_models_for_upcoming_window``
+        resolves the zone itself, from the same ``user_settings`` row this
+        assembly has already read, so the two cannot disagree within a request —
+        it costs one small extra ``SELECT`` on a path that then makes a model
+        call. Threading a resolved ``ZoneInfo`` in to save it would change a
+        signature REST and MCP both call, which is not a trade worth making
+        here.
+        """
+        if summary_date != today_in(tz, now):
+            return None
+        if self._task_read_service is None:
+            return None
+        return await self._task_read_service.read_models_for_upcoming_window(
+            user_id, days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD, now=now
+        )

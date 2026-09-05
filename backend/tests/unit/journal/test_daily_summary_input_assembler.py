@@ -8,12 +8,26 @@ import pytest
 from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals import EventDateRange, Journal, MoodData
 from core_shared.models.journals.daily_summary import JournalDailySummary
+from core_shared.models.tasks import (
+    DEFAULT_UPCOMING_DAYS_AHEAD,
+    Task,
+    TaskJournalRef,
+    TaskReadModel,
+    UpcomingTasks,
+    build_task_read_model,
+    upcoming_window,
+)
 
 from app.core.journal.models.agenda import AgendaEntry
+from app.core.journal.services import daily_summary_input_assembler
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )
 from app.core.journal.services.journal_date_resolver import local_day_window
+
+# See the note in ``test_daily_summary_prompt_builder``: this suite was outside
+# CI's marker selection too.
+pytestmark = pytest.mark.unit
 
 
 def _make_journal(
@@ -463,3 +477,253 @@ class TestTheAgendaIsNotReadForAnyOtherDay:
         result = await assembler.assemble("user123", date(2026, 4, 27), "UTC", now=now)
 
         assert result.agenda == []
+
+
+def _read_model(
+    task_id: int, *, due_date: date, text: str = "book the venue"
+) -> TaskReadModel:
+    """One assembled task, built the way the read service builds one.
+
+    Through ``build_task_read_model`` rather than by constructing the frozen
+    model directly, so ``lapse_reason`` is derived here exactly as it is in
+    production — the same reasoning ``tests/unit/tasks/test_task_upcoming_window``
+    gives for its own helper.
+    """
+    due_journal = TaskJournalRef(
+        id=900 + task_id, title=f"journal {task_id}", date=due_date, cancelled=False
+    )
+    return build_task_read_model(
+        task=Task(
+            id=task_id,
+            user_id="user123",
+            text=text,
+            creating_journal_id=1,
+            due_journal_id=due_journal.id,
+        ),
+        creating_journal=TaskJournalRef(
+            id=1, title="where it arose", date=due_date, cancelled=False
+        ),
+        due_journal=due_journal,
+        intermediate_journals=[],
+        contacts=[],
+        today=due_date,
+    )
+
+
+def _upcoming(*models: TaskReadModel, today: date = date(2026, 4, 27)) -> UpcomingTasks:
+    """The listing's answer, window and all."""
+    return UpcomingTasks(
+        window=upcoming_window(today, DEFAULT_UPCOMING_DAYS_AHEAD), tasks=models
+    )
+
+
+@pytest.fixture
+def mock_task_read_service() -> AsyncMock:
+    service = AsyncMock()
+    service.read_models_for_upcoming_window.return_value = _upcoming()
+    return service
+
+
+@pytest.fixture
+def tasks_assembler(
+    mock_journal_repo: AsyncMock,
+    mock_mood_repo: AsyncMock,
+    mock_contact_rel_repo: AsyncMock,
+    mock_summary_repo: AsyncMock,
+    mock_agenda_repo: AsyncMock,
+    mock_task_read_service: AsyncMock,
+) -> DailySummaryInputAssembler:
+    return DailySummaryInputAssembler(
+        journal_repo=mock_journal_repo,
+        mood_repo=mock_mood_repo,
+        contact_relationship_repo=mock_contact_rel_repo,
+        summary_repo=mock_summary_repo,
+        agenda_repo=mock_agenda_repo,
+        task_read_service=mock_task_read_service,
+    )
+
+
+class TestTheUpcomingWindowIsAssembled:
+    """The week's commitments travel with the current day's input."""
+
+    @pytest.mark.asyncio
+    async def test_assembles_the_upcoming_window(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """The listing's answer arrives whole — its order and its window."""
+        soonest = _read_model(1, due_date=date(2026, 4, 27), text="book the venue")
+        later = _read_model(2, due_date=date(2026, 4, 30), text="confirm the flights")
+        mock_task_read_service.read_models_for_upcoming_window.return_value = _upcoming(
+            soonest, later
+        )
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 27), "UTC", now=now
+        )
+
+        assert result.upcoming_tasks is not None
+        assert [model.task.text for model in result.upcoming_tasks.tasks] == [
+            "book the venue",
+            "confirm the flights",
+        ]
+        assert result.upcoming_tasks.window.first_day == date(2026, 4, 27)
+        assert result.upcoming_tasks.window.last_day == date(2026, 5, 4)
+
+    @pytest.mark.asyncio
+    async def test_asks_for_the_specifications_window_at_the_assemblys_instant(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """Seven days ahead, anchored on the instant the rest of the day used.
+
+        The instant is handed over rather than left to the read service's own
+        clock: with ``now=None`` each reading samples afresh, and a request
+        crossing local midnight between them would gather a window for one day
+        while the prompt labels the input another.
+        """
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        await tasks_assembler.assemble("user123", date(2026, 4, 27), "UTC", now=now)
+
+        mock_task_read_service.read_models_for_upcoming_window.assert_awaited_once_with(
+            "user123", days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD, now=now
+        )
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_east_of_utc(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """UTC's date is still the 26th, but the user's day is the 27th."""
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        gathered = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 27), FAR_EAST, now=now
+        )
+        stale = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_EAST, now=now
+        )
+
+        assert gathered.upcoming_tasks is not None
+        assert stale.upcoming_tasks is None
+        assert mock_task_read_service.read_models_for_upcoming_window.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_west_of_utc(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """UTC has ticked over to the 27th; in Niue it is still the 26th."""
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        ahead = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 27), FAR_WEST, now=now
+        )
+        assert ahead.upcoming_tasks is None
+
+        gathered = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_WEST, now=now
+        )
+        assert gathered.upcoming_tasks is not None
+        assert mock_task_read_service.read_models_for_upcoming_window.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_nothing_due_is_not_the_same_as_nothing_gathered(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+    ) -> None:
+        """An empty week is a fact about it; a past day was never asked."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 27), "UTC", now=now
+        )
+
+        assert result.upcoming_tasks is not None
+        assert result.upcoming_tasks.tasks == ()
+
+
+class TestTasksAreNotReadForAnyOtherDay:
+    """Forward-looking material is the current day's, and costs nothing else."""
+
+    @pytest.mark.asyncio
+    async def test_past_day_does_not_read_tasks(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), "UTC", now=now
+        )
+
+        assert result.upcoming_tasks is None
+        mock_task_read_service.read_models_for_upcoming_window.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_future_day_does_not_read_tasks(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 28), "UTC", now=now
+        )
+
+        assert result.upcoming_tasks is None
+        mock_task_read_service.read_models_for_upcoming_window.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_without_the_read_service_defaults_to_nothing_gathered(
+        self, assembler: DailySummaryInputAssembler
+    ) -> None:
+        """The dependency is optional, as the agenda port already is."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await assembler.assemble("user123", date(2026, 4, 27), "UTC", now=now)
+
+        assert result.upcoming_tasks is None
+
+
+class TestOneClockReadingPerAssembly:
+    """Every day-based decision in one assembly reads one instant."""
+
+    @pytest.mark.asyncio
+    async def test_the_clock_is_read_once_and_handed_on(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A caller without an instant still gives every collaborator one.
+
+        Left to themselves the agenda guard, the tasks guard and the read
+        service would each sample the wall clock, and an assembly crossing local
+        midnight between two of them would gather a window for a day the rest of
+        the input is not about.
+        """
+        instant = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+        readings = 0
+
+        def _counting_clock() -> datetime:
+            nonlocal readings
+            readings += 1
+            return instant
+
+        monkeypatch.setattr(daily_summary_input_assembler, "_utc_now", _counting_clock)
+
+        await tasks_assembler.assemble("user123", date(2026, 4, 27), "UTC")
+
+        assert readings == 1
+        mock_task_read_service.read_models_for_upcoming_window.assert_awaited_once_with(
+            "user123", days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD, now=instant
+        )

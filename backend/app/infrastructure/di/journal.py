@@ -204,11 +204,40 @@ from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
 class JournalProvider(Provider):
+    """Provides the journal domain's dependencies.
+
+    **This provider is no longer self-sufficient, and the reversal is
+    deliberate.** Two factories below — ``task_anchor_repository`` and
+    ``task_journal_merge_service`` — build tasks-domain objects by hand with
+    docstrings arguing that a ``JournalProvider`` depending on ``TaskProvider``
+    "would force every container that registers one to register the other".
+    That argument came with a condition, stated in those docstrings: *it needs
+    nothing but the connection, so there is no graph cost*. Both of those still
+    do, so both stay as they are.
+
+    ``daily_summary_input_assembler`` broke the condition. The summary's
+    forward-looking input is the dashboard's upcoming-task listing, reused
+    whole, and ``TaskReadService`` needs five collaborators drawn from three
+    domains. Hand-building it here would mean reaching around the container for
+    ``SqlTaskRepository`` *and* ``SqlContactRepository`` — and would produce a
+    second instance alongside ``TaskProvider``'s. A provider reaching around the
+    container for another domain's adapter is usually a boundary complaining;
+    two of them is the boundary saying the edge belongs in the graph.
+
+    So a container registering this provider must also register
+    ``TaskProvider``, ``ContactProvider`` and ``IntegrationProvider`` (which
+    ``ContactProvider``'s merge service reaches for), alongside the
+    ``SettingsProvider`` and ``InfrastructureProvider`` it already needed. Every
+    container but one already did; the exception is
+    ``tests/integration/journal/test_journal_date_resolver.py``.
+    """
+
     @provide(scope=Scope.REQUEST)
     def journal_repository(self, connection: AsyncConnection) -> JournalRepository:
         """Provide a JournalRepository instance."""
@@ -780,8 +809,17 @@ class JournalProvider(Provider):
         summary_repo: JournalDailySummaryRepository,
         series_repo: JournalSeriesRepository,
         agenda_repo: AgendaRepository,
+        task_read_service: TaskReadService,
     ) -> DailySummaryInputAssembler:
-        """Provide a DailySummaryInputAssembler instance."""
+        """Provide a DailySummaryInputAssembler instance.
+
+        ``TaskReadService`` comes from ``TaskProvider``, and it is the one
+        dependency that makes this provider need that one — see the class
+        docstring for why the edge is in the graph rather than hand-built here.
+        The read service rather than the repository, because what the summary
+        wants is the *listing*: its window, its exclusions and its order, none
+        of which live in SQL.
+        """
         return DailySummaryInputAssembler(
             journal_repo=journal_repo,
             mood_repo=mood_repo,
@@ -789,6 +827,7 @@ class JournalProvider(Provider):
             summary_repo=summary_repo,
             series_repo=series_repo,
             agenda_repo=agenda_repo,
+            task_read_service=task_read_service,
         )
 
     @provide(scope=Scope.REQUEST)
