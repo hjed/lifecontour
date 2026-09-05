@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.adapters.sql import (
     SqlContactEventPublisher,
     SqlContactFieldHistoryRepository,
+    SqlContactImportanceRepository,
     SqlContactRelationshipRepository,
     SqlContactRepository,
     SqlContactSummaryRepository,
@@ -19,6 +20,7 @@ from app.core.contacts.adapters.sql import (
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
     ContactFieldHistoryRepository,
+    ContactImportanceRepository,
     ContactRelationshipRepository,
     ContactRepository,
     ContactSummaryRepository,
@@ -68,6 +70,19 @@ class ContactProvider(Provider):
     @provide(provides=TagRepository)
     def get_tag_repository(self, connection: AsyncConnection) -> SqlTagRepository:
         return SqlTagRepository(connection)
+
+    @provide(provides=ContactImportanceRepository)
+    def get_contact_importance_repository(
+        self, connection: AsyncConnection
+    ) -> SqlContactImportanceRepository:
+        """Provide the shared contact-importance read.
+
+        Registered here rather than left to each caller to construct, because
+        the read exists to be shared: the search indexer builds it inline while
+        processing an outbox event, and the home dashboard resolves it through
+        this container to rank upcoming important dates.
+        """
+        return SqlContactImportanceRepository(connection)
 
     @provide(provides=CustomDateTypeRepository, scope=Scope.REQUEST)
     def custom_date_type_repository(

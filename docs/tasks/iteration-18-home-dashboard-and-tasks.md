@@ -8969,11 +8969,12 @@ section without the inline done action — the specification names that as an in
    `HomeDashboardService` should name the same thing, and this system has two dashboards. The outdoor
    precedent stays under `/api/journals/` because it is journal-scoped, which this is not. See *Decisions
    taken (Phase 1)*.
-2. **How the SQL side obtains the importance signals** — settled in **Phase 8**. Reuse the computation that
-   feeds the search index (`search_indexer._fetch_complete_contact_data`) by extracting it into a shared
-   read, or query the index itself. Extraction keeps the dashboard independent of MeiliSearch availability
-   and is the likely answer; either way the precedence order must be pinned by a test alongside
-   `test_ranking_rules.py`.
+2. ~~**How the SQL side obtains the importance signals**~~ — ✅ **settled in Phase 10: extracted into a
+   shared read**, `ContactImportanceRepository` in the contacts domain, not by querying the index. The
+   dashboard therefore ranks contacts with MeiliSearch down, and the precedence order is stated once in
+   `CONTACT_IMPORTANCE_ORDER`, which `CONTACTS_INDEX_SETTINGS` derives its custom ranking rules from. See
+   *Decisions taken (Phase 10)*. *(Pointer corrected: this read "settled in Phase 8", which is the tomorrow
+   disclosure and has no importance signals in it.)*
 3. **The upcoming-dates cap** (wireframe gap 3) — settled in **Phase 8** (payload) and **Phase 9** (UI).
    Five matches the tasks section; the wireframe shows three rows and a show-more naming five.
 4. **Which date types count as "important dates" for the dashboard** — settled in **Phase 7**. All five
@@ -10275,18 +10276,92 @@ existing call site in the search domain (calibration rules 7 and 8)
 
 **Acceptance Criteria:**
 
-- [ ] The favourite / recent-journal-count / recent-activity-count computation that today lives inside
+- [x] The favourite / recent-journal-count / recent-activity-count computation that today lives inside
       `search_indexer._fetch_complete_contact_data` is available as a **shared read** usable outside the
-      indexer, per open decision 2.
-- [ ] The indexer is refactored onto that shared read with **no behaviour change** — the existing search
-      ranking must produce identical documents, and the existing indexer tests must pass untouched.
-- [ ] The dashboard's use of it does not depend on MeiliSearch being available.
-- [ ] The precedence order (favourite → journal count → activity count) is expressed once and pinned by a
-      test that fails if it changes, mirroring `tests/unit/infrastructure/search/test_ranking_rules.py`.
+      indexer, per open decision 2. — `ContactImportanceRepository` (port, in the contacts domain's
+      `models/repositories.py`) with `SqlContactImportanceRepository`
+      (`app/core/contacts/adapters/sql/contact_importance_repository.py`), answering a **batch** of contact
+      ids in one statement and registered on `ContactProvider`.
+- [x] The indexer is refactored onto that shared read with **no behaviour change** — the existing search
+      ranking must produce identical documents, and the existing indexer tests must pass untouched. —
+      `test_search_indexer_contact_document.py` pins the whole document *before* the refactor and passes
+      unchanged after it; `test_search_indexer_phase4.py` and `tests/unit/infrastructure/search/` were not
+      edited.
+- [x] The dashboard's use of it does not depend on MeiliSearch being available. — the read lives in the
+      contacts domain and imports nothing from `app/infrastructure/search`; asserted by reading signals with
+      `get_meilisearch_client` monkeypatched to raise.
+- [x] The precedence order (favourite → journal count → activity count) is expressed once and pinned by a
+      test that fails if it changes, mirroring `tests/unit/infrastructure/search/test_ranking_rules.py`. —
+      `CONTACT_IMPORTANCE_ORDER` in `app/core/contacts/models/importance.py`; `CONTACTS_INDEX_SETTINGS`
+      **derives** its three custom ranking rules from it, and `tests/unit/contacts/test_contact_importance.py`
+      pins the tuple, the derivation and the sort key.
 
 **Required Test Coverage:** unit — the shared read's ordering contract and the precedence test. Integration
 — the refactored indexer produces byte-identical documents for a fixture contact; the shared read works with
 MeiliSearch unavailable. No e2e.
+
+**Decisions taken (Phase 10):**
+
+- **Extraction, not querying the index** — open decision 2, settled the way it predicted. Reading the
+  signals back out of MeiliSearch would have made the dashboard's upcoming-dates section fail whenever
+  search was down, which the third criterion forbids outright.
+- **It lives in the contacts domain, not `core_shared` and not `app/core/dashboard`.** `core_shared` carries
+  what the *integration workers* share, and the indexer is inside `backend/app`, so it needs nothing from
+  there. The dashboard's own ports sit in its domain because they return **dashboard** models; this one
+  returns a contact model and has two callers outside the dashboard, so it belongs beside
+  `SqlContactSummaryRepository`.
+- **The read is batch-shaped** — `Sequence[int] → dict[int, ContactImportance]`, one statement with two
+  `LEFT JOIN LATERAL` aggregates — although the indexer only ever passes one id. Phase 11 ranks a whole
+  window of contacts and carries a no-N+1 criterion; a single-id read would have been rewritten one phase
+  later. An integration test counts the statements, and an empty id list is answered without a round trip
+  because that is the common case for a quiet window.
+- **The counts moved from a Python loop into SQL, and that is not a behaviour change.** Every column
+  involved — `contacts.updated_at`, `journals.created_at`, `field_history.created_at` — is
+  `TIMESTAMP WITH TIME ZONE`, so `>= :cutoff` is exactly the comparison the loop performed and the loop's
+  naive-datetime branch was unreachable. `GREATEST` reproduces the maximum the indexer took across the
+  contact row, its newest journal and its newest recorded change: PostgreSQL's `GREATEST` ignores NULL
+  arguments, and `contacts.updated_at` is `NOT NULL`. The boundary stays inclusive. The indexer stopped
+  selecting every journal and history row a contact has ever had merely to count the recent ones.
+- **`journal_mentions` stayed in the indexer.** Journal *titles* are search text, not an importance signal;
+  a shared read carrying them would hand the dashboard a payload it must ignore. The indexer keeps a
+  titles-only query, so its two importance-related statements are still two.
+- **The `field_history` predicate was carried over verbatim, including its flaw** — see the follow-up below.
+- **The read is not user-scoped.** `contacts` has no owner column in this schema and every other contacts
+  repository is likewise unscoped, so this **diverges from the dashboard ports' rule that every method takes
+  a `user_id`** — recorded here rather than left as a silent inconsistency. Scoping the journal half alone
+  would have changed what the indexer counts, which the second criterion forbids. When contacts gain an
+  owner, this port and its two callers are the place to apply it.
+- **The precedence is derived, not merely checked.** `CONTACTS_INDEX_SETTINGS["rankingRules"]` builds its
+  custom rules from `CONTACT_IMPORTANCE_ORDER` rather than restating them, so drift is impossible rather
+  than detectable. Nothing else in the index settings changed — `is_favourite` is still absent from
+  `sortableAttributes`, which is pre-existing and not this phase's to alter.
+- **`ranking_key` is negated** so importance composes into a single *ascending* sort: Phase 11 orders by
+  `(occurrence_date, *importance.ranking_key)` in one pass, rather than sorting twice.
+
+**Sizing, and rule 3.** Estimated 480 tracked (~120 production ×4); **measured 1,321** — 2.75×, and 2.0×
+tests against production (418 production, 821 tests, 82 docs). Shipped as **two stacked PRs**, because rule
+3 requires a split and rule 9 does not block one here: the first changes no behaviour at all — a golden pin
+over existing code, plus a ranking-rule derivation that produces a byte-identical list — and the second is
+the extraction that consumes it. **Neither PR is under 500 and no seam gets both there**: the golden
+document pin (287 lines) and the repository matrix (413) are each required by this phase's own stated test
+coverage and neither divides usefully.
+
+**Suggested refinement — the ×6 this document predicted for this phase was not applied.** Calibration rule
+14 already named Phase 10 as a case where the deliverable is a *decision* rather than a capability, and it
+is: which signals count, in what order, over which window. The criteria *read* as an extraction, which is
+why ×4 looked right at planning time, but the tests are boundary tests — either side of the cutoff, exactly
+on it, each of four activity entity types, each of three sources for the maximum, the empty contact, the
+empty batch — and each boundary is a test carrying the arithmetic that makes it readable. **When a phase's
+estimate and its own calibration entry disagree, take the calibration entry**: ~120 production at ×6 is
+~720, which would have called for the split before work started rather than after it, as rule 3 asks.
+
+**Follow-up — the activity predicate over-counts.** The `field_history` filter matches the four child
+`entity_type` values against an `entity_id` drawn from a `UNION` of all four child tables **without pairing
+a type to its table**, so a `contact_note` row whose `entity_id` equals one of the same contact's
+`contact_method` ids is counted. It has been that way since the signal was added, it is a small over-count
+in an already-coarse ranking input, and this phase's criterion is that documents do not change — so it moved
+across unaltered rather than being corrected inside an extraction nobody would review as a ranking change.
+Correcting it is a standalone change with its own before/after on the search documents.
 
 #### Phase 11: Upcoming Dates — Windowed Query, Ranking and MCP Tool
 

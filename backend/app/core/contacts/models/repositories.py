@@ -18,6 +18,7 @@ from core_shared.models.contacts.entities import (
 from core_shared.models.contacts.important_date_types import CustomDateType
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.importance import ContactImportance
 from app.core.history.models import FieldHistoryEntry, FieldHistoryRepository
 
 
@@ -648,5 +649,42 @@ class ContactSummaryRepository(ABC):
         is_disabled)`` tuples, oldest marker first. Disabled rows are claimed
         too (so stale markers don't accumulate) but callers must not dispatch
         generation for them.
+        """
+        pass
+
+
+class ContactImportanceRepository(ABC):
+    """Reads how much each of a set of contacts matters to the user.
+
+    Shared deliberately. The signals were computed inside the search indexer
+    until ITER18-004 Phase 10, which needed them on the home dashboard as well
+    — to order upcoming important dates — and could not depend on MeiliSearch
+    being up to get them. One read, two callers, one definition of the window.
+
+    Unlike the dashboard's own ports, the methods here take no ``user_id``:
+    ``contacts`` carries no owner column in this schema and every other contacts
+    repository is likewise unscoped. See the iteration document for why that was
+    not changed here.
+    """
+
+    @abstractmethod
+    async def for_contacts(
+        self, contact_ids: Sequence[int], *, now: datetime | None = None
+    ) -> dict[int, ContactImportance]:
+        """The importance signals for each of ``contact_ids`` that exists.
+
+        Args:
+            contact_ids: The contacts to report on. An empty sequence is
+                answered with an empty mapping and no query — the dashboard asks
+                this whenever its window holds no dates.
+            now: The instant the recency window is measured back from. Defaults
+                to the current time; passed explicitly by tests that need the
+                window's edge to sit somewhere known.
+
+        Returns:
+            A mapping from contact id to its signals. Ids with no ``contacts``
+            row are **absent** rather than present with zeros: a contact that
+            does not exist has no signals, which is not the same claim as a
+            contact nobody has touched.
         """
         pass
