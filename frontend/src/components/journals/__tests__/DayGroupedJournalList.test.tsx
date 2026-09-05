@@ -128,6 +128,32 @@ describe('DayGroupedJournalList', () => {
       });
     }
 
+    /** Both sentinels reported in one observer callback — a single commit. */
+    function intersectBothSentinels() {
+      act(() => {
+        observerCallback(
+          [
+            {
+              target: screen.getByTestId('journal-top-sentinel'),
+              isIntersecting: true,
+            },
+            {
+              target: screen.getByTestId('journal-bottom-sentinel'),
+              isIntersecting: true,
+            },
+          ] as unknown as IntersectionObserverEntry[],
+          {} as IntersectionObserver
+        );
+      });
+    }
+
+    /** The same reach, expressed as a gesture rather than a movement. */
+    function gesture(type: 'wheel' | 'touchmove') {
+      act(() => {
+        window.dispatchEvent(new Event(type));
+      });
+    }
+
     it('fetches the previous page when the top sentinel intersects while idle', () => {
       const fetchPreviousPage = jest.fn();
       render(
@@ -167,6 +193,88 @@ describe('DayGroupedJournalList', () => {
       scrollThePage();
 
       expect(fetchPreviousPage).toHaveBeenCalled();
+    });
+
+    it.each(['wheel', 'touchmove'] as const)(
+      'expands into the past on a %s gesture, with no scroll to be had',
+      gestureType => {
+        // A sparse history that fits on one screen leaves the page with
+        // nowhere to scroll, so no scroll event can ever fire — the reader
+        // spinning the wheel or dragging the screen at the top of the list is
+        // the only way they can ask for older entries, and it means exactly
+        // what a scroll would.
+        const fetchPreviousPage = jest.fn();
+        render(
+          <DayGroupedJournalList
+            journals={journals}
+            collapseEmptyDays={false}
+            hasPreviousPage
+            fetchPreviousPage={fetchPreviousPage}
+          />
+        );
+
+        intersect('journal-top-sentinel', true);
+        expect(fetchPreviousPage).not.toHaveBeenCalled();
+
+        gesture(gestureType);
+
+        expect(fetchPreviousPage).toHaveBeenCalled();
+      }
+    );
+
+    it('asks for the past before the future when both sentinels are in view', () => {
+      // A list too short to fill the viewport leaves both sentinels on screen,
+      // and both requests would go out in the same commit — before either
+      // loading flag updates. Infinite queries run one fetch at a time and
+      // pagination defaults to `cancelRefetch: true`, so the second call
+      // cancels the first while its per-visit token is already spent: on a
+      // list this short the sentinel never leaves the viewport to reset it, and
+      // the past the reader asked for would never load (#1398). One request per
+      // commit, and the reader's beats the eager one.
+      const fetchPreviousPage = jest.fn();
+      const fetchNextPage = jest.fn();
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          hasNextPage
+          fetchPreviousPage={fetchPreviousPage}
+          fetchNextPage={fetchNextPage}
+        />
+      );
+
+      scrollThePage();
+      intersectBothSentinels();
+
+      expect(fetchPreviousPage).toHaveBeenCalledTimes(1);
+      expect(fetchNextPage).not.toHaveBeenCalled();
+
+      // The future is deferred, not dropped: it goes out once the past lands.
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          hasNextPage
+          fetchPreviousPage={fetchPreviousPage}
+          fetchNextPage={fetchNextPage}
+          isLoadingPrevious
+        />
+      );
+      rerender(
+        <DayGroupedJournalList
+          journals={journals}
+          collapseEmptyDays={false}
+          hasPreviousPage
+          hasNextPage
+          fetchPreviousPage={fetchPreviousPage}
+          fetchNextPage={fetchNextPage}
+        />
+      );
+
+      expect(fetchNextPage).toHaveBeenCalledTimes(1);
+      expect(fetchPreviousPage).toHaveBeenCalledTimes(1);
     });
 
     it('expands into the past without a scroll when the list is empty', () => {

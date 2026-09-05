@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { reachForMoreJournals } from './utils/journal-list-scroll';
 
 function relativeDate(dayOffset: number): string {
   const d = new Date();
@@ -84,30 +85,23 @@ test.describe('Journal Infinite Scroll', () => {
     ).toBeHidden();
 
     // 3. Scroll Down (to FUTURE) -> Should trigger fetchNextPage
-    const bottomSentinel = page.getByTestId('journal-bottom-sentinel');
-
-    // Use toPass to retry scroll + assertion together, since a single
-    // scrollIntoViewIfNeeded may not reliably trigger the IntersectionObserver
-    // in CI headless environments.
+    // The reach is a wheel gesture rather than a conditional scroll, so it
+    // registers even when the sentinel is already on screen — see
+    // reachForMoreJournals. toPass retries the reach with the assertion, in
+    // case the fetch it asked for was skipped while another was in flight.
     await expect(async () => {
-      await bottomSentinel.scrollIntoViewIfNeeded();
+      await reachForMoreJournals(page, 'future');
       await expect(
         page.getByRole('heading', { name: /Future Journal/i })
-      ).toBeVisible({ timeout: 5000 });
+      ).toBeVisible({ timeout: 3000 });
     }).toPass({ timeout: 30000 });
 
     // 4. Scroll Up (to PAST) -> Should trigger fetchPreviousPage
-    const topSentinel = page.getByTestId('journal-top-sentinel');
-
-    // Use toPass to retry scroll + assertion together for reliability.
-    // scrollIntoViewIfNeeded on the top sentinel reliably brings it into the
-    // viewport and triggers the IntersectionObserver, unlike window.scrollTo(0,0)
-    // which may not fire the observer in headless CI.
     await expect(async () => {
-      await topSentinel.scrollIntoViewIfNeeded();
+      await reachForMoreJournals(page, 'past');
       await expect(
         page.getByRole('heading', { name: /Past Journal/i })
-      ).toBeVisible({ timeout: 5000 });
+      ).toBeVisible({ timeout: 3000 });
     }).toPass({ timeout: 30000 });
   });
 });

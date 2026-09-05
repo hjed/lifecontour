@@ -322,6 +322,28 @@ This pattern applies to:
 - **Dynamic UI rendering** (check checkbox → editor `toBeVisible`)
 - **Combobox interactions** (fill input → option `toBeVisible`)
 
+#### Never Drive App State With an Interaction That Can No-Op
+
+`scrollIntoViewIfNeeded()` and `hover()`'s implicit scroll do **nothing** when the element is already on screen, and a page with nothing left to scroll fires no `scroll` event however hard it is pushed. Either is fine for *positioning* an element before clicking it — a no-op there means the element was already in place. Neither can be the lever that makes the app do something, because on the runs where it no-ops there is no event for the app to react to, and wrapping it in `toPass()` converts a fast failure into a full-budget deadlock that retries the same no-op.
+
+The journals list only pages into the past once the reader reaches for it, so this bit exactly (issue #1398): a two-journal fixture left the top sentinel already in view with the page at scroll position 0, and the test spun for 30s on `element(s) not found`. Whether the sentinel started in view depended on the settled page height, so it flaked rather than failing outright.
+
+```typescript
+// ✅ CORRECT: a gesture that fires regardless of scroll position
+await expect(async () => {
+  await reachForMoreJournals(page, 'past'); // hover + page.mouse.wheel
+  await expect(gapGroup).toBeVisible({ timeout: 3000 });
+}).toPass({ timeout: 30000 });
+
+// ❌ WRONG: a no-op on every retry if the sentinel is already visible
+await expect(async () => {
+  await page.getByTestId('journal-top-sentinel').scrollIntoViewIfNeeded();
+  await expect(gapGroup).toBeVisible({ timeout: 5000 });
+}).toPass({ timeout: 30000 });
+```
+
+Use `frontend/tests/e2e/utils/journal-list-scroll.ts` for the journals list. Sizing fixture data so the target starts *off* screen is not a fix — it makes the test depend on the viewport of whichever project runs it.
+
 #### Use Web-First URL Assertions
 
 Always prefer auto-retrying web-first assertions over snapshot-based checks:
