@@ -3,6 +3,9 @@
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.services.upcoming_important_dates_service import (
+    UpcomingImportantDatesService,
+)
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
 from app.core.journal.models.repositories import AgendaRepository
 from app.core.journal.services.daily_summary_repository import (
@@ -26,6 +29,10 @@ class DashboardProvider(Provider):
 
     The agenda port sits there rather than here because it reads **journals**;
     the dashboard is one of its two callers, not its owner.
+    ``UpcomingImportantDatesService`` comes from ``ContactProvider`` for the same
+    reason and with a third caller ahead of it: an agent reaches the same answer
+    through ``list_upcoming_important_dates``, and ITER18-005 Phase 6 will reach
+    it again from the daily summary's inputs.
 
     The **repository** rather than ``DailySummaryService`` is deliberate: the
     service's read path generates, and a dashboard load must not write.
@@ -37,6 +44,7 @@ class DashboardProvider(Provider):
         date_resolver: JournalDateResolver,
         summary_repo: JournalDailySummaryRepository,
         agenda_repo: AgendaRepository,
+        upcoming_dates_service: UpcomingImportantDatesService,
         connection: AsyncConnection,
     ) -> HomeDashboardService:
         """Provide a HomeDashboardService instance."""
@@ -44,5 +52,6 @@ class DashboardProvider(Provider):
             date_resolver=date_resolver,
             summary_repo=summary_repo,
             agenda_repo=agenda_repo,
+            upcoming_dates_service=upcoming_dates_service,
             connection=connection,
         )

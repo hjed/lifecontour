@@ -138,6 +138,28 @@ def empty_agenda(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def empty_upcoming_dates(document: dict[str, Any]) -> dict[str, Any]:
+    """The section a user with no important dates gets: ready, window, no rows.
+
+    Like the agenda's, the window is read off the document's own anchor rather
+    than a clock, so a midnight crossing mid-test moves the expectation with the
+    answer.
+    """
+    anchor = datetime.date.fromisoformat(document["meta"]["anchor"]["date"])
+    return {
+        "status": "ready",
+        "data": {
+            "window": {
+                "start_date": anchor.isoformat(),
+                "end_date": (anchor + datetime.timedelta(days=7)).isoformat(),
+                "days_ahead": 7,
+            },
+            "total": 0,
+            "dates": [],
+        },
+    }
+
+
 @pytest.mark.asyncio
 class TestTheSectionEnvelope:
     async def test_returns_all_four_sections_in_one_call(
@@ -152,12 +174,13 @@ class TestTheSectionEnvelope:
         attributes = document["data"]["attributes"]
         assert set(attributes) == set(SECTIONS)
         # This user has no summary row, so that section reports unavailable.
-        # The agenda answers with an empty day — its own suite covers a populated
-        # one — and the two Phases 11 and 13 have yet to fill answer with nothing.
+        # The agenda and the upcoming dates answer with an empty day and an empty
+        # window — their own suites cover populated ones — and tasks, which
+        # Phase 13 has yet to fill, answers with nothing at all.
         assert attributes["summary"] == {"status": "unavailable", "data": None}
         assert attributes["agenda"] == empty_agenda(document)
-        for name in ("tasks", "upcoming_dates"):
-            assert attributes[name] == {"status": "ready", "data": {}}, name
+        assert attributes["upcoming_dates"] == empty_upcoming_dates(document)
+        assert attributes["tasks"] == {"status": "ready", "data": {}}
 
     async def test_the_resource_links_to_itself(
         self, authenticated_client: AsyncClient

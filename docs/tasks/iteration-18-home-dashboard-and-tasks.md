@@ -8983,8 +8983,13 @@ section without the inline done action — the specification names that as an in
    `CONTACT_IMPORTANCE_ORDER`, which `CONTACTS_INDEX_SETTINGS` derives its custom ranking rules from. See
    *Decisions taken (Phase 10)*. *(Pointer corrected: this read "settled in Phase 8", which is the tomorrow
    disclosure and has no importance signals in it.)*
-3. **The upcoming-dates cap** (wireframe gap 3) — settled in **Phase 11** (payload) and **Phase 12** (UI).
-   Five matches the tasks section; the wireframe shows three rows and a show-more naming five.
+3. ~~**The upcoming-dates cap**~~ (wireframe gap 3) — ✅ **settled in Phase 11: three, and the card
+   applies it.** The wireframe draws three rows and a show-more reading *"Show all 5 this week"*, and gap 3
+   names that as evidence for three rather than five. Symmetry with the tasks section's five was the
+   alternative and was declined: **W3** already grants the three columns independent heights, so the
+   symmetry buys nothing the wireframe did not draw. The *shape* was settled once for both sections by
+   Phase 13 — the whole window travels with its total and the card caps it, so a show-more costs no second
+   request — which leaves this decision as the number alone. See *Decisions taken (Phase 11)*.
 4. ~~**Which date types count as "important dates" for the dashboard**~~ — ✅ **settled in Phase 9: all
    five, and precision alone decides.** `year` precision produces no occurrence *whatever* the type, so
    the `first_met` case the question was built on is already answered without a type filter — and a
@@ -10517,31 +10522,174 @@ wanted; **no reindex is forced**, because the signal only breaks ties within an 
 Whether relationship, important-date and summary edits *should* count as contact activity — the feed reads
 them and this signal does not — was left open rather than answered inside the correction.
 
-#### Phase 11: Upcoming Dates — Windowed Query, Ranking and MCP Tool
+#### Phase 11: Upcoming Dates — Windowed Query, Ranking and MCP Tool ✅ COMPLETE
 
 **Prerequisites:** Phases 1, 9 and 10.
-**Estimated diff:** ~160 production → **~640 tracked** (×4) — capability triple
+**Estimated diff:** ~160 production → **~640 tracked** (×4) — capability triple · **Actual:** 1,316
+production → **~4,100 tracked** (1,316 production, 2,668 tests, ~120 documentation). **8.2× the
+production estimate and 6.4× the tracked one**, and 2.0× tests against production.
+
+**Delivery rule 3:** shipped as **two stacked PRs** — #1404, the read, and its successor, the two
+surfaces — because rule 3 requires a split above 500 and calibration rule 15 had already put a
+two-entry-point phase at ×6 against production. The split was **recorded before work started**, as rule
+3 asks, rather than discovered halfway. Rule 9 holds either side: PR 1 adds a read nobody calls, so it
+breaks nothing. Neither half lands under 500, and no seam gets both there — the same finding Phase 10
+recorded.
 
 **Acceptance Criteria:**
 
-- [ ] A windowed query returns candidate important dates for the next seven days in **one query**, resolved
-      through the Phase 9 helper.
-- [ ] Ordering is **date ascending, then contact importance descending**, using Phase 10's shared read.
-- [ ] **No** new user-configured importance field is introduced anywhere.
-- [ ] The section carries the full in-window count so the UI can label its show-more (**W32**), with the cap
-      resolved per open decision 3 and the *wireframe's own* depiction (three rows, "Show all 5") taken into
-      account.
-- [ ] **MCP parity:** an agent can retrieve the same windowed, ranked list — the specification says agents
-      compose the dashboard from "the contacts tools for upcoming dates", and no such tool exists today
-      (`list_contacts`, `search_contacts`, `get_contact`, `get_contact_relationships`, `list_contact_tags`
-      are the whole surface). A `list_upcoming_important_dates` tool ships in this PR, or delivery rule 5 is
-      knowingly broken and recorded as an exception here.
-- [ ] The section reports empty distinctly from unavailable.
+- [x] A windowed query returns candidate important dates for the next seven days in **one query**, resolved
+      through the Phase 9 helper. — `SqlUpcomingImportantDateRepository.candidates_for`, one statement over
+      `contact_important_dates`, plus Phase 10's batched signals read: **two statements, and one for an
+      empty window**, asserted as a count rather than assumed.
+- [x] Ordering is **date ascending, then contact importance descending**, using Phase 10's shared read. —
+      `select_upcoming_dates` sorts on `(occurs_on, *ContactImportance.ranking_key, contact_id, date_id)`,
+      the single ascending pass `ranking_key`'s negation was built for.
+- [x] **No** new user-configured importance field is introduced anywhere. — Nothing added; the payload
+      deliberately **omits** the signals it ranked by, pinned by a test that fails if a row grows a field.
+- [x] The section carries the full in-window count so the UI can label its show-more (**W32**), with the cap
+      resolved per open decision 3. — `total` on the section and `total_count` on the MCP answer; **open
+      decision 3 is settled at three**, applied by Phase 12's card. Struck through in the list above.
+- [x] **MCP parity:** an agent can retrieve the same windowed, ranked list. — `list_upcoming_important_dates`
+      ships in the same PR stack, over the same service, asserted against a real database.
+- [x] The section reports empty distinctly from unavailable. — Phase 1's envelope, now with a payload that
+      can be empty: `ready` with an empty `dates` and a window, versus `unavailable` with `data: null`.
 
 **Required Test Coverage:** unit — ordering including a same-day tie broken by each signal in turn, and cap
 plus remainder count. Integration — the query against real contacts and dates; window anchoring for a
 non-UTC user; a query-count assertion (no N+1); a contact with no importance signals; the MCP tool against a
-real database. No e2e.
+real database. No e2e. — **Delivered:** 71 unit and 45 integration.
+
+- `core_shared/tests/unit/models/test_date_window.py` (**13**, new) — the promoted window.
+- `backend/tests/unit/tasks/test_task_upcoming_window.py` (**25**, unedited) — the proof the promotion
+  changed no behaviour, including that the tasks wrapper still raises `TaskValidationError`.
+- `backend/tests/unit/contacts/test_upcoming_dates_rule.py` (**27**, new) — the candidate pairs across
+  month and year boundaries, the leap-day addition *and its absence* in a leap year, a same-day tie broken
+  by each signal in turn, a deterministic final tie-break asserted against reversed input, a contact with no
+  signals, and that nothing is capped.
+- `backend/tests/unit/contacts/test_upcoming_important_dates_service.py` (**18**, new) — the pairs actually
+  handed to the query, a Kiritimati user near midnight, one clock read and one settings read per request,
+  and the round trips at 0, 1, 2 and 6 contacts.
+- `backend/tests/unit/mcp/domains/contacts/test_upcoming_dates_tool_schema.py` (**21**, new) — the default
+  of 7 **in the schema**, both bounds, and eleven refused parameters.
+- `backend/tests/unit/api/test_home_dashboard_serialisation.py` (**+11**) and
+  `backend/tests/unit/dashboard/test_home_dashboard_service.py` (**+5**) — the wire shape, and the wiring.
+- `backend/tests/integration/contacts/test_upcoming_important_dates_integration.py` (**28**, new) — both
+  window edges and both sides of them, each precision, the leap day, a year-crossing window, real signals
+  deciding a shared day, a real settings row for the timezone case *with its UTC control*, and statement
+  counts of 2 / 2 / 1.
+- `backend/tests/integration/api/test_home_dashboard_upcoming_dates.py` (**12**, new) and
+  `backend/tests/integration/mcp/test_contact_tools_integration.py` (**+5**) — both surfaces end to end,
+  each asserting the same window and the same order, so parity is demonstrated rather than claimed.
+
+**Where the required coverage was met differently, and why.** The line asks for "cap plus remainder count",
+which was written before **Phase 13 settled the shape for both sections**: the whole window travels with its
+total and the *card* applies the cap, so a show-more costs no second request. There is therefore no cap
+arithmetic on the server to test, and what stands in its place is the opposite assertion — twelve in-window
+dates yield twelve, at three layers — plus a mutation that caps the payload at three and fails five tests.
+
+**Decisions taken (Phase 11):**
+
+- **Open decision 3 is settled: the cap is three, and it lives in the card.** The wireframe draws three rows
+  and a show-more reading *"Show all 5 this week"*, and gap 3 names that as evidence for three rather than
+  five. Symmetry with the tasks section's five was the alternative and was declined: W3 already grants the
+  three columns independent heights, so the symmetry buys nothing the wireframe did not draw. Nothing on the
+  server truncates anything — this phase's obligation is `total`, and Phase 12 renders three of it.
+- **The window is promoted, not duplicated — which is what Phase 9 deferred to here.** That phase declined
+  to reuse `UpcomingWindow` because it had no caller, and said in terms that Phase 11 was where the evidence
+  would be. The evidence is this iteration's own criterion that the dates window **match** the tasks window:
+  they are one span two sections must agree on, not two similar ones. `UpcomingWindow`, `upcoming_window`
+  and the two constants moved to `core_shared/models/date_window.py`, raising a neutral `DateWindowError`.
+  What each domain keeps is the **translation** — a bad `days_ahead` on a task surface is a
+  `TaskValidationError` and on a contacts surface a `ContactValidationError`, and a re-export could not
+  achieve that because `except TaskValidationError` does not catch a `DateWindowError`. Every existing
+  import goes through the `core_shared.models.tasks` package `__init__`, so **no call site moved** and the
+  tasks window's 25 tests pass **unedited**, which is the proof rather than the claim.
+- **The recurrence stays out of SQL, and the leap day is why the candidate set is not simply the window's
+  days.** The database is asked the narrow question it can answer cheaply — which stored `(month, day)`
+  pairs could land in this window — and `resolve_occurrence` decides what actually does. But a row stored as
+  29 February is **observed on the 28th** in a year without a 29th, so a filter built from the literal pairs
+  the window spells would never fetch it: a leap-day birthday would be missing from the section in **three
+  years out of four**, silently, since a row that is never fetched cannot be reported as dropped.
+  `window_month_days` adds `(2, 29)` exactly when the window covers a 28 February that is not itself a leap
+  day, and nothing broader is needed — a real 29 February is already one of the window's own days.
+- **The pairs reach SQL as two parallel integer arrays**, joined through a multi-argument `unnest`. Not a
+  literal `IN (VALUES …)` list, which would build a different statement for every window length; and not two
+  independent `= ANY` filters on month and day, which would match 3 August for a window covering 14
+  September — the pair has to be matched as a pair, and a test says so.
+- **No precision filter in the statement.** `ck_important_dates_year_precision` already guarantees a
+  `year`-precision row has a NULL month and day, so the pair join cannot match one, and precision is
+  `resolve_occurrence`'s authority. A second rule here that had to agree with the first is the defect shape
+  Phase 9 rejected for date types, and it is no better applied to precision.
+- **The signals batch is keyed off the candidates, not the survivors**, which keeps the recurrence rule to a
+  single pass. The two sets are provably the same set: a row only becomes a candidate by matching a day the
+  window covers or the leap day standing in for one, and every such row resolves inside the window.
+- **A contact the signals read does not answer for ranks last rather than raising.** `for_contacts` omits
+  ids with no `contacts` row, and a contact deleted between the two statements must not blank a whole
+  section over a missing ranking input.
+- **The read is not user-scoped**, because `contacts` has no owner column in this schema — Phase 10's
+  recorded divergence, carried forward rather than solved for one query. This port joins the list of places
+  to change when contacts gain an owner.
+- **The payload publishes no importance signals.** They decide the order and are otherwise not the user's
+  business: the specification requires importance to stay inferred and unconfigured, and a payload carrying
+  the numbers would invite a surface to show them. Pinned by a test over the exact key set of a row.
+- **One clock read and one settings read per request, structurally.** The service takes `today` and resolves
+  its own only when nobody supplies one, so the dashboard — which resolves a single anchor for all four
+  sections — cannot cause a second read or land this section on a different day from the agenda beside it.
+  This is ITER18-001 Phase 14's bug, which that phase shipped, had found in review, and then shipped again
+  in a second place in the same file; the answer taken here is a signature that makes it impossible rather
+  than a habit of being careful.
+- **`UpcomingDateContact` is minted rather than reusing `TaskContactRef`.** They are the same three fields
+  under two domain names, and the tasks one says whose it is. A shared contact reference is recorded as a
+  follow-up for the third caller rather than extracted mid-phase (calibration rule 7).
+
+**Mutation checks.** Seven were run, each reverted after.
+
+| Mutation | Tests failed |
+|---|---|
+| Drop `(2, 29)` from the candidate pairs | 3 |
+| Make the window's far end exclusive | 11 |
+| Drop contact importance from the sort key | 6 |
+| Drop the deterministic final tie-break | 2 |
+| Anchor the window on UTC's today | 3 |
+| Drop the SQL pair filter | **3, all repository-level** |
+| Cap the payload server-side at three | 5 |
+
+**The sixth is the one worth recording.** Dropping the pair filter — so the statement fetches every
+important date on file — fails **only** the three tests addressed to the repository, and nothing at the
+service, API or MCP level, because the pure rule filters the window a second time and repairs the answer
+before anybody above can see it. That is ITER18-001 Phase 14's finding reproduced deliberately rather than
+discovered: **defence in depth means a weakened lower layer is invisible from above, so any layer that
+duplicates a filter needs tests addressed to it directly.** Those three tests exist for exactly this
+mutation, and were written before the query was.
+
+**One near-miss worth recording, because it was a tooling mistake rather than a code one.** The first
+mutation harness restored the tree with `git checkout -- app core_shared` after each run, which also
+discarded every *uncommitted* change in those directories — the whole of the second PR's production code,
+mid-phase. The tests survived (they live elsewhere) and were enough to rebuild from, but the lesson is
+general: **a mutation harness must restore only the file it mutated, from a copy it took itself**, never by
+reverting a directory it does not own. The harness now backs up the single target file, refuses a mutation
+that turns out to be a no-op (Phase 14's other trap), and restores from that copy.
+
+**E2E:** none — the deferral this phase states. No file under `frontend/` changes and no user-visible
+surface ships; the card is Phase 12 and the wireframe-conformance e2e is Phase 17, so the *Phase Completion
+Requirements* deferral for a phase with no user-visible surface applies. The day-boundary requirement is met
+where it can bite: a Kiritimati user at an instant whose UTC date is the previous day, at both the unit and
+the integration layer, each with its UTC control.
+
+**Docs:** the wireframe's gap 3 resolved in place; `api-design.md` gained the section's shape, the MCP tool
+beside `list_upcoming_tasks`, and the conventions this read settles; `domain-architecture.md`'s *The
+upcoming window* now records that one type serves two domains with two error translations, and the contacts
+entry gained the candidate read. `mcp-tools.md` was deliberately **not** touched: a tool's contract lives in
+its docstring and schema, which is what an agent actually reads, and the task tools set that precedent.
+
+**Follow-ups (not done here):**
+
+- **No index on `contact_important_dates (month, day)`.** The table holds a handful of rows per contact and
+  a sequential scan is right at this size; an index is a migration and belongs to a phase that has measured
+  a problem rather than anticipated one.
+- **A shared lightweight contact reference.** `TaskContactRef` and `UpcomingDateContact` are the same three
+  fields. Extract at the third caller, not before.
 
 #### Phase 12: Upcoming Dates — Card
 

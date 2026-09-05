@@ -60,6 +60,9 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
+    from app.core.contacts.services.upcoming_important_dates_service import (
+        UpcomingImportantDatesService,
+    )
     from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.models.repositories import AgendaRepository
     from app.core.journal.services.daily_summary_repository import (
@@ -78,11 +81,13 @@ class HomeDashboardService:
         date_resolver: JournalDateResolver,
         summary_repo: JournalDailySummaryRepository,
         agenda_repo: AgendaRepository,
+        upcoming_dates_service: UpcomingImportantDatesService,
         connection: AsyncConnection | None = None,
     ) -> None:
         self.date_resolver = date_resolver
         self.summary_repo = summary_repo
         self.agenda_repo = agenda_repo
+        self.upcoming_dates_service = upcoming_dates_service
         # Held for the per-section SAVEPOINTs, not for querying: the sections
         # read through their own repositories. ``savepoint`` no-ops without a
         # real connection, so a unit test may leave it out.
@@ -230,5 +235,20 @@ class HomeDashboardService:
     async def _load_upcoming_dates(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo
     ) -> UpcomingDatesSectionData:
-        """Important contact dates in the next seven days. Filled by Phase 11."""
-        return UpcomingDatesSectionData()
+        """Important contact dates in the same seven days the tasks cover.
+
+        Read through the contacts domain's shared service rather than a query of
+        the dashboard's own: an agent reaches the same answer through
+        ``list_upcoming_important_dates``, and the daily summary will reach it
+        again (ITER18-005 Phase 6). Three callers assembling the window
+        themselves is three chances to disagree about which week it is.
+
+        **The anchor is handed down, not re-resolved.** The service resolves its
+        own only when nobody gives it one; passing the dashboard's means this
+        section cannot land on a different day from the agenda beside it, and
+        the page still pays for exactly one settings read.
+        """
+        upcoming = await self.upcoming_dates_service.upcoming_dates(
+            user_id, today=anchor
+        )
+        return UpcomingDatesSectionData(window=upcoming.window, dates=upcoming.dates)

@@ -20,12 +20,26 @@ import datetime
 from typing import Any
 
 import pytest
+from core_shared.models.contacts.entities import ImportantDate
+from core_shared.models.contacts.important_date_occurrence import (
+    ImportantDateOccurrence,
+)
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
+from core_shared.models.date_window import upcoming_window
 
 from app.api.home_dashboard.schemas import (
     HOME_DASHBOARD_RESOURCE_TYPE,
     DashboardSectionSchema,
     SummarySectionSchema,
     to_home_dashboard_response,
+)
+from app.core.contacts.models.importance import ContactImportance
+from app.core.contacts.models.upcoming_dates import (
+    UpcomingContactDate,
+    UpcomingDateContact,
 )
 from app.core.dashboard.models.sections import (
     AgendaDay,
@@ -59,9 +73,9 @@ GENERATED_SUMMARY = SummarySectionData(
     mood_average=7.5,
 )
 
-# The sections Phases 11 and 13 have yet to fill. Named rather than repeated so
-# a phase filling one has a single place to stop excluding it.
-STILL_EMPTY = ("tasks", "upcoming_dates")
+# The section Phase 13 has yet to fill. Named rather than repeated so a phase
+# filling one has a single place to stop excluding it.
+STILL_EMPTY = ("tasks",)
 
 NINE_AM = datetime.datetime(2026, 7, 31, 9, tzinfo=datetime.UTC)
 
@@ -90,13 +104,87 @@ def agenda(
     )
 
 
+NO_SIGNALS = ContactImportance(
+    contact_id=7,
+    is_favourite=False,
+    journal_count_30d=0,
+    activity_count_30d=0,
+    last_activity_at=None,
+)
+
+ADA = UpcomingDateContact(
+    id=7, display_name="Ada Lovelace", photo_url="https://example.test/ada.png"
+)
+
+
+def occurrence(
+    *,
+    date_type: ImportantDateType,
+    occurs_on: datetime.date,
+    days_away: int,
+    years: int | None,
+    observed_for_leap_day: bool = False,
+    custom_date_type_name: str | None = None,
+) -> UpcomingContactDate:
+    """One resolved occurrence as the contacts read hands it over."""
+    return UpcomingContactDate(
+        occurrence=ImportantDateOccurrence(
+            important_date=ImportantDate(
+                id=1,
+                contact_id=7,
+                date_type=date_type,
+                precision=DatePrecision.DAY_MONTH,
+                month=occurs_on.month,
+                day=occurs_on.day,
+                custom_date_type_id=3 if custom_date_type_name else None,
+                custom_date_type_name=custom_date_type_name,
+            ),
+            occurs_on=occurs_on,
+            days_away=days_away,
+            years=years,
+            observed_for_leap_day=observed_for_leap_day,
+        ),
+        contact=ADA,
+        importance=NO_SIGNALS,
+    )
+
+
+BIRTHDAY = occurrence(
+    date_type=ImportantDateType.BIRTHDAY,
+    occurs_on=datetime.date(2026, 8, 2),
+    days_away=2,
+    years=35,
+)
+
+SOBRIETY = occurrence(
+    date_type=ImportantDateType.CUSTOM,
+    occurs_on=datetime.date(2026, 8, 1),
+    days_away=1,
+    years=None,
+    custom_date_type_name="Sobriety",
+)
+
+LEAP_BIRTHDAY = occurrence(
+    date_type=ImportantDateType.BIRTHDAY,
+    occurs_on=datetime.date(2026, 2, 28),
+    days_away=4,
+    years=None,
+    observed_for_leap_day=True,
+)
+
+
+def dates(*rows: UpcomingContactDate) -> UpcomingDatesSectionData:
+    """An upcoming-dates payload as the service builds one: a window and rows."""
+    return UpcomingDatesSectionData(window=upcoming_window(ANCHOR, 7), dates=rows)
+
+
 def dashboard(**overrides: object) -> HomeDashboard:
     """A dashboard with every section ready, as the service builds one."""
     sections: dict[str, object] = {
         "summary": DashboardSection.ready(GENERATED_SUMMARY),
         "agenda": DashboardSection.ready(agenda()),
         "tasks": DashboardSection.ready(TasksSectionData()),
-        "upcoming_dates": DashboardSection.ready(UpcomingDatesSectionData()),
+        "upcoming_dates": DashboardSection.ready(dates()),
     }
     sections.update(overrides)
     return HomeDashboard(
@@ -160,9 +248,9 @@ class TestTheFourSections:
     def test_a_ready_section_carries_a_payload_object(self) -> None:
         """Present whether or not the phase that fills it has landed yet.
 
-        The two unfilled sections serialise as ``{}`` — "ready and holding
+        The one unfilled section serialises as ``{}`` — "ready and holding
         nothing", which is a real answer rather than an absence — while the
-        summary and the agenda carry the fields their phases gave them.
+        others carry the fields their phases gave them.
         """
         document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
 
@@ -594,3 +682,154 @@ class TestTomorrowOnTheWire:
         ).model_dump(mode="json")
 
         assert "tomorrow" in document["data"]["attributes"]["agenda"]["data"]
+
+
+class TestTheUpcomingDatesSection:
+    """W30–W32: whose date, when, how far away, and what it makes.
+
+    The rows are the contacts domain's ``UpcomingContactDate``, the way the
+    agenda's are the journal domain's ``AgendaEntry``. What is asserted here is
+    only the wire shape — the ordering and the recurrence were settled before a
+    renderer sees them, and a renderer that re-derived either would be a second
+    copy of a rule that already has a home.
+    """
+
+    @staticmethod
+    def section_of(document: dict[str, Any]) -> dict[str, Any]:
+        section: dict[str, Any] = document["data"]["attributes"]["upcoming_dates"][
+            "data"
+        ]
+        return section
+
+    def test_a_row_renders_field_for_field(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates(BIRTHDAY)))
+        ).model_dump(mode="json")
+
+        assert self.section_of(document)["dates"] == [
+            {
+                "contact_id": 7,
+                "contact_name": "Ada Lovelace",
+                "photo_url": "https://example.test/ada.png",
+                "date_type": "birthday",
+                "custom_date_type_name": None,
+                "occurs_on": "2026-08-02",
+                "days_away": 2,
+                "years": 35,
+                "observed_for_leap_day": False,
+            }
+        ]
+
+    def test_a_custom_type_carries_the_name_the_user_gave_it(self) -> None:
+        """The badge shows what they called it, not the word "custom"."""
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates(SOBRIETY)))
+        ).model_dump(mode="json")
+
+        row = self.section_of(document)["dates"][0]
+        assert (row["date_type"], row["custom_date_type_name"]) == (
+            "custom",
+            "Sobriety",
+        )
+
+    def test_a_date_with_no_derivable_years_sends_null(self) -> None:
+        """W31 degrades the badge to the bare type; the wire says why it must."""
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates(SOBRIETY)))
+        ).model_dump(mode="json")
+
+        assert self.section_of(document)["dates"][0]["years"] is None
+
+    def test_a_leap_day_substitution_is_flagged_rather_than_silent(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates(LEAP_BIRTHDAY)))
+        ).model_dump(mode="json")
+
+        row = self.section_of(document)["dates"][0]
+        assert (row["occurs_on"], row["observed_for_leap_day"]) == ("2026-02-28", True)
+
+    def test_it_keeps_the_order_the_service_put_the_rows_in(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates(SOBRIETY, BIRTHDAY)))
+        ).model_dump(mode="json")
+
+        assert [row["date_type"] for row in self.section_of(document)["dates"]] == [
+            "custom",
+            "birthday",
+        ]
+
+    def test_the_window_travels_with_the_rows(self) -> None:
+        """So a surface labels itself "the next seven days" from the answer it
+        was given rather than from the browser's own arithmetic."""
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates(BIRTHDAY)))
+        ).model_dump(mode="json")
+
+        assert self.section_of(document)["window"] == {
+            "start_date": "2026-07-31",
+            "end_date": "2026-08-07",
+            "days_ahead": 7,
+        }
+
+    def test_the_total_names_the_whole_window(self) -> None:
+        """W32's show-more names a count larger than the three rows the card
+        renders, so the count is sent rather than left to be derived from a list
+        the card has already truncated."""
+        document = to_home_dashboard_response(
+            dashboard(
+                upcoming_dates=DashboardSection.ready(
+                    dates(BIRTHDAY, SOBRIETY, LEAP_BIRTHDAY, BIRTHDAY)
+                )
+            )
+        ).model_dump(mode="json")
+
+        assert self.section_of(document)["total"] == 4
+
+    def test_nothing_in_the_window_is_a_ready_empty_list(self) -> None:
+        """W29's idiom: one quiet line, not the section being unavailable."""
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates()))
+        ).model_dump(mode="json")
+
+        section = document["data"]["attributes"]["upcoming_dates"]
+        assert section["status"] == "ready"
+        assert section["data"]["dates"] == []
+        assert section["data"]["total"] == 0
+
+    def test_an_unavailable_section_is_told_apart_from_an_empty_one(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.unavailable())
+        ).model_dump(mode="json")
+
+        section = document["data"]["attributes"]["upcoming_dates"]
+        assert section["status"] == "unavailable"
+        assert section["data"] is None
+
+    def test_the_rest_of_the_page_survives_it(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.unavailable())
+        ).model_dump(mode="json")
+
+        attributes = document["data"]["attributes"]
+        assert attributes["summary"]["status"] == "ready"
+        assert attributes["agenda"]["status"] == "ready"
+
+    def test_the_rows_carry_no_ranking_signals(self) -> None:
+        """Contact importance decides the order and is not otherwise the user's
+        business — the specification requires it stay inferred and unconfigured,
+        and a payload that published it would invite a surface to show it."""
+        document = to_home_dashboard_response(
+            dashboard(upcoming_dates=DashboardSection.ready(dates(BIRTHDAY)))
+        ).model_dump(mode="json")
+
+        assert set(self.section_of(document)["dates"][0]) == {
+            "contact_id",
+            "contact_name",
+            "photo_url",
+            "date_type",
+            "custom_date_type_name",
+            "occurs_on",
+            "days_away",
+            "years",
+            "observed_for_leap_day",
+        }

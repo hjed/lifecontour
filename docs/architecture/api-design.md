@@ -506,6 +506,34 @@ rather than this API's taste:
   Tags and participants are aggregated in `LATERAL` sub-selects so each day is
   **one statement whatever it holds** — two for the section; an integration test
   counts them for both days, because an N+1 is functionally invisible.
+- **The `upcoming_dates` section is the same seven days the tasks cover, ranked
+  by inferred contact importance.** Its payload is
+  `{window: {start_date, end_date, days_ahead}, total, dates: [...]}`, and an
+  **empty list is a real answer** — nothing is coming up — which is why the
+  section stays `ready`. A row is
+  `{contact_id, contact_name, photo_url, date_type, custom_date_type_name,
+  occurs_on, days_away, years, observed_for_leap_day}`.
+
+  | Rule | What it means on the wire |
+  |---|---|
+  | Which dates | Every `contact_important_dates` row whose stored month and day fall in the window once resolved. **Every `date_type` participates** — precision alone decides whether a date recurs, so a `year`-precision row never appears whatever its type, and no type filter exists to disagree with that rule. |
+  | Which window | Today to seven days ahead, **both ends inclusive**, anchored on `meta.anchor.date`. Literally the same `UpcomingWindow` the tasks section and `GET /api/tasks/upcoming` are built from, so the two evidence columns cannot disagree about which week it is. |
+  | Resolved, not stored | `occurs_on` is the day the date falls on **this** time round — a birthday recorded in 1991 comes back on this year's day — and `days_away` counts from the window's first day, `0` meaning today. Both are sent rather than left to be derived: subtracting dates in the browser's zone can disagree with the day the server windowed on. |
+  | The derived count | `years` is the age or anniversary count where the precision allows one, and **`null` where it does not** — the date was recorded without a year, or with a year *after* the occurrence, and a negative age is not an age. `0` is a real count. A surface renders the bare type when it is null (**W31**). |
+  | 29 February | Observed on **28 February** in a year that has no 29th, with `observed_for_leap_day` set so the substitution is visible rather than looking like a quietly different date. Dropping the date instead would hide a birthday in three years out of four from a section whose only job is to give notice. |
+  | Order | Occurrence date ascending, then **contact importance descending**, then contact and date row for stability. Importance breaks ties *within* a day and never reorders the days. |
+  | What importance is | The favourite flag, then the recent journal count, then the recent activity count — `CONTACT_IMPORTANCE_ORDER`, the same signals and precedence the MeiliSearch contact ranking rules derive from, read through `ContactImportanceRepository` rather than out of the index, so the section still ranks with search down. |
+  | …and what is *not* on the wire | Those signals are **deliberately absent** from the payload. The specification requires importance to stay inferred and unconfigured: there is no field for a user to set and none for a surface to show, and publishing the numbers would invite one. |
+  | The cap | **None on the server.** The whole window travels with `total`, and the card renders three of it (ITER18-004 open decision 3), so a show-more reveals the remainder without a second request and can name a count larger than the rows on screen. `total` equals `dates.length` and is named because that is what the show-more displays. |
+
+  Two statements: one candidate query, one batched importance read — and one for
+  an empty window, since the signals read short-circuits on an empty batch. The
+  recurrence is **not** in SQL: the database is asked only which stored
+  `(month, day)` pairs could land in the window, passed as two parallel integer
+  arrays through a multi-argument `unnest`, and `resolve_occurrence` decides what
+  actually does. The candidate pairs include `(2, 29)` whenever the window covers
+  a 28 February that is not itself a leap day, or a leap-day birthday would never
+  be fetched to be observed.
 - **Sections embed denormalised refs; there is no compound document.**
   `relationships` + `included` is the specification's way to serve related
   resources in one round trip, and it was the live alternative here. It cannot
@@ -519,10 +547,13 @@ rather than this API's taste:
   savepoint instead of aborting the transaction and taking the remaining
   sections down with it; the sections are read sequentially because a request
   holds a single `AsyncConnection`.
-- **No MCP tool, deliberately.** An agent composes the same view from the
-  daily-summary tool, journal browsing, the task listing tools and the contacts
-  tools, so nothing on this surface is UI-only. Recorded in the service and
-  endpoint docstrings.
+- **No *composite* MCP tool, deliberately.** An agent composes the same view from
+  the daily-summary tool, journal browsing, the task listing tools
+  (`list_upcoming_tasks`) and the contacts tools
+  (`list_upcoming_important_dates`), so nothing on this surface is UI-only.
+  Recorded in the service and endpoint docstrings. The per-section tools are not
+  an exception to this: each is a capability in its own right, and each landed in
+  the same phase as the section it mirrors.
 - Member names are snake_case, as everywhere else in this API; JSON:API's
   camelCase preference is on its non-normative Recommendations page.
 

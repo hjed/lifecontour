@@ -17,6 +17,9 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.contacts.services.upcoming_important_dates_service import (
+    UpcomingImportantDatesService,
+)
 from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
@@ -167,6 +170,14 @@ async def get_immich_album_creation_service() -> Any:
 async def get_contact_service() -> ContactService:
     """Resolve the contact service for the current MCP request."""
     return cast(ContactService, await _resolve_dependency(ContactService))
+
+
+async def get_upcoming_important_dates_service() -> UpcomingImportantDatesService:
+    """Resolve the upcoming-dates read for the current MCP request."""
+    return cast(
+        UpcomingImportantDatesService,
+        await _resolve_dependency(UpcomingImportantDatesService),
+    )
 
 
 async def get_contact_merge_service() -> ContactMergeService:

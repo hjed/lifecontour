@@ -5,6 +5,7 @@ Tests the full MCP contact tools with real database and search service integrati
 using Dishka dependency injection patterns.
 """
 
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
@@ -20,6 +21,7 @@ from core_shared.models.contacts.value_objects import TagName
 from dishka import Provider, Scope, make_async_container, provide
 from fastmcp import FastMCP
 from fastmcp.client import Client
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services import ContactRelationshipService, ContactService
@@ -2003,3 +2005,183 @@ class TestContactHistoryOverMCPCountsTaskRecords:
             assert resp.status_code == 200
             payload = extract_mcp_json_payload(resp.text)
             assert "No recent changes" in payload["summary"]
+
+
+@pytest.mark.integration
+class TestListUpcomingImportantDatesTool:
+    """The window an agent sees, against a real database.
+
+    The parity claim is the point of this class. The specification has agents
+    compose the dashboard's view from the contacts tools, so what comes back
+    here must be the same window, the same order and the same resolved days the
+    page shows a browser — an agent that reported a different week, or a
+    birthday on the day it was stored rather than the day it next falls, would
+    be confidently wrong in a way the user could not check.
+
+    The dates are seeded relative to an instant read inside the test and placed
+    mid-window, where a midnight crossing mid-test cannot turn a correct answer
+    into a failure.
+    """
+
+    @staticmethod
+    def in_days(offset: int) -> date:
+        """A day this many days after UTC's today — the test user's own day."""
+        return datetime.now(UTC).date() + timedelta(days=offset)
+
+    @staticmethod
+    async def seed_contact(
+        connection: AsyncConnection,
+        contact_id: int,
+        *,
+        first_name: str = "Ada",
+        is_favourite: bool = False,
+    ) -> None:
+        await connection.execute(
+            text("""
+                INSERT INTO contacts (
+                    id, first_name, last_name, is_favourite, created_at, updated_at
+                )
+                VALUES (:id, :first_name, 'Lovelace', :is_favourite, NOW(), NOW())
+            """),
+            {
+                "id": contact_id,
+                "first_name": first_name,
+                "is_favourite": is_favourite,
+            },
+        )
+
+    @staticmethod
+    async def seed_date(
+        connection: AsyncConnection,
+        date_id: int,
+        contact_id: int,
+        *,
+        on: date,
+        year: int | None = None,
+    ) -> None:
+        await connection.execute(
+            text("""
+                INSERT INTO contact_important_dates (
+                    id, contact_id, date_type, precision, year, month, day,
+                    created_at, updated_at
+                )
+                VALUES (:id, :contact_id, 'birthday', :precision, :year,
+                        :month, :day, NOW(), NOW())
+            """),
+            {
+                "id": date_id,
+                "contact_id": contact_id,
+                "precision": "full" if year else "day_month",
+                "year": year,
+                "month": on.month,
+                "day": on.day,
+            },
+        )
+
+    @staticmethod
+    async def call(client, session_id: str, **arguments):
+        response = await client.post(
+            "/mcp-server/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "list_upcoming_important_dates",
+                    "arguments": arguments,
+                },
+            },
+            headers=mcp_headers(session_id),
+        )
+        assert response.status_code == 200
+        return extract_mcp_json_payload(response.text)
+
+    @pytest.mark.asyncio
+    async def test_it_returns_the_window_the_total_and_the_dates(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        """The full read shape per row, so no follow-up call is needed."""
+        occurs_on = self.in_days(3)
+        await self.seed_contact(clean_database, 1)
+        await self.seed_date(clean_database, 10, 1, on=occurs_on, year=1991)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await self.call(client, session_id)
+
+        assert payload["window"]["days_ahead"] == 7
+        assert payload["total_count"] == 1
+        (row,) = payload["dates"]
+        assert row["contact_id"] == 1
+        assert row["contact_name"] == "Ada Lovelace"
+        assert row["date_type"] == "birthday"
+        assert row["occurs_on"] == occurs_on.isoformat()
+        assert row["years"] == occurs_on.year - 1991
+        assert row["observed_for_leap_day"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_shorter_window_leaves_a_later_date_out(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        """``days_ahead`` reaches the query rather than being echoed back."""
+        await self.seed_contact(clean_database, 1)
+        await self.seed_date(clean_database, 10, 1, on=self.in_days(5))
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            narrow = await self.call(client, session_id, days_ahead=2)
+            wide = await self.call(client, session_id, days_ahead=7)
+
+        assert narrow["window"]["days_ahead"] == 2
+        assert narrow["dates"] == []
+        assert len(wide["dates"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_order_is_the_one_the_dashboard_shows(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        """Soonest first, and within a day the contact who matters most."""
+        shared_day = self.in_days(3)
+        await self.seed_contact(clean_database, 1, first_name="Ordinary")
+        await self.seed_contact(
+            clean_database, 2, first_name="Favourite", is_favourite=True
+        )
+        await self.seed_contact(clean_database, 3, first_name="Sooner")
+        await self.seed_date(clean_database, 10, 1, on=shared_day)
+        await self.seed_date(clean_database, 11, 2, on=shared_day)
+        await self.seed_date(clean_database, 12, 3, on=self.in_days(1))
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await self.call(client, session_id)
+
+        assert [row["contact_id"] for row in payload["dates"]] == [3, 2, 1]
+
+    @pytest.mark.asyncio
+    async def test_a_quiet_week_is_an_ordinary_answer(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        """Empty, with a window and a summary that say so rather than an error —
+        an agent told nothing at all would report a failure instead of a fact."""
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await self.call(client, session_id)
+
+        assert payload["dates"] == []
+        assert payload["total_count"] == 0
+        assert payload["window"]["start_date"]
+        assert "No important contact dates" in payload["summary"]
+
+    @pytest.mark.asyncio
+    async def test_a_date_recorded_without_a_year_carries_no_count(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        """So an agent says "birthday" rather than inventing an age."""
+        await self.seed_contact(clean_database, 1)
+        await self.seed_date(clean_database, 10, 1, on=self.in_days(3))
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            payload = await self.call(client, session_id)
+
+        assert payload["dates"][0]["years"] is None

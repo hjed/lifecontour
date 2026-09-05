@@ -23,6 +23,10 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.contacts.value_objects import Provenance
+from core_shared.models.date_window import (
+    DEFAULT_UPCOMING_DAYS_AHEAD,
+    MAX_UPCOMING_DAYS_AHEAD,
+)
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -31,12 +35,19 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.core.contacts.models.repositories import TagRepository
+from app.core.contacts.models.upcoming_dates import (
+    UpcomingContactDate,
+    UpcomingContactDates,
+)
 from app.core.contacts.services import (
     ContactRelationshipService,
     ContactService,
     TagService,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.contacts.services.upcoming_important_dates_service import (
+    UpcomingImportantDatesService,
+)
 from app.core.integrations.link_sources import (
     contact_source_names,
     resolve_contact_source,
@@ -50,6 +61,9 @@ from app.mcp.domains.contacts.schemas import (
     ContactRelationshipListResponse,
     ContactSearchResponse,
     ContactUpdateRequest,
+    UpcomingImportantDateResponse,
+    UpcomingImportantDatesResponse,
+    UpcomingImportantDatesWindow,
     UpdateContactRelationshipRequest,
 )
 from app.mcp.shared.annotations import (
@@ -75,6 +89,7 @@ from app.mcp.shared.dependencies import (
     get_search_service,
     get_tag_repository,
     get_tag_service,
+    get_upcoming_important_dates_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
@@ -219,6 +234,48 @@ async def _build_contact_response(
         response.summary = f"{response.summary}\n\n{history_summary}"
 
     return MCPResponseBuilder.success_response(response)
+
+
+def _upcoming_date_response(date: UpcomingContactDate) -> UpcomingImportantDateResponse:
+    """One occurrence in the shape an agent reads.
+
+    A transcription: the recurrence was resolved and the row was ranked before
+    this is reached. The importance the row was ranked *by* is deliberately
+    dropped — it is a ranking input, not something to report.
+    """
+    return UpcomingImportantDateResponse(
+        contact_id=date.contact.id,
+        contact_name=date.contact.display_name,
+        date_type=date.occurrence.important_date.date_type.value,
+        custom_date_type_name=date.occurrence.important_date.custom_date_type_name,
+        occurs_on=date.occurrence.occurs_on,
+        days_away=date.occurrence.days_away,
+        years=date.occurrence.years,
+        observed_for_leap_day=date.occurrence.observed_for_leap_day,
+    )
+
+
+def _upcoming_dates_summary(upcoming: UpcomingContactDates) -> str:
+    """One line naming the window and what is in it.
+
+    An empty window is described as the ordinary answer it is, so a model has no
+    reason to read absence as a failure.
+    """
+    span = (
+        f"{upcoming.window.first_day.isoformat()} to "
+        f"{upcoming.window.last_day.isoformat()}"
+    )
+    if not upcoming.dates:
+        return f"No important contact dates fall between {span}."
+
+    soonest = upcoming.dates[0]
+    return (
+        f"{upcoming.total} important contact "
+        f"{'date' if upcoming.total == 1 else 'dates'} between {span}. "
+        f"Soonest: {soonest.contact.display_name} "
+        f"in {soonest.occurrence.days_away} "
+        f"{'day' if soonest.occurrence.days_away == 1 else 'days'}."
+    )
 
 
 def register_contact_tools(mcp: FastMCP[None]) -> None:
@@ -1535,3 +1592,91 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 target_id=target_id,
             )
             raise
+
+    @mcp.tool(annotations=READ_ONLY)
+    @mcp_unified_error_handler("list_upcoming_important_dates", "contact")
+    async def list_upcoming_important_dates(
+        days_ahead: Annotated[
+            int,
+            Field(
+                ge=0,
+                le=MAX_UPCOMING_DAYS_AHEAD,
+                description=(
+                    "How many days beyond today to include. Zero is today "
+                    "alone. Leave it out for the usual week."
+                ),
+            ),
+        ] = DEFAULT_UPCOMING_DAYS_AHEAD,
+        upcoming_dates_service: UpcomingImportantDatesService = mcp_depends(
+            get_upcoming_important_dates_service
+        ),
+    ) -> str:
+        """
+        List the important contact dates coming up: birthdays and anniversaries.
+
+        The window runs from **today** to ``days_ahead`` days ahead, **inclusive
+        at both ends**, and defaults to **seven** days — the same window the
+        user's own home dashboard shows, so your answer and their screen agree.
+        It is anchored on today in **their timezone**, and every date comes back
+        already resolved into that window: do not compute the window, the day
+        boundaries or "how many days away" from a timestamp yourself.
+
+        **A recurring date is resolved, not reported as stored.** ``occurs_on``
+        is the day it falls on *this* time round, so a birthday recorded in 1991
+        comes back on this year's day. ``years`` is what that makes — an age for
+        a birthday, a count for an anniversary — and is **null** when there is
+        no answer, because the date was recorded without a year or with one
+        after the occurrence. Say the bare type in that case rather than working
+        a number out from anything else.
+
+        **29 February is observed on the 28th** in a year that has no 29th. When
+        that happens ``observed_for_leap_day`` is true and ``occurs_on`` is a
+        stand-in rather than the day the user wrote down, which is worth saying
+        out loud rather than reporting a date they will not recognise.
+
+        Every kind of date participates, including ones the user named
+        themselves — for those, ``custom_date_type_name`` is what to call it. A
+        date recorded as a year alone has no day to place and so is never here.
+
+        The order is soonest first and, within a day, the contact who matters
+        most to the user first. That ranking is inferred from their own
+        behaviour; there is no importance setting behind it and nothing to
+        report about it.
+
+        The whole window comes back in one answer and is **not paginated**:
+        there is no second page to ask for, and an **empty** list is an ordinary
+        answer — a quiet week — rather than a failure or a reason to retry.
+
+        Args:
+            days_ahead: How far ahead to look, 0 to 90, defaulting to 7.
+
+        Returns:
+            JSON string with a window object naming start_date, end_date and
+            days_ahead; a total_count; and dates, each with the contact's id and
+            name, the date type, occurs_on, days_away, years and
+            observed_for_leap_day.
+        """
+        user_id = await get_current_user_id()
+
+        logger.info(
+            "MCP: Listing upcoming important dates",
+            user_id=user_id,
+            days_ahead=days_ahead,
+        )
+
+        upcoming = await upcoming_dates_service.upcoming_dates(
+            user_id, days_ahead=days_ahead
+        )
+
+        return MCPResponseBuilder.success_response(
+            UpcomingImportantDatesResponse(
+                window=UpcomingImportantDatesWindow(
+                    start_date=upcoming.window.first_day,
+                    end_date=upcoming.window.last_day,
+                    days_ahead=upcoming.window.days_ahead,
+                ),
+                total_count=upcoming.total,
+                dates=[_upcoming_date_response(date) for date in upcoming.dates],
+                summary=_upcoming_dates_summary(upcoming),
+            )
+        )
