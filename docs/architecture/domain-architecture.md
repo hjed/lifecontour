@@ -648,6 +648,56 @@ which also fixed the repeated-hour case its private copy had. **Standing duplica
 `compute_search_window` (`app/core/integrations/immich/album_creation_service.py`) predates this module
 and should be migrated onto it too.
 
+### Important-date occurrence resolution (recurrence)
+
+A contact's important date is stored as loose components — `year`, `month`, `day`, any of which may be
+absent — rather than as a date. `core_shared/models/contacts/important_date_occurrence.py` turns one of
+those rows into the **occurrence** falling inside a window of days: `resolve_occurrence(important_date,
+first_day=…, last_day=…)` returns an `ImportantDateOccurrence` or `None`. It is pure and I/O-free, so the
+home dashboard's upcoming-dates section and the daily summary's inputs resolve recurrence the same way
+rather than twice.
+
+**Precision decides whether a date recurs, and it is the only thing that does:**
+
+| `DatePrecision` | Occurrence | Derived `years` |
+|---|---|---|
+| `YEAR` | none — no month or day to place it | — |
+| `DAY_MONTH` | the month and day, in some year | `None` |
+| `FULL` | the month and day, in some year | years since the stored year |
+
+**No `date_type` is excluded** (ITER18-004 open decision 4). `year` precision yields nothing whatever the
+type, so a type filter would be a second rule overlapping the first; `custom` types are user-named, and a
+`first_met` recorded to the day is a real anniversary. `years` travels as a bare count because the wording
+belongs to the surface — "turns 35" for a birthday against "34 years" for an anniversary.
+
+Four rules carry the arithmetic:
+
+- **Both window ends are inclusive**, so a date occurring *today* is in the window — the point of a
+  section that exists to give notice. Every year the window touches is a candidate, which is what lets a
+  window running from December into January find a January date; a window longer than a year resolves to
+  the **earliest** occurrence in it.
+- **29 February is observed on 28 February** in a year that does not have one, flagged as
+  `observed_for_leap_day`. Dropping it would hide the date in three years out of four; 1 March would move
+  it into a month the user did not record. The flag keeps the substitution inspectable.
+- **A stored year *after* the occurrence yields `years = None`**, not a negative age — the recurrence is
+  real and is still returned, only the derived count is not. `0` is a real count, being what the year a
+  date was first recorded makes.
+- **Nothing raises over data, and there is more malformed data possible than one might expect.** A row
+  whose month and day are not a real date is storable today (the day is range-checked 1–31 with no month
+  cross-check), and so is one whose **year is not a calendar year at all** — unlike the month and the
+  day, the year is range-checked *nowhere*: not in `ImportantDate.__post_init__`, not in
+  `ImportantDateAttributes`, and not in a column constraint. `year=0` therefore reaches the resolver, and
+  is treated as no year to count from rather than reported as "turns 2026". A surface resolving a page of
+  contacts must degrade on such rows rather than fail on them or repeat nonsense from them. A **reversed
+  window** does raise `ValueError`, because that is a caller bug rather than a question with an empty
+  answer.
+
+**The window is dates, not instants, and that is what keeps the module pure.** It reads no clock and takes
+no `ZoneInfo`: a day window is only meaningful once anchored in the acting user's configured timezone, and
+that anchoring belongs to the caller — the same split *Journal date resolution* makes above. Ordering is
+also not here: the dashboard ranks these by date ascending then **contact importance** descending, and
+importance is a separate read the model cannot see.
+
 ### Task creation invariants
 
 The [tasks specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#core-invariants)

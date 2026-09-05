@@ -8975,10 +8975,17 @@ section without the inline done action — the specification names that as an in
    `CONTACT_IMPORTANCE_ORDER`, which `CONTACTS_INDEX_SETTINGS` derives its custom ranking rules from. See
    *Decisions taken (Phase 10)*. *(Pointer corrected: this read "settled in Phase 8", which is the tomorrow
    disclosure and has no importance signals in it.)*
-3. **The upcoming-dates cap** (wireframe gap 3) — settled in **Phase 8** (payload) and **Phase 9** (UI).
+3. **The upcoming-dates cap** (wireframe gap 3) — settled in **Phase 11** (payload) and **Phase 12** (UI).
    Five matches the tasks section; the wireframe shows three rows and a show-more naming five.
-4. **Which date types count as "important dates" for the dashboard** — settled in **Phase 7**. All five
-   types, or only the recurring ones? `first_met` with `year` precision has no in-window occurrence.
+4. ~~**Which date types count as "important dates" for the dashboard**~~ — ✅ **settled in Phase 9: all
+   five, and precision alone decides.** `year` precision produces no occurrence *whatever* the type, so
+   the `first_met` case the question was built on is already answered without a type filter — and a
+   second rule overlapping the first is a defect waiting to happen. A `custom` type is user-named, and a
+   `first_met` recorded to the day is a real anniversary. See *Decisions taken (Phase 9)*. *(Pointer
+   corrected: this read "settled in Phase 7", which builds the agenda card and has no important dates in
+   it. Decision 3 above was stale the same way and is corrected here; decision 2 was corrected by Phase 10
+   independently. The Phase 5 split renumbered everything after it and none of the pointers were moved
+   with it, so a decision that names a phase is worth checking against the phase list before trusting.)*
 5. ~~**Whether "tomorrow" expansion is server-provided or lazily fetched**~~ — ✅ **settled in Phase 6:
    server-provided, inside the payload** as `agenda.tomorrow = {date, entries}`; **Phase 8** owns the
    disclosure that renders it. One round trip won; collapsed-by-default is a presentation state, not a
@@ -10255,25 +10262,141 @@ present on a ready agenda. Label the row from `tomorrow.date` (the server's loca
 `meta.anchor.date + 1` computed in the browser; the count is `tomorrow.entries.length`, cancelled entries
 included; and the entries are in exactly today's form and order, so the same row component renders both.
 
-#### Phase 9: Important-Date Occurrence Resolution
+#### Phase 9: Important-Date Occurrence Resolution ✅ COMPLETE
 
 **Prerequisites:** none (pure logic).
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4); re-based at planning time to ~140
+production → **~850 tracked** (×6) under calibration rule 14, which names this phase · **Actual:** 206
+production → **~795 tracked** (206 production, 539 tests, 50 documentation across 3 files, excluding
+this document's own lines as Phases 3, 4 and 7 excluded theirs). **1.3× the original estimate and 0.94×
+the re-based one — the only phase in this iteration to come in under its estimate**, and the *Follow-ups*
+convention requires saying so. Review added 12 production and 78 test lines to the figures above (the
+unvalidated-year defect); the pre-review numbers were 194 → ~700. See the calibration note below: rule
+14 was right about the tests and wrong about the production.
+
+**Delivery rule 3:** 795 tracked, over the 500-line cap but well inside calibration rule 16's ~1,500 for
+a capability phase — and this phase adds no entry point at all, which is the shape rule 3's 500 figure
+was kept for. The overrun is entirely test volume against a rule that is only meaningful at its
+boundaries. Nothing was deferred.
 
 **Acceptance Criteria:**
 
-- [ ] A pure occurrence-resolution helper in `core_shared`: given a stored important date and a window,
-      return the occurrence within it, or nothing.
-- [ ] `DatePrecision` is respected: `day_month` still produces an occurrence; `full` produces one **and** a
-      derived age or count of years; `year` produces none (no month/day to place).
-- [ ] Open decision 4 settled: which `date_type` values participate.
-- [ ] Edge cases handled explicitly: 29 February in a non-leap year, a window crossing the year boundary, a
-      date whose occurrence is today, and a `full` date in the future (age would be negative).
-- [ ] Pure and I/O-free, so it is unit-testable and reusable by ITER18-005 Phase 6.
+- [x] A pure occurrence-resolution helper in `core_shared`: given a stored important date and a window,
+      return the occurrence within it, or nothing. —
+      `resolve_occurrence(important_date, *, first_day, last_day) -> ImportantDateOccurrence | None` in
+      `core_shared/models/contacts/important_date_occurrence.py`. Synchronous, with both window ends
+      **keyword-only** so they cannot be transposed silently, and both **inclusive**. The result carries
+      the row it resolved, `occurs_on`, `days_away`, `years` and `observed_for_leap_day`.
+- [x] `DatePrecision` is respected: `day_month` still produces an occurrence; `full` produces one **and** a
+      derived age or count of years; `year` produces none (no month/day to place). — The precision table
+      in the module docstring, pinned by `TestPrecision`. Precision is the **authority**, not the
+      components a row happens to carry: `ImportantDate` is a mutable dataclass whose `__post_init__`
+      clears a `YEAR` row's month and day only on construction, so the rule checks the precision itself
+      (`test_precision_outranks_leftover_components`).
+- [x] Open decision 4 settled: which `date_type` values participate. — **All five.** Struck through in the
+      open-decisions list above; see the decisions below.
+- [x] Edge cases handled explicitly: 29 February in a non-leap year, a window crossing the year boundary, a
+      date whose occurrence is today, and a `full` date in the future (age would be negative). — In order:
+      observed on **28 February** with `observed_for_leap_day` set (`TestTheLeapDay`); every year the
+      window touches is a candidate, so a December→January window finds a January date, and both
+      directions are asserted (`TestTheWindowBoundary`); `first_day` is inclusive and `days_away` is `0`;
+      and the occurrence is **returned** with `years=None` rather than rejected (`TestTheDerivedYears`).
+      Four edge cases beyond the four asked for are handled and tested: an **impossible calendar day**
+      (30 February, 31 April — storable today, since the day is range-checked 1–31 with no month
+      cross-check), an **impossible calendar year** (`year=0` — found in review; see the decisions), a
+      **multi-year window** resolving to the earliest occurrence, and a **reversed window**, which raises
+      `ValueError` because it is a caller bug rather than an empty answer.
+- [x] Pure and I/O-free, so it is unit-testable and reusable by ITER18-005 Phase 6. — No async, no
+      repository, and nothing from `datetime` that can tell the time — `date` and the calendar-year
+      bounds `MINYEAR`/`MAXYEAR`, and no clock. Ordering is deliberately
+      *not* here: Phase 11 ranks by date then contact importance, and importance is Phase 10's read.
 
 **Required Test Coverage:** unit — each precision, each date type, both boundary edge cases, the leap-day
 rule, the future-dated `full` case, and the age/years derivation including a same-day occurrence. No
-integration or e2e (no I/O).
+integration or e2e (no I/O). — **Delivered:** 56 unit tests in
+`core_shared/tests/unit/models/contacts/test_important_date_occurrence.py` — `TestPrecision` (6),
+`TestEveryDateTypeParticipates` (15, parametrised over all five types three ways),
+`TestTheWindowBoundary` (10), `TestTheLeapDay` (5), `TestTheDerivedYears` (4),
+`TestAnImpossibleCalendarYear` (10, parametrised) and `TestAnImpossibleCalendarDay` (6, parametrised).
+No integration or e2e, as the phase specifies: the
+module performs no I/O and has no surface, so the *Phase Completion Requirements* e2e deferral applies —
+wireframe conformance stays with Phase 17 and the query's integration coverage arrives with Phase 11.
+
+**On the day-boundary requirement.** The *Phase Completion Requirements* ask that timezone-sensitive
+behaviour be tested across a day boundary. **This module is where that requirement stops applying, by
+design**: it takes `datetime.date` values, never an instant, a `ZoneInfo` or a clock, so there is no
+anchoring in it to get wrong. Anchoring stays with the caller, and Phase 11 is where a day-boundary test
+has something to bite on. Two things make that a guarantee rather than a claim — the module touches
+nothing in `datetime` that can tell the time (`date`, plus the calendar-year bounds `MINYEAR`/`MAXYEAR`,
+and no `now`, `today` or `utcnow`), and ruff's `DTZ` rules are enabled repo-wide (`ruff.toml:22`) and
+would fail the gate on any naive datetime introduced here. What the phase *does* test is the **calendar**
+boundary it owns: both ends inclusive, the days either side excluded, and a window crossing the year.
+
+**Decisions taken (Phase 9):**
+
+- **Open decision 4 is settled: every `date_type` participates, and precision alone decides.** The
+  decision was framed as *"all five types, or only the recurring ones? `first_met` with `year` precision
+  has no in-window occurrence"* — but that premise is already answered by the precision rule, which
+  yields nothing at `year` precision **whatever the type**. A type filter would therefore be a second
+  rule overlapping the first, and two rules that must agree are a defect waiting to happen. On the
+  merits: birthdays and the two anniversary types recur by definition; `custom` types are user-named and
+  the user is the only authority on what one means, so excluding them would hide precisely the dates
+  somebody cared enough to name; and a `first_met` recorded to the day is a real anniversary — "three
+  years ago today" is the kind of thing the section exists to surface. The specification says *"important
+  contact dates"* without qualification. The helper therefore takes no type list and special-cases
+  nothing, and `TestEveryDateTypeParticipates` parametrises all five so a future filter fails a test.
+- **The window is two plain dates, not a window type — and that is a decision deferred, not dodged.**
+  The tasks domain's `UpcomingWindow` was the obvious candidate for reuse, and it was **not** imported.
+  Not because sharing it would be wrong, but because **this phase has no caller**: Phase 11 is where a
+  real window exists and where the evidence to judge whether one type serves both sections will be.
+  Minting a parallel `OccurrenceWindow` for nobody would be worse — a second definition of the same seven
+  days, in a phase whose subject is a date rule. Calibration rule 7 says not to reach into a second
+  domain mid-phase, and this is what that looks like in practice.
+- **29 February is observed on 28 February, and the substitution is flagged rather than silent.**
+  The three options were to drop the date, to move it to 1 March, or to pull it back to 28 February.
+  Dropping it hides a birthday in **three years out of four** from a section whose only job is to give
+  notice; 1 March moves it into a month the user did not write down. The 28th keeps it in February and
+  adjacent to the real day. `observed_for_leap_day` travels on the result so Phase 12 *can* render a
+  caveat, and — the reason it exists regardless of whether Phase 12 uses it — so the substitution is
+  inspectable rather than a quietly different date.
+- **A stored year *after* the occurrence yields `years = None` and keeps its occurrence.** This is a
+  different rule from the impossible-day one, and conflating them would be the easy mistake. An
+  impossible day means there **is** no date, so there is no occurrence to return. A future stored year is
+  not like that: the recurrence is real and the user will see it, and only the *derived extra* is
+  meaningless. Discarding a valid occurrence over an unrenderable badge would be the wrong trade, and
+  **W31** already degrades to the bare type where the extra does not read. `0` is left as a real count —
+  it is what the year a date was first recorded makes.
+- **Nothing raises over data; a reversed window does raise.** A row whose month and day are not a real
+  date is storable today, and a dashboard resolving a page of contacts must degrade rather than fail on
+  one of them. A window whose end precedes its start is the opposite: a bug in the calling code, which
+  would be hidden if reported as "nothing coming up". It raises bare `ValueError` rather than
+  `ContactValidationError`, whose 422 is an answer about *user input* — the same call
+  `ImportantDate.__post_init__` already makes for its own caller errors.
+- **A stored year that is not a calendar year counts as no year — found in review, and the review was
+  right.** The automated review pointed out that `year=0` reaches the resolver and that
+  `occurs_on.year - 0` would render a birthday as *"turns 2026"*. Verified before acting on it, and the
+  premise holds at all three layers: `ImportantDate.__post_init__` range-checks the **month** (1–12) and
+  the **day** (1–31) and does not check the year at all; `ImportantDateAttributes.year` is a bare
+  `int | None` with no `ge`/`le`; and migration `0044` declares `year INTEGER` with only NULL-by-precision
+  constraints. So the row is genuinely storable. The fix keeps the **occurrence** — the month and day are
+  still real, exactly as in the future-dated case — and returns `years=None`, which extends the module's
+  existing rule rather than adding a new one: an impossible calendar *day* yields no occurrence, and an
+  impossible calendar *year* yields no count. The underlying validation gap belongs to the contacts
+  domain and is recorded as a follow-up rather than fixed here (it needs a migration, and calibration
+  rule 7 keeps this phase out of a second domain).
+- **`core_shared/models/contacts/__init__.py` stays empty.** It is empty today and every contacts model
+  is imported from its own module, so the new one follows suit. Populating it to match
+  `models/tasks/__init__.py` would rewrite import sites across the contacts domain — another domain's
+  call sites, inside a phase whose subject is a date rule. Recorded as a follow-up instead.
+- **Calibration: rule 14 was right about the tests and wrong about the production.** The rule predicted
+  ×6 for this phase because its deliverable is a *decision* whose acceptance criteria read as a matrix —
+  and the tests bear that out exactly: 539 test lines against the **61 executable lines** that actually
+  decide anything is **8.8×**. But the module is 206 lines, of which 106 are docstring prose and 39 are
+  blank, so the tracked total landed at 795 rather than 850. This is ITER18-003 Phase 8's observation
+  recurring in the opposite direction: *the multiplier is a rule about test volume, and it misreads a
+  phase whose production is mostly prose*. **Suggested refinement:** for a rule-defining phase, apply the
+  multiplier to *executable* lines and count explanatory prose separately, rather than multiplying a
+  production figure that already contains the explanation.
 
 #### Phase 10: Contact Importance Signals — Shared Read
 
@@ -11559,6 +11682,39 @@ Appended as the work proceeds, in the style of iterations 16 and 17.
   and `tasks/task_seeding.py` as its own module. Not done here: moving ~235 lines would have added roughly
   470 lines of pure churn to a phase already over its estimate, and delivery rule 7 prefers importing the
   one seeder to copying it.
+- **An important date's `year` is range-checked nowhere, while its month and day are checked three
+  times** (found in ITER18-004 Phase 9's review). `ImportantDate.__post_init__` enforces month 1–12 and
+  day 1–31; `ImportantDateAttributes` types the year as a bare `int | None`; and migration `0044`
+  declares `year INTEGER` with only the NULL-by-precision CHECKs. So `year=0`, `year=-500` and
+  `year=99999` are all storable on a `full`-precision row, and the first of those would have rendered a
+  birthday as *"turns 2026"* on the dashboard. Phase 9 defends itself — a year outside
+  `datetime.MINYEAR..MAXYEAR` yields no count, and the occurrence still travels — but the **row should
+  not exist in the first place**. Repairing it properly means a validation rule, a schema bound and a
+  migration with a backfill decision for any row already stored, which is three layers of the contacts
+  domain and a migration inside a phase whose subject was a date rule (calibration rule 7). *The general
+  point is that a component validated at three layers sits next to one validated at none, and nothing
+  makes that visible until something does arithmetic on it.*
+
+- **`core_shared/models/contacts/__init__.py` is empty, alone among the model packages** (found in
+  ITER18-004 Phase 9). `models/tasks/__init__.py` and `models/journals/__init__.py` both re-export their
+  domain's names with an `__all__`; contacts exports nothing, so every caller imports from the concrete
+  module (`from core_shared.models.contacts.entities import ImportantDate`). Phase 9's new module follows
+  that convention rather than half-populating the package, because filling it properly means rewriting
+  import sites across the contacts domain — another domain's call sites, in a phase whose subject was a
+  date rule (calibration rule 7). Worth doing on its own, and cheap; it is only recorded here because it
+  is invisible until somebody adds a contacts model and has to choose.
+
+- **A rule-defining phase's multiplier should be applied to *executable* lines, not to production**
+  (found in ITER18-004 Phase 9, which came in at 795 tracked against a re-based 850 — the first phase in
+  this iteration to land **under** its estimate). Calibration rule 14 predicted ×6 for it, and was right
+  about the part that matters: 539 test lines against the **61 executable lines** that actually decide
+  anything is 8.8×. The estimate still missed, because the module is 206 lines of which 106 are docstring
+  prose explaining *why* the rule is the rule. That is ITER18-003 Phase 8's finding recurring in the
+  opposite direction — the multiplier is a rule about test volume, and it misreads a phase whose
+  production is mostly prose. **Split the production estimate into executable lines and explanation,
+  multiply only the former, and add the latter.** It applies to every remaining phase whose deliverable is
+  a decision rather than a capability, and the estimates below still multiply a production figure that
+  contains its own explanation.
 
 - **Record the actual diff beside each phase's estimate as it lands**, in the
   `**Estimated diff:** … · **Actual:** …` form iteration 17 used. The
