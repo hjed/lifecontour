@@ -176,6 +176,57 @@ def _mock_calendar_execute(query, params=None):
     return mock_res
 
 
+_MOOD_COLUMN_TYPES = {
+    "journal_id": "integer",
+    "mood_value": "integer",
+    "energy_level": "integer",
+}
+
+
+def _mock_source_only_execute(
+    table_name: str,
+    source_row: dict[str, Any],
+    column_types: dict[str, str],
+) -> Any:
+    """Only the source journal has a row in ``table_name``.
+
+    The target's lookup finds nothing, so the merge takes the transfer branch:
+    the row is moved onto the target rather than folded into one it already has.
+    """
+
+    def _execute(query, params=None):
+        q_str = str(query)
+        mock_res = MagicMock()
+        mock_res.fetchone.return_value = None
+        mock_res.fetchall.return_value = []
+
+        if "information_schema.columns" in q_str:
+            mock_res.fetchall.return_value = _column_type_rows(column_types)
+        elif table_name in q_str and "SELECT" in q_str:
+            if params and params.get("source_id") == 2:
+                row = MagicMock()
+                row._mapping = source_row
+                mock_res.fetchone.return_value = row
+        return mock_res
+
+    return _execute
+
+
+def _override_updates(mock_transaction, table_name: str) -> list[Any]:
+    """The UPDATEs that change a transferred row's columns.
+
+    The move itself is also an ``UPDATE`` on the same table, so match on the
+    row it targets: the move finds the row by ``source_id``, everything after
+    it by ``target_id``.
+    """
+    return [
+        call
+        for call in mock_transaction.execute.call_args_list
+        if f"UPDATE {table_name}" in str(call[0][0])
+        and "WHERE journal_id = :target_id" in str(call[0][0])
+    ]
+
+
 class TestJournalMergeService:
     @pytest.mark.asyncio
     async def test_merge_journals_basic_fields(
@@ -389,6 +440,185 @@ class TestJournalMergeService:
         )
         mock_journal_repo.save.return_value = target
         mock_transaction.execute.side_effect = _mock_calendar_execute
+
+        overrides = {"type_data": {"event": {"start_time": "half past seven"}}}
+
+        with pytest.raises(JournalValidationError):
+            await merge_service.merge_journals(
+                1, 2, mock_transaction, overrides=overrides
+            )
+
+    @pytest.mark.asyncio
+    async def test_merge_applies_type_data_override_to_a_transferred_row(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """A type only the source carries still honours the caller's override.
+
+        The merge panel cannot reach this branch — it only offers a type-data
+        override where both journals have a row — but a REST payload or the
+        ``merge_journals`` MCP tool can, and the values used to be dropped.
+        """
+        target = create_test_journal(id=1, title="Target Title")
+        source = create_test_journal(id=2, title="Source Title")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_source_only_execute(
+            "journal_mood_data",
+            {"journal_id": 2, "mood_value": 8, "energy_level": 8},
+            _MOOD_COLUMN_TYPES,
+        )
+
+        overrides = {"type_data": {"MOOD_RATING": {"mood_value": 3}}}
+
+        await merge_service.merge_journals(1, 2, mock_transaction, overrides=overrides)
+
+        update_calls = _override_updates(mock_transaction, "journal_mood_data")
+        assert len(update_calls) == 1
+        query_text = str(update_calls[0][0][0])
+        params = update_calls[0][0][1]
+
+        assert "mood_value = :mood_value" in query_text
+        # Only the overridden column is written; the rest of the moved row stands.
+        assert "energy_level = :energy_level" not in query_text
+        assert params["mood_value"] == 3
+        assert params["target_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_transferred_row_override_accepts_lowercase_type_keys(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """The read API's lowercase type key works here too, as it does elsewhere."""
+        target = create_test_journal(id=1, title="Target Title")
+        source = create_test_journal(id=2, title="Source Title")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_source_only_execute(
+            "journal_mood_data",
+            {"journal_id": 2, "mood_value": 8, "energy_level": 8},
+            _MOOD_COLUMN_TYPES,
+        )
+
+        overrides = {"type_data": {"mood_rating": {"mood_value": 3}}}
+
+        await merge_service.merge_journals(1, 2, mock_transaction, overrides=overrides)
+
+        update_calls = _override_updates(mock_transaction, "journal_mood_data")
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["mood_value"] == 3
+
+    @pytest.mark.asyncio
+    async def test_transferred_row_binds_a_clock_time_override_as_a_time(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """A JSON time override reaches the moved row's TIME column as a ``time``."""
+        from datetime import time
+
+        target = create_test_journal(id=1, title="Plain Journal")
+        source = create_test_journal(id=2, title="Timed Event")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_source_only_execute(
+            "journal_calendar_info",
+            {
+                "journal_id": 2,
+                "calendar_id": "cal-1",
+                "start_time": time(19, 30),
+                "end_time": time(22, 0),
+                "is_all_day": False,
+                "location": None,
+                "sync_invitees": False,
+                "timezone": None,
+            },
+            _CALENDAR_COLUMN_TYPES,
+        )
+
+        overrides = {"type_data": {"event": {"start_time": "20:15:00"}}}
+
+        await merge_service.merge_journals(1, 2, mock_transaction, overrides=overrides)
+
+        update_calls = _override_updates(mock_transaction, "journal_calendar_info")
+        assert len(update_calls) == 1
+        assert update_calls[0][0][1]["start_time"] == time(20, 15)
+
+    @pytest.mark.asyncio
+    async def test_transferred_row_made_all_day_by_an_override_clears_its_times(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """An all-day event carries no clock times, however it became all-day."""
+        from datetime import time
+
+        target = create_test_journal(id=1, title="Plain Journal")
+        source = create_test_journal(id=2, title="Timed Event")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_source_only_execute(
+            "journal_calendar_info",
+            {
+                "journal_id": 2,
+                "calendar_id": "cal-1",
+                "start_time": time(19, 30),
+                "end_time": time(22, 0),
+                "is_all_day": False,
+                "location": None,
+                "sync_invitees": False,
+                "timezone": None,
+            },
+            _CALENDAR_COLUMN_TYPES,
+        )
+
+        overrides = {"type_data": {"event": {"is_all_day": True}}}
+
+        await merge_service.merge_journals(1, 2, mock_transaction, overrides=overrides)
+
+        update_calls = _override_updates(mock_transaction, "journal_calendar_info")
+        assert len(update_calls) == 1
+        params = update_calls[0][0][1]
+        assert params["is_all_day"] is True
+        assert params["start_time"] is None
+        assert params["end_time"] is None
+
+    @pytest.mark.asyncio
+    async def test_transferred_row_rejects_an_unparseable_time_override(
+        self, merge_service, mock_journal_repo, mock_transaction
+    ):
+        """Nonsense in a typed column is a 400 here too, not a driver crash."""
+        from datetime import time
+
+        from core_shared.models.journals.exceptions import JournalValidationError
+
+        target = create_test_journal(id=1, title="Plain Journal")
+        source = create_test_journal(id=2, title="Timed Event")
+
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+        mock_transaction.execute.side_effect = _mock_source_only_execute(
+            "journal_calendar_info",
+            {
+                "journal_id": 2,
+                "calendar_id": "cal-1",
+                "start_time": time(19, 30),
+                "end_time": time(22, 0),
+                "is_all_day": False,
+                "location": None,
+                "sync_invitees": False,
+                "timezone": None,
+            },
+            _CALENDAR_COLUMN_TYPES,
+        )
 
         overrides = {"type_data": {"event": {"start_time": "half past seven"}}}
 

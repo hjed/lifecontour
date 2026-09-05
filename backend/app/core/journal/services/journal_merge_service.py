@@ -627,7 +627,13 @@ class JournalMergeService:
 
             if not target_row:
                 await self._transfer_new_type_data(
-                    table_name, target_id, source_id, changed_fields, transaction
+                    table_name,
+                    target_id,
+                    source_id,
+                    source_row,
+                    overrides,
+                    changed_fields,
+                    transaction,
                 )
             else:
                 await self._merge_existing_type_data(
@@ -731,9 +737,19 @@ class JournalMergeService:
         table_name: str,
         target_id: int,
         source_id: int,
+        source_row: Any,
+        overrides: dict[str, Any],
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
     ) -> None:
+        """Move the source's row onto the target, which has none for this type.
+
+        Nothing is being reconciled here — there is no rival row — but the
+        caller's overrides still decide what the surviving row says. The merge
+        panel never sends any for this branch (a type only one journal has is
+        not a conflict), while a REST payload or the ``merge_journals`` MCP tool
+        may, and dropping them would silently discard what the caller asked for.
+        """
         await transaction.execute(
             text(
                 f"UPDATE {table_name} SET journal_id = :target_id WHERE journal_id = :source_id"
@@ -741,6 +757,48 @@ class JournalMergeService:
             {"target_id": target_id, "source_id": source_id},
         )
         changed_fields[f"{table_name}_added"] = True
+
+        await self._override_transferred_type_data(
+            table_name, target_id, source_row, overrides, transaction
+        )
+
+    async def _override_transferred_type_data(
+        self,
+        table_name: str,
+        target_id: int,
+        source_row: Any,
+        overrides: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Apply the caller's overrides to the row just moved onto the target.
+
+        Only the moved row's own columns are considered, so an override naming
+        something the table does not have is ignored rather than reaching the
+        SQL — the same way the two-row branch treats one.
+        """
+        type_overrides = await self._type_data_overrides_for(
+            table_name, overrides, transaction
+        )
+        if not type_overrides:
+            return
+
+        source_dict = source_row._mapping
+        updates: list[str] = []
+        update_params: dict[str, Any] = {"target_id": target_id}
+
+        for col in source_dict.keys():
+            if col in ("id", "journal_id") or col not in type_overrides:
+                continue
+            if type_overrides[col] == source_dict[col]:
+                continue
+            updates.append(f"{col} = :{col}")
+            update_params[col] = type_overrides[col]
+
+        self._apply_all_day_invariant(table_name, source_dict, updates, update_params)
+
+        await self._execute_type_row_update(
+            table_name, updates, update_params, transaction
+        )
 
     async def _column_types(
         self, table_name: str, transaction: AsyncConnection
@@ -767,6 +825,97 @@ class JournalMergeService:
         self._column_type_cache[table_name] = column_types
         return column_types
 
+    async def _type_data_overrides_for(
+        self,
+        table_name: str,
+        overrides: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> dict[str, Any]:
+        """The caller's overrides for ``table_name``, typed by their columns.
+
+        Both casings of a type key map to the same table ("FITNESS" and
+        "fitness"), and callers legitimately use either: the enum name in
+        hand-written payloads, the lowercase enum value the read API returns
+        and the merge panel echoes back. Accept both rather than dropping half
+        the overrides on the floor.
+
+        Overrides arrive as JSON, so a clock time is the string '19:30:00'
+        while its column is a TIME. asyncpg encodes each parameter against the
+        column's type and refuses the string, so give every override the type
+        its column takes before it reaches an UPDATE.
+        """
+        type_data_overrides = overrides.get("type_data") or {}
+        type_overrides: dict[str, Any] = {}
+        for type_key, table in _JOURNAL_TYPE_TABLE_MAP.items():
+            if table == table_name:
+                type_overrides.update(type_data_overrides.get(type_key, {}))
+
+        if not type_overrides:
+            return {}
+
+        column_types = await self._column_types(table_name, transaction)
+        return {
+            col: coerce_type_data_override(col, value, column_types.get(col))
+            for col, value in type_overrides.items()
+        }
+
+    @staticmethod
+    def _apply_all_day_invariant(
+        table_name: str,
+        current_row: Any,
+        updates: list[str],
+        update_params: dict[str, Any],
+    ) -> None:
+        """An all-day event carries no clock times, whichever side made it one.
+
+        ``current_row`` is the row as it stands before this merge writes to it,
+        so the invariant is judged on the full merged state rather than on the
+        columns that happen to be changing.
+        """
+        if table_name != "journal_calendar_info":
+            return
+
+        merged_state = {
+            **current_row,
+            **{k: v for k, v in update_params.items() if k != "target_id"},
+        }
+        if not merged_state.get("is_all_day"):
+            return
+
+        for col in ("start_time", "end_time"):
+            if merged_state.get(col) is None:
+                continue
+            if col not in update_params:
+                updates.append(f"{col} = :{col}")
+            update_params[col] = None
+
+    @staticmethod
+    async def _execute_type_row_update(
+        table_name: str,
+        updates: list[str],
+        update_params: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> bool:
+        """Write the collected column changes onto the target's row.
+
+        Returns whether there was anything to write.
+        """
+        if not updates:
+            return False
+
+        # Deduplicate just in case
+        unique_updates: list[str] = []
+        for update in updates:
+            if update not in unique_updates:
+                unique_updates.append(update)
+
+        set_clause = ", ".join(unique_updates)
+        await transaction.execute(
+            text(f"UPDATE {table_name} SET {set_clause} WHERE journal_id = :target_id"),
+            update_params,
+        )
+        return True
+
     async def _merge_existing_type_data(
         self,
         table_name: str,
@@ -786,27 +935,9 @@ class JournalMergeService:
         updates = []
         update_params: dict[str, Any] = {"target_id": target_id}
 
-        # Both casings of a type key map to the same table ("FITNESS" and
-        # "fitness"), and callers legitimately use either: the enum name in
-        # hand-written payloads, the lowercase enum value the read API returns
-        # and the merge panel echoes back. Accept both rather than dropping
-        # half the overrides on the floor.
-        type_keys = [k for k, v in _JOURNAL_TYPE_TABLE_MAP.items() if v == table_name]
-        type_overrides = {}
-        type_data_overrides = overrides.get("type_data") or {}
-        for type_key in type_keys:
-            type_overrides.update(type_data_overrides.get(type_key, {}))
-
-        # Overrides arrive as JSON, so a clock time is the string '19:30:00'
-        # while its column is a TIME. asyncpg encodes each parameter against the
-        # column's type and refuses the string, so give every override the type
-        # its column takes before it reaches the UPDATE below.
-        if type_overrides:
-            column_types = await self._column_types(table_name, transaction)
-            type_overrides = {
-                col: coerce_type_data_override(col, value, column_types.get(col))
-                for col, value in type_overrides.items()
-            }
+        type_overrides = await self._type_data_overrides_for(
+            table_name, overrides, transaction
+        )
 
         combined = (
             self._combine_fitness_metrics(target_dict, source_dict)
@@ -840,37 +971,11 @@ class JournalMergeService:
                 updates.append(f"{col} = :{col}")
                 update_params[col] = s_val
 
-        if table_name == "journal_calendar_info":
-            # Compute full merged state for validation
-            merged_state = {
-                **target_dict,
-                **{k: v for k, v in update_params.items() if k != "target_id"},
-            }
+        self._apply_all_day_invariant(table_name, target_dict, updates, update_params)
 
-            if merged_state.get("is_all_day"):
-                if merged_state.get("start_time") is not None:
-                    if "start_time" not in update_params:
-                        updates.append("start_time = :start_time")
-                    update_params["start_time"] = None
-                if merged_state.get("end_time") is not None:
-                    if "end_time" not in update_params:
-                        updates.append("end_time = :end_time")
-                    update_params["end_time"] = None
-
-        if updates:
-            # Deduplicate just in case
-            unique_updates = []
-            for u in updates:
-                if u not in unique_updates:
-                    unique_updates.append(u)
-
-            set_clause = ", ".join(unique_updates)
-            await transaction.execute(
-                text(
-                    f"UPDATE {table_name} SET {set_clause} WHERE journal_id = :target_id"
-                ),
-                update_params,
-            )
+        if await self._execute_type_row_update(
+            table_name, updates, update_params, transaction
+        ):
             changed_fields[f"{table_name}_updated"] = True
 
         await transaction.execute(

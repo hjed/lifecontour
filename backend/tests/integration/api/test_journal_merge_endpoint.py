@@ -512,6 +512,86 @@ async def test_merge_journal_with_overrides(
 
 
 @pytest.mark.integration
+async def test_merge_applies_type_data_override_for_a_source_only_type(
+    authenticated_client: AsyncClient,
+    clean_database: None,
+) -> None:
+    """An override lands even when only the source has a row for that type.
+
+    The target carries no MOOD_RATING, so the merge moves the source's row
+    wholesale — the branch that used to ignore ``type_data`` entirely.
+    """
+    target_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Target Title",
+                    "content": "Target Content",
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T01:00:00Z",
+                    },
+                },
+            }
+        },
+    )
+    assert target_res.status_code == 201, target_res.text
+    target_id = int(target_res.json()["data"]["id"])
+
+    source_res = await authenticated_client.post(
+        "/api/journals",
+        json={
+            "data": {
+                "type": "journals",
+                "attributes": {
+                    "title": "Source Title",
+                    "content": "Source Content",
+                    "event_date_range": {
+                        "start": "2024-01-01T00:00:00Z",
+                        "end": "2024-01-01T01:00:00Z",
+                    },
+                    "types": ["MOOD_RATING"],
+                    "type_data": {
+                        "MOOD_RATING": {
+                            "mood_value": 8,
+                            "energy_level": 8,
+                        }
+                    },
+                },
+            }
+        },
+    )
+    assert source_res.status_code == 201, source_res.text
+    source_id = int(source_res.json()["data"]["id"])
+
+    merge_res = await authenticated_client.post(
+        f"/api/journals/{target_id}/merge",
+        json={
+            "data": {
+                "type": "journal-merge",
+                "attributes": {
+                    "source_journal_id": source_id,
+                    "overrides": {
+                        "type_data": {"MOOD_RATING": {"mood_value": 3}},
+                    },
+                },
+            }
+        },
+    )
+
+    assert merge_res.status_code == 200, merge_res.text
+    type_data = merge_res.json()["data"]["attributes"].get("type_data", {})
+
+    assert "mood_rating" in type_data
+    # The override wins over the value the moved row carried.
+    assert type_data["mood_rating"]["mood_value"] == 3
+    # Everything the caller did not override rides along on the moved row.
+    assert type_data["mood_rating"]["energy_level"] == 8
+
+
+@pytest.mark.integration
 async def test_merge_journal_with_route(
     authenticated_client: AsyncClient,
     async_connection: AsyncConnection,
