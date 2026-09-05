@@ -10654,6 +10654,7 @@ dates yield twelve, at three layers — plus a mutation that caps the payload at
 | Anchor the window on UTC's today | 3 |
 | Drop the SQL pair filter | **3, all repository-level** |
 | Cap the payload server-side at three | 5 |
+| Let the signals read sample its own clock (the review's finding, reinstated) | 5 |
 
 **The sixth is the one worth recording.** Dropping the pair filter — so the statement fetches every
 important date on file — fails **only** the three tests addressed to the repository, and nothing at the
@@ -10662,6 +10663,34 @@ before anybody above can see it. That is ITER18-001 Phase 14's finding reproduce
 discovered: **defence in depth means a weakened lower layer is invisible from above, so any layer that
 duplicates a filter needs tests addressed to it directly.** Those three tests exist for exactly this
 mutation, and were written before the query was.
+
+**Acted on from the PR review** (`auggie review` on #1404). One finding, medium severity, and its premise
+was right: **there are two "now"s in this read and the first version only saw one.**
+`JournalDateResolver.today` sampled the clock to find the user's day, and `ContactImportanceRepository.
+for_contacts` — which takes an optional `now` and defaults to `datetime.now(UTC)` — then sampled it again
+for the thirty-day window its recency counts are measured back from.
+
+**The severity reading was generous and the finding was still worth acting on.** The drift is microseconds
+against a *thirty-day* cutoff, so a count changes only for a row written at that exact boundary, and the
+signals are a tie-break inside an already-coarse ordering — nothing user-visible turns on it, which is a
+different case from ITER18-001 Phase 14's, where two clock reads could land on different *days* and a task
+vanished from a window that claimed to include it. What was actually wrong is the **claim**: this module's
+docstring said one clock read per request and it did not do that, and a caller injecting `now` had pinned
+half the answer — a test asserting on a count at the cutoff would have failed on its own schedule with
+nothing to point at. A module claiming one clock read has to mean all of it. The instant is now sampled
+once at the top and decides both the day and the cutoff, which is three lines.
+
+**It is the same shape hit for a third time**, which is the part worth generalising: Phase 14 shipped it,
+had it found in review, shipped a second instance in the same file, and this is a third in a new one. The
+habit that catches it is not care but a question — *how many clocks does this read consult?* — asked of
+every service that windows anything.
+
+**Tested at both layers, and the integration half is the one that matters.** Four unit tests assert the
+service hands **one instant** to both collaborators, compared by `is` rather than `==`, because two
+`datetime.now()` calls make distinct objects even when they compare equal and equality would pass against
+exactly this bug. Two integration tests then prove the instant reaches PostgreSQL's comparison: the same
+journal counts as recent at the injected instant and is stale at one sixty days later. Reinstating the bug
+fails five of the six — the sixth is vacuous under the mutation, which is why they are a pair.
 
 **One near-miss worth recording, because it was a tooling mistake rather than a code one.** The first
 mutation harness restored the tree with `git checkout -- app core_shared` after each run, which also
