@@ -12,6 +12,7 @@
  */
 
 import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test-utils';
 import { AgendaCard } from '../AgendaCard';
 import { DashboardSectionStatus } from '@/lib/api/home-dashboard';
@@ -28,6 +29,9 @@ jest.mock('@/lib/constants', () => jest.requireActual('@/lib/constants'));
 const DASHBOARD_URL = '/api/home-dashboard';
 const EMPTY_LINE = 'Nothing scheduled today.';
 const LIST_NAME = "Today's agenda";
+/** The server's local tomorrow. A Saturday, which the row's label works out. */
+const TOMORROW_DATE = '2026-08-01';
+const TOMORROW_LIST_NAME = "Tomorrow's agenda";
 
 globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
@@ -80,6 +84,24 @@ const LUNCH = entry({
   is_cancelled: true,
 });
 
+/** Tomorrow's entries, in the server's order. */
+const TOMORROW_STANDUP = entry({
+  journal_id: 4,
+  title: 'Tomorrow standup',
+  starts_at: '2026-08-01T09:00:00+10:00',
+  ends_at: '2026-08-01T09:15:00+10:00',
+  start_time: '09:00:00',
+  end_time: '09:15:00',
+});
+const TOMORROW_RETRO = entry({
+  journal_id: 5,
+  title: 'Tomorrow retro',
+  starts_at: '2026-08-01T16:00:00+10:00',
+  ends_at: '2026-08-01T17:00:00+10:00',
+  start_time: '16:00:00',
+  end_time: '17:00:00',
+});
+
 function dashboardDocument(
   agenda: HomeDashboardResponse['data']['attributes']['agenda']
 ): HomeDashboardResponse {
@@ -98,8 +120,11 @@ function dashboardDocument(
   };
 }
 
-function agendaWith(entries: HomeDashboardAgendaEntry[]): HomeDashboardAgenda {
-  return { entries, tomorrow: { date: '2026-08-01', entries: [] } };
+function agendaWith(
+  entries: HomeDashboardAgendaEntry[],
+  tomorrow: HomeDashboardAgendaEntry[] = []
+): HomeDashboardAgenda {
+  return { entries, tomorrow: { date: TOMORROW_DATE, entries: tomorrow } };
 }
 
 function routeFetch(dashboard: () => Promise<Response>) {
@@ -125,10 +150,13 @@ function serveAgenda(
   );
 }
 
-function serveReady(entries: HomeDashboardAgendaEntry[]) {
+function serveReady(
+  entries: HomeDashboardAgendaEntry[],
+  tomorrow: HomeDashboardAgendaEntry[] = []
+) {
   serveAgenda({
     status: DashboardSectionStatus.READY,
-    data: agendaWith(entries),
+    data: agendaWith(entries, tomorrow),
   });
 }
 
@@ -248,6 +276,98 @@ describe('AgendaCard', () => {
 
       expect(await screen.findByTestId('agenda-unavailable')).toBeVisible();
       expect(screen.queryByText(EMPTY_LINE)).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The disclosure is the card's, not the shell's: it is drawn from the
+   * payload's own `tomorrow` day, and only once the section is ready — a
+   * control counting "0 events" over a section that has not answered would be
+   * a claim the card cannot make.
+   */
+  describe('tomorrow beneath today (W19, W20)', () => {
+    it('draws the disclosure from the payload’s tomorrow, shut', async () => {
+      serveReady([STANDUP], [TOMORROW_STANDUP, TOMORROW_RETRO]);
+
+      renderWithProviders(<AgendaCard />);
+
+      const trigger = await screen.findByTestId('tomorrow-trigger');
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByTestId('tomorrow-label')).toHaveTextContent(
+        'Tomorrow — Saturday, 1 August'
+      );
+      expect(screen.getByTestId('tomorrow-count')).toHaveTextContent(
+        '2 events'
+      );
+    });
+
+    it('expands in place, leaving today’s list where it was', async () => {
+      const user = userEvent.setup();
+      serveReady([STANDUP], [TOMORROW_STANDUP]);
+
+      renderWithProviders(<AgendaCard />);
+
+      await user.click(await screen.findByTestId('tomorrow-trigger'));
+
+      // Tomorrow arrives...
+      expect(
+        within(
+          screen.getByRole('list', { name: TOMORROW_LIST_NAME })
+        ).getByRole('link', { name: 'Tomorrow standup' })
+      ).toBeInTheDocument();
+      // ...and today has not gone anywhere. "In place" is the whole point.
+      expect(
+        within(agendaList()).getByRole('link', { name: 'Standup' })
+      ).toBeInTheDocument();
+    });
+
+    it('offers the disclosure even when nothing is on today', async () => {
+      serveReady([], [TOMORROW_STANDUP]);
+
+      renderWithProviders(<AgendaCard />);
+
+      expect(await screen.findByText(EMPTY_LINE)).toBeInTheDocument();
+      expect(screen.getByTestId('tomorrow-count')).toHaveTextContent('1 event');
+    });
+
+    it('draws none while the dashboard is still loading', () => {
+      routeFetch(() => new Promise<Response>(() => {}));
+
+      renderWithProviders(<AgendaCard />);
+
+      expect(screen.getByTestId('agenda-loading')).toBeInTheDocument();
+      expect(screen.queryByTestId('tomorrow-trigger')).not.toBeInTheDocument();
+    });
+
+    /**
+     * Found by the e2e, not by design: a ready agenda whose `tomorrow` was
+     * missing threw out of render and blanked the **entire page** — summary,
+     * tasks and dates with it. The type says the field is always there, and
+     * the server does send it; this is the section-independence rule the
+     * specification states, held against a payload that breaks its own
+     * contract rather than only against one that says `unavailable`.
+     */
+    it('keeps today drawn when a ready agenda arrives without a tomorrow', async () => {
+      serveAgenda({
+        status: DashboardSectionStatus.READY,
+        data: { entries: [STANDUP] } as unknown as HomeDashboardAgenda,
+      });
+
+      renderWithProviders(<AgendaCard />);
+
+      expect(
+        await within(agendaList()).findByRole('link', { name: 'Standup' })
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId('tomorrow-trigger')).not.toBeInTheDocument();
+    });
+
+    it('draws none when the section is unavailable', async () => {
+      serveAgenda({ status: DashboardSectionStatus.UNAVAILABLE, data: null });
+
+      renderWithProviders(<AgendaCard />);
+
+      await screen.findByTestId('agenda-unavailable');
+      expect(screen.queryByTestId('tomorrow-trigger')).not.toBeInTheDocument();
     });
   });
 

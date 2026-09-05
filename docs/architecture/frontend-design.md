@@ -1175,7 +1175,12 @@ elements are numbered **W1**–**W33**.
   optional `placeholder`, drawn *instead of* the empty line while a section
   holds no entries for some reason other than there being none — the query is
   still in flight, or the section is `unavailable` — so "nothing scheduled" is
-  never a false claim. It is ignored once there are entries.
+  never a false claim. It is ignored once there are entries. A second optional
+  slot, `footer`, is drawn *after* the list **and** after whichever of the two
+  empty renderings applied: it is where a section hangs something that is not
+  an entry, and it has to survive an empty section, because "nothing scheduled
+  today" says nothing about what a footer is for. The agenda's tomorrow
+  disclosure is its only user so far.
 - **Agenda card**: `AgendaCard` (**W11**–**W18**) reads `useHomeDashboard()`
   itself and maps `agenda.data.entries` to one `AgendaEntryRow` each, **in the
   server's order** — all-day first, then timed ascending by start instant is
@@ -1185,8 +1190,30 @@ elements are numbered **W1**–**W33**.
   idiom (`agenda-loading`, `agenda-unavailable`) as placeholders until Phase
   16's skeletons, so the three cannot be confused. A dashboard request that
   fails outright has no envelope at all and reads as unavailable.
-  - **`AgendaEntryRow`** is a pure function of one payload entry, the same row
-    the tomorrow disclosure reuses: a bordered row with a left accent bar keyed
+  - **`TomorrowDisclosure`** (**W19**, **W20**) hangs off that `footer` slot,
+    shut until asked. It is drawn **only on a ready agenda**, and guarded on
+    `agenda.tomorrow` itself rather than on the section: the type promises the
+    day on every ready agenda, but a payload that broke that promise once threw
+    out of render and took the whole page with it — the specification's
+    *"sections render independently"* has to survive a section that breaks its
+    contract, not only one that reports `unavailable`. The label is
+    `formatIsoWeekdayDate(tomorrow.date)`, **the server's** local tomorrow
+    parsed as a local calendar date; computing `anchor + 1` in the browser
+    would be a second opinion about what tomorrow is, and a wrong one in any
+    zone behind UTC. The count is `formatEventCount(entries.length)`, cancelled
+    entries **included**, because the panel shows them (**W18**) and a count
+    that disagreed with what it opened onto would be worse than none. Expanding
+    maps the same `AgendaEntryRow` into a `ul` labelled "Tomorrow's agenda", so
+    the two days can never drift apart in form; a clear tomorrow keeps its row,
+    counts `0 events`, and opens onto `WidgetEmptyState`'s single line. The
+    trigger is a real button carrying `aria-expanded` and `aria-controls` from
+    Radix's `Collapsible` over a `role="region"` named by it, and the
+    accessible name is the whole sentence — *"Tomorrow — Saturday, 1 August, 2
+    events"* — so nobody has to open it to learn whether it was worth opening.
+    E2E must gate its clicks on `aria-expanded` rather than the panel's
+    visibility, which races the slide-in.
+  - **`AgendaEntryRow`** is a pure function of one payload entry, shared by
+    today's list and the tomorrow disclosure: a bordered row with a left accent bar keyed
     to `calendar_color` by inline style (a runtime hex value Tailwind cannot
     class), `bg-chart-1` when the calendar has none (**W17**); the title as a
     `Link` to `/journals/{id}` behind a calendar glyph (**W14** — the second,

@@ -142,6 +142,72 @@ describe('DashboardSectionCard', () => {
     });
   });
 
+  /**
+   * The footer is what a section hangs beneath its entries: the agenda's
+   * tomorrow disclosure (**W19**) is the first, and it has to sit under the
+   * list *and* under the empty line, because "nothing scheduled today" says
+   * nothing about tomorrow.
+   */
+  describe('when given a footer', () => {
+    it('renders it beneath the entries', () => {
+      render(
+        <DashboardSectionCard
+          {...CARD_PROPS}
+          footer={<button type='button'>Tomorrow</button>}
+        >
+          <li>The only entry</li>
+        </DashboardSectionCard>
+      );
+
+      const entry = screen.getByRole('listitem');
+      const footer = screen.getByRole('button', { name: 'Tomorrow' });
+      expect(footer).toBeInTheDocument();
+      expect(
+        entry.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    it('renders it beneath the empty line when the section holds nothing', () => {
+      render(
+        <DashboardSectionCard
+          {...CARD_PROPS}
+          footer={<button type='button'>Tomorrow</button>}
+        />
+      );
+
+      const emptyLine = screen.getByText('Nothing scheduled today.');
+      const footer = screen.getByRole('button', { name: 'Tomorrow' });
+      expect(
+        emptyLine.compareDocumentPosition(footer) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    it('renders it alongside a placeholder, leaving the placeholder alone', () => {
+      render(
+        <DashboardSectionCard
+          {...CARD_PROPS}
+          placeholder={<p>Loading today&apos;s agenda...</p>}
+          footer={<button type='button'>Tomorrow</button>}
+        />
+      );
+
+      expect(screen.getByText("Loading today's agenda...")).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Tomorrow' })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText('Nothing scheduled today.')
+      ).not.toBeInTheDocument();
+    });
+
+    it('draws nothing extra when a section supplies no footer', () => {
+      render(<DashboardSectionCard {...CARD_PROPS} />);
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+  });
+
   it('carries its header regardless of whether it holds anything', () => {
     render(<DashboardSectionCard {...CARD_PROPS} />);
 

@@ -7,6 +7,7 @@ import {
   formatDateRange,
   formatIsoDate,
   formatIsoDateLong,
+  formatIsoWeekdayDate,
 } from '../date-utils';
 
 describe('formatDateOnly', () => {
@@ -116,5 +117,30 @@ describe('formatIsoDateLong', () => {
 
   it('handles a leap day', () => {
     expect(formatIsoDateLong('2024-02-29')).toBe('Thursday, 29 February 2024');
+  });
+});
+
+describe('formatIsoWeekdayDate', () => {
+  it('writes the weekday and day-month the tomorrow disclosure labels itself with', () => {
+    // W19's form: "Tomorrow — <weekday>, <d Month>". The year is not drawn,
+    // because a disclosure about tomorrow is never about another year than
+    // the one the page already names in its header.
+    expect(formatIsoWeekdayDate('2026-08-01')).toBe('Saturday, 1 August');
+  });
+
+  /**
+   * The same contract as {@link formatIsoDateLong}, and it matters for the
+   * same reason: `agenda.tomorrow.date` is the *server's* local tomorrow,
+   * already resolved in the user's configured zone. Parsing it as an instant
+   * would shift it back a day in any zone behind UTC and label the row with
+   * today.
+   */
+  it('does not shift a date that has already been resolved', () => {
+    expect(formatIsoWeekdayDate('2026-01-01')).toBe('Thursday, 1 January');
+    expect(formatIsoWeekdayDate('2026-12-31')).toBe('Thursday, 31 December');
+  });
+
+  it('handles a leap day', () => {
+    expect(formatIsoWeekdayDate('2024-02-29')).toBe('Thursday, 29 February');
   });
 });

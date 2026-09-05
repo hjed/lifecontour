@@ -11,7 +11,13 @@
  * entries first, then timed ones ascending by start, is the server's rule
  * (Phase 5a) and is pinned there; a second copy here would be a second place
  * for the two to disagree. Each entry is one `AgendaEntryRow`, the same row
- * the tomorrow disclosure reuses in the next phase.
+ * the tomorrow disclosure beneath it reuses.
+ *
+ * **Tomorrow hangs off the shell's footer, and only on a ready agenda**
+ * (**W19**, **W20**): it is drawn from the payload's own `tomorrow` day, so a
+ * section that has not answered has no count to state and no day to name, and
+ * the control stays away rather than claiming "0 events" about a read that
+ * never landed.
  *
  * Three things the list can hold nothing for, and they are kept apart on
  * purpose: **nothing scheduled** is a real answer and gets the single
@@ -28,6 +34,7 @@
 import { CalendarCheck, CalendarDays } from 'lucide-react';
 import { AgendaEntryRow } from './AgendaEntryRow';
 import { DashboardSectionCard } from './DashboardSectionCard';
+import { TomorrowDisclosure } from './TomorrowDisclosure';
 import {
   DashboardSectionStatus,
   useHomeDashboard,
@@ -63,6 +70,17 @@ export function AgendaCard() {
       testId='agenda-card'
       placeholder={
         agenda ? undefined : <AgendaPlaceholder pending={isPending} />
+      }
+      footer={
+        // Guarded on the day itself rather than on `agenda`: the type promises
+        // `tomorrow` on every ready agenda, but a payload that broke that
+        // promise used to throw out of render and take the *whole page* with
+        // it — the summary, the tasks and the dates included. The
+        // specification's "sections render independently" has to survive a
+        // malformed section, not only an unavailable one.
+        agenda?.tomorrow ? (
+          <TomorrowDisclosure day={agenda.tomorrow} />
+        ) : undefined
       }
     >
       {agenda?.entries.map(entry => (

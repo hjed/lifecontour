@@ -10116,25 +10116,110 @@ zone: the event's own, gap 17). Retained here for the record:
   another zone shows that zone's wall time. Changing it would be an app-wide divergence needing its own
   decision, not a card-phase choice — and the entry also carries `starts_at`, the true instant.
 
-#### Phase 8: Tomorrow Disclosure
+#### Phase 8: Tomorrow Disclosure ✅ COMPLETE
 
 **Prerequisites:** Phase 7.
-**Estimated diff:** ~120 production → **~480 tracked** (×4)
+**Estimated diff:** ~120 production → **~480 tracked** (×4) · **Actual: 196 production, 764 tests →
+~960 tracked** (2.0× the estimate, **4.9×** its own production; this document's own changed lines are
+excluded, as Phases 3, 4 and 7 excluded theirs).
+
+**Frontend only, and that was settled before work started.** `agenda.data.tomorrow` is `{date, entries}`
+and rides on every ready agenda — Phase 6 shipped it, with its own unit and integration coverage. So no
+schema, service, repository, endpoint or MCP change, and delivery rule 5 has nothing to attach to: no new
+capability is exposed, only a payload already sent is drawn. The backend suites named below were re-run
+as the regression gate rather than extended.
 
 **Acceptance Criteria:**
 
-- [ ] A disclosure row beneath today's list: chevron direction by state, the date label, and the
-      right-aligned event count (**W19**), collapsed by default.
-- [ ] Expanding reveals tomorrow's entries **in place**, in exactly the form of **W12**–**W18** (**W20**) —
-      no navigation, no separate route.
-- [ ] Disclosure state is exposed to assistive technology (`aria-expanded` on the trigger, a controlled
-      region) and the toggle is keyboard operable.
-- [ ] Nothing scheduled tomorrow shows the row with a zero count and an empty line when expanded, rather
-      than hiding the control.
+- [x] A disclosure row beneath today's list: chevron direction by state, the date label, and the
+      right-aligned event count (**W19**), collapsed by default. — `TomorrowDisclosure`
+      (`frontend/src/components/dashboard/TomorrowDisclosure.tsx`) over the shadcn `Collapsible` the repo
+      already had, hung from a new `footer` slot on `DashboardSectionCard` so it sits beneath the list
+      **and** beneath the empty line — "nothing scheduled today" says nothing about tomorrow. `ChevronRight`
+      shut, `ChevronDown` open; the label is `Tomorrow — {formatIsoWeekdayDate(tomorrow.date)}`; the count
+      is `formatEventCount(entries.length)`, right-aligned and muted. Six collapsed-state tests plus the
+      card's own.
+- [x] Expanding reveals tomorrow's entries **in place**, in exactly the form of **W12**–**W18** (**W20**) —
+      no navigation, no separate route. — The panel maps `AgendaEntryRow`, the **same** row today's list
+      uses, into a `ul` labelled "Tomorrow's agenda". Pinned three ways: the disclosure's own test asserts
+      DOM order equals payload order and that the all-day marker, clock range, journal link and cancelled
+      badge all arrive; `AgendaCard.test.tsx` asserts today's rows are **still on screen** after expanding;
+      and the e2e asserts the same with the URL unchanged and today's row above tomorrow's.
+- [x] Disclosure state is exposed to assistive technology (`aria-expanded` on the trigger, a controlled
+      region) and the toggle is keyboard operable. — Radix supplies `aria-expanded` and `aria-controls` on
+      a real `button`; the panel is a `role="region"` whose `id` is what `aria-controls` names, labelled by
+      the same sentence as the trigger. Tab-then-Enter and Tab-then-Space are asserted separately, and every
+      icon is `aria-hidden`.
+- [x] Nothing scheduled tomorrow shows the row with a zero count and an empty line when expanded, rather
+      than hiding the control. — The row stays, counting `0 events`, and opens onto `WidgetEmptyState`'s
+      *"Nothing scheduled tomorrow."* — the **W29** idiom today's card uses. Two unit tests, one page-level
+      test with today empty **and** tomorrow populated, and a mocked e2e.
 
 **Required Test Coverage:** unit (RTL) — collapsed default, expand/collapse, chevron and `aria-expanded`
-state, count label, empty-tomorrow case. E2E in Phase 17, gating clicks on `aria-expanded` rather than
-visibility (the recorded Radix slide-in race).
+state, count label, empty-tomorrow case. ~~E2E in Phase 17~~, **landed here** on the ground Phases 3, 4
+and 7 used: every phase with a user-visible surface brings its own. — **Delivered:** 3 helper tests
+(`formatIsoWeekdayDate`, `formatEventCount`), 4 over the shell's `footer`, 16 over the disclosure, and 6
+new over the card against the real hook and a routed fetch. **E2E: 4 tests, green on both `firefox` and
+`Mobile Chrome`**; the whole spec is 57 tests across the two projects. No backend change, so the gate is
+the endpoint's own suites re-run: `backend/tests/unit/dashboard/` (86) and the two home-dashboard
+integration files (70) — all green, alongside the full frontend suite (2,495) and `pnpm quality:check`.
+
+**The e2e found a page-killing bug that every unit test had missed.** A ready agenda whose `tomorrow` was
+absent threw out of render — and because the disclosure is a child of the page's own tree, it took the
+**whole dashboard** with it: summary, tasks and dates blanked together. It surfaced because the summary
+block's `dashboardBody` mock predates Phase 6 and served `agenda: {status: 'ready', data: {entries: []}}`,
+a payload the API can no longer produce; 20 of the 57 tests failed on it. Both halves are fixed — the mock
+now carries a `tomorrow`, and `AgendaCard` guards on the day itself rather than on the section, with a
+regression test that constructs the malformed payload deliberately. **The general lesson is the
+specification's own:** *"sections should render independently"* has to hold against a section that breaks
+its contract, not only one that reports `unavailable`, and a card that reads a nested field is the place
+that rule gets tested. Worth Phase 16 revisiting as it hardens the other three sections.
+
+**Decisions taken (Phase 8):**
+
+- **The label is the server's day, never `anchor + 1`.** `tomorrow.date` is already resolved in the user's
+  configured zone; computing it here would be a second opinion about what tomorrow is, and in any zone
+  behind UTC a wrong one. `formatIsoWeekdayDate` therefore parses it as a **local calendar date**, the
+  contract `formatIsoDateLong` already documents, and drops the year: the row is always the day after the
+  one **W2** names in full, so repeating it adds nothing.
+- **The count includes cancelled entries.** The payload carries them and the panel shows them (**W18** —
+  shown, never hidden); a count that disagreed with what it opened onto would be worse than none.
+- **A `footer` slot on the shell, not a fourth thing inside the list.** A button is not a list item, and
+  **W4**'s labelled list must stay a list of entries. The slot renders after the list *and* after the empty
+  line or placeholder, which is what puts the disclosure beneath a clear day as well as a busy one.
+- **The disclosure is drawn only on a ready agenda.** A section still in flight or come back unavailable
+  has no day to name and no count to state; a control claiming "0 events" over a read that never landed
+  would be exactly the false claim Phase 7 kept the three empty states apart to avoid.
+- **The accessible name carries the day and the count** — *"Tomorrow — Saturday, 1 August, 2 events"* — so
+  a screen-reader user learns whether it is worth opening without opening it. The visible label and count
+  are two elements because **W19** right-aligns the count; they are one sentence to anyone listening.
+- **Keyboard operation is asserted in RTL, not e2e.** Tab-then-Enter and Tab-then-Space are structural
+  facts of a real button inside Radix's `Collapsible`, and RTL proves them deterministically; Mobile
+  Chrome's virtual keyboard is a recorded flake source and buys nothing here.
+- **E2E clicks are gated on `aria-expanded`, never on the panel's visibility** — the recorded Radix
+  slide-in race. `aria-expanded` is the state; visibility is an animation of it.
+- **Exact counts are asserted against mocks, behaviour against real fixtures.** The e2e account is shared
+  across the run, so a count read from real data would depend on suite ordering — Phase 7's reasoning for
+  mocking the empty agenda, applied to the number. The fixture-driven test seeds its own events on
+  **tomorrow** (via a new `nextDay` helper stepping the anchor in UTC, because the e2e user has no
+  configured timezone) and asserts only its own rows.
+
+**Note for Phase 17 — the region count.** The page-shell e2e asserts exactly three regions inside
+`dashboard-sections`. The expanded panel is a fourth. Nothing breaks today, because no shell test expands
+it and the panel is unmounted while shut; a Phase 17 test that expands the disclosure and then counts
+regions would need scoping to the agenda card, as this phase's own tests are.
+
+**Sizing, and rule 3.** At ~960 tracked this is over the 500-line ceiling and the overrun was **not**
+recorded before work started, which rule 3 requires — the estimate said 480 and the production count came
+in at 196, close enough to the ~120 estimate that no split looked warranted at planning time. The miss is
+entirely tests: 764 against a production 196 is **×4.9**, above Phase 7's ×4.4, and the reason is that the
+criteria enumerate *states of one control* (shut, open, empty, loading, unavailable, keyboard, ARIA) which
+combine rather than sit independently — exactly the case Phase 7's refinement said to price at ×6. The e2e
+block is ~228 lines for four tests, again the fixture cost rule 9 counts. **Suggested refinement:** when a
+phase's criteria describe one component in many states, apply rule 14's ×6 to production, not ×4 — a 120-
+line estimate should have read as ~720 tracked and been split, with the component and its unit tests in one
+PR and the card wiring plus e2e in a second, as 7a/7b were. The available seam here was the same one, and
+it was passed over because the estimate looked comfortable.
 
 **Payload for this phase, settled by Phase 6:** `agenda.data.tomorrow` is `{date, entries}` and is always
 present on a ready agenda. Label the row from `tomorrow.date` (the server's local tomorrow), not from

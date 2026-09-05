@@ -93,3 +93,23 @@ export function formatIsoDate(date: string): string {
 export function formatIsoDateLong(date: string): string {
   return format(parseISO(date), 'EEEE, d MMMM yyyy', { locale: enAU });
 }
+
+/**
+ * Format an ISO **calendar date** (`YYYY-MM-DD`) as `EEEE, d MMMM` — no year.
+ *
+ * The form the agenda's tomorrow disclosure labels itself with (**W19**) —
+ * *"Saturday, 1 August"*, written after the word *Tomorrow*. The year is left
+ * off deliberately: the row is always about the day after the one the page
+ * header already names in full, so repeating it adds nothing.
+ *
+ * Parsed as a local calendar date for the same reason as
+ * {@link formatIsoDateLong}: `agenda.tomorrow.date` is the server's local
+ * tomorrow, already resolved in the user's configured zone, and re-parsing it
+ * as an instant would shift it back a day in any zone behind UTC — labelling
+ * the row with today.
+ *
+ * @example formatIsoWeekdayDate('2026-08-01') // "Saturday, 1 August"
+ */
+export function formatIsoWeekdayDate(date: string): string {
+  return format(parseISO(date), 'EEEE, d MMMM', { locale: enAU });
+}

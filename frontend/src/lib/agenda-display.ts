@@ -32,3 +32,15 @@ export function formatClockRange(
   const to = clockOf(end);
   return to ? `${from} – ${to}` : from;
 }
+
+/**
+ * The event count beside the tomorrow disclosure (**W19**): *"2 events"*.
+ *
+ * Cancelled entries are counted, because the payload carries them and the row
+ * they expand into shows them — a count that excluded them would disagree with
+ * the list beneath it. Zero is written rather than suppressed: the disclosure
+ * stays put on a clear day, so it needs an honest thing to say.
+ */
+export function formatEventCount(count: number): string {
+  return `${count} ${count === 1 ? 'event' : 'events'}`;
+}
