@@ -5,7 +5,6 @@ Processes domain events from the outbox and updates MeiliSearch indices
 to keep search data synchronized with the database.
 """
 
-from datetime import UTC
 from typing import Any
 
 import structlog
@@ -13,6 +12,9 @@ from meilisearch.errors import MeilisearchError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_importance_repository import (
+    SqlContactImportanceRepository,
+)
 from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.meilisearch_client import (
@@ -171,12 +173,13 @@ class SearchIndexer:
             return None
 
         try:
-            from datetime import datetime, timedelta
-
-            # Fetch basic contact info
+            # Fetch basic contact info. The importance signals — favourite, the
+            # two recent counts and the last-activity instant — come from the
+            # shared read below rather than from here, so that the home
+            # dashboard ranks contacts by exactly what the index ranks them by.
             contact_query = text("""
                 SELECT id, first_name, last_name, middle_name, nick_name,
-                       company, job_title, is_favourite, created_at, updated_at
+                       company, job_title, created_at, updated_at
                 FROM contacts
                 WHERE id = :contact_id
             """)
@@ -361,9 +364,11 @@ class SearchIndexer:
                 if date_str:
                     important_dates_list.append(f"{parts[0]} ({date_str})")
 
-            # Fetch journal mentions
+            # Fetch journal mentions. Titles are search *text*; the count of
+            # recent journals is an importance signal and belongs to the shared
+            # read, which is why this query no longer asks for dates.
             journals_query = text("""
-                SELECT j.title, j.created_at
+                SELECT j.title
                 FROM journals j
                 JOIN journal_contact_relationships jc ON j.id = jc.journal_id
                 WHERE jc.contact_id = :contact_id
@@ -371,79 +376,17 @@ class SearchIndexer:
             journals_result = await self.db_connection.execute(
                 journals_query, {"contact_id": contact_id}
             )
-            journals_rows = journals_result.fetchall()
+            journal_mentions = [
+                row.title for row in journals_result.fetchall() if row.title
+            ]
 
-            journal_mentions = []
-            journal_count_30d = 0
-            now = datetime.now(UTC)
-            thirty_days_ago = now - timedelta(days=30)
-
-            latest_journal_date = None
-            for row in journals_rows:
-                if row.title:
-                    journal_mentions.append(row.title)
-
-                # created_at is naive or aware, we handle properly in PG but python needs aware for comparison
-                row_dt = row.created_at
-                if row_dt and row_dt.tzinfo is None:
-                    row_dt = row_dt.replace(tzinfo=UTC)
-
-                if row_dt:
-                    if row_dt >= thirty_days_ago:
-                        journal_count_30d += 1
-                    if not latest_journal_date or row_dt > latest_journal_date:
-                        latest_journal_date = row_dt
-
-            # Fetch activities (history)
-            # Use the same broad predicate as SqlContactFieldHistoryRepository
-            # to include changes to contact methods, addresses, notes, and tags
-            history_query = text("""
-                SELECT created_at
-                FROM field_history
-                WHERE
-                    (entity_type = 'contact' AND entity_id = :contact_id)
-                    OR (entity_type IN ('contact_method', 'contact_address', 'contact_note', 'contact_tag')
-                        AND entity_id IN (
-                            SELECT id FROM contact_methods WHERE contact_id = :contact_id
-                            UNION
-                            SELECT id FROM contact_addresses WHERE contact_id = :contact_id
-                            UNION
-                            SELECT id FROM contact_notes WHERE contact_id = :contact_id
-                            UNION
-                            SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id
-                        ))
-            """)
-            history_result = await self.db_connection.execute(
-                history_query, {"contact_id": contact_id}
-            )
-            history_rows = history_result.fetchall()
-
-            activity_count_30d = 0
-            latest_activity_date = None
-            for row in history_rows:
-                row_dt = row.created_at
-                if row_dt and row_dt.tzinfo is None:
-                    row_dt = row_dt.replace(tzinfo=UTC)
-
-                if row_dt:
-                    if row_dt >= thirty_days_ago:
-                        activity_count_30d += 1
-                    if not latest_activity_date or row_dt > latest_activity_date:
-                        latest_activity_date = row_dt
-
-            # Calculate last activity date
-            last_activity_date = contact_row.updated_at
-            if last_activity_date and last_activity_date.tzinfo is None:
-                last_activity_date = last_activity_date.replace(tzinfo=UTC)
-
-            if latest_journal_date and (
-                not last_activity_date or latest_journal_date > last_activity_date
-            ):
-                last_activity_date = latest_journal_date
-            if latest_activity_date and (
-                not last_activity_date or latest_activity_date > last_activity_date
-            ):
-                last_activity_date = latest_activity_date
+            # The importance signals, from the read the home dashboard also uses
+            # so that both surfaces rank a contact by the same numbers.
+            importance_repository = SqlContactImportanceRepository(self.db_connection)
+            importance = (await importance_repository.for_contacts([contact_id]))[
+                contact_id
+            ]
+            last_activity_date = importance.last_activity_at
 
             return {
                 "id": contact_row.id,
@@ -462,7 +405,7 @@ class SearchIndexer:
                 "tags": tags,
                 "relationships": relationships_list,
                 "entity_type": "contact",
-                "is_favourite": contact_row.is_favourite,
+                "is_favourite": importance.is_favourite,
                 "created_at": contact_row.created_at.isoformat()
                 if contact_row.created_at
                 else None,
@@ -476,8 +419,8 @@ class SearchIndexer:
                 "last_activity_date": last_activity_date.isoformat()
                 if last_activity_date
                 else None,
-                "journal_count_30d": journal_count_30d,
-                "activity_count_30d": activity_count_30d,
+                "journal_count_30d": importance.journal_count_30d,
+                "activity_count_30d": importance.activity_count_30d,
             }
 
         except Exception as e:  # noqa: BLE001

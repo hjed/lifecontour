@@ -11,6 +11,7 @@ import structlog
 from meilisearch import Client as MeiliSearchClient
 from meilisearch.errors import MeilisearchError
 
+from app.core.contacts.models.importance import CONTACT_IMPORTANCE_ORDER
 from app.infrastructure.config import get_settings
 
 logger = structlog.get_logger()
@@ -139,9 +140,11 @@ CONTACTS_INDEX_SETTINGS = {
         "attribute",
         "sort",
         "exactness",
-        "is_favourite:desc",
-        "journal_count_30d:desc",
-        "activity_count_30d:desc",
+        # Text relevance first, then how much the contact matters to the user.
+        # Derived from CONTACT_IMPORTANCE_ORDER rather than listed here, so the
+        # index and the dashboard cannot come to disagree about the precedence:
+        # there is one place to change it and both read that place.
+        *(f"{signal}:desc" for signal in CONTACT_IMPORTANCE_ORDER),
     ],
 }
 
