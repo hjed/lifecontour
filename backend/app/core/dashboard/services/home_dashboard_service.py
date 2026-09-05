@@ -100,14 +100,18 @@ class HomeDashboardService:
 
         Args:
             user_id: The acting user, whose timezone anchors every window.
-            now: The instant to read "today" from, for testing either side of
-                local midnight. Defaults to the current time.
+            now: The instant the whole projection is read "as at" — the day
+                every window is anchored on, and the moment the upcoming-dates
+                ranking counts its recent activity back from. Injectable for
+                testing either side of local midnight; defaults to **one**
+                sample of the clock, shared by every section.
 
         Returns:
             The projection, with each section either ready or unavailable.
         """
+        moment = now or datetime.datetime.now(datetime.UTC)
         tz = await self.date_resolver.timezone_for(user_id)
-        anchor = today_in(tz, now)
+        anchor = today_in(tz, moment)
 
         return HomeDashboard(
             user_id=user_id,
@@ -124,7 +128,7 @@ class HomeDashboardService:
             ),
             upcoming_dates=await self._section(
                 "upcoming_dates",
-                lambda: self._load_upcoming_dates(user_id, anchor, tz),
+                lambda: self._load_upcoming_dates(user_id, anchor, tz, moment),
             ),
         )
 
@@ -233,7 +237,11 @@ class HomeDashboardService:
         return TasksSectionData()
 
     async def _load_upcoming_dates(
-        self, user_id: str, anchor: datetime.date, tz: ZoneInfo
+        self,
+        user_id: str,
+        anchor: datetime.date,
+        tz: ZoneInfo,
+        moment: datetime.datetime,
     ) -> UpcomingDatesSectionData:
         """Important contact dates in the same seven days the tasks cover.
 
@@ -247,8 +255,17 @@ class HomeDashboardService:
         own only when nobody gives it one; passing the dashboard's means this
         section cannot land on a different day from the agenda beside it, and
         the page still pays for exactly one settings read.
+
+        **So is the instant, and the day alone was not enough.** This section is
+        the only one ordered by something counted over a *window of time* rather
+        than read off a row: importance signals are the last thirty days back
+        from an instant. Handing down only the day left that instant to be
+        sampled again downstream, so a caller who pinned ``now`` got a window
+        fixed to one moment and a tie-break computed from another — not the
+        single as-at snapshot this projection is meant to be. Raised by the
+        review on #1407, and the third instance of two-clocks in this iteration.
         """
         upcoming = await self.upcoming_dates_service.upcoming_dates(
-            user_id, today=anchor
+            user_id, today=anchor, now=moment
         )
         return UpcomingDatesSectionData(window=upcoming.window, dates=upcoming.dates)

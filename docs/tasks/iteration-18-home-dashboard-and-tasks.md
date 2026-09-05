@@ -10655,6 +10655,7 @@ dates yield twelve, at three layers — plus a mutation that caps the payload at
 | Drop the SQL pair filter | **3, all repository-level** |
 | Cap the payload server-side at three | 5 |
 | Let the signals read sample its own clock (the review's finding, reinstated) | 5 |
+| Let the dashboard's dates section find its own instant (the second finding, reinstated) | 2 |
 
 **The sixth is the one worth recording.** Dropping the pair filter — so the statement fetches every
 important date on file — fails **only** the three tests addressed to the repository, and nothing at the
@@ -10684,6 +10685,22 @@ once at the top and decides both the day and the cutoff, which is three lines.
 had it found in review, shipped a second instance in the same file, and this is a third in a new one. The
 habit that catches it is not care but a question — *how many clocks does this read consult?* — asked of
 every service that windows anything.
+
+**And then a fourth, in the round after, which is the more useful lesson.** The second review pass found
+two more: that the fix had left a docstring claiming a supplied ``today`` means "the clock is then not read
+here at all" — false the moment the instant moved to the top of the method — and that
+`HomeDashboardService` still handed its dates section only the *day*, so a caller pinning
+`dashboard(now=…)` got a window fixed to one instant and a same-day tie-break counted from another. Both
+were acted on. The point is not that a fourth instance existed but **where it was**: the first round fixed
+the service and left the two things pointing at it — its own prose, and its caller — describing the world
+before the fix. A change of this shape is not finished at the line that had the bug; it is finished when
+every claim about that line has been re-read.
+
+**The reasoning that nearly stopped both fixes was the same both times, and it was wrong both times.** The
+drift is microseconds, the signals are a coarse tie-break, nothing user-visible moves — all true, and all
+beside the point. The defect is a *promise*: a method that takes `now` promises the answer is as at `now`,
+and one that says "one clock read" promises there is one. Judging these on user impact is what let the same
+shape through four times. **A guarantee is either kept or deleted, and "the drift is small" is neither.**
 
 **Tested at both layers, and the integration half is the one that matters.** Four unit tests assert the
 service hands **one instant** to both collaborators, compared by `is` rather than `==`, because two

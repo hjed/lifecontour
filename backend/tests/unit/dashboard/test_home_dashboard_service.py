@@ -877,6 +877,46 @@ class TestTomorrow:
 class TestTheUpcomingDatesSection:
     """The section is read through the shared contacts service, not its own query."""
 
+    async def test_the_whole_page_is_read_as_at_one_instant(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """A pinned ``now`` must pin the ranking as well as the window.
+
+        The upcoming-dates section is ordered within a day by importance
+        signals, and those are counted over the thirty days back from an
+        instant. Handing down only the *day* left that instant to be sampled
+        again inside the contacts service, so a caller who pinned ``now`` got a
+        window fixed to one moment and a tie-break computed from another —
+        which is not the single as-at snapshot this projection is supposed to
+        be. Raised by the review on #1407.
+
+        Sydney rather than UTC so the day and the instant are visibly different
+        things: the anchor is the 31st while the instant is still the 30th.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        mock_upcoming_dates_service.upcoming_dates.assert_awaited_once_with(
+            USER_ID, today=ANCHOR, now=JUST_PAST_SYDNEY_MIDNIGHT
+        )
+
+    async def test_an_unpinned_page_still_shares_one_instant(
+        self,
+        service: HomeDashboardService,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """The ordinary request: nobody supplies an instant, so the service
+        samples one and every section is read as at that same one."""
+        await service.dashboard(USER_ID)
+
+        moment = mock_upcoming_dates_service.upcoming_dates.await_args.kwargs["now"]
+        assert moment is not None
+        assert moment.tzinfo is not None
+
     async def test_it_asks_for_the_dashboards_own_anchor(
         self,
         service: HomeDashboardService,
@@ -890,9 +930,9 @@ class TestTheUpcomingDatesSection:
 
         await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
 
-        mock_upcoming_dates_service.upcoming_dates.assert_awaited_once_with(
-            USER_ID, today=datetime.date(2026, 7, 31)
-        )
+        assert mock_upcoming_dates_service.upcoming_dates.await_args.kwargs[
+            "today"
+        ] == datetime.date(2026, 7, 31)
 
     async def test_reading_it_costs_no_second_settings_read(
         self, service: HomeDashboardService, mock_settings_repo: AsyncMock
