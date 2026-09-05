@@ -45,7 +45,7 @@ import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { homeDashboardKeys } from './home-dashboard';
 import { taskKeys } from './tasks';
 import { journalKeys } from './journal-keys';
-import { getDefaultTimezone, useUserSettings } from './settings';
+import { useUserTimezone } from './settings';
 import {
   addDaysToIsoDate,
   futureJournalOptions,
@@ -1122,8 +1122,7 @@ export function useFutureJournals(
   options: { search?: string; enabled?: boolean } = {}
 ) {
   const search = options.search?.trim() ?? '';
-  const { data: settings } = useUserSettings();
-  const timezone = settings?.data.attributes.timezone ?? getDefaultTimezone();
+  const timezone = useUserTimezone();
   const today = todayIn(timezone);
 
   return useQuery({

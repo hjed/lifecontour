@@ -9,8 +9,22 @@ import {
   formatIsoDateLong,
   formatIsoWeekdayDate,
   isIsoCalendarDate,
-  localMidnight,
+  zonedCalendarDay,
+  zonedMidnight,
 } from '../date-utils';
+
+const SYDNEY = 'Australia/Sydney';
+const NEW_YORK = 'America/New_York';
+const SANTIAGO = 'America/Santiago';
+
+/**
+ * A calendar day as react-day-picker hands one over: browser-local midnight,
+ * whatever the ambient zone happens to be.
+ */
+function pickerDay(isoDate: string): Date {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
 
 describe('formatDateOnly', () => {
   it('formats a date as YYYY-MM-DD', () => {
@@ -188,46 +202,130 @@ describe('isIsoCalendarDate', () => {
 });
 
 /**
- * `localMidnight` is the write half of the `event_date_range` convention: a
- * bound is stored as the UTC instant of *local* midnight. The read half is
- * already `new Date(iso)` plus a local-timezone format, so the two only agree
- * if the write zeroes the **local** clock rather than the UTC one.
+ * `zonedMidnight` and `zonedCalendarDay` are the two halves of the
+ * `event_date_range` convention, and they only work as a pair: a bound is
+ * stored as the UTC instant of midnight on a calendar day *in a named zone*,
+ * so the zone that resolves the day on the way out has to be the one that
+ * anchors it on the way back in. Anchoring on the browser's zone instead — as
+ * the `localMidnight` these replace did — moves an untouched range a calendar
+ * day whenever the browser is somewhere the user is not (issue #1401).
  *
- * These cases hold in any ambient zone, which is why they say nothing about
- * offsets; the offset-sensitive half is covered where the component that
- * writes the value is tested, with a zone pinned.
+ * Every case names its zone, so all of them hold in any ambient zone.
  */
-describe('localMidnight', () => {
-  it('zeroes the local clock components', () => {
-    const midnight = localMidnight(new Date(2026, 8, 5, 13, 47, 22, 501));
-
-    expect([
-      midnight.getHours(),
-      midnight.getMinutes(),
-      midnight.getSeconds(),
-      midnight.getMilliseconds(),
-    ]).toEqual([0, 0, 0, 0]);
+describe('zonedMidnight', () => {
+  it.each([
+    ['a zone ahead of UTC', '2026-09-05', SYDNEY, '2026-09-04T14:00:00.000Z'],
+    ['a zone behind UTC', '2025-01-15', NEW_YORK, '2025-01-15T05:00:00.000Z'],
+  ])('anchors midnight in %s', (_, day, zone, expected) => {
+    expect(zonedMidnight(pickerDay(day), zone).toISOString()).toBe(expected);
   });
 
-  it('keeps the local calendar date it was given', () => {
-    // Late enough in the local day that a UTC-based implementation would land
-    // on the following date anywhere behind UTC.
-    const midnight = localMidnight(new Date(2026, 8, 5, 23, 30));
-
-    expect(formatDateOnly(midnight)).toBe('2026-09-05');
+  it.each([
+    // Either side of the transition, where the offset at UTC midnight is
+    // already the offset the day starts on: the control the two transition
+    // days below are read against.
+    ['before the spring transition', '2025-03-08', '2025-03-08T05:00:00.000Z'],
+    ['after the spring transition', '2025-03-10', '2025-03-10T04:00:00.000Z'],
+    // Daylight saving starts at 02:00 on this day: midnight is still EST.
+    ['on the spring transition day', '2025-03-09', '2025-03-09T05:00:00.000Z'],
+    // ...and ends at 02:00 on this one, so midnight is still EDT.
+    ['on the autumn transition day', '2025-11-02', '2025-11-02T04:00:00.000Z'],
+  ])('reads the offset the day actually starts on, %s', (_, day, expected) => {
+    expect(zonedMidnight(pickerDay(day), NEW_YORK).toISOString()).toBe(
+      expected
+    );
   });
 
-  it('is idempotent', () => {
-    const once = localMidnight(new Date(2026, 8, 5, 9, 15));
+  it('uses the offset in force at midnight, not the one later that day', () => {
+    // Sydney puts the clocks forward at 02:00 on 4 October 2026, so the day
+    // *starts* at +10:00 and ends at +11:00. Probing the zone at UTC midnight
+    // sees +11:00 — the offset the day ends on — and a single probe would
+    // write 13:00Z, which is 23:00 on 3 October: the previous day.
+    expect(zonedMidnight(pickerDay('2026-10-04'), SYDNEY).toISOString()).toBe(
+      '2026-10-03T14:00:00.000Z'
+    );
+  });
 
-    expect(localMidnight(once).toISOString()).toBe(once.toISOString());
+  it('clamps to the start of a day whose midnight does not exist', () => {
+    // Santiago puts the clocks forward at 24:00, so 7 September 2025 has no
+    // 00:00 at all and begins at 01:00. The answer has to be that instant:
+    // correcting onto the offset either side of the gap would land on 6
+    // September, which is not the day the user picked.
+    expect(zonedMidnight(pickerDay('2025-09-07'), SANTIAGO).toISOString()).toBe(
+      '2025-09-07T04:00:00.000Z'
+    );
+  });
+
+  it('takes the calendar day from the picked date, not its clock', () => {
+    // react-day-picker hands back whatever instant the selected cell carries.
+    const afternoon = new Date(2025, 0, 15, 16, 42, 9, 128);
+
+    expect(zonedMidnight(afternoon, NEW_YORK).toISOString()).toBe(
+      '2025-01-15T05:00:00.000Z'
+    );
+  });
+
+  it('falls back to browser-local midnight for a zone it cannot resolve', () => {
+    // A stale cached timezone should cost the user the anchor, not the save.
+    const day = pickerDay('2025-01-15');
+
+    expect(zonedMidnight(day, 'Not/A_Zone').toISOString()).toBe(
+      new Date(2025, 0, 15).toISOString()
+    );
   });
 
   it('does not mutate the date it is given', () => {
-    const original = new Date(2026, 8, 5, 9, 15);
+    const original = new Date(2025, 0, 15, 9, 15);
 
-    localMidnight(original);
+    zonedMidnight(original, SYDNEY);
 
     expect(original.getHours()).toBe(9);
+  });
+});
+
+/**
+ * The read half: which calendar day a stored instant belongs to depends
+ * entirely on who is asking, which is the whole of issue #1401 in one line.
+ */
+describe('zonedCalendarDay', () => {
+  it.each([
+    ['New York, where it is still the evening before', NEW_YORK, '2025-01-14'],
+    ['Sydney, where the morning is already under way', SYDNEY, '2025-01-15'],
+  ])('resolves the same instant to its own day in %s', (_, zone, expected) => {
+    const day = zonedCalendarDay('2025-01-15T00:00:00.000Z', zone);
+
+    expect(formatDateOnly(day)).toBe(expected);
+  });
+
+  it('returns the day at browser-local midnight, as a picker reads it', () => {
+    const day = zonedCalendarDay('2025-01-15T05:00:00.000Z', NEW_YORK);
+
+    expect([day.getHours(), day.getMinutes(), day.getSeconds()]).toEqual([
+      0, 0, 0,
+    ]);
+  });
+
+  it('accepts an instant that is already a Date', () => {
+    const day = zonedCalendarDay(new Date('2025-01-15T05:00:00.000Z'), SYDNEY);
+
+    expect(formatDateOnly(day)).toBe('2025-01-15');
+  });
+
+  it('falls back to the browser day for a zone it cannot resolve', () => {
+    const instant = '2025-01-15T05:00:00.000Z';
+
+    expect(formatDateOnly(zonedCalendarDay(instant, 'Not/A_Zone'))).toBe(
+      formatDateOnly(new Date(instant))
+    );
+  });
+
+  it.each([
+    ['ahead of UTC', SYDNEY, '2026-09-04T14:00:00.000Z'],
+    ['behind UTC', NEW_YORK, '2025-01-15T05:00:00.000Z'],
+    ['on a transition day', SYDNEY, '2026-10-03T14:00:00.000Z'],
+  ])('round-trips a correctly stored bound %s untouched', (_, zone, stored) => {
+    const reopened = zonedCalendarDay(stored, zone);
+
+    expect(zonedMidnight(reopened, zone).toISOString()).toBe(stored);
   });
 });

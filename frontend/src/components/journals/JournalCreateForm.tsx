@@ -63,7 +63,8 @@ import { Label } from '@/components/ui/label';
 import { MarkdownEditor } from '@/components/journals/MarkdownEditor';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal, useJournal } from '@/lib/api/journals';
-import { localMidnight } from '@/lib/date-utils';
+import { zonedMidnight } from '@/lib/date-utils';
+import { useUserTimezone } from '@/lib/api/settings';
 import { useCreateRoute } from '@/lib/api/routes';
 import { toast } from 'sonner';
 import {
@@ -483,6 +484,8 @@ export function JournalCreateForm({
     useCreateJournal();
   const { mutateAsync: createRoute, isPending: isCreatingRoute } =
     useCreateRoute();
+  /** The zone the submitted date range's day boundaries are anchored on. */
+  const timezone = useUserTimezone();
   const [typeData, setTypeData] = useState<TypeDataState>({});
   const [abseilKey, setAbseilKey] = useState(0);
   // Snapshot of type-specific values applied from a template. Passed as the
@@ -782,13 +785,15 @@ export function JournalCreateForm({
       const result = await createJournal({
         title: values.title,
         content: values.content,
-        // Each bound is the UTC instant of local midnight, and the end is the
-        // last day inclusive. The picker already hands over local midnight;
-        // localMidnight says so, and is the same call the inline date editor
-        // makes, so there is one definition of the convention rather than two.
+        // Each bound is the UTC instant of midnight on its day in the user's
+        // configured zone, and the end is the last day inclusive. Anchoring on
+        // the browser's zone instead would put a journal created here at a
+        // different instant from the one the inline date editor writes for the
+        // same day, so the two share `zonedMidnight` and there is one
+        // definition of the convention rather than two (issue #1401).
         event_date_range: {
-          start: localMidnight(values.dateRange.from).toISOString(),
-          end: localMidnight(endDate).toISOString(),
+          start: zonedMidnight(values.dateRange.from, timezone).toISOString(),
+          end: zonedMidnight(endDate, timezone).toISOString(),
         },
         types: values.types,
         parent_id: values.parentId ?? undefined,

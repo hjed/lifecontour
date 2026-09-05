@@ -10,7 +10,12 @@
 import { useState, useCallback } from 'react';
 import { Calendar as CalendarIcon, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatDateRange, localMidnight } from '@/lib/date-utils';
+import {
+  formatDateRange,
+  zonedCalendarDay,
+  zonedMidnight,
+} from '@/lib/date-utils';
+import { useUserTimezone } from '@/lib/api/settings';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -47,34 +52,47 @@ export function InlineEditDateRange({
   'data-testid': testId,
   'aria-label': ariaLabel,
 }: InlineEditDateRangeProps) {
+  // Every day this component resolves, shows or writes is anchored on the
+  // user's configured zone rather than the browser's. The two only have to be
+  // the same zone as each other — an untouched range must round-trip — and the
+  // browser's cannot play that part, because it changes when the user travels
+  // and is simply wrong for an event imported from a foreign-zone calendar
+  // (issue #1401).
+  const timezone = useUserTimezone();
+
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
-    from: new Date(value.start),
-    to: new Date(value.end),
-  }));
 
-  const displayValue = formatDateRange(value.start, value.end);
+  const openOn = useCallback(
+    (range: EventDateRange): { from: Date; to: Date } => ({
+      from: zonedCalendarDay(range.start, timezone),
+      to: zonedCalendarDay(range.end, timezone),
+    }),
+    [timezone]
+  );
+
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
+    openOn(value)
+  );
+
+  // Formatted from the resolved days rather than the raw bounds, so the label
+  // names the day the picker will open on and the day a save will write.
+  const opened = openOn(value);
+  const displayValue = formatDateRange(opened.from, opened.to);
 
   const startEdit = useCallback(() => {
     if (disabled) return;
     setIsEditing(true);
     setError(null);
-    setDateRange({
-      from: new Date(value.start),
-      to: new Date(value.end),
-    });
-  }, [disabled, value]);
+    setDateRange(openOn(value));
+  }, [disabled, openOn, value]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
     setError(null);
-    setDateRange({
-      from: new Date(value.start),
-      to: new Date(value.end),
-    });
-  }, [value]);
+    setDateRange(openOn(value));
+  }, [openOn, value]);
 
   const saveEdit = useCallback(async () => {
     if (!dateRange?.from || !dateRange?.to) {
@@ -91,13 +109,14 @@ export function InlineEditDateRange({
     setIsLoading(true);
     setError(null);
 
-    // The backend stores each bound as the UTC instant of *local* midnight, and
-    // the end is the last day inclusive — the same thing JournalCreateForm
-    // sends. Zeroing the UTC clock instead would write a different instant from
-    // a created journal's, one that reads back a day early behind UTC.
+    // The backend stores each bound as the UTC instant of midnight on its day
+    // in the user's zone, and the end is the last day inclusive — the same
+    // thing JournalCreateForm sends. `zonedMidnight` is the inverse of the
+    // `zonedCalendarDay` the picker was opened with, so a range nobody touched
+    // is written back as the instant it arrived as.
     const newValue: EventDateRange = {
-      start: localMidnight(dateRange.from).toISOString(),
-      end: localMidnight(dateRange.to).toISOString(),
+      start: zonedMidnight(dateRange.from, timezone).toISOString(),
+      end: zonedMidnight(dateRange.to, timezone).toISOString(),
     };
 
     try {
@@ -112,7 +131,7 @@ export function InlineEditDateRange({
     } finally {
       setIsLoading(false);
     }
-  }, [dateRange, onSave]);
+  }, [dateRange, onSave, timezone]);
 
   // View mode - clickable display
   if (!isEditing) {

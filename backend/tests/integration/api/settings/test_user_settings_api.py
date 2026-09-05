@@ -4,14 +4,24 @@ from httpx import AsyncClient
 pytestmark = pytest.mark.integration
 
 
-async def test_get_user_settings_defaults_to_utc(authenticated_client: AsyncClient):
-    """GET returns the default timezone (UTC) when none is configured."""
+async def test_get_user_settings_reports_an_unset_timezone_as_null(
+    authenticated_client: AsyncClient,
+):
+    """GET answers ``null`` when the user has never configured a timezone.
+
+    Substituting the ``UTC`` default here would make "never set" look exactly
+    like "deliberately chose UTC", and the frontend cannot tell them apart: it
+    would anchor every unconfigured user's date writes at UTC midnight rather
+    than falling back to the browser's zone, which is a calendar day out for
+    anyone ahead of UTC (issue #1401). The default still applies everywhere the
+    backend resolves a zone for itself.
+    """
     response = await authenticated_client.get("/api/user-settings")
 
     assert response.status_code == 200
     data = response.json()
     assert data["data"]["type"] == "user_settings"
-    assert data["data"]["attributes"]["timezone"] == "UTC"
+    assert data["data"]["attributes"]["timezone"] is None
 
 
 async def test_put_and_get_user_settings(authenticated_client: AsyncClient):

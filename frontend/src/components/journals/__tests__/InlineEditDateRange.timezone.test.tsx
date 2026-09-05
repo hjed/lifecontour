@@ -19,7 +19,15 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InlineEditDateRange } from '@/components/journals/InlineEditDateRange';
+import { useUserTimezone } from '@/lib/api/settings';
 import type { EventDateRange } from '@/types/journals';
+
+// The configured zone is the pinned one, so these cases isolate the
+// convention itself; `InlineEditDateRange.cross-timezone.test.tsx` is where
+// the two zones are made to disagree.
+jest.mock('@/lib/api/settings', () => ({
+  useUserTimezone: jest.fn(),
+}));
 
 // 15 and 16 January 2025 as the app stores them for a New York user: local
 // midnight, which is 05:00Z because January is outside daylight saving.
@@ -43,6 +51,7 @@ async function saveWithoutChangingTheRange(
 describe('InlineEditDateRange in a zone behind UTC', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (useUserTimezone as jest.Mock).mockReturnValue('America/New_York');
   });
 
   it('sanity check: the pinned zone is in effect', () => {

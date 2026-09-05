@@ -96,13 +96,40 @@ export function useUserSettings() {
   });
 }
 
+/**
+ * The zone to anchor a user-facing day boundary on: the **configured** one,
+ * the localStorage cache while that read is in flight, then the browser's.
+ *
+ * The order is the point. A journal's `event_date_range` bounds are stored as
+ * the UTC instant of midnight *on some day in some zone*, and which zone that
+ * is has to be the same one on the way in and on the way out or an untouched
+ * range drifts a calendar day (issue #1401). The browser's zone cannot be that
+ * anchor — it changes when the user travels — so the configured zone wins
+ * whenever there is one.
+ *
+ * A user who has configured nothing gets the browser's zone rather than the
+ * server's `UTC` default, which is why the API's `timezone` attribute is
+ * nullable: `'UTC'` here would mean "they chose UTC", and answering that for
+ * the unconfigured majority would move every write a day for anyone ahead of
+ * UTC.
+ */
+export function useUserTimezone(): string {
+  const { data } = useUserSettings();
+  return data?.data.attributes.timezone ?? getDefaultTimezone();
+}
+
 export function useUpdateTimezone() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: updateTimezone,
     onSuccess: response => {
-      cacheTimezone(response.data.attributes.timezone);
+      // Typed nullable because a *read* can answer "not set"; a PUT echoes the
+      // value it just saved, so this branch is the type system's, not a case.
+      const saved = response.data.attributes.timezone;
+      if (saved) {
+        cacheTimezone(saved);
+      }
       // **Changing the zone changes what the server thinks "today" is**, and
       // two answers are derived from that rather than stored: whether a task
       // has *lapsed*, and the journal list's `tasks_due_count`, which is the
