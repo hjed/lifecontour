@@ -1051,11 +1051,18 @@ it twice for one object is the boundary saying the edge belongs in the graph.** 
 other in both directions — Dishka validates a graph of *types*, and that graph stays acyclic because
 everything the tasks domain reaches for is a journal port and none of it reaches back.
 
-**A caller of this listing must hand it the instant it is judging.** `read_models_for_upcoming_window`
-defaults `now` to the wall clock, and a caller that also asks what day it is — as the summary's assembler
-does, to decide whether to call at all — would otherwise take two readings that can straddle local
-midnight. One reading per request, passed down, is the rule; the same one the service applies internally
-between its window and its lapse verdict.
+**A caller of this listing must hand it both halves of "which day is it" — the instant and the zone.**
+`read_models_for_upcoming_window` defaults `now` to the wall clock and `timezone` to a `user_settings`
+read, which is right for a surface that asks nothing else and wrong for a caller that has already asked.
+The summary's assembler has asked both: it decides whether the day it is summarising is today before it
+calls at all. Leaving either to default gives that request two readings — of the clock, which can straddle
+local midnight, and of the settings row, which is a **second statement** under READ COMMITTED and so can
+see a timezone change the first did not. The second is the one that took a review to spot, because the
+first cut argued the two reads could not disagree on the grounds that they hit the same row in the same
+request: true of the row, false of the reads. One reading per request, passed down, is the rule — the same
+one the service applies internally when `_assemble` takes `today` and `timezone` as parameters rather than
+looking them up. The three sibling reads still resolve their own, because every caller of those resolves
+no timezone of its own and so has nothing to disagree with.
 
 ### The journal delete guard
 

@@ -275,18 +275,28 @@ class DailySummaryInputAssembler:
         because the answer would be discarded and a past-day summary should cost
         no extra round trip.
 
-        **The instant travels; the timezone does not.** ``read_models_for_upcoming_window``
-        resolves the zone itself, from the same ``user_settings`` row this
-        assembly has already read, so the two cannot disagree within a request —
-        it costs one small extra ``SELECT`` on a path that then makes a model
-        call. Threading a resolved ``ZoneInfo`` in to save it would change a
-        signature REST and MCP both call, which is not a trade worth making
-        here.
+        **Both halves of "which day is it" travel: the instant and the zone.**
+        Left to itself the read service resolves the zone from ``user_settings``
+        — which is right for a surface that asks nothing else, and wrong here,
+        because this assembly has *already* read that row to decide the day it
+        is summarising. Two reads in one request are two statements under READ
+        COMMITTED, so a timezone changed between them yields a prompt labelled
+        today in the old zone wrapped around a window and relative due dates
+        built in the new one. The window is seconds wide rather than
+        milliseconds, since a generation makes a model call. Handing the zone
+        down makes the two agree structurally, which is the discipline
+        ``_assemble`` already applies one level further in. *Raised by the pull
+        request's automated review; the first cut argued the two reads could not
+        disagree, and the reason it gave — same row, same request — was true of
+        the row and false of the reads.*
         """
         if summary_date != today_in(tz, now):
             return None
         if self._task_read_service is None:
             return None
         return await self._task_read_service.read_models_for_upcoming_window(
-            user_id, days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD, now=now
+            user_id,
+            days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
+            now=now,
+            timezone=tz,
         )

@@ -257,6 +257,7 @@ class TaskReadService:
         *,
         days_ahead: int = DEFAULT_UPCOMING_DAYS_AHEAD,
         now: datetime.datetime | None = None,
+        timezone: ZoneInfo | None = None,
     ) -> UpcomingTasks:
         """The not-done tasks due between today and ``days_ahead`` days ahead.
 
@@ -290,6 +291,15 @@ class TaskReadService:
                 specification's seven
             now: The instant to judge "today" from, for tests that need a
                 specific side of a day boundary. Production omits it.
+            timezone: The acting user's zone, when the caller has **already
+                resolved it**. Omit it and this resolves its own, which is what
+                every surface does. It exists for a caller that asks what day it
+                is on its own account as well — the daily summary's input
+                assembler, which labels the day it is summarising — because two
+                reads of ``user_settings`` in one request are two different
+                statements under READ COMMITTED, and a timezone changed between
+                them yields a prompt dated in the old zone around a window built
+                in the new one. Raised by the pull request's automated review.
 
         Returns:
             The window and its tasks, ordered by due-journal date then task id.
@@ -305,7 +315,11 @@ class TaskReadService:
             JournalNotFoundError: An anchor journal is missing, which the
                 foreign keys make unreachable.
         """
-        timezone = await self.date_resolver.timezone_for(user_id)
+        zone = (
+            timezone
+            if timezone is not None
+            else await self.date_resolver.timezone_for(user_id)
+        )
         # Read once and carried, not consulted again below. With ``now=None``
         # each call to ``today_in`` reads the wall clock afresh, so a request
         # crossing local midnight between two of them would build the window
@@ -313,9 +327,9 @@ class TaskReadService:
         # on the earlier day would be dropped as "date passed" from a window
         # that still claims to include it. Raised by the pull request's
         # automated review.
-        today = today_in(timezone, now)
+        today = today_in(zone, now)
         window = upcoming_window(today, days_ahead)
-        instants = local_window(window.first_day, window.last_day, timezone)
+        instants = local_window(window.first_day, window.last_day, zone)
 
         tasks = await self.task_repo.find_upcoming_tasks(
             user_id,
@@ -335,7 +349,7 @@ class TaskReadService:
             mentions=mentions,
             contacts=contacts,
             today=today,
-            timezone=timezone,
+            timezone=zone,
         )
         return select_upcoming_tasks(models, window)
 

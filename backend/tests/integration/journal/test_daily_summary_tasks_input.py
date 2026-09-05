@@ -430,3 +430,49 @@ class TestTheWindowIsAnchoredOnTheUsersDay:
         assert assembled.upcoming_tasks.window.first_day == date(2026, 8, 12)
         assert assembled.upcoming_tasks.window.last_day == date(2026, 8, 19)
         assert gathered_texts(assembled) == ["their last day"]
+
+    async def test_the_zone_the_assembly_resolved_beats_a_later_settings_change(
+        self,
+        assembler: DailySummaryInputAssembler,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        user_settings_repository: SqlUserSettingsRepository,
+    ) -> None:
+        """The stored row disagrees with the caller, and the caller wins.
+
+        This is the race the arrangement stands in for. In production the
+        assembler is handed the zone ``DailySummaryService`` read from this very
+        row; a second read inside the listing is a **second statement**, and
+        under READ COMMITTED a timezone changed in between is visible to it and
+        not to the day the prompt is labelled with. So the row is seeded as UTC
+        while the assembly is handed Kiritimati: a listing resolving its own
+        zone would build UTC's 11th-to-18th window and drop this task entirely,
+        while the prompt above it still said Kiritimati's 12th.
+
+        The bracketing case seeds the row and the argument to agree, which is
+        what production does; this one exists because that case cannot fail for
+        this reason.
+        """
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone="UTC")
+        )
+        creating = await creating_journal(journal_repository)
+        due = await create_journal(
+            journal_repository,
+            title="Kiritimati boundary day",
+            start=datetime(2026, 8, 19, 0, 0, tzinfo=UTC),
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=creating,
+            due_journal_id=due,
+            text="their last day",
+        )
+
+        assembled = await assembler.assemble(
+            USER_ID, date(2026, 8, 12), FAR_EAST, now=NOW
+        )
+
+        assert assembled.upcoming_tasks is not None
+        assert assembled.upcoming_tasks.window.first_day == date(2026, 8, 12)
+        assert gathered_texts(assembled) == ["their last day"]

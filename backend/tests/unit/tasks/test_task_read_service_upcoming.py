@@ -556,3 +556,71 @@ class TestOneReadPerCollection:
 
         task_repo.save.assert_not_awaited()
         assert not hasattr(service, "connection")
+
+
+class TestASuppliedTimezoneWins:
+    """A caller that has already resolved the zone hands it down.
+
+    Every surface omits it and lets the service resolve its own. The one caller
+    that supplies it — the daily summary's input assembler — has read
+    ``user_settings`` already, to decide which day it is summarising. Two reads
+    in one request are two statements under READ COMMITTED, so a timezone
+    changed between them would date the prompt in the old zone and build its
+    task window in the new one.
+    """
+
+    async def test_the_supplied_zone_anchors_the_window(
+        self, service: TaskReadService, task_repo: AsyncMock
+    ) -> None:
+        """Settings say UTC; the caller says Kiritimati; the caller wins.
+
+        The two answers differ by a whole day at this instant, so a service that
+        quietly ignored the argument and read its own would fail here rather
+        than agree by coincidence.
+        """
+        upcoming = await service.read_models_for_upcoming_window(
+            USER_ID, now=NOW, timezone=KIRITIMATI
+        )
+
+        assert upcoming.window.first_day == TODAY_KIRITIMATI
+        assert upcoming.window.last_day == datetime.date(2026, 8, 19)
+
+    async def test_the_settings_row_is_not_read_at_all(
+        self, service: TaskReadService, settings_repo: AsyncMock
+    ) -> None:
+        """The saving is the point: a second read is a second chance to differ."""
+        await service.read_models_for_upcoming_window(
+            USER_ID, now=NOW, timezone=KIRITIMATI
+        )
+
+        settings_repo.get_timezone.assert_not_awaited()
+
+    async def test_the_supplied_zone_reaches_the_query_as_instants(
+        self, service: TaskReadService, task_repo: AsyncMock
+    ) -> None:
+        """Not only the window's dates — the bounds the statement compares.
+
+        The window and the instants are built from the same zone or the listing
+        can disagree with its own answer, which is the failure
+        ``local_window``'s midnight-ambiguity rule exists to prevent.
+        """
+        await service.read_models_for_upcoming_window(
+            USER_ID, now=NOW, timezone=KIRITIMATI
+        )
+
+        start, end = window_bounds(task_repo)
+        assert start == datetime.datetime(2026, 8, 12, tzinfo=KIRITIMATI).astimezone(
+            UTC
+        )
+        assert end.astimezone(KIRITIMATI).date() == datetime.date(2026, 8, 19)
+
+    async def test_omitting_it_still_resolves_the_users_own(
+        self, service: TaskReadService, settings_repo: AsyncMock
+    ) -> None:
+        """The surfaces' path, unchanged: the parameter is additive."""
+        settings_repo.get_timezone.return_value = "Pacific/Kiritimati"
+
+        upcoming = await service.read_models_for_upcoming_window(USER_ID, now=NOW)
+
+        assert upcoming.window.first_day == TODAY_KIRITIMATI
+        settings_repo.get_timezone.assert_awaited_once_with(USER_ID)

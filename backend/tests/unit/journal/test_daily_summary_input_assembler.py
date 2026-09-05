@@ -590,7 +590,10 @@ class TestTheUpcomingWindowIsAssembled:
         await tasks_assembler.assemble("user123", date(2026, 4, 27), "UTC", now=now)
 
         mock_task_read_service.read_models_for_upcoming_window.assert_awaited_once_with(
-            "user123", days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD, now=now
+            "user123",
+            days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
+            now=now,
+            timezone=ZoneInfo("UTC"),
         )
 
     @pytest.mark.asyncio
@@ -725,5 +728,60 @@ class TestOneClockReadingPerAssembly:
 
         assert readings == 1
         mock_task_read_service.read_models_for_upcoming_window.assert_awaited_once_with(
-            "user123", days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD, now=instant
+            "user123",
+            days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
+            now=instant,
+            timezone=ZoneInfo("UTC"),
         )
+
+
+class TestOneTimezoneReadingPerAssembly:
+    """The zone travels down with the instant, for the same reason."""
+
+    @pytest.mark.asyncio
+    async def test_the_resolved_zone_is_handed_to_the_read_service(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """Left to itself the read service would read ``user_settings`` again.
+
+        Two reads in one request are two statements under READ COMMITTED, so a
+        timezone changed between them gives a prompt labelled today in the old
+        zone around a window built in the new one. Handing the zone down is what
+        makes the two agree structurally rather than by timing.
+        """
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        await tasks_assembler.assemble("user123", date(2026, 4, 27), FAR_EAST, now=now)
+
+        kwargs = (
+            mock_task_read_service.read_models_for_upcoming_window.await_args.kwargs
+        )
+        assert kwargs["timezone"] == ZoneInfo(FAR_EAST)
+
+    @pytest.mark.asyncio
+    async def test_the_zone_handed_down_is_the_one_the_day_was_judged_in(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """The guard and the read cannot be told apart by the zone they used.
+
+        Asserted at the boundary that separates them: 13:00Z is the 26th in UTC
+        and already the 27th in Kiritimati, so the guard only fires for the 27th
+        if it judged the day in the user's zone — and the read is only reached
+        at all when it does.
+        """
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        gathered = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 27), FAR_EAST, now=now
+        )
+
+        assert gathered.upcoming_tasks is not None
+        kwargs = (
+            mock_task_read_service.read_models_for_upcoming_window.await_args.kwargs
+        )
+        assert kwargs["timezone"] == ZoneInfo(FAR_EAST)
+        assert kwargs["now"] == now

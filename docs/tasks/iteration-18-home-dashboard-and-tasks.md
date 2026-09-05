@@ -11348,7 +11348,7 @@ now asserts both superseded forms absent**, so the next widening cannot leave a 
    here would test the mock. What this phase adds at unit level is everything *its own* code decides; the
    exclusions are proved end to end in its integration suite instead.
 
-**Tests: 34 unit and 10 integration**, and — separately — **78 pre-existing tests joined CI's selection.**
+**Tests: 41 unit and 11 integration**, and — separately — **78 pre-existing tests joined CI's selection.**
 Neither daily-summary unit file carried `pytestmark = pytest.mark.unit`, so none of their tests ran in CI's
 `-m unit` job. Both files got the marker with this phase: a test outside the selection is a test that does
 not run, and there was no point adding assertions to files CI ignored. Checked with `pytest -m unit
@@ -11377,11 +11377,36 @@ real and tracked separately; this is the two files the phase touched, not a swee
   nothing; and a Kiritimati (+14) user whose window runs a day ahead of UTC's, with the due journal on the
   last day of theirs and past the end of UTC's.
 
-**Mutation checks.** Four were run, each reverted after. Dropping the assembler's current-day guard fails
+**Acted on from the PR review** (`auggie review` on #1402). One finding, medium severity, and it was
+right — against a paragraph this write-up had already used to argue the opposite.
+
+- **The user's timezone was read twice per generation, so a prompt could be dated in one zone and windowed
+  in another.** `DailySummaryService` resolves the zone once and hands it to freshness, assembly,
+  eligibility and the prompt — the discipline Phase 3 established — and the first cut of this phase then let
+  `TaskReadService` resolve its *own* from `user_settings`. The decision was recorded as deliberate on the
+  grounds that the two reads hit the same row in the same request and so could not disagree. **That is true
+  of the row and false of the reads**: two reads in one request are two statements under READ COMMITTED, an
+  independently-committed settings change between them is visible to the second and not the first, and the
+  window is seconds wide rather than milliseconds because a generation makes a model call in between. The
+  user-visible failure is a summary headed *(Today)* in the old zone wrapped around a task window and
+  relative due dates built in the new one — and, at the boundary the fixture uses, a whole day's worth of
+  tasks silently absent.
+- **Fixed by making the zone injectable, the way the instant already was.** `read_models_for_upcoming_window`
+  gained a keyword-only `timezone: ZoneInfo | None = None`, resolving its own when omitted — which is what
+  every surface does, so REST and MCP are untouched. The asymmetry was the actual defect: the method already
+  took `now` because "which day is it" needs an instant the caller may have fixed, and the zone is the other
+  half of that same question. The three sibling reads keep resolving their own and were left alone, checked
+  rather than assumed: each is called by a controller or MCP tool that resolves no timezone of its own, so
+  those requests take exactly one reading and have nothing to disagree with.
+- **The write-up's own reasoning is what made the bug hard to see.** *Where a decision records why two
+  things cannot disagree, the argument is worth re-reading at the level of statements rather than of rows.*
+
+**Mutation checks.** Five were run, each reverted after. Dropping the assembler's current-day guard fails
 **6** (four unit, two integration); dropping the builder's temporal guard fails **2**; dropping the lapsed
 exclusion from `select_upcoming_tasks` fails **exactly 1** in this phase's suite — the cancelled-due-journal
 case, and nothing else; making the window's far end exclusive fails **8** across `tests/unit/tasks` and this
-phase's integration suite. No mutation left the suite green.
+phase's integration suite; and dropping the review fix — no longer handing the resolved zone down — fails
+**5**, three unit and one integration of them written for it. No mutation left the suite green.
 
 **E2E:** none — the deferral this phase states, and it holds. No file under `frontend/` changes, the REST
 and MCP read contracts are untouched, and the only observable difference is in generated prose, which
@@ -11393,7 +11418,7 @@ is what ITER18-005's own acceptance criteria say. No tool signature or docstring
 contents, so none changed.
 
 **Docs:** this entry, ITER18-005's baseline trail above, and `domain-architecture.md`'s *The upcoming
-window*, which gained the second caller and what it settled.
+window*, which gained the second caller, what it settled, and the injectable zone the review added.
 
 #### Phase 5: Extended Inputs — Past-Day Task Resolution
 
