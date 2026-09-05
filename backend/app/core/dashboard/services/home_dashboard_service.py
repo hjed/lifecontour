@@ -51,6 +51,7 @@ from app.core.dashboard.models.sections import (
 )
 from app.core.dashboard.services.agenda_section import order_agenda_entries
 from app.core.dashboard.services.summary_section import summary_section_for
+from app.core.journal.services.daily_summary_freshness import was_generated_on
 from app.core.journal.services.journal_date_resolver import (
     local_day_window,
     today_in,
@@ -162,9 +163,18 @@ class HomeDashboardService:
         it writes — a DISABLED row for an ineligible day, a GENERATING marker,
         then a multi-second AI call — so the dashboard goes to the repository
         instead. It is the same row, and a page load stays read-only.
+
+        Read-only includes the freshness rule: a summary for today that was not
+        generated today in the user's zone must not be served, so it is judged
+        here with the anchor day and zone already in hand, and presented as
+        generating rather than regenerated. Regenerating it is the user's own
+        Regenerate control's job, or the journals view's, or MCP's.
         """
+        summary = await self.summary_repo.find_by_user_and_date(user_id, anchor)
+        if summary is None:
+            return None
         return summary_section_for(
-            await self.summary_repo.find_by_user_and_date(user_id, anchor)
+            summary, stale=not was_generated_on(summary, anchor, tz)
         )
 
     async def _load_agenda(

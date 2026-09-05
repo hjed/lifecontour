@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import date
+from datetime import date, datetime
 
 from core_shared.models.journals.daily_summary import JournalDailySummary
 
@@ -53,6 +53,41 @@ class JournalDailySummaryRepository(ABC):
 
         Returns:
             The updated summary, or None if not found
+        """
+        pass
+
+    @abstractmethod
+    async def claim_for_generation(
+        self,
+        user_id: str,
+        summary_date: date,
+        *,
+        seen_generated_at: datetime | None,
+    ) -> bool:
+        """Atomically mark the summary GENERATING, if it is still as the caller saw it.
+
+        The marker two concurrent readers race for: exactly one wins. Creates
+        the row if none exists; on an existing row only the status moves, so
+        text, counters and ``generated_at`` from the previous generation are
+        kept until the new one replaces them.
+
+        A claim is a compare-and-set on ``generated_at``: it loses not only
+        when the row is already GENERATING but when ``generated_at`` no longer
+        equals what the caller saw at its cache check — every completed
+        generation moves it, so a slow caller cannot regenerate over a result
+        another run has finished in the meantime.
+
+        Args:
+            user_id: The user ID
+            summary_date: The date
+            seen_generated_at: The ``generated_at`` of the row the caller read
+                before deciding to generate, or ``None`` if it saw no row (or
+                a row that had never generated).
+
+        Returns:
+            True if this caller claimed the row; False if it was already
+            GENERATING or has been generated since, in which case nothing
+            changed.
         """
         pass
 

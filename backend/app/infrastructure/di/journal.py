@@ -158,6 +158,9 @@ from app.core.journal.services.calendar_service import CalendarService
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
 )
+from app.core.journal.services.daily_summary_freshness import (
+    DailySummaryFreshnessChecker,
+)
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )
@@ -746,6 +749,11 @@ class JournalProvider(Provider):
         return DailySummaryEligibilityChecker()
 
     @provide(scope=Scope.REQUEST)
+    def daily_summary_freshness_checker(self) -> DailySummaryFreshnessChecker:
+        """Provide a DailySummaryFreshnessChecker instance."""
+        return DailySummaryFreshnessChecker()
+
+    @provide(scope=Scope.REQUEST)
     def daily_summary_prompt_builder(self) -> DailySummaryPromptBuilder:
         """Provide a DailySummaryPromptBuilder instance."""
         return DailySummaryPromptBuilder()
@@ -773,6 +781,7 @@ class JournalProvider(Provider):
         self,
         input_assembler: DailySummaryInputAssembler,
         eligibility_checker: DailySummaryEligibilityChecker,
+        freshness_checker: DailySummaryFreshnessChecker,
         prompt_builder: DailySummaryPromptBuilder,
         summary_repo: JournalDailySummaryRepository,
         user_settings_repo: UserSettingsRepository,
@@ -794,6 +803,7 @@ class JournalProvider(Provider):
             gemini_model=settings.gemini_summary_model,
             user_settings_repo=user_settings_repo,
             container=container,
+            freshness_checker=freshness_checker,
         )
 
     @provide(scope=Scope.REQUEST)

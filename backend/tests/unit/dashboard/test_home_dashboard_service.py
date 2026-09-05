@@ -74,8 +74,21 @@ def mock_summary_repo() -> AsyncMock:
         summary_date=datetime.date(2026, 7, 31),
         summary_text="A long day.",
         status=SummaryStatus.GENERATED,
+        # Generated now, so it is fresh whichever day the service anchors on.
+        generated_at=datetime.datetime.now(datetime.UTC),
     )
     return repo
+
+
+def generated_summary(generated_at: datetime.datetime) -> JournalDailySummary:
+    """Today's generated row, written at ``generated_at``."""
+    return JournalDailySummary(
+        user_id=USER_ID,
+        summary_date=datetime.date(2026, 7, 31),
+        summary_text="A long day.",
+        status=SummaryStatus.GENERATED,
+        generated_at=generated_at,
+    )
 
 
 @pytest.fixture
@@ -354,6 +367,80 @@ class TestTheSummarySection:
         assert dashboard.summary.data is not None
         assert dashboard.summary.data.state is DashboardSummaryState.GENERATED
         assert dashboard.summary.data.summary_text == "A long day."
+
+    async def test_withholds_a_summary_generated_before_the_users_today(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """At 00:30 in Sydney, a summary from 23:00 is yesterday's — and stale.
+
+        The specification says a summary not generated today in the user's
+        timezone must not be served; the dashboard cannot regenerate it (a page
+        load must not write), so it shows the state whose exit is the reader's
+        own Regenerate control, exactly as it does for an invalidated row.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+        mock_summary_repo.find_by_user_and_date.return_value = generated_summary(
+            datetime.datetime(2026, 7, 30, 13, 0, tzinfo=datetime.UTC)
+        )
+
+        dashboard = await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        assert dashboard.summary.status is SectionStatus.READY
+        assert dashboard.summary.data is not None
+        assert dashboard.summary.data.state is DashboardSummaryState.GENERATING
+        assert dashboard.summary.data.summary_text is None
+
+    async def test_serves_a_summary_generated_after_the_users_midnight(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """Twenty minutes into the Sydney day is today, however UTC counts it."""
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+        mock_summary_repo.find_by_user_and_date.return_value = generated_summary(
+            datetime.datetime(2026, 7, 30, 14, 10, tzinfo=datetime.UTC)
+        )
+
+        dashboard = await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        assert dashboard.summary.data is not None
+        assert dashboard.summary.data.state is DashboardSummaryState.GENERATED
+        assert dashboard.summary.data.summary_text == "A long day."
+
+    async def test_judges_freshness_in_the_users_zone_not_utcs(
+        self, service: HomeDashboardService, mock_summary_repo: AsyncMock
+    ) -> None:
+        """The instant Sydney found stale is the same UTC day for a UTC user."""
+        mock_summary_repo.find_by_user_and_date.return_value = generated_summary(
+            datetime.datetime(2026, 7, 30, 13, 0, tzinfo=datetime.UTC)
+        )
+
+        dashboard = await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        assert dashboard.summary.data is not None
+        assert dashboard.summary.data.state is DashboardSummaryState.GENERATED
+
+    async def test_a_stale_summary_is_still_only_read(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """Withholding is a reading, not a write: the row is left as it was."""
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+        mock_summary_repo.find_by_user_and_date.return_value = generated_summary(
+            datetime.datetime(2026, 7, 30, 13, 0, tzinfo=datetime.UTC)
+        )
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        mock_summary_repo.upsert.assert_not_called()
+        mock_summary_repo.update_status.assert_not_called()
+        mock_summary_repo.invalidate_for_date.assert_not_called()
 
     async def test_reports_unavailable_when_the_user_has_no_summary(
         self, service: HomeDashboardService, mock_summary_repo: AsyncMock

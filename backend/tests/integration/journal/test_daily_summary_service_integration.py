@@ -10,16 +10,21 @@ input assembly are stubbed; the repository and connection are real.
 
 import json
 from datetime import UTC, date, datetime, timedelta
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.models.contacts.entities import SummaryStatus
+from core_shared.models.journals.daily_summary import JournalDailySummary
 
 from app.core.journal.adapters.sql.daily_summary_repository import (
     SqlJournalDailySummaryRepository,
 )
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
+)
+from app.core.journal.services.daily_summary_freshness import (
+    DailySummaryFreshnessChecker,
 )
 from app.core.journal.services.daily_summary_models import DailySummaryInput
 from app.core.journal.services.daily_summary_service import DailySummaryService
@@ -218,3 +223,263 @@ class TestDailySummaryEligibilityIntegration:
         assert persisted is not None
         assert persisted.status == SummaryStatus.DISABLED
         assert persisted.summary_text is None
+
+
+@pytest.mark.integration
+class TestDailySummaryFreshnessIntegration:
+    """Today's summary is regenerated on read unless it was generated today.
+
+    Real repository, real settings repository with a saved ``Pacific/Auckland``
+    timezone, and the real eligibility and freshness checkers on one fixed
+    clock — 14:30 UTC on 3 September, which is 02:30 on the 4th in Auckland.
+    Only the AI call is stubbed, and it counts how often it is asked.
+    """
+
+    _USER = "user_ds_fresh_integ"
+    _TIMEZONE = "Pacific/Auckland"
+    _NOW = datetime(2026, 9, 3, 14, 30, tzinfo=UTC)
+    # 21:00 on 3 September in Auckland (+12): last night, where the user lives.
+    _LAST_NIGHT = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
+    # 00:30 on 4 September in Auckland: earlier this morning.
+    _EARLY_TODAY = datetime(2026, 9, 3, 12, 30, tzinfo=UTC)
+    _OLD_TEXT = "Written last night."
+    _NEW_TEXT = "Written this morning."
+
+    @pytest.fixture
+    async def today(self, async_connection) -> date:
+        settings_repo = SqlUserSettingsRepository(async_connection)
+        await settings_repo.save(
+            UserSettings(user_id=self._USER, timezone=self._TIMEZONE)
+        )
+        return today_in(resolve_timezone(self._TIMEZONE), self._NOW)
+
+    def _service(
+        self, async_connection, *, summary_date: date, ai_calls: list[str]
+    ) -> DailySummaryService:
+        assembler = AsyncMock()
+        assembler.assemble.return_value = DailySummaryInput(
+            user_id=self._USER,
+            summary_date=summary_date,
+            journals=[],
+            journal_count=2,
+            event_count=0,
+            contact_names=[],
+            mood_values=[],
+        )
+        prompt_builder = MagicMock()
+        prompt_builder.build.return_value = "prompt"
+        service = DailySummaryService(
+            input_assembler=assembler,
+            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
+            prompt_builder=prompt_builder,
+            summary_repo=SqlJournalDailySummaryRepository(async_connection),
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            user_settings_repo=SqlUserSettingsRepository(async_connection),
+            freshness_checker=DailySummaryFreshnessChecker(clock=lambda: self._NOW),
+        )
+
+        async def fake_gemini(prompt: str) -> str:
+            ai_calls.append(prompt)
+            return json.dumps({"summary_text": self._NEW_TEXT})
+
+        service._call_gemini = fake_gemini  # type: ignore[method-assign]
+        return service
+
+    async def _seed_generated(
+        self, async_connection, summary_date: date, generated_at: datetime
+    ) -> None:
+        await SqlJournalDailySummaryRepository(async_connection).upsert(
+            JournalDailySummary(
+                user_id=self._USER,
+                summary_date=summary_date,
+                summary_text=self._OLD_TEXT,
+                journal_count=2,
+                status=SummaryStatus.GENERATED,
+                generated_at=generated_at,
+            )
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_stale_today_summary_is_regenerated_on_read(
+        self, async_connection, today: date
+    ):
+        """Last night's summary must not be served this morning."""
+        await self._seed_generated(async_connection, today, self._LAST_NIGHT)
+        ai_calls: list[str] = []
+        service = self._service(async_connection, summary_date=today, ai_calls=ai_calls)
+
+        result = await service.get_or_generate(self._USER, today, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == self._NEW_TEXT
+        assert len(ai_calls) == 1
+        repo = SqlJournalDailySummaryRepository(async_connection)
+        persisted = await repo.find_by_user_and_date(self._USER, today)
+        assert persisted is not None
+        assert persisted.summary_text == self._NEW_TEXT
+        assert persisted.generated_at is not None
+        assert persisted.generated_at > self._LAST_NIGHT
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_today_summary_is_served_from_cache(
+        self, async_connection, today: date
+    ):
+        """Generated at 00:30 this morning: caching is unchanged."""
+        await self._seed_generated(async_connection, today, self._EARLY_TODAY)
+        ai_calls: list[str] = []
+        service = self._service(async_connection, summary_date=today, ai_calls=ai_calls)
+
+        result = await service.get_or_generate(self._USER, today, async_connection)
+
+        assert result is not None
+        assert result.summary_text == self._OLD_TEXT
+        assert ai_calls == []
+        repo = SqlJournalDailySummaryRepository(async_connection)
+        persisted = await repo.find_by_user_and_date(self._USER, today)
+        assert persisted is not None
+        assert persisted.summary_text == self._OLD_TEXT
+        assert persisted.generated_at == self._EARLY_TODAY
+
+    @pytest.mark.asyncio
+    async def test_a_past_day_summary_is_served_from_cache(
+        self, async_connection, today: date
+    ):
+        """Only today must reflect today; yesterday's summary is left alone."""
+        yesterday = today - timedelta(days=1)
+        await self._seed_generated(
+            async_connection, yesterday, datetime(2026, 8, 20, 9, 0, tzinfo=UTC)
+        )
+        ai_calls: list[str] = []
+        service = self._service(
+            async_connection, summary_date=yesterday, ai_calls=ai_calls
+        )
+
+        result = await service.get_or_generate(self._USER, yesterday, async_connection)
+
+        assert result is not None
+        assert result.summary_text == self._OLD_TEXT
+        assert ai_calls == []
+
+    @pytest.mark.asyncio
+    async def test_two_stale_reads_that_both_pass_the_cache_check_generate_once(
+        self, async_connection, today: date
+    ):
+        """The GENERATING marker is an atomic claim, so the loser calls no AI.
+
+        The narrower race: both requests read the stale row *before* either
+        marks it. Request B's claim is placed exactly there — after A's cache
+        check and before A's own claim — by making it during A's input
+        assembly, the one await that sits between the two. A then finds the row
+        already claimed and stands down without calling the AI.
+        """
+        await self._seed_generated(async_connection, today, self._LAST_NIGHT)
+        a_calls: list[str] = []
+        a = self._service(async_connection, summary_date=today, ai_calls=a_calls)
+        repo_b = SqlJournalDailySummaryRepository(async_connection)
+        assembler = cast(AsyncMock, a._input_assembler)
+        assembled = assembler.assemble.return_value
+
+        async def b_claims_while_a_assembles(*args: object, **kwargs: object):
+            assert (
+                await repo_b.claim_for_generation(
+                    self._USER, today, seen_generated_at=self._LAST_NIGHT
+                )
+                is True
+            )
+            return assembled
+
+        assembler.assemble.side_effect = b_claims_while_a_assembles
+
+        result = await a.get_or_generate(self._USER, today, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATING
+        assert a_calls == []
+        persisted = await repo_b.find_by_user_and_date(self._USER, today)
+        assert persisted is not None
+        assert persisted.status == SummaryStatus.GENERATING
+        assert persisted.summary_text == self._OLD_TEXT
+
+    @pytest.mark.asyncio
+    async def test_a_slow_stale_read_does_not_regenerate_over_a_finished_run(
+        self, async_connection, today: date
+    ):
+        """The widest race: B claims, generates and finishes while A is still
+        between its cache check and its claim.
+
+        A's claim carries the ``generated_at`` it saw; B's result moved it, so
+        A loses, calls no AI, and returns B's fresh summary instead of writing
+        its own over the top.
+        """
+        await self._seed_generated(async_connection, today, self._LAST_NIGHT)
+        a_calls: list[str] = []
+        b_calls: list[str] = []
+        a = self._service(async_connection, summary_date=today, ai_calls=a_calls)
+        b = self._service(async_connection, summary_date=today, ai_calls=b_calls)
+        assembler = cast(AsyncMock, a._input_assembler)
+        assembled = assembler.assemble.return_value
+
+        async def b_runs_to_completion_while_a_assembles(
+            *args: object, **kwargs: object
+        ):
+            finished = await b.get_or_generate(self._USER, today, async_connection)
+            assert finished is not None
+            assert finished.status == SummaryStatus.GENERATED
+            return assembled
+
+        assembler.assemble.side_effect = b_runs_to_completion_while_a_assembles
+
+        result = await a.get_or_generate(self._USER, today, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == self._NEW_TEXT
+        assert a_calls == []
+        assert len(b_calls) == 1
+        persisted = await SqlJournalDailySummaryRepository(
+            async_connection
+        ).find_by_user_and_date(self._USER, today)
+        assert persisted is not None
+        assert persisted.generated_at == result.generated_at
+
+    @pytest.mark.asyncio
+    async def test_concurrent_reads_of_a_stale_summary_generate_once(
+        self, async_connection, today: date
+    ):
+        """The GENERATING guard still holds when staleness starts a regeneration.
+
+        A second read arriving while the first is at the AI sees the committed
+        GENERATING marker and waits on that run rather than starting its own.
+        """
+        await self._seed_generated(async_connection, today, self._LAST_NIGHT)
+        first_calls: list[str] = []
+        second_calls: list[str] = []
+        first = self._service(
+            async_connection, summary_date=today, ai_calls=first_calls
+        )
+        second = self._service(
+            async_connection, summary_date=today, ai_calls=second_calls
+        )
+        observed: dict[str, object] = {}
+
+        async def fake_gemini_with_a_concurrent_read(prompt: str) -> str:
+            first_calls.append(prompt)
+            concurrent = await second.get_or_generate(
+                self._USER, today, async_connection
+            )
+            observed["status"] = concurrent.status if concurrent else None
+            return json.dumps({"summary_text": self._NEW_TEXT})
+
+        first._call_gemini = (  # type: ignore[method-assign]
+            fake_gemini_with_a_concurrent_read
+        )
+
+        result = await first.get_or_generate(self._USER, today, async_connection)
+
+        assert result is not None
+        assert result.summary_text == self._NEW_TEXT
+        assert observed["status"] == SummaryStatus.GENERATING
+        assert len(first_calls) == 1
+        assert second_calls == []

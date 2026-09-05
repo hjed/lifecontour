@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.services.daily_summary_eligibility import (
     DailySummaryEligibilityChecker,
 )
+from app.core.journal.services.daily_summary_freshness import (
+    DailySummaryFreshnessChecker,
+)
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )
@@ -51,10 +54,16 @@ class DailySummaryService:
         gemini_model: str,
         user_settings_repo: UserSettingsRepository | None = None,
         container: AsyncContainer | None = None,
+        freshness_checker: DailySummaryFreshnessChecker | None = None,
         _gemini_response_override: str | None = None,
     ) -> None:
         self._input_assembler = input_assembler
         self._eligibility_checker = eligibility_checker
+        self._freshness_checker = (
+            freshness_checker
+            if freshness_checker is not None
+            else DailySummaryFreshnessChecker()
+        )
         self._prompt_builder = prompt_builder
         self._summary_repo = summary_repo
         self._gemini_api_key = gemini_api_key
@@ -74,8 +83,14 @@ class DailySummaryService:
     ) -> JournalDailySummary | None:
         """Get a cached summary or generate a new one.
 
-        Returns the existing summary if already GENERATED, otherwise assembles
-        input and generates a new one.
+        Returns the existing summary if already GENERATED **and fresh**,
+        otherwise assembles input and generates a new one. Freshness is the
+        specification's rule that today's summary must reflect today: a
+        summary for today that was not generated today in the user's timezone
+        is regenerated on read, so one produced yesterday evening is never
+        served this morning. Any other day's summary is served from cache
+        however old it is. The rule lives here rather than at either surface so
+        REST and MCP inherit it without logic of their own.
 
         This orchestrator deliberately holds **no** transaction across the
         multi-second Gemini call (issue #970). Each write commits as its own
@@ -85,6 +100,14 @@ class DailySummaryService:
         held, then the ``GENERATED``/``FAILED`` result is committed afterwards —
         re-checking status first so a slower run can't overwrite a summary
         another request already completed (last-writer-wins prevention).
+
+        The marker is an atomic **claim**, not an unconditional write: two
+        requests that both pass the cache check before either marks the row
+        (two stale reads at 07:00, or two reads of an invalidated row) race for
+        it, exactly one wins, and the loser returns the row the winner is
+        regenerating — or has already regenerated — without calling the AI. The
+        claim is keyed on the ``generated_at`` the cache check saw, so a slow
+        request cannot regenerate over a result a faster one finished meanwhile.
 
         Committing in the service layer (rather than relying on teardown) is
         required because the request connection has no commit backstop, so an
@@ -96,15 +119,28 @@ class DailySummaryService:
             )
             return None
 
-        # 1. Check cache (read — no transaction held)
+        # The user's zone anchors every day-based decision below: freshness,
+        # input assembly and eligibility all read "today" from it.
+        timezone = await self._resolve_timezone(user_id)
+
+        # 1. Check cache (read — no transaction held). A GENERATED row is
+        #    served unless it is today's and was not generated today, in which
+        #    case it falls through to the same generate path an invalidated
+        #    (PENDING) row takes — so the GENERATING guard below still holds.
         existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
         if existing and existing.status == SummaryStatus.GENERATED:
+            if not self._freshness_checker.is_stale(existing, timezone=timezone):
+                logger.info(
+                    "Returning cached daily summary for %s on %s",
+                    user_id,
+                    summary_date,
+                )
+                return existing
             logger.info(
-                "Returning cached daily summary for %s on %s",
+                "Daily summary for %s on %s was not generated today; regenerating",
                 user_id,
                 summary_date,
             )
-            return existing
 
         # Skip if currently generating (prevent concurrent generation)
         if existing and existing.status == SummaryStatus.GENERATING:
@@ -116,7 +152,6 @@ class DailySummaryService:
             return existing
 
         # 2. Assemble input (scoped to the user's local day — reads only)
-        timezone = await self._resolve_timezone(user_id)
         summary_input = await self._input_assembler.assemble(
             user_id, summary_date, timezone
         )
@@ -137,10 +172,22 @@ class DailySummaryService:
                 user_id, summary_date, summary_input, transaction
             )
 
-        # 4. Commit the GENERATING marker as its own short unit of work, so
+        # 4. Claim the GENERATING marker as its own short unit of work, so
         #    concurrent callers see it and the row lock is released before the
-        #    AI call.
-        await self._mark_generating(user_id, summary_date, transaction)
+        #    AI call. The claim carries the generated_at the cache check saw:
+        #    losing it means another request got here between then and now —
+        #    and may already have finished — so leave the generation to it and
+        #    hand back whatever it has produced.
+        seen_generated_at = existing.generated_at if existing else None
+        if not await self._claim_generation(
+            user_id, summary_date, seen_generated_at, transaction
+        ):
+            logger.info(
+                "Daily summary for %s on %s was claimed by a concurrent request",
+                user_id,
+                summary_date,
+            )
+            return await self._summary_repo.find_by_user_and_date(user_id, summary_date)
 
         # 5. Build prompt and call Gemini — with NO transaction held.
         try:
@@ -185,25 +232,23 @@ class DailySummaryService:
         return await self._summary_repo.upsert(disabled_summary)
 
     @transactional
-    async def _mark_generating(
-        self, user_id: str, summary_date: date, transaction: AsyncConnection
-    ) -> None:
-        """Commit the GENERATING marker as its own unit of work.
+    async def _claim_generation(
+        self,
+        user_id: str,
+        summary_date: date,
+        seen_generated_at: datetime | None,
+        transaction: AsyncConnection,
+    ) -> bool:
+        """Commit the GENERATING claim as its own unit of work.
 
-        Uses ``update_status`` to preserve existing fields; falls back to
-        ``upsert`` if no row exists yet.
+        Returns whether this run won it. The repository's claim is one atomic
+        compare-and-set on ``generated_at`` that creates the row if needed and
+        otherwise moves only the status, so a previous generation's text and
+        counters survive until the new result replaces them.
         """
-        updated = await self._summary_repo.update_status(
-            user_id, summary_date, SummaryStatus.GENERATING.value
+        return await self._summary_repo.claim_for_generation(
+            user_id, summary_date, seen_generated_at=seen_generated_at
         )
-        if updated is None:
-            await self._summary_repo.upsert(
-                JournalDailySummary(
-                    user_id=user_id,
-                    summary_date=summary_date,
-                    status=SummaryStatus.GENERATING,
-                )
-            )
 
     @transactional
     async def _persist_generated(

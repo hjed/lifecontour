@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from core_shared.models.contacts.entities import SummaryStatus
@@ -129,6 +129,46 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
         if row is None:
             return None
         return self._row_to_entity(row)
+
+    async def claim_for_generation(
+        self,
+        user_id: str,
+        summary_date: date,
+        *,
+        seen_generated_at: datetime | None,
+    ) -> bool:
+        """Atomically mark the summary GENERATING, if it is still as the caller saw it.
+
+        One statement, so two callers cannot both win: the insert takes the
+        unique (user_id, summary_date) slot or, on conflict, updates the row
+        under its lock — and the conflict branch's WHERE lets through untouched,
+        returning nothing, a row that is already GENERATING or whose
+        ``generated_at`` has moved since the caller looked (``IS NOT DISTINCT
+        FROM`` so a never-generated row matches a caller that saw none). Only
+        the status moves on an existing row.
+        """
+        query = text(
+            """
+            INSERT INTO journal_daily_summaries (user_id, summary_date, status)
+            VALUES (:user_id, :summary_date, :generating)
+            ON CONFLICT (user_id, summary_date) DO UPDATE
+                SET status = EXCLUDED.status, updated_at = NOW()
+                WHERE journal_daily_summaries.status != EXCLUDED.status
+                  AND journal_daily_summaries.generated_at IS NOT DISTINCT FROM
+                      CAST(:seen_generated_at AS TIMESTAMP WITH TIME ZONE)
+            RETURNING id
+        """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": user_id,
+                "summary_date": summary_date,
+                "generating": SummaryStatus.GENERATING.value,
+                "seen_generated_at": seen_generated_at,
+            },
+        )
+        return result.fetchone() is not None
 
     async def invalidate_for_date(self, user_id: str, summary_date: date) -> None:
         """Set an existing summary to PENDING. No-op if none exists."""

@@ -62,8 +62,11 @@ async def get_daily_summary(
 
     Returns the cached summary if available, or generates a new one on-demand.
     Today (in the user's timezone) is always eligible, however many journals
-    it has; any other date with fewer than 2 journals returns a DISABLED
-    summary. Returns null data when Gemini is not configured.
+    it has, and today's summary is regenerated on read if it was not generated
+    today in the user's timezone — a summary produced yesterday evening is not
+    served this morning. Any other date with fewer than 2 journals returns a
+    DISABLED summary, and is otherwise served from cache however old it is.
+    Returns null data when Gemini is not configured.
     """
     try:
         result = await daily_summary_service.get_or_generate(

@@ -442,8 +442,12 @@ rather than this API's taste:
   the same `journal_daily_summaries` row `GET /api/journals/daily-summary/{date}`
   serves, read through `JournalDailySummaryRepository` rather than
   `DailySummaryService.get_or_generate` — that path commits a row and then calls
-  an AI model, and a dashboard load must not write. Which of the five stored
-  statuses the page can show is the section's own decision:
+  an AI model, and a dashboard load must not write. (`GET
+  /api/journals/daily-summary/{date}` itself, and MCP `get_daily_summary`,
+  regenerate today's summary on read when it was not generated today in the
+  user's timezone; that rule is the service's, so neither surface has logic of
+  its own for it.) Which of the five stored statuses the page can show is the
+  section's own decision:
 
   | Stored status | Section `status` | `data.state` |
   |---|---|---|
@@ -452,16 +456,22 @@ rather than this API's taste:
   | `disabled` (a past or future day below the two-journal threshold; today is always eligible) | `unavailable` | — |
   | `pending` | `ready` | `generating` |
   | `generating` | `ready` | `generating` |
-  | `generated` | `ready` | `generated` |
+  | `generated`, generated today in the user's timezone | `ready` | `generated` |
+  | `generated`, but not generated today (stale) | `ready` | `generating` |
 
   A summary section has no *empty* state — it is not a list — so `unavailable`
   covers both "could not be read" and "there is none today", which the page
   renders as one quiet line either way. `pending` folds into `generating`
   because to a reader waiting for words, queued and in-flight are the same
-  condition — but note that **nothing currently moves a journal daily summary
-  out of `pending`** except the daily-summary endpoints, which this one does not
-  call. A client that renders `generating` should therefore offer the
-  regeneration action rather than waiting for the state to change on its own.
+  condition, and a **stale** generated row folds the same way: the
+  specification's freshness rule says today's summary must have been generated
+  today in the user's timezone, so yesterday evening's prose is withheld this
+  morning rather than served. The dashboard judges that from the row's
+  `generated_at` and never writes — but note that **nothing on this path moves
+  a journal daily summary out of `generating`**: only the daily-summary
+  endpoints (and the MCP tool) generate, and this one does not call them. A
+  client that renders `generating` should therefore offer the regeneration
+  action rather than waiting for the state to change on its own.
   The payload is
   `{state, summary_text, journal_count, event_count, contact_count,
   mood_average}`: `summary_text` comes from the entity's `get_display_text`, so
