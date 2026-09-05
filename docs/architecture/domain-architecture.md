@@ -606,6 +606,24 @@ The journal domain has **two separate review stores** that must not be conflated
 
 ### Journal date resolution (user-local)
 
+**How a date range is stored.** `journals.event_date_range_start/end` hold the UTC **instant of local
+midnight**, and the end is the last day *inclusive* — so 5 September in Sydney is `2026-09-04T14:00Z`, and
+a single-day event has `start == end`. The zone that instant is anchored in is read from
+`journal_calendar_info.timezone`, else the user's configured zone, else UTC; `event_date_in_timezone`
+(`core_shared/models/journals/calendar_info.py`) and `google_event_times` (the Google worker's
+`event_transformer.py`) both apply that order. Taking `.date()` of the instant in UTC instead is a day
+early for any zone ahead of UTC, which is what LOCAL-137 reported.
+
+Everything that writes a range follows this: `JournalCreateForm` and `InlineEditDateRange` both send
+`localMidnight(...).toISOString()` (`frontend/src/lib/date-utils.ts`), and since #1385 the inbound Google
+sync stores an imported all-day event at local midnight in the user's zone and records that zone.
+Migration **0109** moved the all-day rows imported *before* that — which sat at UTC midnight with no zone,
+and pushed back to Google a day early for a user west of UTC — onto the same convention.
+
+Clock times are a separate matter: `journal_calendar_info.start_time/end_time` are local to whatever zone
+the row records, so they must never be re-anchored in a zone the row does not state. With no zone, the
+stored instants are the truth.
+
 A journal's **date** is the local date of its `event_date_range.start` in the acting user's **configured**
 timezone, and it is the date the tasks model judges its future-dated invariant against. It is *intended*
 to be the date the journal list groups it under; that equality does not hold unconditionally today, and
