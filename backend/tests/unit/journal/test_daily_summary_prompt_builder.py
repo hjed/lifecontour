@@ -24,6 +24,7 @@ from app.core.journal.services.daily_summary_prompt_builder import (
     MAX_CONTENT_LENGTH,
     MAX_TASK_CONTACTS,
     MAX_TASK_ENTRIES,
+    MAX_TASK_TEXT_LENGTH,
     DailySummaryPromptBuilder,
 )
 
@@ -933,3 +934,57 @@ class TestTheToneInstructionsCoverTasks:
             "Do not restate the day's agenda, journals, tasks or other listed "
             "material item by item" in prompt
         )
+
+
+class TestAnUnboundedTaskTextIsCapped:
+    """``tasks.text`` is deliberately unbounded, so the prompt bounds it.
+
+    Capping the *number* of tasks does nothing about the size of one, and a
+    single arbitrarily large row would push the whole request past the model's
+    limit — failing that day's summary outright rather than degrading it.
+    """
+
+    def test_a_long_text_is_truncated_and_marked(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        text = "x" * (MAX_TASK_TEXT_LENGTH + 50) + "TAIL"
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY, text=text)),
+            ),
+            now=_NOW,
+        )
+
+        assert "x" * MAX_TASK_TEXT_LENGTH + "..." in prompt
+        assert "TAIL" not in prompt
+
+    def test_a_text_at_the_limit_is_left_alone(self) -> None:
+        """The boundary from the other side, so the cap cannot be off by one."""
+        builder = DailySummaryPromptBuilder()
+        text = "y" * MAX_TASK_TEXT_LENGTH
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY, text=text)),
+            ),
+            now=_NOW,
+        )
+
+        assert text in prompt
+        assert text + "..." not in prompt
+
+    def test_an_ordinary_task_is_untouched(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_tasks=_due_soon(_task(1, due_date=_TODAY)),
+            ),
+            now=_NOW,
+        )
+
+        assert "book the venue (in" in prompt
+        assert "..." not in prompt

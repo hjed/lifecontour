@@ -34,6 +34,19 @@ if TYPE_CHECKING:
 # Truncate content beyond this length to keep prompts bounded
 MAX_CONTENT_LENGTH = 500
 
+# And the same bound on a task's text, which needs one for the same reason.
+#
+# **Two columns reach this prompt unbounded, and these are they.** Every other
+# string interpolated below comes from a bounded ``VARCHAR`` — a journal title
+# is 500, a contact name 100, a location 500 — so it cannot be the thing that
+# blows a request. ``journals.content`` is ``TEXT``, which is why
+# ``MAX_CONTENT_LENGTH`` has always existed; ``tasks.text`` is ``TEXT`` too, and
+# migration 0105 calls it "deliberately unbounded". One arbitrarily large task
+# would otherwise push the whole request past the model's limit and fail the
+# day's summary outright — a per-day outage caused by a single row. Raised by
+# the pull request's automated review.
+MAX_TASK_TEXT_LENGTH = 500
+
 # Caps on the agenda material one prompt may carry. Adding the agenda, and later
 # the week's tasks and contact dates, grows a prompt that used to hold journals
 # alone, so each input group is bounded rather than left to a busy day. Neither
@@ -49,6 +62,18 @@ MAX_AGENDA_PARTICIPANTS = 10
 # itself; these bound the pathological week within it.
 MAX_TASK_ENTRIES = 20
 MAX_TASK_CONTACTS = 10
+
+
+def _capped(value: str, cap: int) -> str:
+    """``value`` at most ``cap`` characters, with an ellipsis when it was cut.
+
+    Used for the two values in this prompt that come from unbounded ``TEXT``
+    columns — a journal's content and a task's text. The ellipsis is the point:
+    a model that can see the value was cut will not treat a sentence that stops
+    mid-word as the whole commitment, which is the same honesty the counted
+    remainders give the capped *lists*.
+    """
+    return value if len(value) <= cap else value[:cap] + "..."
 
 
 def _with_people(names: list[str], cap: int) -> str | None:
@@ -397,11 +422,16 @@ class DailySummaryPromptBuilder:
         what needs preparing, and a bare ``30 Apr`` makes it do date arithmetic
         against a system time several sections earlier to find out whether that
         is urgent.
+
+        **The text is capped**, unlike the journal title beside it. ``tasks.text``
+        is the only unbounded column this line reads — see
+        :data:`MAX_TASK_TEXT_LENGTH` — and capping the *number* of tasks does
+        nothing about the size of one.
         """
         parts = [
             f"Due {model.due_journal.date:%d %b} "
             f"({cls._relative_day(model.due_journal.date, today)}):",
-            model.task.text,
+            _capped(model.task.text, MAX_TASK_TEXT_LENGTH),
             f'(in "{model.due_journal.title}")',
         ]
 
@@ -446,10 +476,7 @@ class DailySummaryPromptBuilder:
                 lines.append(f"Mood: {entry.mood_value}")
             if entry.energy_level is not None:
                 lines.append(f"Energy: {entry.energy_level}")
-            content = entry.content
-            if len(content) > MAX_CONTENT_LENGTH:
-                content = content[:MAX_CONTENT_LENGTH] + "..."
-            lines.append(f"Content: {content}")
+            lines.append(f"Content: {_capped(entry.content, MAX_CONTENT_LENGTH)}")
 
         return "\n".join(lines)
 
