@@ -1,12 +1,15 @@
 """Unit tests for DailySummaryPromptBuilder."""
 
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta
 
+from app.core.dashboard.models.sections import AgendaEntry, AgendaParticipant
 from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
     DailySummaryJournalEntry,
 )
 from app.core.journal.services.daily_summary_prompt_builder import (
+    MAX_AGENDA_ENTRIES,
+    MAX_AGENDA_PARTICIPANTS,
     MAX_CONTENT_LENGTH,
     DailySummaryPromptBuilder,
 )
@@ -270,3 +273,189 @@ class TestPromptSeriesLine:
         prompt = builder.build(summary_input)
 
         assert "Series:" not in prompt
+
+
+_NOW = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+_TODAY = date(2026, 4, 27)
+
+
+def _agenda_entry(**overrides: object) -> AgendaEntry:
+    """An agenda entry with sensible defaults: a timed, uncancelled event."""
+    defaults: dict[str, object] = {
+        "journal_id": 1,
+        "title": "Design review",
+        "is_all_day": False,
+        "starts_at": datetime(2026, 4, 27, 9, 0, tzinfo=UTC),
+        "ends_at": datetime(2026, 4, 27, 9, 30, tzinfo=UTC),
+        "start_time": time(9, 0),
+        "end_time": time(9, 30),
+    }
+    defaults.update(overrides)
+    return AgendaEntry(**defaults)  # type: ignore[arg-type]
+
+
+class TestTheAgendaIsCurrentDayOnly:
+    """Forward-looking material belongs to today and to no other day."""
+
+    def test_agenda_section_present_for_today(self) -> None:
+        """Today's prompt carries the day's events, times, locations and people."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            location="Level 3 boardroom",
+            participants=(AgendaParticipant(contact_id=7, name="Alice Smith"),),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "Today's Agenda" in prompt
+        assert "Design review" in prompt
+        assert "09:00-09:30" in prompt
+        assert "Level 3 boardroom" in prompt
+        assert "Alice Smith" in prompt
+
+    def test_agenda_absent_for_a_past_day(self) -> None:
+        """A past day describes that day, not what was scheduled on it now."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY - timedelta(days=1), agenda=[_agenda_entry()]
+            ),
+            now=_NOW,
+        )
+
+        assert "Today's Agenda" not in prompt
+        assert "Design review" not in prompt
+
+    def test_agenda_absent_for_a_future_day(self) -> None:
+        """The rule is "the current day", not "today or later"."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY + timedelta(days=1), agenda=[_agenda_entry()]
+            ),
+            now=_NOW,
+        )
+
+        assert "Today's Agenda" not in prompt
+        assert "Design review" not in prompt
+
+    def test_no_entries_adds_no_heading(self) -> None:
+        """A day with nothing scheduled gains no empty section."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input(summary_date=_TODAY, agenda=[]), now=_NOW)
+
+        assert "Today's Agenda" not in prompt
+
+
+class TestHowAnAgendaEntryReads:
+    """One entry's rendering: times, cancellation and the caps."""
+
+    def test_all_day_entry_renders_all_day(self) -> None:
+        """An all-day item is true of the whole day, not a thing at 00:00."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            title="Public holiday",
+            is_all_day=True,
+            start_time=None,
+            end_time=None,
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "All day: Public holiday" in prompt
+
+    def test_timed_entry_without_clock_times_renders_no_time(self) -> None:
+        """No clock columns means no time — never one invented from the instant."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(title="Mystery meeting", start_time=None, end_time=None)
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "- Mystery meeting" in prompt
+        assert "All day" not in prompt
+
+    def test_cancelled_entry_is_marked(self) -> None:
+        """A cancelled event is never presented as something the user is doing."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(title="Dentist", is_cancelled=True)
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "[CANCELLED]" in prompt
+        assert "did not go ahead" in prompt
+
+    def test_entry_cap_states_the_overflow(self) -> None:
+        """A busy day is capped, and the prompt says so rather than truncating."""
+        builder = DailySummaryPromptBuilder()
+        entries = [
+            _agenda_entry(journal_id=i, title=f"Event-{i:02d}")
+            for i in range(MAX_AGENDA_ENTRIES + 5)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=entries), now=_NOW
+        )
+
+        assert f"Event-{MAX_AGENDA_ENTRIES - 1:02d}" in prompt
+        assert f"Event-{MAX_AGENDA_ENTRIES:02d}" not in prompt
+        assert "5 further events" in prompt
+
+    def test_participant_cap_states_the_overflow(self) -> None:
+        """A large invite list is capped per entry, and counted rather than cut."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            participants=tuple(
+                AgendaParticipant(contact_id=i, name=f"Person-{i:02d}")
+                for i in range(MAX_AGENDA_PARTICIPANTS + 2)
+            )
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert f"Person-{MAX_AGENDA_PARTICIPANTS - 1:02d}" in prompt
+        assert f"Person-{MAX_AGENDA_PARTICIPANTS:02d}" not in prompt
+        assert "and 2 more" in prompt
+
+
+class TestToneAndSafetyInstructions:
+    """The constraints the specification says matter more now."""
+
+    def test_do_not_restate_instruction_present(self) -> None:
+        """The summary's value is connecting the sections, not repeating them."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input())
+
+        assert "item by item" in prompt
+        assert "restate" in prompt
+
+    def test_grounding_names_the_agenda_as_a_source(self) -> None:
+        """The summary is grounded in everything it was given, agenda included."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input())
+
+        assert "Ground everything you say in the journals, the agenda" in prompt
+
+    def test_existing_tone_constraints_retained(self) -> None:
+        """Adding inputs must not cost the constraints already in the prompt."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input())
+
+        assert "practical and descriptive rather than speculative" in prompt
+        assert "Do not invent information" in prompt
+        assert "Do not rewrite the journal record" in prompt

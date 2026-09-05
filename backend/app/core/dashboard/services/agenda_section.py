@@ -22,15 +22,23 @@ on every request.
 Pure, and deliberately not a method on the service: the rule is the whole product
 of this phase, it is only meaningful at its boundaries, and a function over a
 sequence is the shape those boundaries can be asserted at without a database.
+
+``agenda_for_day`` below is the one read that applies it, kept here beside the
+rule so no caller can window a day without ordering it.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.core.journal.services.journal_date_resolver import local_day_window
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from datetime import date
+    from zoneinfo import ZoneInfo
 
+    from app.core.dashboard.models.repositories import AgendaRepository
     from app.core.dashboard.models.sections import AgendaEntry
 
 
@@ -55,3 +63,34 @@ def order_agenda_entries(entries: Iterable[AgendaEntry]) -> tuple[AgendaEntry, .
             ),
         )
     )
+
+
+async def agenda_for_day(
+    repo: AgendaRepository, user_id: str, day: date, tz: ZoneInfo
+) -> tuple[AgendaEntry, ...]:
+    """One local day's event journals, in the order the agenda draws them.
+
+    The window and the anchor are the whole of what a caller could get wrong,
+    and neither is visible in the entries that come back: an all-day event is
+    matched against the *date*, a timed one by overlap against the *instants*,
+    and a window built from anything but ``local_day_window`` would quietly
+    disagree with the dashboard about which events are on today.
+
+    So this exists rather than each caller assembling the same three lines. The
+    home dashboard reads today and tomorrow through it; the daily summary reads
+    the current day through it, and the two therefore cannot describe different
+    days as "today" or order the same day differently.
+
+    Args:
+        repo: The agenda read port.
+        user_id: The acting user — every window is scoped to them.
+        day: The local day to read, in ``tz``.
+        tz: The user's configured timezone, which decides where the day starts.
+
+    Returns:
+        The day's entries, all-day first and then ascending by start instant.
+    """
+    entries = await repo.list_entries_in_window(
+        user_id, window=local_day_window(day, tz), anchor=day
+    )
+    return order_agenda_entries(entries)

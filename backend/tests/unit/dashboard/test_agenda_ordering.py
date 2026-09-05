@@ -15,11 +15,17 @@ decided which entries are on it.
 """
 
 import datetime
+from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.core.dashboard.models.sections import AgendaEntry
-from app.core.dashboard.services.agenda_section import order_agenda_entries
+from app.core.dashboard.services.agenda_section import (
+    agenda_for_day,
+    order_agenda_entries,
+)
+from app.core.journal.services.journal_date_resolver import local_day_window
 
 pytestmark = pytest.mark.unit
 
@@ -224,3 +230,28 @@ class TestTheRuleIsPure:
 
     def test_it_returns_a_tuple_so_the_section_payload_stays_frozen(self) -> None:
         assert isinstance(order_agenda_entries([entry(1)]), tuple)
+
+
+class TestAgendaForDay:
+    """The read both the dashboard and the daily summary go through.
+
+    The window and the anchor are the whole contract here: a caller that built
+    either itself would be the second implementation this helper exists to
+    prevent, and neither is visible in the entries that come back.
+    """
+
+    @pytest.mark.asyncio
+    async def test_it_windows_the_local_day_and_orders_what_comes_back(self) -> None:
+        tz = ZoneInfo("Australia/Sydney")
+        repo = AsyncMock()
+        repo.list_entries_in_window.return_value = [
+            entry(1, starts_at=instant(8)),
+            entry(2, all_day=True),
+        ]
+
+        ordered = await agenda_for_day(repo, "user-1", TODAY, tz)
+
+        assert ids(ordered) == [2, 1]
+        repo.list_entries_in_window.assert_awaited_once_with(
+            "user-1", window=local_day_window(TODAY, tz), anchor=TODAY
+        )
