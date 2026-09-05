@@ -7,6 +7,8 @@ import {
   formatDateRange,
   formatIsoDate,
   formatIsoDateLong,
+  formatIsoWeekdayDate,
+  isIsoCalendarDate,
 } from '../date-utils';
 
 describe('formatDateOnly', () => {
@@ -116,5 +118,70 @@ describe('formatIsoDateLong', () => {
 
   it('handles a leap day', () => {
     expect(formatIsoDateLong('2024-02-29')).toBe('Thursday, 29 February 2024');
+  });
+});
+
+describe('formatIsoWeekdayDate', () => {
+  it('writes the weekday and day-month the tomorrow disclosure labels itself with', () => {
+    // W19's form: "Tomorrow — <weekday>, <d Month>". The year is not drawn,
+    // because a disclosure about tomorrow is never about another year than
+    // the one the page already names in its header.
+    expect(formatIsoWeekdayDate('2026-08-01')).toBe('Saturday, 1 August');
+  });
+
+  /**
+   * The same contract as {@link formatIsoDateLong}, and it matters for the
+   * same reason: `agenda.tomorrow.date` is the *server's* local tomorrow,
+   * already resolved in the user's configured zone. Parsing it as an instant
+   * would shift it back a day in any zone behind UTC and label the row with
+   * today.
+   */
+  it('does not shift a date that has already been resolved', () => {
+    expect(formatIsoWeekdayDate('2026-01-01')).toBe('Thursday, 1 January');
+    expect(formatIsoWeekdayDate('2026-12-31')).toBe('Thursday, 31 December');
+  });
+
+  it('handles a leap day', () => {
+    expect(formatIsoWeekdayDate('2024-02-29')).toBe('Thursday, 29 February');
+  });
+});
+
+describe('isIsoCalendarDate', () => {
+  it('accepts an ISO calendar date', () => {
+    expect(isIsoCalendarDate('2026-08-01')).toBe(true);
+    expect(isIsoCalendarDate('2024-02-29')).toBe(true);
+  });
+
+  /**
+   * Everything a caller's types promised and its payload did not deliver.
+   * These fail identically from the formatter's seat — `format(parseISO(x))`
+   * throws a RangeError — so the guard answers them identically too.
+   */
+  it.each([
+    ['an empty string', ''],
+    ['a word', 'tomorrow'],
+    ['a day that does not exist', '2026-02-31'],
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 20260801],
+    ['an object', { date: '2026-08-01' }],
+  ])('rejects %s', (_, value) => {
+    expect(isIsoCalendarDate(value)).toBe(false);
+  });
+
+  /**
+   * The rejections that matter most, because `parseISO` accepts all three and
+   * each would then be formatted in the *browser's* zone. An instant is the
+   * dangerous one: anywhere behind UTC it labels its caller with the previous
+   * calendar day, which is the exact failure the calendar-date helpers exist
+   * to avoid.
+   */
+  it.each([
+    ['an instant', '2026-08-01T00:00:00Z'],
+    ['an instant with an offset', '2026-08-01T00:00:00+10:00'],
+    ['a year and month only', '2026-08'],
+    ['a basic-format date', '20260801'],
+  ])('rejects %s, which parseISO would otherwise accept', (_, value) => {
+    expect(isIsoCalendarDate(value)).toBe(false);
   });
 });

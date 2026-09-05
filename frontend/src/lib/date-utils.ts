@@ -5,7 +5,7 @@
  * with proper timezone handling and Australian locale support.
  */
 
-import { format, parseISO } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { enAU } from 'date-fns/locale';
 
 /**
@@ -92,4 +92,55 @@ export function formatIsoDate(date: string): string {
  */
 export function formatIsoDateLong(date: string): string {
   return format(parseISO(date), 'EEEE, d MMMM yyyy', { locale: enAU });
+}
+
+/**
+ * Format an ISO **calendar date** (`YYYY-MM-DD`) as `EEEE, d MMMM` — no year.
+ *
+ * The form the agenda's tomorrow disclosure labels itself with (**W19**) —
+ * *"Saturday, 1 August"*, written after the word *Tomorrow*. The year is left
+ * off deliberately: the row is always about the day after the one the page
+ * header already names in full, so repeating it adds nothing.
+ *
+ * Parsed as a local calendar date for the same reason as
+ * {@link formatIsoDateLong}: `agenda.tomorrow.date` is the server's local
+ * tomorrow, already resolved in the user's configured zone, and re-parsing it
+ * as an instant would shift it back a day in any zone behind UTC — labelling
+ * the row with today.
+ *
+ * @example formatIsoWeekdayDate('2026-08-01') // "Saturday, 1 August"
+ */
+export function formatIsoWeekdayDate(date: string): string {
+  return format(parseISO(date), 'EEEE, d MMMM', { locale: enAU });
+}
+
+/** `YYYY-MM-DD` and nothing else — not an instant, not a partial date. */
+const ISO_CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Is `value` an ISO **calendar date** (`YYYY-MM-DD`) a formatter can read?
+ *
+ * Presence, type, shape and parseability in one question, for a caller holding
+ * a value its types promise but its payload might not deliver. `''`, `null`,
+ * `'tomorrow'` and `'2026-02-31'` are all answered the same way, because from
+ * the formatter's seat they fail identically: `format(parseISO(...))` throws a
+ * `RangeError` on an invalid date and takes the render down with it.
+ *
+ * **The shape is checked, not just the parse, and that is the point of the
+ * guard rather than a nicety.** `parseISO` is generous — it accepts
+ * `2026-08-01T00:00:00Z`, `20260801` and even `2026-08` — and an *instant*
+ * that survives this check would then be formatted in the **browser's** zone,
+ * labelling a caller with the previous calendar day anywhere behind UTC. That
+ * is the precise failure {@link formatIsoWeekdayDate} and
+ * {@link formatIsoDateLong} exist to avoid, so a value that is not a bare
+ * calendar date is rejected rather than quietly re-anchored.
+ *
+ * Written as a type guard so a caller that asks this can then use the value.
+ */
+export function isIsoCalendarDate(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    ISO_CALENDAR_DATE.test(value) &&
+    isValid(parseISO(value))
+  );
 }

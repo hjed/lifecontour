@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { TestDataManager } from './data-management';
 import { test, expect, type TestJournal } from './fixtures';
 
@@ -259,6 +259,36 @@ const SUMMARY_TIMEZONE = 'Australia/Sydney';
 const SUMMARY_ANCHOR = new Intl.DateTimeFormat('en-CA', {
   timeZone: SUMMARY_TIMEZONE,
 }).format(new Date());
+/**
+ * The calendar day after `day`, as `YYYY-MM-DD`.
+ *
+ * Stepped in UTC because the e2e user has no configured timezone, so the
+ * backend's day boundaries — and therefore `agenda.tomorrow.date` — are UTC.
+ * Built from the anchor the API gave rather than from a clock, for the reason
+ * {@link anchorDay} exists.
+ *
+ * Declared here, above the module-scope constant that calls it: as a hoisted
+ * `function` the order happens not to matter, but rewriting it as a `const`
+ * arrow — a routine tidy-up — would throw at module evaluation and fail all
+ * 57 tests in this file with an error pointing nowhere near the change.
+ */
+function nextDay(day: string): string {
+  const stepped = new Date(`${day}T00:00:00Z`);
+  stepped.setUTCDate(stepped.getUTCDate() + 1);
+  return stepped.toISOString().slice(0, 10);
+}
+
+/**
+ * The mocked tomorrow, **fixed** rather than derived from the clock.
+ *
+ * `SUMMARY_ANCHOR` has to be the real today, because the page reads the
+ * server's anchor; nothing requires the *mocked* tomorrow to track the
+ * calendar, and deriving it made one assertion's strength depend on the day
+ * the suite ran. A Wednesday in September is the longest label the row has to
+ * hold, which is what the mobile-overflow test needs to be worth running.
+ */
+const MOCK_TOMORROW = '2026-09-30';
+
 const REGENERATE_PATH = `**/api/journals/daily-summary/${SUMMARY_ANCHOR}/regenerate`;
 
 const SUMMARY_PROSE = 'A quiet Wednesday. Two journals and one long walk.';
@@ -315,7 +345,13 @@ function dashboardBody(summary: SummarySection) {
       id: 'e2e-user',
       attributes: {
         summary,
-        agenda: { status: 'ready', data: { entries: [] } },
+        // `tomorrow` rides on every ready agenda (Phase 6). Omitting it here
+        // served a payload the API cannot produce, and the tomorrow
+        // disclosure beneath today's list is drawn from it.
+        agenda: {
+          status: 'ready',
+          data: { entries: [], tomorrow: { date: MOCK_TOMORROW, entries: [] } },
+        },
         tasks: { status: 'ready', data: {} },
         upcoming_dates: { status: 'ready', data: {} },
       },
@@ -703,13 +739,79 @@ function agendaList(page: Page) {
   return page.getByRole('list', { name: AGENDA_LIST_NAME });
 }
 
+/**
+ * A locator's bounding box, asserted present rather than asserted away.
+ *
+ * The same guard `sectionBoxes` uses: a null box should fail as an assertion
+ * naming the element, not as a `TypeError` on a property read.
+ */
+async function boxOf(locator: Locator) {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  return box!;
+}
+
+/**
+ * The weekday-and-date half of the disclosure's label, in **W19**'s form.
+ *
+ * Built with `Intl` in UTC — deliberately not the app's `formatIsoWeekdayDate`
+ * — so this asserts what the row should say rather than re-running the code
+ * that says it.
+ */
+function expectedTomorrowLabel(day: string): string {
+  const at = new Date(`${day}T00:00:00Z`);
+  const weekday = new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'UTC',
+    weekday: 'long',
+  }).format(at);
+  const dayMonth = new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'long',
+  }).format(at);
+  // W19 writes the comma; `Intl` does not put one in on its own.
+  return `${weekday}, ${dayMonth}`;
+}
+
 /** The agenda row for one seeded journal, by the id the row carries. */
 function agendaRow(page: Page, journal: TestJournal) {
   return agendaList(page).getByTestId(`agenda-entry-${journal.id}`);
 }
 
-/** Serve a dashboard whose agenda is ready and empty. */
-async function mockEmptyAgenda(page: Page): Promise<void> {
+/** One mocked agenda entry, in the payload's shape. */
+function mockEntry(journalId: number, title: string, startTime: string) {
+  return {
+    journal_id: journalId,
+    title,
+    is_all_day: false,
+    starts_at: `${MOCK_TOMORROW}T${startTime}Z`,
+    ends_at: `${MOCK_TOMORROW}T${startTime}Z`,
+    start_time: startTime,
+    end_time: null,
+    timezone: 'UTC',
+    location: null,
+    calendar_color: '#8B5CF6',
+    is_cancelled: false,
+    tags: [],
+    participants: [],
+  };
+}
+
+/**
+ * Serve a dashboard whose agenda is ready, with the given days.
+ *
+ * The counts and the empty states are asserted against a mock for the reason
+ * the summary block gives for `unavailable`: the account is shared across the
+ * run, so an exact count read from real data would depend on suite ordering.
+ * The behavioural tests below use real fixtures and assert only their own rows.
+ */
+async function mockAgenda(
+  page: Page,
+  agenda: {
+    entries?: ReturnType<typeof mockEntry>[];
+    tomorrow?: ReturnType<typeof mockEntry>[];
+  } = {}
+): Promise<void> {
   await page.route('**/api/home-dashboard', async route => {
     await route.fulfill({
       status: 200,
@@ -723,8 +825,11 @@ async function mockEmptyAgenda(page: Page): Promise<void> {
             agenda: {
               status: 'ready',
               data: {
-                entries: [],
-                tomorrow: { date: SUMMARY_ANCHOR, entries: [] },
+                entries: agenda.entries ?? [],
+                tomorrow: {
+                  date: MOCK_TOMORROW,
+                  entries: agenda.tomorrow ?? [],
+                },
               },
             },
             tasks: { status: 'ready', data: {} },
@@ -735,6 +840,11 @@ async function mockEmptyAgenda(page: Page): Promise<void> {
       }),
     });
   });
+}
+
+/** Serve a dashboard whose agenda is ready and empty, today and tomorrow. */
+async function mockEmptyAgenda(page: Page): Promise<void> {
+  await mockAgenda(page);
 }
 
 test.describe('Home Dashboard — the agenda card', () => {
@@ -961,6 +1071,165 @@ test.describe('Home Dashboard — the agenda card', () => {
       await expect(card.getByText(AGENDA_EMPTY_LINE)).toBeVisible();
       await expect(agendaList(page).getByRole('listitem')).toHaveCount(0);
       await expect(card.getByRole('alert')).toHaveCount(0);
+    });
+  });
+
+  /**
+   * The tomorrow disclosure (**W19**, **W20**).
+   *
+   * Clicks are gated on the trigger's `aria-expanded` rather than on the
+   * panel's visibility: the panel slides, and asking whether it is visible
+   * races that animation (the recorded Radix one-shot race). `aria-expanded`
+   * is the state, not a rendering of it.
+   */
+  test.describe('Tomorrow (W19, W20)', () => {
+    test('opens tomorrow’s entries in place beneath today, then shuts again', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+      testCleanup(() => dataManager.cleanup());
+      const today = await anchorDay(page);
+      const tomorrow = nextDay(today);
+
+      const [calendar] = await dataManager.createCalendars([
+        { name: 'Agenda Tomorrow Cal', color: '#0EA5E9' },
+      ]);
+      const todayStandup = await createAgendaEvent(dataManager, today, {
+        title: 'Agenda Today Standup',
+        startTime: '09:00:00',
+        endTime: '09:30:00',
+        calendarId: calendar.id,
+      });
+      const tomorrowHoliday = await createAgendaEvent(dataManager, tomorrow, {
+        title: 'Agenda Tomorrow Holiday',
+        allDay: true,
+        calendarId: calendar.id,
+      });
+      const tomorrowRetro = await createAgendaEvent(dataManager, tomorrow, {
+        title: 'Agenda Tomorrow Retro',
+        startTime: '16:00:00',
+        endTime: '17:00:00',
+        location: 'The big room',
+        calendarId: calendar.id,
+      });
+
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const card = page.getByTestId('agenda-card');
+      const trigger = card.getByTestId('tomorrow-trigger');
+      const holidayRow = card.getByTestId(`agenda-entry-${tomorrowHoliday.id}`);
+      const retroRow = card.getByTestId(`agenda-entry-${tomorrowRetro.id}`);
+      const todayRow = agendaRow(page, todayStandup);
+
+      // Collapsed on arrival: today is drawn, tomorrow is not (W19).
+      await expect(todayRow).toBeVisible();
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      // The whole label, against the day the API itself resolved — the prefix
+      // alone would pass on a row drawn a day out. Formatted here with `Intl`
+      // rather than the app's own `date-fns` helper, so the assertion is
+      // independent of the code it is checking.
+      await expect(page.getByTestId('tomorrow-label')).toHaveText(
+        `Tomorrow — ${expectedTomorrowLabel(tomorrow)}`
+      );
+      await expect(holidayRow).toHaveCount(0);
+      await expect(retroRow).toHaveCount(0);
+      const urlBefore = page.url();
+
+      await trigger.click();
+      await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+      // W20: tomorrow's entries in the W12–W18 form, all-day above timed.
+      await expect(holidayRow.getByTestId('agenda-entry-all-day')).toHaveText(
+        /all day/i
+      );
+      await expect(retroRow.getByTestId('agenda-entry-time')).toHaveText(
+        '16:00 – 17:00'
+      );
+      await expect(retroRow.getByTestId('agenda-entry-location')).toHaveText(
+        'The big room'
+      );
+      const holidayBox = await boxOf(holidayRow);
+      const retroBox = await boxOf(retroRow);
+      expect(holidayBox.y).toBeLessThan(retroBox.y);
+
+      // In place: today is still on screen and nothing navigated.
+      await expect(todayRow).toBeVisible();
+      expect(page.url()).toBe(urlBefore);
+      // The expanded panel is the only region the card adds, and it opens
+      // beneath today's list rather than replacing it.
+      const todayBox = await boxOf(todayRow);
+      expect(todayBox.y).toBeLessThan(holidayBox.y);
+
+      await trigger.click();
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      await expect(holidayRow).toHaveCount(0);
+    });
+
+    test('counts what is behind it before it is opened', async ({
+      authenticatedPage: page,
+    }) => {
+      await mockAgenda(page, {
+        tomorrow: [
+          mockEntry(9001, 'Mocked tomorrow standup', '09:00:00'),
+          mockEntry(9002, 'Mocked tomorrow retro', '16:00:00'),
+        ],
+      });
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const card = page.getByTestId('agenda-card');
+      await expect(card.getByTestId('tomorrow-count')).toHaveText('2 events');
+      await expect(card.getByTestId('tomorrow-trigger')).toHaveAttribute(
+        'aria-expanded',
+        'false'
+      );
+    });
+
+    test('keeps its row on a clear tomorrow, counting none', async ({
+      authenticatedPage: page,
+    }) => {
+      await mockEmptyAgenda(page);
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const card = page.getByTestId('agenda-card');
+      const trigger = card.getByTestId('tomorrow-trigger');
+      await expect(trigger).toBeVisible();
+      await expect(card.getByTestId('tomorrow-count')).toHaveText('0 events');
+
+      await trigger.click();
+      await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+      await expect(card.getByText('Nothing scheduled tomorrow.')).toBeVisible();
+      await expect(
+        page.getByRole('list', { name: "Tomorrow's agenda" })
+      ).toHaveCount(0);
+      await expect(card.getByRole('alert')).toHaveCount(0);
+    });
+
+    test('reaches tomorrow at mobile width without overflowing', async ({
+      authenticatedPage: page,
+    }) => {
+      await mockAgenda(page, {
+        tomorrow: [mockEntry(9003, 'Mocked tomorrow standup', '09:00:00')],
+      });
+      await page.setViewportSize(MOBILE);
+      await openDashboard(page);
+
+      const trigger = page
+        .getByTestId('agenda-card')
+        .getByTestId('tomorrow-trigger');
+      await trigger.click();
+      await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.getByTestId('agenda-entry-9003')).toBeVisible();
+
+      const overflow = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
     });
   });
 

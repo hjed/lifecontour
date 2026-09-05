@@ -50,6 +50,13 @@ interface DashboardSectionCardProps {
    * Ignored once there are entries.
    */
   readonly placeholder?: React.ReactNode;
+  /**
+   * Hung beneath the entries — under the empty line or the placeholder too,
+   * because neither of those says anything about what a footer is for. The
+   * agenda's tomorrow disclosure (**W19**) is the first: a real button, so it
+   * sits outside the list rather than pretending to be one of its items.
+   */
+  readonly footer?: React.ReactNode;
   readonly children?: React.ReactNode;
   readonly testId?: string;
 }
@@ -63,6 +70,7 @@ export function DashboardSectionCard({
   emptyIcon,
   emptyMessage,
   placeholder,
+  footer,
   children,
   testId,
 }: DashboardSectionCardProps) {
@@ -101,6 +109,7 @@ export function DashboardSectionCard({
           (placeholder ?? (
             <WidgetEmptyState icon={emptyIcon} message={emptyMessage} />
           ))}
+        {footer}
       </CardContent>
     </Card>
   );

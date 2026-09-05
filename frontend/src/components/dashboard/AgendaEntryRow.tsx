@@ -10,7 +10,7 @@
  * (**W16**).
  *
  * A pure function of the payload entry, with no query of its own, so the same
- * row renders today's list and, in the next phase, tomorrow's.
+ * row renders today's list and tomorrow's, inside the disclosure beneath it.
  *
  * **A cancelled entry is shown, not hidden, and never as if still happening**
  * (**W18**): the whole row is dimmed, the accent bar is muted rather than
