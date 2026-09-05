@@ -75,21 +75,44 @@ class RecordingCandidates(UpcomingImportantDateRepository):
 
 
 class RecordingImportance(ContactImportanceRepository):
-    """A signals read that remembers which contacts it was asked about."""
+    """A signals read that remembers who it was asked about, and as at when."""
 
     def __init__(self, signals: dict[int, ContactImportance] | None = None) -> None:
         self.signals = signals or {}
         self.calls: list[tuple[int, ...]] = []
+        self.instants: list[datetime.datetime | None] = []
 
     async def for_contacts(
         self, contact_ids: Sequence[int], *, now: datetime.datetime | None = None
     ) -> dict[int, ContactImportance]:
         self.calls.append(tuple(contact_ids))
+        self.instants.append(now)
         return {
             contact_id: self.signals[contact_id]
             for contact_id in contact_ids
             if contact_id in self.signals
         }
+
+
+class SpyDateResolver(JournalDateResolver):
+    """The real resolver, remembering the instant it was asked to read.
+
+    Real rather than mocked so the timezone rules under test are production's,
+    and a spy so the instant can be compared by **identity** with the one the
+    signals read was given — two separate ``datetime.now()`` calls produce
+    distinct objects even when they compare equal, so identity is what tells a
+    shared instant apart from two that merely agree.
+    """
+
+    def __init__(self, user_settings_repo: object) -> None:
+        super().__init__(user_settings_repo=user_settings_repo)  # type: ignore[arg-type]
+        self.instants: list[datetime.datetime | None] = []
+
+    async def today(
+        self, user_id: str, now: datetime.datetime | None = None
+    ) -> datetime.date:
+        self.instants.append(now)
+        return await super().today(user_id, now)
 
 
 def candidate(
@@ -130,13 +153,13 @@ def settings_repo() -> AsyncMock:
 
 
 @pytest.fixture
-def date_resolver(settings_repo: AsyncMock) -> JournalDateResolver:
-    """The real resolver over a stubbed settings row.
+def date_resolver(settings_repo: AsyncMock) -> SpyDateResolver:
+    """The real resolver over a stubbed settings row, remembering its instant.
 
     Real rather than mocked so the timezone rules under test are the ones that
     run in production, not a second copy of them.
     """
-    return JournalDateResolver(user_settings_repo=settings_repo)
+    return SpyDateResolver(user_settings_repo=settings_repo)
 
 
 @pytest.fixture
@@ -151,7 +174,7 @@ def importance() -> RecordingImportance:
 
 @pytest.fixture
 def service(
-    date_resolver: JournalDateResolver,
+    date_resolver: SpyDateResolver,
     candidates: RecordingCandidates,
     importance: RecordingImportance,
 ) -> UpcomingImportantDatesService:
@@ -238,6 +261,89 @@ class TestWhoseDayItIs:
         await service.upcoming_dates(USER_ID, now=JUST_PAST_KIRITIMATI_MIDNIGHT)
 
         assert settings_repo.get_timezone.await_count == 1
+
+
+class TestOneInstantDecidesTheWholeRead:
+    """The day and the thirty-day recency cutoff are read from *one* clock sample.
+
+    The window and the importance signals are separate reads with separate
+    notions of "now" — the day the window starts on, and the instant its
+    thirty-day recency counts are measured back from. Sampling the clock twice
+    leaves them able to disagree, and an injected instant would then pin only
+    half the answer: a caller that supplied ``now`` and asserted on a count at
+    the cutoff would have written a test that fails on its own schedule with
+    nothing to point at.
+
+    Raised by the PR review on #1404. Its premise was right and its severity
+    reading was generous — a microsecond of drift moves a thirty-day cutoff by
+    microseconds, so a count changes only if a row was written at that exact
+    boundary, and the signals are a tie-break in an already-coarse ordering. But
+    the module *claimed* one clock read per request, so the claim was false as
+    written, and the fix costs three lines.
+    """
+
+    async def test_the_signals_are_read_as_at_the_instant_the_day_came_from(
+        self,
+        service: UpcomingImportantDatesService,
+        date_resolver: SpyDateResolver,
+        importance: RecordingImportance,
+        candidates: RecordingCandidates,
+    ) -> None:
+        """Compared by identity: two ``datetime.now()`` calls make distinct
+        objects even when they compare equal, so equality would pass against
+        exactly the bug this asserts against."""
+        candidates.rows = [candidate(1, 10, 8, 12)]
+
+        await service.upcoming_dates(USER_ID)
+
+        assert date_resolver.instants[0] is not None
+        assert importance.instants == [date_resolver.instants[0]]
+        assert importance.instants[0] is date_resolver.instants[0]
+
+    async def test_an_injected_instant_pins_the_signals_too(
+        self,
+        service: UpcomingImportantDatesService,
+        importance: RecordingImportance,
+        candidates: RecordingCandidates,
+    ) -> None:
+        """So a caller that pins the clock has pinned the *whole* answer."""
+        candidates.rows = [candidate(1, 10, 8, 12)]
+
+        await service.upcoming_dates(USER_ID, now=JUST_PAST_KIRITIMATI_MIDNIGHT)
+
+        assert importance.instants == [JUST_PAST_KIRITIMATI_MIDNIGHT]
+
+    async def test_a_supplied_day_still_pins_the_signals_when_an_instant_is_given(
+        self,
+        service: UpcomingImportantDatesService,
+        importance: RecordingImportance,
+        candidates: RecordingCandidates,
+    ) -> None:
+        """``today`` decides the window and ``now`` still decides the cutoff —
+        the two are different questions and supplying one must not silently
+        leave the other to the clock."""
+        candidates.rows = [candidate(1, 10, 8, 12)]
+
+        await service.upcoming_dates(
+            USER_ID, today=TODAY, now=JUST_PAST_KIRITIMATI_MIDNIGHT
+        )
+
+        assert importance.instants == [JUST_PAST_KIRITIMATI_MIDNIGHT]
+
+    async def test_the_signals_get_an_instant_even_when_only_the_day_is_supplied(
+        self,
+        service: UpcomingImportantDatesService,
+        importance: RecordingImportance,
+        candidates: RecordingCandidates,
+    ) -> None:
+        """The dashboard's path: it hands down an anchor and no instant, and the
+        cutoff must still be this request's rather than the repository's own."""
+        candidates.rows = [candidate(1, 10, 8, 12)]
+
+        await service.upcoming_dates(USER_ID, today=TODAY)
+
+        assert importance.instants[0] is not None
+        assert importance.instants[0].tzinfo is not None
 
 
 class TestTheRoundTrips:

@@ -15,7 +15,7 @@ read must stay at two statements — the candidates and the batched importance
 signals — however many contacts the window turns up.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from core_shared.models.contacts.important_date_types import (
@@ -127,6 +127,39 @@ async def _important_date(
             "custom_date_type_id": custom_date_type_id,
             "now": NOW,
         },
+    )
+
+
+async def _journal_mentioning(
+    connection: AsyncConnection,
+    contact_id: int,
+    *,
+    created_at: datetime,
+) -> None:
+    """A journal mentioning the contact, created at a chosen instant.
+
+    One of the three importance signals, and the one whose thirty-day window is
+    measurable from a single row.
+    """
+    result = await connection.execute(
+        text("""
+            INSERT INTO journals (
+                user_id, title, content,
+                event_date_range_start, event_date_range_end, created_at, updated_at
+            )
+            VALUES (:user_id, 'Coffee', 'Notes', :created_at, :created_at,
+                    :created_at, :created_at)
+            RETURNING id
+        """),
+        {"user_id": USER_ID, "created_at": created_at},
+    )
+    await connection.execute(
+        text("""
+            INSERT INTO journal_contact_relationships
+                (journal_id, contact_id, relationship_type)
+            VALUES (:journal_id, :contact_id, 'MENTION')
+        """),
+        {"journal_id": result.scalar_one(), "contact_id": contact_id},
     )
 
 
@@ -651,3 +684,38 @@ class TestTheRoundTrips:
 
         assert result.dates == ()
         assert len(statements) == 1
+
+
+class TestTheInstantReachesTheSignals:
+    """The injected instant decides the recency cutoff, against real SQL.
+
+    The unit tests prove the service *passes* one instant to both reads. This
+    proves the instant it passes is the one PostgreSQL compares against — the
+    half a collaborator assertion cannot see, and the half the PR review on
+    #1404 was really about: a caller that pins ``now`` has pinned the counts.
+    """
+
+    async def test_a_recent_journal_counts_as_at_the_injected_instant(
+        self, async_connection: AsyncConnection, service: UpcomingImportantDatesService
+    ) -> None:
+        await _contact(async_connection, 1)
+        await _important_date(async_connection, 10, 1, month=8, day=14)
+        await _journal_mentioning(async_connection, 1, created_at=NOW)
+
+        result = await service.upcoming_dates(USER_ID, today=TODAY, now=NOW)
+
+        assert result.dates[0].importance.journal_count_30d == 1
+
+    async def test_the_same_journal_is_stale_at_an_instant_months_later(
+        self, async_connection: AsyncConnection, service: UpcomingImportantDatesService
+    ) -> None:
+        """The pair with the test above, and the one that fails if the cutoff is
+        read from the wall clock instead of the instant the caller supplied."""
+        await _contact(async_connection, 1)
+        await _important_date(async_connection, 10, 1, month=8, day=14)
+        await _journal_mentioning(async_connection, 1, created_at=NOW)
+
+        much_later = NOW + timedelta(days=60)
+        result = await service.upcoming_dates(USER_ID, today=TODAY, now=much_later)
+
+        assert result.dates[0].importance.journal_count_30d == 0

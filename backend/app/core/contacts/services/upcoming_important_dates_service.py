@@ -25,9 +25,18 @@ once to judge its rows — so a request crossing local midnight between the two
 built the window against one day and judged the rows against the next, dropping
 a row from a window that claimed to include it. It then shipped a second
 instance of the same shape in the same file. The lesson taken here is
-structural rather than careful: a caller that has **already** resolved today
-passes it in, and this service reads the clock only on the path where nobody
-has. The two cannot both happen.
+structural rather than careful: the instant is sampled **once**, at the top, and
+that same object decides both the day the window starts on and the instant the
+importance signals measure their thirty days back from.
+
+There are two "now"s in this read and it is easy to see only one of them. The
+first attempt threaded the caller's instant into the day and left the *signals*
+read to sample the clock for itself — which the PR review on #1404 caught. The
+drift is microseconds and the signals are a tie-break in an already-coarse
+ordering, so nothing user-visible turned on it; what did turn on it is that a
+caller injecting ``now`` had pinned only half the answer, and a test asserting
+on a count at the thirty-day boundary would have failed on its own schedule with
+nothing to point at. A module claiming one clock read has to mean all of it.
 
 **The window is bounded in the domain**, not only on each surface, so it cannot
 be sidestepped by reaching this service another way — and the bound is refused
@@ -100,10 +109,12 @@ class UpcomingImportantDatesService:
                 it when the caller has one — the dashboard resolves a single
                 anchor for all four of its sections — and the clock is then not
                 read here at all.
-            now: The instant to resolve ``today`` from, when ``today`` was not
-                supplied. Injectable so a day boundary is testable; ignored
-                entirely when ``today`` is given, so exactly one of the two ever
-                decides the day.
+            now: The instant this read is "as at". It resolves ``today`` when
+                ``today`` was not supplied, and in **either** case it is the
+                instant the importance signals measure their thirty-day recency
+                window back from. Injectable so a day boundary is testable, and
+                supplying it pins the whole answer rather than half of it.
+                Defaults to one sample of the clock, taken once and shared.
 
         Returns:
             The window and the dates in it, ordered by occurrence date then
@@ -115,15 +126,16 @@ class UpcomingImportantDatesService:
             ContactValidationError: ``days_ahead`` is negative or beyond the
                 shared maximum.
         """
+        moment = now or datetime.datetime.now(datetime.UTC)
         window = upcoming_dates_window(
             today
             if today is not None
-            else await self.date_resolver.today(user_id, now),
+            else await self.date_resolver.today(user_id, moment),
             days_ahead,
         )
 
         candidates = await self.candidate_repo.candidates_for(window_month_days(window))
         contact_ids = list(dict.fromkeys(row.contact.id for row in candidates))
-        importance = await self.importance_repo.for_contacts(contact_ids)
+        importance = await self.importance_repo.for_contacts(contact_ids, now=moment)
 
         return select_upcoming_dates(candidates, window, importance)
