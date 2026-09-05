@@ -24,7 +24,7 @@ from app.core.settings.timezone_utils import (
 if TYPE_CHECKING:
     from datetime import date, datetime
 
-    from app.core.dashboard.models.sections import AgendaEntry
+    from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.services.daily_summary_models import DailySummaryInput
 
 # Truncate content beyond this length to keep prompts bounded

@@ -20,8 +20,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.core.dashboard.models.sections import AgendaEntry
-from app.core.dashboard.services.agenda_section import (
+from app.core.journal.models.agenda import AgendaEntry
+from app.core.journal.services.agenda import (
     agenda_for_day,
     order_agenda_entries,
 )

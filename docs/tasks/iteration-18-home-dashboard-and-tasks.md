@@ -9688,6 +9688,13 @@ non-mutation of the input, and the empty case. No integration, no e2e: nothing c
 **Delivered:** 11 tests in `tests/unit/dashboard/test_agenda_ordering.py` and 4 added to
 `test_dashboard_sections.py`.
 
+> **Paths since moved.** ITER18-005 Phase 3 relocated the agenda read into the journal domain when the
+> daily summary became its second caller: the models are now `app/core/journal/models/agenda.py`, the port
+> is in `app/core/journal/models/repositories.py`, the adapter is
+> `app/core/journal/adapters/sql/agenda_repository.py`, and `order_agenda_entries` is
+> `app/core/journal/services/agenda.py` (tests in `tests/unit/journal/`). The behaviour recorded above is
+> unchanged; only its address is. `AgendaDay` and `AgendaSectionData` stayed in the dashboard's sections.
+
 **Decisions taken (Phase 5a):**
 
 - **All-day is a pin, not a tie-break.** An all-day entry outranks every timed one however early the
@@ -10670,11 +10677,13 @@ backend fact until Phase 8 wires the card.
 #### Phase 3: Extended Inputs — Today's Agenda ✅ COMPLETE
 
 **Prerequisites:** Phase 1 and ITER18-004 Phase 5.
-**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Actual: 247 production (of which ~120 are
-docstrings and comments), 588 tests, ~95 documentation → ~930 tracked** (1.7× the estimate; production ran
-1.8× high almost entirely on prose — six of the eight production hunks are explanations of *why* the read
-is shared and why a clock time is not invented — and the test count is high because the current-day rule is
-pinned at both guards, the caps at both ends, and the agenda read at three levels).
+**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Actual: ~1,390 tracked** — ~930 for the
+feature (247 production of which ~120 are docstrings and comments, 588 tests, ~95 documentation) plus
+~460 for the domain move that review turned up (241 insertions / 220 deletions across 21 files, most of it
+git-tracked renames and import churn). 2.5× the estimate. Two things drove it: production ran 1.8× high
+almost entirely on prose — six of the eight feature hunks explain *why* the read is shared and why a clock
+time is not invented — and **the estimate had no line for discovering that the read was in the wrong
+domain**, which no amount of sizing the feature would have found.
 
 **Acceptance Criteria:**
 
@@ -10695,17 +10704,17 @@ do-not-restate instruction is present. Integration — assembly against real jou
 
 **Delivered.** The read is **shared, not repeated.** `HomeDashboardService._agenda_for` was three lines —
 window the local day, ask the port, apply the ordering rule — and those three lines are now
-`agenda_for_day(repo, user_id, day, tz)` in `app/core/dashboard/services/agenda_section.py`, beside the
-ordering rule they apply. The dashboard reads today and tomorrow through it; `DailySummaryInputAssembler`
-reads the current day through it. Neither builds a window of its own, so the two cannot disagree about
-where the user's day starts or how the day is ordered — which is the whole content of the acceptance
-criterion, since a second implementation would be right the day it was written and wrong the first time
-either changed.
+`agenda_for_day(repo, user_id, day, tz)` in `app/core/journal/services/agenda.py`, beside the ordering
+rule they apply. The dashboard reads today and tomorrow through it; `DailySummaryInputAssembler` reads the
+current day through it. Neither builds a window of its own, so the two cannot disagree about where the
+user's day starts or how the day is ordered — which is the whole content of the acceptance criterion,
+since a second implementation would be right the day it was written and wrong the first time either
+changed.
 
-`DailySummaryInput` gained `agenda: list[AgendaEntry]` — the **dashboard's own frozen model**, reused
-rather than projected into a summary-shaped twin. It already carries exactly what the specification asks
-for (title, clock times, `is_all_day`, location, participants) plus the `is_cancelled` flag the prompt
-needs, and a parallel dataclass would be a second shape to keep in step for nothing.
+`DailySummaryInput` gained `agenda: list[AgendaEntry]` — the **same frozen model the agenda card draws**,
+reused rather than projected into a summary-shaped twin. It already carries exactly what the specification
+asks for (title, clock times, `is_all_day`, location, participants) plus the `is_cancelled` flag the
+prompt needs, and a parallel dataclass would be a second shape to keep in step for nothing.
 
 **Two guards for one rule, deliberately.** The assembler skips the agenda read entirely unless
 `summary_date` is today in the user's zone, so a past-day summary costs no extra round trip; the prompt
@@ -10738,13 +10747,34 @@ by item, because the user can already see those lists; and a statement of where 
 what one implies for another, what needs preparing, what is likely to clash. The instructions are
 assertable and asserted; the model's adherence to them is not, and is not claimed.
 
-**DI.** `JournalProvider.daily_summary_input_assembler` builds `SqlAgendaRepository(connection)` itself
-rather than declaring a dependency on the `AgendaRepository` that `DashboardProvider` supplies. Dishka
-validates the whole graph at container construction, and `tests/integration/api/conftest.py` and
-`tests/integration/journal/test_journal_date_resolver.py` both build containers from `JournalProvider`
-with no `DashboardProvider` — so the dependency would break them. This is exactly the situation
-`JournalProvider.task_anchor_repository` documents and is solved the same way: the assembler still declares
-the *port*, and only the provider line knows the adapter.
+**The agenda read moved into the journal domain**, and that is the more important half of this phase.
+The first implementation left the port, the models and the SQL adapter in `app/core/dashboard/` and had
+the assembler import them, which put a journal-domain caller behind a dashboard-domain read — backwards.
+Every table that read touches is a journal table (`journals`, `journal_calendar_info`, `calendars`, the
+tag assignments, the contact relationships) and every row it returns is a journal, so the dashboard was
+its first *caller*, never its owner. `app/core/dashboard/models/repositories.py` had even argued the
+placement on the grounds that moving it "would point that domain at this one, **for no gain**" — and the
+second caller is exactly the gain that clause said did not exist.
+
+So `AgendaTag`, `AgendaParticipant` and `AgendaEntry` now live in `app/core/journal/models/agenda.py`,
+`AgendaRepository` beside the domain's other ports (next to `OutdoorDashboardRepository`, the precedent —
+a projection shaped for one card still belongs to the domain whose rows it returns), `SqlAgendaRepository`
+in the journal adapters, and `order_agenda_entries` / `agenda_for_day` in
+`app/core/journal/services/agenda.py`. The dashboard keeps what is genuinely its own: `AgendaDay`'s
+labelled day and `AgendaSectionData`'s tomorrow-beneath-today shape, both of which import `AgendaEntry` —
+the dashboard → journal direction that already existed. `app/core/dashboard/models/repositories.py` is
+deleted rather than left empty; a later dashboard-owned port can recreate it, and will have to make the
+argument this move settled.
+
+**DI got simpler as a direct result.** `JournalProvider` now provides `AgendaRepository`, `DashboardProvider`
+consumes it (it already needs `JournalProvider` for the date resolver and the summary repository), and the
+assembler takes the port by injection. The first implementation could not do that: with the port in the
+dashboard domain, `JournalProvider` depending on it would have broken every container that registers
+`JournalProvider` alone — `tests/integration/api/conftest.py` and
+`tests/integration/journal/test_journal_date_resolver.py` among them — so the provider had to build
+`SqlAgendaRepository(connection)` by hand, the way `task_anchor_repository` does. Moving the port removed
+the need for the workaround entirely. *The general point is that a DI provider reaching around the
+container to build an adapter by hand is usually a domain boundary complaining.*
 
 **Decisions taken.**
 
@@ -10754,11 +10784,13 @@ the *port*, and only the provider line knows the adapter.
    truncates silently, because a model told "and 6 more" can say the day was full while one handed a
    quietly shortened list will describe it as complete. Entries are capped in agenda order, so what
    survives is the earliest of the day. Phases 4 and 6 budget their groups against these.
-2. **The journal domain now imports a dashboard port and model.** The dashboard already imports this
-   domain's date resolver and summary repository, so the two are mutually acquainted at package level,
-   though no module cycle exists. Accepted rather than duplicating the query (delivery rule 7, and the
-   phase's own first criterion). Recorded as a follow-up below: if a third caller appears, the read belongs
-   somewhere neither domain owns.
+2. **The agenda read belongs to the journal domain, and was moved there rather than imported across.**
+   The first cut had the journal domain importing a dashboard port and model, with the dashboard already
+   importing this domain's date resolver and summary repository — mutual acquaintance at package level,
+   no module cycle, and recorded as an accepted cost. That was the wrong call and was corrected before
+   merge: the read is over journal tables, so one of the two directions was simply wrong, and "accepted
+   coupling" was papering over it. **A second caller is the evidence that settles which domain owns a
+   read**; one caller is not, which is why the original placement looked defensible when it was made.
 
 **Tests.** Unit (`test_daily_summary_prompt_builder.py`): today's prompt carries the entry, its
 `09:00-09:30`, its location and its participant; the same input on a past day *and* on a future day
@@ -10773,7 +10805,7 @@ real constraint on the new static wording rather than an assertion to relax.
 the port is `local_day_window` on the anchor day, the day is resolved fourteen hours east and eleven hours
 west of UTC (where UTC's date and the user's are never the same, so a UTC-anchored reading cannot pass),
 and a past day, a future day and a missing port each yield an empty agenda with the port not awaited.
-(`test_agenda_ordering.py`): the extracted `agenda_for_day` passes the local-day window and anchor and
+(`test_agenda.py`): the extracted `agenda_for_day` passes the local-day window and anchor and
 returns the ordered tuple. Integration against real Postgres
 (`test_daily_summary_agenda_input.py`, real repositories on the test's savepoint connection, seeded through
 the agenda suite's own `EventSeeder`): a timed event with a location and a participant contact and an
@@ -10787,11 +10819,13 @@ because a negative assertion on an empty day proves nothing.
 an AI call, the REST and MCP read contracts are untouched, and the only observable difference is in
 generated prose, which cannot be asserted without the multi-outcome test this repo forbids.
 
-**Overrun recorded (delivery rule 3).** ~930 tracked against a 500-line target and a 560 estimate. Not
-split: the assembler, the prompt and the DI wiring are one shippable slice, and a "gathers it but does not
-render it" half would ship a read whose only consumer is the phase after it — the dead end rule 9 exists to
-prevent. The overrun is prose and test volume rather than scope, and it sits below Phase 2's recorded
-1,450.
+**Overrun recorded (delivery rule 3).** ~1,390 tracked against a 500-line target and a 560 estimate, in
+one PR of two commits — the feature, then the domain move. Not split into two PRs: the move is only
+correct *because* of the second caller the feature adds, so a reviewer reading them apart would see a
+refactor with no stated cause. Not split the other way either — a "gathers the agenda but does not render
+it" half would ship a read whose only consumer is the phase after it, the dead end rule 9 exists to
+prevent. The overrun is prose, test volume and a correction rather than scope creep, and it sits below
+Phase 2's recorded 1,450.
 
 #### Phase 4: Extended Inputs — Tasks Due in the Current Window
 
@@ -11148,14 +11182,14 @@ Appended as the work proceeds, in the style of iterations 16 and 17.
   test infrastructure shared by every iteration, and changing it inside a page-shell phase would put an
   unrelated risk in that PR.
 
-- **The agenda read is arguably neither domain's** (found in ITER18-005 Phase 3). `agenda_for_day` and the
-  `AgendaRepository` port live in `app/core/dashboard`, and the journal domain's summary assembler now
-  imports both — while the dashboard imports the journal domain's date resolver and summary repository.
-  There is no module cycle and no duplication, which is the point, but two callers in two domains sharing a
-  read that belongs to neither is the shape that eventually wants a home of its own. Not moved here: it
-  would touch the dashboard's ports, models and DI inside a phase about the summary's inputs, and the
-  coupling costs nothing until a third caller appears. *The general point is that "which domain owns this
-  read?" is answered by its callers, and one caller is not enough evidence.*
+- **A read's owner is decided by its second caller, not its first** (learned in ITER18-005 Phase 3).
+  The agenda read was placed in `app/core/dashboard/` because the dashboard was its only caller, and the
+  module docstring argued the placement explicitly. When the daily summary became the second caller the
+  placement inverted a dependency, and the phase moved the port, the models, the adapter and the ordering
+  rule into the journal domain — where every table the query reads already lives. **The same question is
+  live for ITER18-004 Phases 10–13**: the upcoming-dates read is over contacts and important dates, and
+  the tasks read is over tasks, so their ports probably belong in those domains rather than in a dashboard
+  `repositories.py` — which this phase deleted. Decide it when each is written, not after.
 
 - **`EventSeeder` is a shared integration fixture living inside a test module** (found in ITER18-005
   Phase 3). `tests/integration/api/test_home_dashboard_agenda.py` defines it and

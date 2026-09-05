@@ -1,4 +1,9 @@
-"""The order today's agenda is read in.
+"""Reading a day's agenda, and the order it comes back in.
+
+Both callers of the agenda — the home dashboard's card and the daily summary's
+prompt — come through ``agenda_for_day``, so neither builds the day window
+itself and neither can order the day differently. The rule below is what
+"differently" would mean.
 
 The wireframe states it in two clauses — all-day entries pinned above timed ones
 (**W12**), timed ones ascending by start (**W13**) — and the specification states
@@ -19,12 +24,9 @@ ordered by the same measure that decided which entries are on it. Ties fall back
 to the journal id, so two events that really do start at once render the same way
 on every request.
 
-Pure, and deliberately not a method on the service: the rule is the whole product
-of this phase, it is only meaningful at its boundaries, and a function over a
-sequence is the shape those boundaries can be asserted at without a database.
-
-``agenda_for_day`` below is the one read that applies it, kept here beside the
-rule so no caller can window a day without ordering it.
+Pure, and deliberately not a method on a service: the rule is only meaningful at
+its boundaries, and a function over a sequence is the shape those boundaries can
+be asserted at without a database.
 """
 
 from __future__ import annotations
@@ -38,8 +40,8 @@ if TYPE_CHECKING:
     from datetime import date
     from zoneinfo import ZoneInfo
 
-    from app.core.dashboard.models.repositories import AgendaRepository
-    from app.core.dashboard.models.sections import AgendaEntry
+    from app.core.journal.models.agenda import AgendaEntry
+    from app.core.journal.models.repositories import AgendaRepository
 
 
 def order_agenda_entries(entries: Iterable[AgendaEntry]) -> tuple[AgendaEntry, ...]:

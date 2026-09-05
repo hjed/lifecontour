@@ -28,8 +28,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.dashboard.adapters.sql.agenda_repository import SqlAgendaRepository
-from app.core.dashboard.models.sections import AgendaEntry
+from app.core.journal.adapters.sql.agenda_repository import SqlAgendaRepository
 from app.core.journal.adapters.sql.daily_summary_repository import (
     SqlJournalDailySummaryRepository,
 )
@@ -38,6 +37,7 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
+from app.core.journal.models.agenda import AgendaEntry
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )

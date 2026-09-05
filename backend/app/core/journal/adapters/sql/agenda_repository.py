@@ -63,12 +63,12 @@ from core_shared.models.journals.journal_relationship_types import (
 )
 from sqlalchemy import text
 
-from app.core.dashboard.models.repositories import AgendaRepository
-from app.core.dashboard.models.sections import (
+from app.core.journal.models.agenda import (
     AgendaEntry,
     AgendaParticipant,
     AgendaTag,
 )
+from app.core.journal.models.repositories import AgendaRepository
 
 if TYPE_CHECKING:
     from datetime import date

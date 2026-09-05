@@ -9,7 +9,7 @@ from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals import EventDateRange, Journal, MoodData
 from core_shared.models.journals.daily_summary import JournalDailySummary
 
-from app.core.dashboard.models.sections import AgendaEntry
+from app.core.journal.models.agenda import AgendaEntry
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )

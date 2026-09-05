@@ -3,15 +3,11 @@
 Gathers day-scoped data from repositories and assembles it into
 a DailySummaryInput suitable for prompt building.
 
-**The current day's agenda is read through the home dashboard's own port**
-rather than through a query of this module's own. The summary and the dashboard
-are two renderings of one day, and a second implementation of "the user's event
-journals on this local day" is the way they start disagreeing about it. That
-points this domain at the dashboard's read port and its ``AgendaEntry``, which
-is a coupling worth naming: the dashboard already depends on this domain's date
-resolver and summary repository, so the two are mutually acquainted. Sharing the
-read is still the lesser cost — and if a third caller appears, the read belongs
-somewhere neither domain owns.
+**The current day's agenda is read through the domain's own agenda port**
+rather than through a query of this module's own. The summary and the home
+dashboard are two renderings of one day, and a second implementation of "the
+user's event journals on this local day" is the way they start disagreeing
+about it.
 """
 
 from __future__ import annotations
@@ -22,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from core_shared.models.contacts.entities import SummaryStatus
 
-from app.core.dashboard.services.agenda_section import agenda_for_day
+from app.core.journal.services.agenda import agenda_for_day
 from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
     DailySummaryJournalEntry,
@@ -33,9 +29,9 @@ from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, resolve_timezone
 if TYPE_CHECKING:
     from zoneinfo import ZoneInfo
 
-    from app.core.dashboard.models.repositories import AgendaRepository
-    from app.core.dashboard.models.sections import AgendaEntry
+    from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.models.repositories import (
+        AgendaRepository,
         JournalContactRelationshipRepository,
         JournalRepository,
         JournalSeriesRepository,

@@ -24,13 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.dashboard.models.sections import (
     AgendaDay,
-    AgendaEntry,
     AgendaSectionData,
     DashboardSummaryState,
     HomeDashboard,
     SectionStatus,
 )
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
+from app.core.journal.models.agenda import AgendaEntry
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 
 pytestmark = pytest.mark.unit

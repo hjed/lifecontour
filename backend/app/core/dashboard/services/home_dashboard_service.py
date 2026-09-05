@@ -49,8 +49,8 @@ from app.core.dashboard.models.sections import (
     TasksSectionData,
     UpcomingDatesSectionData,
 )
-from app.core.dashboard.services.agenda_section import agenda_for_day
 from app.core.dashboard.services.summary_section import summary_section_for
+from app.core.journal.services.agenda import agenda_for_day
 from app.core.journal.services.daily_summary_freshness import was_generated_on
 from app.core.journal.services.journal_date_resolver import today_in
 from app.infrastructure.unit_of_work import savepoint
@@ -60,8 +60,8 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
-    from app.core.dashboard.models.repositories import AgendaRepository
-    from app.core.dashboard.models.sections import AgendaEntry
+    from app.core.journal.models.agenda import AgendaEntry
+    from app.core.journal.models.repositories import AgendaRepository
     from app.core.journal.services.daily_summary_repository import (
         JournalDailySummaryRepository,
     )

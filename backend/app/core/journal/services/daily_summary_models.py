@@ -11,7 +11,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.core.dashboard.models.sections import AgendaEntry
+    from app.core.journal.models.agenda import AgendaEntry
 
 
 @dataclass

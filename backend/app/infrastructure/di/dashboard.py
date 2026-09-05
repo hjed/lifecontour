@@ -3,9 +3,8 @@
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.dashboard.adapters.sql.agenda_repository import SqlAgendaRepository
-from app.core.dashboard.models.repositories import AgendaRepository
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
+from app.core.journal.models.repositories import AgendaRepository
 from app.core.journal.services.daily_summary_repository import (
     JournalDailySummaryRepository,
 )
@@ -19,20 +18,18 @@ class DashboardProvider(Provider):
     for its per-section SAVEPOINTs. It opens no transaction of its own — the
     dashboard is read-only.
 
-    ``JournalDateResolver`` and ``JournalDailySummaryRepository`` both come from
-    ``JournalProvider`` (which itself needs ``SettingsProvider``), and Dishka
-    validates the whole graph at container construction, so a container
-    registering this provider must register those too. The application container
-    and both integration-test containers do.
+    ``JournalDateResolver``, ``JournalDailySummaryRepository`` and
+    ``AgendaRepository`` all come from ``JournalProvider`` (which itself needs
+    ``SettingsProvider``), and Dishka validates the whole graph at container
+    construction, so a container registering this provider must register those
+    too. The application container and both integration-test containers do.
+
+    The agenda port sits there rather than here because it reads **journals**;
+    the dashboard is one of its two callers, not its owner.
 
     The **repository** rather than ``DailySummaryService`` is deliberate: the
     service's read path generates, and a dashboard load must not write.
     """
-
-    @provide(scope=Scope.REQUEST)
-    def agenda_repository(self, connection: AsyncConnection) -> AgendaRepository:
-        """Provide an AgendaRepository instance."""
-        return SqlAgendaRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def home_dashboard_service(

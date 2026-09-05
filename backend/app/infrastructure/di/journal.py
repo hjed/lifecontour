@@ -8,7 +8,6 @@ from core_shared.models.journals import (
 from dishka import AsyncContainer, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.dashboard.adapters.sql.agenda_repository import SqlAgendaRepository
 from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
@@ -24,6 +23,7 @@ from app.core.journal.adapters.sql.abseiling_data_repository import (
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
 )
+from app.core.journal.adapters.sql.agenda_repository import SqlAgendaRepository
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
@@ -119,6 +119,7 @@ from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
     ActivityTemplateRepository,
+    AgendaRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
@@ -212,6 +213,17 @@ class JournalProvider(Provider):
     def journal_repository(self, connection: AsyncConnection) -> JournalRepository:
         """Provide a JournalRepository instance."""
         return SqlJournalRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def agenda_repository(self, connection: AsyncConnection) -> AgendaRepository:
+        """Provide an AgendaRepository instance.
+
+        Here rather than in ``DashboardProvider``, because the port is the
+        journal domain's: it reads journals. The dashboard consumes it, which is
+        the direction that already exists — ``DashboardProvider`` needs this
+        provider anyway for the date resolver and the summary repository.
+        """
+        return SqlAgendaRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def field_history_repository(
@@ -767,25 +779,16 @@ class JournalProvider(Provider):
         contact_relationship_repo: JournalContactRelationshipRepository,
         summary_repo: JournalDailySummaryRepository,
         series_repo: JournalSeriesRepository,
-        connection: AsyncConnection,
+        agenda_repo: AgendaRepository,
     ) -> DailySummaryInputAssembler:
-        """Provide a DailySummaryInputAssembler instance.
-
-        The agenda adapter is **built here** rather than injected, for the reason
-        ``task_anchor_repository`` above is: Dishka validates the whole graph at
-        construction, so depending on the ``AgendaRepository`` that
-        ``DashboardProvider`` supplies would force every container registering
-        this provider to register that one — and several build a container from
-        ``JournalProvider`` alone. It needs nothing but the connection, so the
-        assembler still declares the port and only this line knows the adapter.
-        """
+        """Provide a DailySummaryInputAssembler instance."""
         return DailySummaryInputAssembler(
             journal_repo=journal_repo,
             mood_repo=mood_repo,
             contact_relationship_repo=contact_relationship_repo,
             summary_repo=summary_repo,
             series_repo=series_repo,
-            agenda_repo=SqlAgendaRepository(connection),
+            agenda_repo=agenda_repo,
         )
 
     @provide(scope=Scope.REQUEST)

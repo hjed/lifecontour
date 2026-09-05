@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime, time, timedelta
 
-from app.core.dashboard.models.sections import AgendaEntry, AgendaParticipant
+from app.core.journal.models.agenda import AgendaEntry, AgendaParticipant
 from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
     DailySummaryJournalEntry,

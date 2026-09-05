@@ -35,7 +35,6 @@ from pydantic import BaseModel, Field
 from app.api.common.schemas import JsonApiLinks
 from app.core.dashboard.models.sections import (
     AgendaDay,
-    AgendaEntry,
     AgendaSectionData,
     DashboardSection,
     DashboardSummaryState,
@@ -43,6 +42,7 @@ from app.core.dashboard.models.sections import (
     SectionStatus,
     SummarySectionData,
 )
+from app.core.journal.models.agenda import AgendaEntry
 
 RESOURCE_TYPE_DESC = "Resource type"
 HOME_DASHBOARD_RESOURCE_TYPE: Literal["home-dashboards"] = "home-dashboards"

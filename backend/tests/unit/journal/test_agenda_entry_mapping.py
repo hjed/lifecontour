@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from app.core.dashboard.adapters.sql.agenda_repository import _to_entry
+from app.core.journal.adapters.sql.agenda_repository import _to_entry
 
 pytestmark = pytest.mark.unit
 
