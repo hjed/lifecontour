@@ -14,7 +14,7 @@ Playwright's `globalSetup` (`frontend/tests/global-setup.ts`) is **self-containe
 1. Load workspace-specific ports from `scripts/workspace_env.py` via `frontend/tests/e2e/utils/frontend-test-config.ts`
 2. Check if the full `test` Docker profile is already running with correct config
 3. Start/restart Docker containers if needed (including Backend, OAuth, Workers)
-4. Wait for all services to be healthy (Backend API, OAuth, MeiliSearch)
+4. Wait for all services to be healthy (Backend API, Hydra, the OAuth login-consent UI on its host port, MeiliSearch)
 5. Playwright then starts its own frontend dev server on the workspace-specific port
 
 ### Just Run the Tests
