@@ -177,7 +177,8 @@ class TestDailySummaryEligibilityIntegration:
         prompt_builder.build.return_value = "prompt"
         return DailySummaryService(
             input_assembler=assembler,
-            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
+            eligibility_checker=DailySummaryEligibilityChecker(),
+            clock=lambda: self._NOW,
             prompt_builder=prompt_builder,
             summary_repo=SqlJournalDailySummaryRepository(async_connection),
             gemini_api_key="test-key",
@@ -270,13 +271,14 @@ class TestDailySummaryFreshnessIntegration:
         prompt_builder.build.return_value = "prompt"
         service = DailySummaryService(
             input_assembler=assembler,
-            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
+            eligibility_checker=DailySummaryEligibilityChecker(),
+            clock=lambda: self._NOW,
             prompt_builder=prompt_builder,
             summary_repo=SqlJournalDailySummaryRepository(async_connection),
             gemini_api_key="test-key",
             gemini_model="gemini-2.5-pro",
             user_settings_repo=SqlUserSettingsRepository(async_connection),
-            freshness_checker=DailySummaryFreshnessChecker(clock=lambda: self._NOW),
+            freshness_checker=DailySummaryFreshnessChecker(),
         )
 
         async def fake_gemini(prompt: str) -> str:

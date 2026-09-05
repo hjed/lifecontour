@@ -304,7 +304,7 @@ class TestDailySummaryServiceEligibility:
         await service.get_or_generate("user123", date(2026, 4, 27), transaction=_NO_TXN)
 
         mock_eligibility_checker.is_eligible.assert_called_once_with(
-            3, summary_date=date(2026, 4, 27), timezone="Australia/Sydney"
+            3, summary_date=date(2026, 4, 27), timezone="Australia/Sydney", now=ANY
         )
 
 
@@ -340,7 +340,8 @@ class TestDailySummaryServiceTodayIsAlwaysEligible:
         user_settings_repo.get_timezone.return_value = timezone
         return DailySummaryService(
             input_assembler=assembler,
-            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
+            eligibility_checker=DailySummaryEligibilityChecker(),
+            clock=lambda: self._NOW,
             prompt_builder=mock_prompt_builder,
             summary_repo=mock_summary_repo,
             gemini_api_key="test-key",
@@ -426,14 +427,14 @@ class TestDailySummaryServiceFreshness:
         user_settings_repo.get_timezone.return_value = "Australia/Sydney"
         return DailySummaryService(
             input_assembler=mock_input_assembler,
-            eligibility_checker=DailySummaryEligibilityChecker(clock=lambda: self._NOW),
+            eligibility_checker=DailySummaryEligibilityChecker(),
+            clock=lambda: self._NOW,
             prompt_builder=mock_prompt_builder,
             summary_repo=mock_summary_repo,
             gemini_api_key="test-key",
             gemini_model="gemini-2.5-pro",
             user_settings_repo=user_settings_repo,
-            freshness_checker=freshness_checker
-            or DailySummaryFreshnessChecker(clock=lambda: self._NOW),
+            freshness_checker=freshness_checker or DailySummaryFreshnessChecker(),
             _gemini_response_override=json.dumps({"summary_text": "This morning's."}),
         )
 
@@ -656,7 +657,7 @@ class TestDailySummaryServiceFreshness:
         )
 
         freshness_checker.is_stale.assert_called_once_with(
-            cached, timezone="Australia/Sydney"
+            cached, timezone="Australia/Sydney", now=ANY
         )
 
     @pytest.mark.asyncio
@@ -1077,3 +1078,49 @@ class TestTheDayIsResolvedFromOneInstant:
         assembled_now = mock_input_assembler.assemble.call_args.kwargs["now"]
 
         assert assembled_now.tzinfo is not None
+
+    @pytest.mark.asyncio
+    async def test_eligibility_is_judged_against_the_same_instant(
+        self,
+        service: DailySummaryService,
+        mock_eligibility_checker: MagicMock,
+        mock_input_assembler: AsyncMock,
+    ) -> None:
+        """Otherwise a day counted as today can be judged as yesterday.
+
+        Eligibility is where a second clock reading costs the most: a day that
+        was today when its journals were counted, judged after local midnight,
+        is no longer today, falls to the journal threshold and persists a
+        ``DISABLED`` row — the always-eligible rule turned off for exactly the
+        day it protects.
+        """
+        await service.get_or_generate("user123", date(2026, 4, 27), AsyncMock())
+
+        assembled_now = mock_input_assembler.assemble.call_args.kwargs["now"]
+        judged_now = mock_eligibility_checker.is_eligible.call_args.kwargs["now"]
+
+        assert judged_now == assembled_now
+
+    @pytest.mark.asyncio
+    async def test_freshness_is_judged_against_the_same_instant(
+        self,
+        service: DailySummaryService,
+        mock_summary_repo: AsyncMock,
+        mock_input_assembler: AsyncMock,
+    ) -> None:
+        """Every day-based decision in one request reads one clock."""
+        checker = MagicMock()
+        checker.is_stale.return_value = True
+        service._freshness_checker = checker  # noqa: SLF001
+        mock_summary_repo.find_by_user_and_date.return_value = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            summary_text="Yesterday's prose.",
+            status=SummaryStatus.GENERATED,
+            generated_at=datetime(2026, 4, 26, 22, 0, tzinfo=UTC),
+        )
+
+        await service.get_or_generate("user123", date(2026, 4, 27), AsyncMock())
+
+        assembled_now = mock_input_assembler.assemble.call_args.kwargs["now"]
+        assert checker.is_stale.call_args.kwargs["now"] == assembled_now

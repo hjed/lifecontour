@@ -53,12 +53,21 @@ class TestDailySummaryPromptBuilder:
         assert "recent meetings" in prompt
         assert "remember or action" in prompt
 
-    def test_grounding_rule_allows_tool_results(self) -> None:
-        """Tool results count as valid sources alongside the journals."""
+    def test_grounding_rule_names_every_source_it_was_given(self) -> None:
+        """One grounding rule, listing all of them.
+
+        Tool results have always counted alongside the journals; the agenda
+        joined them when it became an input. It is named in the *same* sentence
+        rather than a second one, because two grounding rules that list
+        different sources are a contradiction the model is free to resolve
+        either way — and resolving it the wrong way discards the agenda this
+        phase exists to supply.
+        """
         builder = DailySummaryPromptBuilder()
         prompt = builder.build(_make_input())
 
-        assert "not present in the journals or tool results" in prompt
+        assert "not present in the journals, the agenda or the tool results" in prompt
+        assert "not present in the journals or tool results" not in prompt
 
     def test_output_format_requests_two_paragraphs(self) -> None:
         """The output format asks for two paragraphs, not 1-3 sentences."""
@@ -442,13 +451,21 @@ class TestToneAndSafetyInstructions:
         assert "item by item" in prompt
         assert "restate" in prompt
 
-    def test_grounding_names_the_agenda_as_a_source(self) -> None:
-        """The summary is grounded in everything it was given, agenda included."""
+    def test_the_local_timezone_claim_admits_the_exception(self) -> None:
+        """The blanket claim contradicted the agenda's own foreign-zone rows.
+
+        Saying every time is the user's local time, and then printing
+        ``09:00 (America/New_York)``, tells the model two incompatible things
+        about the same value.
+        """
         builder = DailySummaryPromptBuilder()
 
         prompt = builder.build(_make_input())
 
-        assert "Ground everything you say in the journals, the agenda" in prompt
+        assert "unless a different timezone is named beside them" in prompt
+        assert (
+            "All times and dates are shown in the user's local timezone" not in prompt
+        )
 
     def test_existing_tone_constraints_retained(self) -> None:
         """Adding inputs must not cost the constraints already in the prompt."""

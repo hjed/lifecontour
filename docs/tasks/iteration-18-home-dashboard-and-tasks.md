@@ -10725,13 +10725,23 @@ cannot disagree; the builder is not re-resolving the day for this rule, it is re
 The *rendering* half is assertable without a database, which is what makes "a past-day prompt is
 unchanged" a unit test rather than an integration one.
 
-**They agree because they are given one instant, not because they read the clock at the same moment.**
-`get_or_generate` now reads `datetime.now(UTC)` once and hands it to both. The first cut let each default
-to its own read, which is equivalent almost always and wrong across one boundary: local midnight falling
-between assembly and prompt building leaves the assembler gathering nothing for a day that is not yet
-today, and the builder labelling the prompt `(Today)` over an agenda that is silently absent. The window is
-a few milliseconds wide — assembly, an eligibility check and a claim write — but it is reachable, and a
-shared instant closes it rather than narrowing it. Caught in review; asserted by two service tests.
+**Every day-based decision in one request now reads one instant.** `get_or_generate` reads the clock once
+and imposes it on all four collaborators that ask what day it is — freshness, assembly, eligibility and the
+prompt. The first cut let each read its own, which is equivalent almost always and wrong across one
+boundary, and **each straddle has a different symptom**: between assembly and prompt building it leaves the
+assembler gathering nothing for a day that is not yet today while the builder labels the prompt `(Today)`
+over an agenda that is silently absent; between assembly and *eligibility* — the worse one — a day that was
+today when its journals were counted is judged as yesterday, falls to the two-journal threshold and is
+persisted `DISABLED`, turning Phase 1's always-eligible rule off for exactly the quiet day it exists to
+protect. Both windows are milliseconds wide and both are reachable; one reading cannot disagree with
+itself.
+
+**The clock moved to where the request begins.** `DailySummaryService` takes the injectable `clock`
+Phases 1 and 2 gave the two checkers, and the checkers keep theirs for callers that arrive without an
+instant — `now` is a defaulted keyword on both, not a replacement. That is what makes the boundary
+pinnable in one place: a test that used to inject two clocks to pin one midnight now injects one. Caught
+across two review rounds — the first found the assembler/builder pair, the second found that fixing only
+that pair had left eligibility reading a second clock.
 Both take an optional `now` that defaults to reading the instant themselves, mirroring
 `DailySummaryFreshnessChecker`'s injectable clock: the local-midnight boundary is pinnable in tests and
 `DailySummaryService` is untouched by this phase.
@@ -10757,13 +10767,21 @@ not the user's now renders `09:00-09:30 (America/New_York): …`, and the sectio
 compared with the rest without converting them. The zone rides with the *time*, so an all-day entry names
 none: it happens on a date and has no clock value to qualify. Caught in review.
 
-**Tone.** The prompt keeps every constraint it had and gains five lines: keep it short; ground everything
-in the journals, the agenda and the tool results — the pre-existing grounding line named only journals and
-tool results, which stopped being the whole list the moment the agenda became an input; do not invent
+**Tone.** The prompt keeps every constraint it had and gains four lines: keep it short; do not invent
 commitments the user did not make; do not restate the day's agenda, journals or other listed material item
 by item, because the user can already see those lists; and a statement of where the value actually is —
-what one implies for another, what needs preparing, what is likely to clash. The instructions are
+what one implies for another, what needs preparing, what is likely to clash. Two *existing* lines were
+edited rather than added to, which review showed was the difference between qualifying an instruction and
+contradicting it: the grounding rule named only "the journals or tool results", so the agenda was added to
+that sentence instead of getting a second grounding sentence of its own — two grounding rules listing
+different sources is a contradiction the model is free to resolve by discarding the agenda this phase
+supplies. And "All times and dates are shown in the user's local timezone" became "…unless a different
+timezone is named beside them", because the agenda now prints exactly such a row. The instructions are
 assertable and asserted; the model's adherence to them is not, and is not claimed.
+
+*The general point, worth carrying into Phases 4–6: when a new input group needs an existing instruction to
+say something broader, widen that instruction. Adding a second one beside it leaves the narrow claim
+standing, and the model has no way to know which was meant.*
 
 **The agenda read moved into the journal domain**, and that is the more important half of this phase.
 The first implementation left the port, the models and the SQL adapter in `app/core/dashboard/` and had

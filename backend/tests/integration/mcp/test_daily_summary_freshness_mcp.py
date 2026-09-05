@@ -26,7 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.daily_summary_repository import (
     SqlJournalDailySummaryRepository,
 )
-from app.core.journal.services import daily_summary_eligibility, daily_summary_freshness
+from app.core.journal.services import (
+    daily_summary_eligibility,
+    daily_summary_freshness,
+    daily_summary_service,
+)
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
@@ -46,7 +50,13 @@ NEW_TEXT = "Written this morning."
 
 @pytest.fixture
 def pinned_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fix the instant both DI-built checkers read as *now*."""
+    """Fix the instant the DI-built pipeline reads as *now*.
+
+    The service reads the clock once and imposes that instant on the checkers,
+    so pinning it there is what decides the day; the checkers' own defaults are
+    pinned too, for any path that calls them without one.
+    """
+    monkeypatch.setattr(daily_summary_service, "_utc_now", lambda: NOW)
     monkeypatch.setattr(daily_summary_freshness, "_utc_now", lambda: NOW)
     monkeypatch.setattr(daily_summary_eligibility, "_utc_now", lambda: NOW)
 

@@ -48,13 +48,24 @@ class DailySummaryEligibilityChecker:
         *,
         summary_date: date,
         timezone: str | None,
+        now: datetime | None = None,
     ) -> bool:
         """Whether ``summary_date`` qualifies for a summary.
 
         Today (in ``timezone``) always does; any other day needs enough
         journals.
+
+        ``now`` lets a caller that has already read the clock impose **its**
+        instant, rather than this checker taking a second reading. That matters
+        here more than anywhere else in the pipeline: a request that began for
+        today and crosses local midnight before reaching this line would be
+        judged against tomorrow, find the day is no longer today, fall to the
+        journal threshold and persist a ``DISABLED`` row — turning the
+        always-eligible rule off for the very day it exists to protect. Falls
+        back to ``clock`` when no instant is supplied.
         """
-        if summary_date == today_in(resolve_timezone(timezone), self._clock()):
+        moment = now if now is not None else self._clock()
+        if summary_date == today_in(resolve_timezone(timezone), moment):
             return True
         return journal_count >= self._min_journals
 
