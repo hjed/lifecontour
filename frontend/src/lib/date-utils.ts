@@ -114,17 +114,33 @@ export function formatIsoWeekdayDate(date: string): string {
   return format(parseISO(date), 'EEEE, d MMMM', { locale: enAU });
 }
 
+/** `YYYY-MM-DD` and nothing else — not an instant, not a partial date. */
+const ISO_CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Is `value` an ISO **calendar date** (`YYYY-MM-DD`) a formatter can read?
  *
- * Presence, type and parseability in one question, for a caller holding a
- * value its types promise but its payload might not deliver. `''`, `null`,
+ * Presence, type, shape and parseability in one question, for a caller holding
+ * a value its types promise but its payload might not deliver. `''`, `null`,
  * `'tomorrow'` and `'2026-02-31'` are all answered the same way, because from
  * the formatter's seat they fail identically: `format(parseISO(...))` throws a
  * `RangeError` on an invalid date and takes the render down with it.
  *
+ * **The shape is checked, not just the parse, and that is the point of the
+ * guard rather than a nicety.** `parseISO` is generous — it accepts
+ * `2026-08-01T00:00:00Z`, `20260801` and even `2026-08` — and an *instant*
+ * that survives this check would then be formatted in the **browser's** zone,
+ * labelling a caller with the previous calendar day anywhere behind UTC. That
+ * is the precise failure {@link formatIsoWeekdayDate} and
+ * {@link formatIsoDateLong} exist to avoid, so a value that is not a bare
+ * calendar date is rejected rather than quietly re-anchored.
+ *
  * Written as a type guard so a caller that asks this can then use the value.
  */
 export function isIsoCalendarDate(value: unknown): value is string {
-  return typeof value === 'string' && isValid(parseISO(value));
+  return (
+    typeof value === 'string' &&
+    ISO_CALENDAR_DATE.test(value) &&
+    isValid(parseISO(value))
+  );
 }

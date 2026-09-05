@@ -168,4 +168,20 @@ describe('isIsoCalendarDate', () => {
   ])('rejects %s', (_, value) => {
     expect(isIsoCalendarDate(value)).toBe(false);
   });
+
+  /**
+   * The rejections that matter most, because `parseISO` accepts all three and
+   * each would then be formatted in the *browser's* zone. An instant is the
+   * dangerous one: anywhere behind UTC it labels its caller with the previous
+   * calendar day, which is the exact failure the calendar-date helpers exist
+   * to avoid.
+   */
+  it.each([
+    ['an instant', '2026-08-01T00:00:00Z'],
+    ['an instant with an offset', '2026-08-01T00:00:00+10:00'],
+    ['a year and month only', '2026-08'],
+    ['a basic-format date', '20260801'],
+  ])('rejects %s, which parseISO would otherwise accept', (_, value) => {
+    expect(isIsoCalendarDate(value)).toBe(false);
+  });
 });
