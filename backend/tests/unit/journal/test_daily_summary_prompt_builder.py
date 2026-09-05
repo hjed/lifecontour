@@ -1,12 +1,15 @@
 """Unit tests for DailySummaryPromptBuilder."""
 
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta
 
+from app.core.journal.models.agenda import AgendaEntry, AgendaParticipant
 from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
     DailySummaryJournalEntry,
 )
 from app.core.journal.services.daily_summary_prompt_builder import (
+    MAX_AGENDA_ENTRIES,
+    MAX_AGENDA_PARTICIPANTS,
     MAX_CONTENT_LENGTH,
     DailySummaryPromptBuilder,
 )
@@ -50,12 +53,21 @@ class TestDailySummaryPromptBuilder:
         assert "recent meetings" in prompt
         assert "remember or action" in prompt
 
-    def test_grounding_rule_allows_tool_results(self) -> None:
-        """Tool results count as valid sources alongside the journals."""
+    def test_grounding_rule_names_every_source_it_was_given(self) -> None:
+        """One grounding rule, listing all of them.
+
+        Tool results have always counted alongside the journals; the agenda
+        joined them when it became an input. It is named in the *same* sentence
+        rather than a second one, because two grounding rules that list
+        different sources are a contradiction the model is free to resolve
+        either way — and resolving it the wrong way discards the agenda this
+        phase exists to supply.
+        """
         builder = DailySummaryPromptBuilder()
         prompt = builder.build(_make_input())
 
-        assert "not present in the journals or tool results" in prompt
+        assert "not present in the journals, the agenda or the tool results" in prompt
+        assert "not present in the journals or tool results" not in prompt
 
     def test_output_format_requests_two_paragraphs(self) -> None:
         """The output format asks for two paragraphs, not 1-3 sentences."""
@@ -270,3 +282,368 @@ class TestPromptSeriesLine:
         prompt = builder.build(summary_input)
 
         assert "Series:" not in prompt
+
+
+_NOW = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+_TODAY = date(2026, 4, 27)
+
+
+def _agenda_entry(**overrides: object) -> AgendaEntry:
+    """An agenda entry with sensible defaults: a timed, uncancelled event."""
+    defaults: dict[str, object] = {
+        "journal_id": 1,
+        "title": "Design review",
+        "is_all_day": False,
+        "starts_at": datetime(2026, 4, 27, 9, 0, tzinfo=UTC),
+        "ends_at": datetime(2026, 4, 27, 9, 30, tzinfo=UTC),
+        "start_time": time(9, 0),
+        "end_time": time(9, 30),
+    }
+    defaults.update(overrides)
+    return AgendaEntry(**defaults)  # type: ignore[arg-type]
+
+
+class TestTheAgendaIsCurrentDayOnly:
+    """Forward-looking material belongs to today and to no other day."""
+
+    def test_agenda_section_present_for_today(self) -> None:
+        """Today's prompt carries the day's events, times, locations and people."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            location="Level 3 boardroom",
+            participants=(AgendaParticipant(contact_id=7, name="Alice Smith"),),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "Today's Agenda" in prompt
+        assert "Design review" in prompt
+        assert "09:00-09:30" in prompt
+        assert "Level 3 boardroom" in prompt
+        assert "Alice Smith" in prompt
+
+    def test_agenda_absent_for_a_past_day(self) -> None:
+        """A past day describes that day, not what was scheduled on it now."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY - timedelta(days=1), agenda=[_agenda_entry()]
+            ),
+            now=_NOW,
+        )
+
+        assert "Today's Agenda" not in prompt
+        assert "Design review" not in prompt
+
+    def test_agenda_absent_for_a_future_day(self) -> None:
+        """The rule is "the current day", not "today or later"."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY + timedelta(days=1), agenda=[_agenda_entry()]
+            ),
+            now=_NOW,
+        )
+
+        assert "Today's Agenda" not in prompt
+        assert "Design review" not in prompt
+
+    def test_no_entries_adds_no_heading(self) -> None:
+        """A day with nothing scheduled gains no empty section."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input(summary_date=_TODAY, agenda=[]), now=_NOW)
+
+        assert "Today's Agenda" not in prompt
+
+
+class TestHowAnAgendaEntryReads:
+    """One entry's rendering: times, cancellation and the caps."""
+
+    def test_all_day_entry_renders_all_day(self) -> None:
+        """An all-day item is true of the whole day, not a thing at 00:00."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            title="Public holiday",
+            is_all_day=True,
+            start_time=None,
+            end_time=None,
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "All day: Public holiday" in prompt
+
+    def test_timed_entry_without_clock_times_renders_no_time(self) -> None:
+        """No clock columns means no time — never one invented from the instant."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(title="Mystery meeting", start_time=None, end_time=None)
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "- Mystery meeting" in prompt
+        assert "All day" not in prompt
+
+    def test_cancelled_entry_is_marked(self) -> None:
+        """A cancelled event is never presented as something the user is doing."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(title="Dentist", is_cancelled=True)
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert "[CANCELLED]" in prompt
+        assert "did not go ahead" in prompt
+
+    def test_entry_cap_states_the_overflow(self) -> None:
+        """A busy day is capped, and the prompt says so rather than truncating."""
+        builder = DailySummaryPromptBuilder()
+        entries = [
+            _agenda_entry(journal_id=i, title=f"Event-{i:02d}")
+            for i in range(MAX_AGENDA_ENTRIES + 5)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=entries), now=_NOW
+        )
+
+        assert f"Event-{MAX_AGENDA_ENTRIES - 1:02d}" in prompt
+        assert f"Event-{MAX_AGENDA_ENTRIES:02d}" not in prompt
+        assert "5 further events" in prompt
+
+    def test_participant_cap_states_the_overflow(self) -> None:
+        """A large invite list is capped per entry, and counted rather than cut."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            participants=tuple(
+                AgendaParticipant(contact_id=i, name=f"Person-{i:02d}")
+                for i in range(MAX_AGENDA_PARTICIPANTS + 2)
+            )
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]), now=_NOW
+        )
+
+        assert f"Person-{MAX_AGENDA_PARTICIPANTS - 1:02d}" in prompt
+        assert f"Person-{MAX_AGENDA_PARTICIPANTS:02d}" not in prompt
+        assert "and 2 more" in prompt
+
+
+class TestToneAndSafetyInstructions:
+    """The constraints the specification says matter more now."""
+
+    def test_do_not_restate_instruction_present(self) -> None:
+        """The summary's value is connecting the sections, not repeating them."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input())
+
+        assert "item by item" in prompt
+        assert "restate" in prompt
+
+    def test_the_local_timezone_claim_admits_the_exception(self) -> None:
+        """The blanket claim contradicted the agenda's own foreign-zone rows.
+
+        Saying every time is the user's local time, and then printing
+        ``09:00 (America/New_York)``, tells the model two incompatible things
+        about the same value.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input())
+
+        assert "unless a different timezone is named beside them" in prompt
+        assert (
+            "All times and dates are shown in the user's local timezone" not in prompt
+        )
+
+    def test_existing_tone_constraints_retained(self) -> None:
+        """Adding inputs must not cost the constraints already in the prompt."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(_make_input())
+
+        assert "practical and descriptive rather than speculative" in prompt
+        assert "Do not invent information" in prompt
+        assert "Do not rewrite the journal record" in prompt
+
+
+class TestAnEventInAnotherTimezone:
+    """The clock columns are the *event's* local time, not the reader's.
+
+    Migration 0045 derives ``start_time``/``end_time`` ``AT TIME ZONE
+    jci.timezone``, so a 09:00 New York meeting stores ``09:00`` for a Sydney
+    user too. Rendering it bare tells the model the user has a morning
+    appointment — the failure the API design document names.
+
+    Naming the zone is not enough either, because the entry reached this agenda
+    by *instant* overlap and its own local date can be the neighbouring one. So
+    a foreign-zone entry leads with the reader's clock time and carries its own
+    behind it.
+    """
+
+    def test_the_readers_time_leads_and_the_events_own_follows(self) -> None:
+        """A real 09:00 New York meeting, as a Sydney reader sees it.
+
+        The instant and the clock column agree the way migration 0045
+        guarantees: 09:00 EDT is 13:00 UTC, which is 23:00 in Sydney.
+        """
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            title="New York sync",
+            timezone="America/New_York",
+            starts_at=datetime(2026, 4, 27, 13, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 27, 13, 30, tzinfo=UTC),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        assert "23:00-23:30 (09:00-09:30 America/New_York): New York sync" in prompt
+
+    def test_an_event_whose_own_date_is_the_day_before(self) -> None:
+        """23:00 on a New York Monday sits in a Sydney user's Tuesday.
+
+        The clock column says 23:00 and the zone says New York, but the event is
+        happening at 14:00 on the reader's Tuesday afternoon. Rendering only the
+        event's own clock would put a late-night commitment on a day that has
+        none — the ambiguity naming the zone alone does not resolve.
+        """
+        builder = DailySummaryPromptBuilder()
+        entry = AgendaEntry(
+            journal_id=9,
+            title="Late call",
+            is_all_day=False,
+            # Monday 23:00 in New York (EDT, -4) is Tuesday 03:00 UTC.
+            starts_at=datetime(2026, 4, 28, 3, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 28, 4, 0, tzinfo=UTC),
+            start_time=time(23, 0),
+            end_time=time(0, 0),
+            timezone="America/New_York",
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=date(2026, 4, 28), agenda=[entry]),
+            now=datetime(2026, 4, 28, 3, 0, tzinfo=UTC),
+            timezone="Australia/Sydney",
+        )
+
+        # Tuesday 03:00 UTC is Tuesday 13:00 in Sydney (AEST, +10).
+        assert "13:00-14:00 (23:00-00:00 America/New_York): Late call" in prompt
+
+    def test_the_users_own_zone_is_not_named(self) -> None:
+        """Naming the zone on every row would make the exception invisible."""
+        builder = DailySummaryPromptBuilder()
+        # 09:00 Sydney on the 27th is 23:00 UTC on the 26th.
+        entry = _agenda_entry(
+            timezone="Australia/Sydney",
+            starts_at=datetime(2026, 4, 26, 23, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 26, 23, 30, tzinfo=UTC),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        assert "09:00-09:30: Design review" in prompt
+        assert "(Australia/Sydney)" not in prompt
+
+    def test_a_missing_zone_reads_as_utc_and_is_named_when_it_differs(self) -> None:
+        """A null zone means UTC, which is still not a Sydney user's clock."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(timezone=None)
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        # 09:00-09:30 UTC is 19:00-19:30 in Sydney (AEST, +10 in late April).
+        assert "19:00-19:30 (09:00-09:30 UTC): Design review" in prompt
+
+    def test_an_all_day_entry_names_no_zone(self) -> None:
+        """An all-day event happens on a date; there is no clock value to qualify."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            title="Public holiday",
+            is_all_day=True,
+            start_time=None,
+            end_time=None,
+            timezone="America/New_York",
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        assert "All day: Public holiday" in prompt
+        assert "America/New_York" not in prompt
+
+    def test_the_section_warns_that_a_named_zone_is_not_comparable(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[_agenda_entry()]), now=_NOW
+        )
+
+        assert "Every time below is the user's own local time" in prompt
+
+
+class TestAMultiDayEvent:
+    """A timed event can begin before this day and end after it.
+
+    The agenda matches timed events by overlap precisely so a multi-day trip
+    appears on the days in the middle of it, and for those the two clock values
+    belong to different dates.
+    """
+
+    def test_a_span_leaving_the_day_carries_its_dates(self) -> None:
+        """Otherwise a Monday-to-Wednesday trip reads as a Tuesday appointment."""
+        builder = DailySummaryPromptBuilder()
+        entry = AgendaEntry(
+            journal_id=4,
+            title="Bushwalking trip",
+            is_all_day=False,
+            starts_at=datetime(2026, 4, 27, 9, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 29, 9, 0, tzinfo=UTC),
+            start_time=time(9, 0),
+            end_time=time(9, 0),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=date(2026, 4, 28), agenda=[entry]),
+            now=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+        )
+
+        assert "27 Apr 09:00 - 29 Apr 09:00: Bushwalking trip" in prompt
+        # The bare form would read as an event of no duration at all.
+        assert "09:00-09:00" not in prompt
+
+    def test_a_span_inside_the_day_stays_terse(self) -> None:
+        """Dates on every row would bury the ones that need them."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[_agenda_entry()]), now=_NOW
+        )
+
+        assert "09:00-09:30: Design review" in prompt
+        assert "Apr" not in prompt.split("## Today's Agenda")[1]

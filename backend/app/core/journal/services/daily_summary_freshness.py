@@ -57,15 +57,26 @@ class DailySummaryFreshnessChecker:
     def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
         self._clock = clock if clock is not None else _utc_now
 
-    def is_stale(self, summary: JournalDailySummary, *, timezone: str | None) -> bool:
+    def is_stale(
+        self,
+        summary: JournalDailySummary,
+        *,
+        timezone: str | None,
+        now: datetime | None = None,
+    ) -> bool:
         """Whether ``summary`` is today's and was not generated today.
 
         "Today" is the current date in ``timezone`` — the user's configured
         zone, falling back to UTC when unset or unknown. Any day other than
         today is never stale.
+
+        ``now`` lets a caller impose the instant it has already read, so that
+        every day-based decision in one request is made against one reading of
+        the clock rather than four. Falls back to ``clock`` when none is given.
         """
         tz = resolve_timezone(timezone)
-        if summary.summary_date != today_in(tz, self._clock()):
+        moment = now if now is not None else self._clock()
+        if summary.summary_date != today_in(tz, moment):
             return False
         return not was_generated_on(summary, summary.summary_date, tz)
 

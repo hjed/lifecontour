@@ -4525,6 +4525,10 @@ async def get_daily_summary(
     Any other date needs at least two journals and otherwise comes back with
     status "disabled"; its summary is served from cache however old it is.
 
+    Today's summary is also grounded in the day's agenda — its event journals
+    with their times, locations and participants — while any other day's
+    describes only that day's journals.
+
     Args:
         summary_date: The date to get the summary for (YYYY-MM-DD format)
     """

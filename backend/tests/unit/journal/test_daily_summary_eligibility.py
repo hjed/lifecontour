@@ -212,3 +212,51 @@ class TestDefaultClock:
             checker.is_eligible(1, summary_date=date(2000, 1, 1), timezone="UTC")
             is False
         )
+
+
+class TestAnImposedInstant:
+    """A caller that has already read the clock can impose its reading.
+
+    The checker keeps its own ``clock`` for callers that have none, but a
+    request that resolved "now" earlier must be able to hand it over: judging
+    eligibility against a second, later reading is how a day that was today
+    when its journals were counted becomes a ``DISABLED`` past day.
+    """
+
+    def test_the_supplied_instant_wins_over_the_checkers_own_clock(self) -> None:
+        checker = DailySummaryEligibilityChecker(
+            clock=lambda: datetime(2026, 4, 28, 0, 0, 1, tzinfo=UTC)
+        )
+
+        # Its own clock says the 28th, so the 27th would be a past day with one
+        # journal — ineligible. The imposed instant says the 27th is today.
+        assert checker.is_eligible(
+            1,
+            summary_date=date(2026, 4, 27),
+            timezone="UTC",
+            now=datetime(2026, 4, 27, 23, 59, 59, tzinfo=UTC),
+        )
+
+    def test_without_one_it_still_reads_its_own_clock(self) -> None:
+        checker = DailySummaryEligibilityChecker(
+            clock=lambda: datetime(2026, 4, 28, 0, 0, 1, tzinfo=UTC)
+        )
+
+        assert not checker.is_eligible(
+            1, summary_date=date(2026, 4, 27), timezone="UTC"
+        )
+
+    def test_the_imposed_instant_is_read_in_the_users_zone(self) -> None:
+        """23:00 UTC on the 27th is already the 28th in Sydney."""
+        checker = DailySummaryEligibilityChecker()
+        moment = datetime(2026, 4, 27, 23, 0, tzinfo=UTC)
+
+        assert checker.is_eligible(
+            0,
+            summary_date=date(2026, 4, 28),
+            timezone="Australia/Sydney",
+            now=moment,
+        )
+        assert not checker.is_eligible(
+            0, summary_date=date(2026, 4, 28), timezone="UTC", now=moment
+        )

@@ -49,13 +49,10 @@ from app.core.dashboard.models.sections import (
     TasksSectionData,
     UpcomingDatesSectionData,
 )
-from app.core.dashboard.services.agenda_section import order_agenda_entries
 from app.core.dashboard.services.summary_section import summary_section_for
+from app.core.journal.services.agenda import agenda_for_day
 from app.core.journal.services.daily_summary_freshness import was_generated_on
-from app.core.journal.services.journal_date_resolver import (
-    local_day_window,
-    today_in,
-)
+from app.core.journal.services.journal_date_resolver import today_in
 from app.infrastructure.unit_of_work import savepoint
 
 if TYPE_CHECKING:
@@ -63,8 +60,8 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
-    from app.core.dashboard.models.repositories import AgendaRepository
-    from app.core.dashboard.models.sections import AgendaEntry
+    from app.core.journal.models.agenda import AgendaEntry
+    from app.core.journal.models.repositories import AgendaRepository
     from app.core.journal.services.daily_summary_repository import (
         JournalDailySummaryRepository,
     )
@@ -215,11 +212,14 @@ class HomeDashboardService:
     async def _agenda_for(
         self, user_id: str, day: datetime.date, tz: ZoneInfo
     ) -> tuple[AgendaEntry, ...]:
-        """One local day's event journals, in the agenda's order."""
-        entries = await self.agenda_repo.list_entries_in_window(
-            user_id, window=local_day_window(day, tz), anchor=day
-        )
-        return order_agenda_entries(entries)
+        """One local day's event journals, in the agenda's order.
+
+        The windowing and the ordering live together in ``agenda_for_day``
+        because the daily summary reads the same day through it: two callers
+        assembling the window themselves is two chances to disagree about where
+        the user's day starts.
+        """
+        return await agenda_for_day(self.agenda_repo, user_id, day, tz)
 
     async def _load_tasks(
         self, user_id: str, anchor: datetime.date, tz: ZoneInfo

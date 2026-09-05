@@ -2,6 +2,12 @@
 
 Gathers day-scoped data from repositories and assembles it into
 a DailySummaryInput suitable for prompt building.
+
+**The current day's agenda is read through the domain's own agenda port**
+rather than through a query of this module's own. The summary and the home
+dashboard are two renderings of one day, and a second implementation of "the
+user's event journals on this local day" is the way they start disagreeing
+about it.
 """
 
 from __future__ import annotations
@@ -12,14 +18,20 @@ from typing import TYPE_CHECKING
 
 from core_shared.models.contacts.entities import SummaryStatus
 
+from app.core.journal.services.agenda import agenda_for_day
 from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
     DailySummaryJournalEntry,
 )
+from app.core.journal.services.journal_date_resolver import today_in
 from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, resolve_timezone
 
 if TYPE_CHECKING:
+    from zoneinfo import ZoneInfo
+
+    from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.models.repositories import (
+        AgendaRepository,
         JournalContactRelationshipRepository,
         JournalRepository,
         JournalSeriesRepository,
@@ -41,18 +53,22 @@ class DailySummaryInputAssembler:
         contact_relationship_repo: JournalContactRelationshipRepository,
         summary_repo: JournalDailySummaryRepository,
         series_repo: JournalSeriesRepository | None = None,
+        agenda_repo: AgendaRepository | None = None,
     ) -> None:
         self._journal_repo = journal_repo
         self._mood_repo = mood_repo
         self._contact_relationship_repo = contact_relationship_repo
         self._summary_repo = summary_repo
         self._series_repo = series_repo
+        self._agenda_repo = agenda_repo
 
     async def assemble(
         self,
         user_id: str,
         summary_date: date,
         timezone: str = DEFAULT_TIMEZONE,
+        *,
+        now: datetime | None = None,
     ) -> DailySummaryInput:
         """Assemble input data for a single day's summary.
 
@@ -60,6 +76,14 @@ class DailySummaryInputAssembler:
         contact relationships, and mood data. The day boundaries are computed
         in the user's ``timezone`` (then converted to UTC for the query) so the
         summary covers the user's local day rather than the UTC day.
+
+        When ``summary_date`` is **today** in that timezone, the day's agenda is
+        gathered too. It is not for any other day: forward-looking material
+        belongs to the current day, and a past day should cost no extra read.
+
+        ``now`` exists only so the local-midnight boundary can be pinned in
+        tests, as ``DailySummaryFreshnessChecker``'s injectable clock is —
+        defaulted, so no caller has to hold a clock to ask for a summary.
         """
         # Build the day's bounds in the user's timezone, then convert to UTC
         # for the (UTC-stored) query.
@@ -172,4 +196,24 @@ class DailySummaryInputAssembler:
             contact_names=all_contact_names,
             mood_values=mood_values,
             previous_summary=previous_summary,
+            agenda=await self._agenda_for(user_id, summary_date, tz, now),
         )
+
+    async def _agenda_for(
+        self,
+        user_id: str,
+        summary_date: date,
+        tz: ZoneInfo,
+        now: datetime | None,
+    ) -> list[AgendaEntry]:
+        """The day's scheduled events, when the day is the user's today.
+
+        Any other day reads nothing at all — not an empty window, no round trip
+        — because the answer would be discarded: the prompt renders the agenda
+        for the current day only.
+        """
+        if summary_date != today_in(tz, now):
+            return []
+        if self._agenda_repo is None:
+            return []
+        return list(await agenda_for_day(self._agenda_repo, user_id, summary_date, tz))

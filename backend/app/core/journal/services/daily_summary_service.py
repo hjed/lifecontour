@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -55,6 +56,7 @@ class DailySummaryService:
         user_settings_repo: UserSettingsRepository | None = None,
         container: AsyncContainer | None = None,
         freshness_checker: DailySummaryFreshnessChecker | None = None,
+        clock: Callable[[], datetime] | None = None,
         _gemini_response_override: str | None = None,
     ) -> None:
         self._input_assembler = input_assembler
@@ -70,6 +72,12 @@ class DailySummaryService:
         self._gemini_model = gemini_model
         self._user_settings_repo = user_settings_repo
         self._container = container
+        # The request's instant. It lives here rather than on each collaborator
+        # because the request is what "now" belongs to: the checkers keep their
+        # own clocks for callers that have none, but a run through this service
+        # imposes one reading on all of them, so pinning the local-midnight
+        # boundary in a test means pinning it once, here.
+        self._clock = clock if clock is not None else _utc_now
         self._gemini_response_override = _gemini_response_override
 
     async def _resolve_timezone(self, user_id: str) -> str:
@@ -123,13 +131,26 @@ class DailySummaryService:
         # input assembly and eligibility all read "today" from it.
         timezone = await self._resolve_timezone(user_id)
 
+        # And the *instant* is read once, then imposed on every collaborator
+        # that asks what day it is: freshness, assembly, eligibility and the
+        # prompt. Each can read its own clock and does when called from
+        # elsewhere, but four readings inside one request is four chances to
+        # straddle local midnight, and each straddle has its own symptom — a
+        # today-prompt whose agenda is silently missing, or, worse, a day that
+        # was today when its journals were counted being judged as yesterday
+        # and persisted DISABLED against the always-eligible rule. One reading
+        # cannot disagree with itself.
+        now = self._clock()
+
         # 1. Check cache (read — no transaction held). A GENERATED row is
         #    served unless it is today's and was not generated today, in which
         #    case it falls through to the same generate path an invalidated
         #    (PENDING) row takes — so the GENERATING guard below still holds.
         existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
         if existing and existing.status == SummaryStatus.GENERATED:
-            if not self._freshness_checker.is_stale(existing, timezone=timezone):
+            if not self._freshness_checker.is_stale(
+                existing, timezone=timezone, now=now
+            ):
                 logger.info(
                     "Returning cached daily summary for %s on %s",
                     user_id,
@@ -153,7 +174,7 @@ class DailySummaryService:
 
         # 2. Assemble input (scoped to the user's local day — reads only)
         summary_input = await self._input_assembler.assemble(
-            user_id, summary_date, timezone
+            user_id, summary_date, timezone, now=now
         )
 
         # 3. Check eligibility. Today (in the user's timezone) is always
@@ -162,6 +183,7 @@ class DailySummaryService:
             summary_input.journal_count,
             summary_date=summary_date,
             timezone=timezone,
+            now=now,
         ):
             logger.info(
                 "Day %s has %d journals, below threshold — not eligible",
@@ -191,7 +213,9 @@ class DailySummaryService:
 
         # 5. Build prompt and call Gemini — with NO transaction held.
         try:
-            prompt = self._prompt_builder.build(summary_input, timezone=timezone)
+            prompt = self._prompt_builder.build(
+                summary_input, now=now, timezone=timezone
+            )
             raw_response = await self._call_gemini(prompt)
             result = self._parse_response(raw_response)
         except Exception as e:
@@ -274,7 +298,7 @@ class DailySummaryService:
             )
             return existing
 
-        now = datetime.now(tz=UTC)
+        now = self._clock()
         generated_summary = JournalDailySummary(
             user_id=user_id,
             summary_date=summary_date,
@@ -446,3 +470,7 @@ class DailySummaryService:
         if not mood_values:
             return None
         return round(sum(mood_values) / len(mood_values), 1)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(tz=UTC)

@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.journal.models.agenda import AgendaEntry
 
 
 @dataclass
@@ -28,6 +32,12 @@ class DailySummaryInput:
     """Aggregated input data for a single day's summary generation.
 
     Assembled by DailySummaryInputAssembler from repository data.
+
+    ``agenda`` is the day's scheduled events — the same ``AgendaEntry`` the home
+    dashboard's agenda card draws, reused rather than re-projected so the two
+    surfaces cannot describe the same day differently. It is populated for the
+    **current day only**: forward-looking material belongs to today, and a
+    summary of last Tuesday describes last Tuesday.
     """
 
     user_id: str
@@ -38,3 +48,4 @@ class DailySummaryInput:
     contact_names: list[str] = field(default_factory=list)
     mood_values: list[int] = field(default_factory=list)
     previous_summary: str | None = None
+    agenda: list[AgendaEntry] = field(default_factory=list)

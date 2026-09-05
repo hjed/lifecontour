@@ -19,13 +19,15 @@ import pytest
 
 from app.core.dashboard.models.sections import (
     AgendaDay,
-    AgendaEntry,
-    AgendaParticipant,
     AgendaSectionData,
-    AgendaTag,
     DashboardSection,
     SectionStatus,
     TasksSectionData,
+)
+from app.core.journal.models.agenda import (
+    AgendaEntry,
+    AgendaParticipant,
+    AgendaTag,
 )
 
 pytestmark = pytest.mark.unit

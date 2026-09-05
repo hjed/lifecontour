@@ -1,16 +1,19 @@
 """Unit tests for DailySummaryInputAssembler."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals import EventDateRange, Journal, MoodData
 from core_shared.models.journals.daily_summary import JournalDailySummary
 
+from app.core.journal.models.agenda import AgendaEntry
 from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )
+from app.core.journal.services.journal_date_resolver import local_day_window
 
 
 def _make_journal(
@@ -288,3 +291,175 @@ class TestDailySummarySeriesNames:
         result = await assembler.assemble("user123", date(2026, 4, 27))
 
         assert result.journals[0].series_names == []
+
+
+# Two zones far enough from UTC that one local day never shares a UTC date with
+# it, so a UTC-anchored reading of "today" cannot pass these by accident.
+FAR_EAST = "Pacific/Kiritimati"  # UTC+14
+FAR_WEST = "Pacific/Niue"  # UTC-11
+
+
+def _agenda_entry(journal_id: int = 1, title: str = "Design review") -> AgendaEntry:
+    """One agenda entry, with only the fields these tests read set."""
+    start = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+    return AgendaEntry(
+        journal_id=journal_id,
+        title=title,
+        is_all_day=False,
+        starts_at=start,
+        ends_at=start + timedelta(hours=1),
+    )
+
+
+@pytest.fixture
+def mock_agenda_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.list_entries_in_window.return_value = []
+    return repo
+
+
+@pytest.fixture
+def agenda_assembler(
+    mock_journal_repo: AsyncMock,
+    mock_mood_repo: AsyncMock,
+    mock_contact_rel_repo: AsyncMock,
+    mock_summary_repo: AsyncMock,
+    mock_agenda_repo: AsyncMock,
+) -> DailySummaryInputAssembler:
+    return DailySummaryInputAssembler(
+        journal_repo=mock_journal_repo,
+        mood_repo=mock_mood_repo,
+        contact_relationship_repo=mock_contact_rel_repo,
+        summary_repo=mock_summary_repo,
+        agenda_repo=mock_agenda_repo,
+    )
+
+
+class TestTodaysAgendaIsAssembled:
+    """The current day's agenda travels with the rest of the day's input."""
+
+    @pytest.mark.asyncio
+    async def test_assembles_todays_agenda(
+        self,
+        agenda_assembler: DailySummaryInputAssembler,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        """Entries arrive on the input in the order the agenda draws them."""
+        timed = _agenda_entry(journal_id=1, title="Design review")
+        all_day = AgendaEntry(
+            journal_id=2,
+            title="Public holiday",
+            is_all_day=True,
+            starts_at=datetime(2026, 4, 27, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 27, tzinfo=UTC),
+        )
+        mock_agenda_repo.list_entries_in_window.return_value = [timed, all_day]
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        result = await agenda_assembler.assemble(
+            "user123", date(2026, 4, 27), "UTC", now=now
+        )
+
+        assert [entry.title for entry in result.agenda] == [
+            "Public holiday",
+            "Design review",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_agenda_window_is_the_users_local_day(
+        self,
+        agenda_assembler: DailySummaryInputAssembler,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        """The window and anchor are the local day's, not a UTC day's."""
+        tz = ZoneInfo(FAR_EAST)
+        # 13:00 UTC on the 26th is already 03:00 on the 27th in Kiritimati.
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        await agenda_assembler.assemble("user123", date(2026, 4, 27), FAR_EAST, now=now)
+
+        mock_agenda_repo.list_entries_in_window.assert_awaited_once_with(
+            "user123",
+            window=local_day_window(date(2026, 4, 27), tz),
+            anchor=date(2026, 4, 27),
+        )
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_east_of_utc(
+        self,
+        agenda_assembler: DailySummaryInputAssembler,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        """UTC's date is still the 26th, but the user's day is the 27th."""
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        gathered = await agenda_assembler.assemble(
+            "user123", date(2026, 4, 27), FAR_EAST, now=now
+        )
+        stale = await agenda_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_EAST, now=now
+        )
+
+        assert mock_agenda_repo.list_entries_in_window.await_count == 1
+        assert gathered.summary_date == date(2026, 4, 27)
+        assert stale.agenda == []
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_west_of_utc(
+        self,
+        agenda_assembler: DailySummaryInputAssembler,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        """UTC has ticked over to the 27th; in Niue it is still the 26th."""
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        await agenda_assembler.assemble("user123", date(2026, 4, 27), FAR_WEST, now=now)
+        assert mock_agenda_repo.list_entries_in_window.await_count == 0
+
+        await agenda_assembler.assemble("user123", date(2026, 4, 26), FAR_WEST, now=now)
+        assert mock_agenda_repo.list_entries_in_window.await_count == 1
+
+
+class TestTheAgendaIsNotReadForAnyOtherDay:
+    """A past-day summary describes that day, and costs no agenda round trip."""
+
+    @pytest.mark.asyncio
+    async def test_past_day_does_not_read_the_agenda(
+        self,
+        agenda_assembler: DailySummaryInputAssembler,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await agenda_assembler.assemble(
+            "user123", date(2026, 4, 26), "UTC", now=now
+        )
+
+        assert result.agenda == []
+        mock_agenda_repo.list_entries_in_window.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_future_day_does_not_read_the_agenda(
+        self,
+        agenda_assembler: DailySummaryInputAssembler,
+        mock_agenda_repo: AsyncMock,
+    ) -> None:
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await agenda_assembler.assemble(
+            "user123", date(2026, 4, 28), "UTC", now=now
+        )
+
+        assert result.agenda == []
+        mock_agenda_repo.list_entries_in_window.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_without_agenda_repo_defaults_to_empty(
+        self, assembler: DailySummaryInputAssembler
+    ) -> None:
+        """The dependency is optional, as the series repository already is."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await assembler.assemble("user123", date(2026, 4, 27), "UTC", now=now)
+
+        assert result.agenda == []

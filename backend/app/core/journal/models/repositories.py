@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
     from core_shared.models.history import Provenance
+    from core_shared.models.journals import EventDateRange
     from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.contact_event_role import ContactEventRole
     from core_shared.models.journals.review_item import ReviewItem
     from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from app.core.journal.models.agenda import AgendaEntry
 
 from core_shared.models.journals import (
     AbseilingData,
@@ -2843,5 +2846,64 @@ class OutdoorDashboardRepository(ABC):
 
         Each row carries the referencing journal's event range so the service
         can apply the recent-templates window without a second query.
+        """
+        pass
+
+
+class AgendaRepository(ABC):
+    """Reads the event journals an agenda window covers.
+
+    Here rather than in the dashboard domain, beside ``OutdoorDashboardRepository``
+    and for the same reason: every table it reads is a journal table and every
+    row it returns is a journal. The dashboard was its first caller, which is not
+    the same as being its owner — the daily summary is the second, and a
+    journal-domain caller reaching into the dashboard for a read over journal
+    tables had the dependency backwards.
+    """
+
+    @abstractmethod
+    async def list_entries_in_window(
+        self, user_id: str, *, window: EventDateRange, anchor: date
+    ) -> list[AgendaEntry]:
+        """The user's event journals on the day ``window`` and ``anchor`` describe.
+
+        **Two parameters for one day, because timed and all-day events are asked
+        about differently.** A timed event happens at instants, so it is matched
+        by **overlap** against ``window``: one that began before the day and ends
+        after it is inside it in the only sense the agenda cares about — it is
+        happening. That is the outdoor dashboard's semantics.
+
+        An all-day event happens on a *date* and has no meaningful instants, so
+        it is matched against ``anchor`` by date. Matching it by instant reads
+        the wrong day: a date-only event synced from Google is stored at midnight
+        UTC, which for a user west of UTC falls in the previous local day's
+        window. See the adapter for how the stored bounds are resolved back to
+        the date they were written as.
+
+        Only journals with calendar info are returned — a journal has the EVENT
+        type exactly when a ``journal_calendar_info`` row exists for it, so a
+        journal without one is a note about the day rather than something
+        scheduled on it. Cancelled events are returned **flagged**, not filtered:
+        the specification requires them to be shown clearly marked, and a surface
+        cannot mark an entry it was never sent.
+
+        The order of the result is not part of the contract — ordering is
+        ``order_agenda_entries``' job, and it belongs to the caller rather than
+        to the query.
+
+        Scoped on ``user_id``, which every implementation must honour: nothing on
+        an agenda is shared between users, and a read port with no owner
+        parameter is the shape that eventually leaks one user's day to another.
+
+        Args:
+            user_id: The acting user. Implementations must scope on it.
+            window: The instants the day covers, from ``local_day_window`` —
+                the span timed events are matched against.
+            anchor: The day itself, in the user's timezone — the date all-day
+                events are matched against.
+
+        Returns:
+            The matching entries with their tags and participants already
+            attached, in no guaranteed order.
         """
         pass

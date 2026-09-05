@@ -23,6 +23,7 @@ from app.core.journal.adapters.sql.abseiling_data_repository import (
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
 )
+from app.core.journal.adapters.sql.agenda_repository import SqlAgendaRepository
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
@@ -118,6 +119,7 @@ from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
     ActivityTemplateRepository,
+    AgendaRepository,
     BushwalkingDataRepository,
     CalendarInfoRepository,
     CalendarRepository,
@@ -211,6 +213,17 @@ class JournalProvider(Provider):
     def journal_repository(self, connection: AsyncConnection) -> JournalRepository:
         """Provide a JournalRepository instance."""
         return SqlJournalRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def agenda_repository(self, connection: AsyncConnection) -> AgendaRepository:
+        """Provide an AgendaRepository instance.
+
+        Here rather than in ``DashboardProvider``, because the port is the
+        journal domain's: it reads journals. The dashboard consumes it, which is
+        the direction that already exists — ``DashboardProvider`` needs this
+        provider anyway for the date resolver and the summary repository.
+        """
+        return SqlAgendaRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def field_history_repository(
@@ -766,6 +779,7 @@ class JournalProvider(Provider):
         contact_relationship_repo: JournalContactRelationshipRepository,
         summary_repo: JournalDailySummaryRepository,
         series_repo: JournalSeriesRepository,
+        agenda_repo: AgendaRepository,
     ) -> DailySummaryInputAssembler:
         """Provide a DailySummaryInputAssembler instance."""
         return DailySummaryInputAssembler(
@@ -774,6 +788,7 @@ class JournalProvider(Provider):
             contact_relationship_repo=contact_relationship_repo,
             summary_repo=summary_repo,
             series_repo=series_repo,
+            agenda_repo=agenda_repo,
         )
 
     @provide(scope=Scope.REQUEST)

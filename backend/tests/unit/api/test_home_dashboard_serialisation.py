@@ -29,16 +29,18 @@ from app.api.home_dashboard.schemas import (
 )
 from app.core.dashboard.models.sections import (
     AgendaDay,
-    AgendaEntry,
-    AgendaParticipant,
     AgendaSectionData,
-    AgendaTag,
     DashboardSection,
     DashboardSummaryState,
     HomeDashboard,
     SummarySectionData,
     TasksSectionData,
     UpcomingDatesSectionData,
+)
+from app.core.journal.models.agenda import (
+    AgendaEntry,
+    AgendaParticipant,
+    AgendaTag,
 )
 
 pytestmark = pytest.mark.unit

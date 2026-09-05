@@ -9688,6 +9688,13 @@ non-mutation of the input, and the empty case. No integration, no e2e: nothing c
 **Delivered:** 11 tests in `tests/unit/dashboard/test_agenda_ordering.py` and 4 added to
 `test_dashboard_sections.py`.
 
+> **Paths since moved.** ITER18-005 Phase 3 relocated the agenda read into the journal domain when the
+> daily summary became its second caller: the models are now `app/core/journal/models/agenda.py`, the port
+> is in `app/core/journal/models/repositories.py`, the adapter is
+> `app/core/journal/adapters/sql/agenda_repository.py`, and `order_agenda_entries` is
+> `app/core/journal/services/agenda.py` (tests in `tests/unit/journal/`). The behaviour recorded above is
+> unchanged; only its address is. `AgendaDay` and `AgendaSectionData` stayed in the dashboard's sections.
+
 **Decisions taken (Phase 5a):**
 
 - **All-day is a pin, not a tie-break.** An all-day entry outranks every timed one however early the
@@ -10514,7 +10521,7 @@ journals view consumes the same summary, so it stands alone.
       a user acting on the dashboard — the sections beneath update in place and the summary refreshes on
       the next load.
 - [ ] Explicit user-requested regeneration continues to work.
-- [ ] **Tone and safety constraints are carried into the prompt**: short and practical; grounded only in
+- [x] **Tone and safety constraints are carried into the prompt**: short and practical; grounded only in
       the journals, agenda, tasks and dates it was given; descriptive rather than speculative; never
       inventing commitments; read-only; and it **must not restate the sections beneath it item by item** —
       its value is in connecting them. The prompt-level instructions are assertable and are asserted
@@ -10561,6 +10568,10 @@ journals view consumes the same summary, so it stands alone.
    **Phase 6**. Moving it is cleaner but touches existing behaviour.
 4. **Prompt budget** — settled across **Phases 3–5**. Adding agenda, tasks and dates grows the prompt;
    decide whether any input group needs a cap, and record it so a busy day cannot silently drop material.
+   **Phase 3 settled the agenda's share: `MAX_AGENDA_ENTRIES = 20` and `MAX_AGENDA_PARTICIPANTS = 10`,
+   each stating its overflow in the prompt rather than truncating.** The shape is the one Phases 4 and 5
+   should follow — a per-group constant beside `MAX_CONTENT_LENGTH`, and a counted remainder, never a
+   silently shortened list.
 
 #### Phase 1: Eligibility — Today Is Always Eligible ✅ COMPLETE
 
@@ -10761,27 +10772,246 @@ page's own `GET` now regenerates a stale today-summary instead of serving last n
 eye exactly as an invalidated row always has; and the dashboard's new *generating*-on-stale reading is a
 backend fact until Phase 8 wires the card.
 
-#### Phase 3: Extended Inputs — Today's Agenda
+#### Phase 3: Extended Inputs — Today's Agenda ✅ COMPLETE
 
 **Prerequisites:** Phase 1 and ITER18-004 Phase 5.
-**Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Actual: ~1,390 tracked** — ~930 for the
+feature (247 production of which ~120 are docstrings and comments, 588 tests, ~95 documentation) plus
+~460 for the domain move that review turned up (241 insertions / 220 deletions across 21 files, most of it
+git-tracked renames and import churn). 2.5× the estimate. Two things drove it: production ran 1.8× high
+almost entirely on prose — six of the eight feature hunks explain *why* the read is shared and why a clock
+time is not invented — and **the estimate had no line for discovering that the read was in the wrong
+domain**, which no amount of sizing the feature would have found.
 
 **Acceptance Criteria:**
 
-- [ ] `DailySummaryInputAssembler` gathers the current day's agenda — today's event journals with times,
+- [x] `DailySummaryInputAssembler` gathers the current day's agenda — today's event journals with times,
       locations and participants — into `DailySummaryInput`, reusing ITER18-004 Phase 5's read rather than a
       second query implementation.
-- [ ] `DailySummaryPromptBuilder` includes the agenda for the **current day only**; a past-day prompt is
+- [x] `DailySummaryPromptBuilder` includes the agenda for the **current day only**; a past-day prompt is
       unchanged by this phase.
-- [ ] Cancelled events are excluded or marked as cancelled in the prompt — never presented as something the
+- [x] Cancelled events are excluded or marked as cancelled in the prompt — never presented as something the
       user is doing.
-- [ ] The prompt keeps the existing tone constraints and gains the explicit instruction not to restate the
+- [x] The prompt keeps the existing tone constraints and gains the explicit instruction not to restate the
       dashboard sections item by item.
-- [ ] Prompt-size handling per open decision 4, with any cap stated rather than silently truncating.
+- [x] Prompt-size handling per open decision 4, with any cap stated rather than silently truncating.
 
 **Required Test Coverage:** unit — the prompt contains agenda material for today and none for a past day;
 cancelled-event handling; the no-events case adds nothing rather than an empty heading; the
 do-not-restate instruction is present. Integration — assembly against real journals. No e2e (Phase 8).
+
+**Delivered.** The read is **shared, not repeated.** `HomeDashboardService._agenda_for` was three lines —
+window the local day, ask the port, apply the ordering rule — and those three lines are now
+`agenda_for_day(repo, user_id, day, tz)` in `app/core/journal/services/agenda.py`, beside the ordering
+rule they apply. The dashboard reads today and tomorrow through it; `DailySummaryInputAssembler` reads the
+current day through it. Neither builds a window of its own, so the two cannot disagree about where the
+user's day starts or how the day is ordered — which is the whole content of the acceptance criterion,
+since a second implementation would be right the day it was written and wrong the first time either
+changed.
+
+`DailySummaryInput` gained `agenda: list[AgendaEntry]` — the **same frozen model the agenda card draws**,
+reused rather than projected into a summary-shaped twin. It already carries exactly what the specification
+asks for (title, clock times, `is_all_day`, location, participants) plus the `is_cancelled` flag the
+prompt needs, and a parallel dataclass would be a second shape to keep in step for nothing.
+
+**Two guards for one rule, deliberately.** The assembler skips the agenda read entirely unless
+`summary_date` is today in the user's zone, so a past-day summary costs no extra round trip; the prompt
+builder emits the section only when its temporal context is `Today`. Each resolves the local date through
+the same pair underneath — the assembler by `today_in(tz, now)`, the builder by `now_in_tz(timezone,
+now).date()`, which is the local date it already needed for the overview's `(Today)` label — so the two
+cannot disagree; the builder is not re-resolving the day for this rule, it is reusing the answer it had.
+The *rendering* half is assertable without a database, which is what makes "a past-day prompt is
+unchanged" a unit test rather than an integration one.
+
+**Every day-based decision in one request now reads one instant.** `get_or_generate` reads the clock once
+and imposes it on all four collaborators that ask what day it is — freshness, assembly, eligibility and the
+prompt. The first cut let each read its own, which is equivalent almost always and wrong across one
+boundary, and **each straddle has a different symptom**: between assembly and prompt building it leaves the
+assembler gathering nothing for a day that is not yet today while the builder labels the prompt `(Today)`
+over an agenda that is silently absent; between assembly and *eligibility* — the worse one — a day that was
+today when its journals were counted is judged as yesterday, falls to the two-journal threshold and is
+persisted `DISABLED`, turning Phase 1's always-eligible rule off for exactly the quiet day it exists to
+protect. Both windows are milliseconds wide and both are reachable; one reading cannot disagree with
+itself.
+
+**The clock moved to where the request begins.** `DailySummaryService` takes the injectable `clock`
+Phases 1 and 2 gave the two checkers, and the checkers keep theirs for callers that arrive without an
+instant — `now` is a defaulted keyword on both, not a replacement. That is what makes the boundary
+pinnable in one place: a test that used to inject two clocks to pin one midnight now injects one. Caught
+across two review rounds — the first found the assembler/builder pair, the second found that fixing only
+that pair had left eligibility reading a second clock.
+Both take an optional `now` that defaults to reading the instant themselves, mirroring
+`DailySummaryFreshnessChecker`'s injectable clock: the local-midnight boundary is pinnable in tests and
+`DailySummaryService` is untouched by this phase.
+
+**Cancelled events are marked, not dropped** — the stance **W18** already takes on the card. An entry
+renders `- [CANCELLED] 15:00-16:00: Dentist`, and the section's header tells the model that entries so
+marked *did not go ahead* and must never be described as something the user is doing. Dropping them was
+the other option the criterion allows and was rejected: "your 3pm was cancelled" is exactly the connective
+observation the summary exists to make, and it cannot be made from an entry the model was never handed.
+
+**Times come from the clock columns only** (`start_time`/`end_time`, what **W13** draws), `All day` for an
+all-day entry, and **no time at all** for a timed entry whose clock columns are empty. `starts_at` is not
+re-anchored into the user's zone to manufacture one: the row records its own zone, and asserting an hour in
+a zone the row does not record is precisely the defect `SqlAgendaRepository`'s docstring exists to prevent.
+
+**A foreign-zone event leads with the reader's clock time and carries its own behind it** —
+`19:00-19:30 (09:00-09:30 America/New_York): New York sync`. This took two review rounds to get right, and
+the intermediate state is the instructive one.
+
+The first cut rendered the clock columns bare under the line "Times are the user's local clock times",
+which is false: migration 0045 derives them `AT TIME ZONE jci.timezone`, so they are the **event's** local
+time and a null zone means UTC. [API Design](../architecture/api-design.md) already spells out the
+consequence for any surface that renders them bare — *"a 09:00 New York meeting on a Sydney reader's
+agenda reads as a morning event that sorts into their evening"* — which is exactly what the model was
+being told. The obvious repair, naming the zone beside the time, **is not sufficient**, and the second
+round said why: an entry is on this agenda by *instant overlap*, so its own local date can be the
+neighbouring one. 23:00 on a New York Monday is on a Sydney user's Tuesday, and `23:00
+(America/New_York)` under a Tuesday heading still reads as a late-night Tuesday commitment when the event
+is really happening at 13:00 that Tuesday afternoon. The zone resolves *which clock*; it does not resolve
+*which day*, and the model has no way to supply the missing date.
+
+Leading with the reader's time settles both, and makes every time on the agenda directly comparable —
+which is what the model needs in order to notice a clash, the connective work the specification says is
+the summary's whole value. The reader's time is derived from the stored instant, which is arithmetic
+rather than the invention D4 rules out: an instant expressed in a second zone is still that instant. The
+zone rides with the *time*, so an all-day entry names none — it happens on a date and has no clock value
+to qualify.
+
+**A span that leaves the day carries its dates**, for the same underlying reason found one round later.
+The agenda matches timed events by overlap *precisely* so that a multi-day trip appears on the days in the
+middle of it, and for those the two clock values belong to different dates: a Monday-to-Wednesday trip on
+the Tuesday rendered as `09:00-17:00`, an ordinary Tuesday appointment, and — in the common case where a
+trip starts and ends at the same hour — as `09:00-09:00`, an event of no duration at all. Both invite the
+model to reason about a clash that is not there and to miss the one that is. An entry with either end
+outside the day now reads `27 Apr 09:00 - 29 Apr 09:00: Bushwalking trip`; entries inside the day stay
+terse, because dates on every row would bury the ones that need them.
+
+Deriving the reader's time from the instant for *every* timed entry, rather than only foreign-zone ones,
+made this one code path instead of two — the two sources agree by construction for a same-zone entry — and
+it immediately exposed two unit fixtures whose `start_time` and `starts_at` could not both have been true.
+*A rendering that reads two fields which the schema guarantees are consistent will find the fixtures where
+they are not.*
+
+**Tone.** The prompt keeps every constraint it had and gains four lines: keep it short; do not invent
+commitments the user did not make; do not restate the day's agenda, journals or other listed material item
+by item, because the user can already see those lists; and a statement of where the value actually is —
+what one implies for another, what needs preparing, what is likely to clash. Two *existing* lines were
+edited rather than added to, which review showed was the difference between qualifying an instruction and
+contradicting it: the grounding rule named only "the journals or tool results", so the agenda was added to
+that sentence instead of getting a second grounding sentence of its own — two grounding rules listing
+different sources is a contradiction the model is free to resolve by discarding the agenda this phase
+supplies. And "All times and dates are shown in the user's local timezone" became "…unless a different
+timezone is named beside them", because the agenda now prints exactly such a row. The instructions are
+assertable and asserted; the model's adherence to them is not, and is not claimed.
+
+*The general point, worth carrying into Phases 4–6: when a new input group needs an existing instruction to
+say something broader, widen that instruction. Adding a second one beside it leaves the narrow claim
+standing, and the model has no way to know which was meant.*
+
+**The agenda read moved into the journal domain**, and that is the more important half of this phase.
+The first implementation left the port, the models and the SQL adapter in `app/core/dashboard/` and had
+the assembler import them, which put a journal-domain caller behind a dashboard-domain read — backwards.
+Every table that read touches is a journal table (`journals`, `journal_calendar_info`, `calendars`, the
+tag assignments, the contact relationships) and every row it returns is a journal, so the dashboard was
+its first *caller*, never its owner. `app/core/dashboard/models/repositories.py` had even argued the
+placement on the grounds that moving it "would point that domain at this one, **for no gain**" — and the
+second caller is exactly the gain that clause said did not exist.
+
+So `AgendaTag`, `AgendaParticipant` and `AgendaEntry` now live in `app/core/journal/models/agenda.py`,
+`AgendaRepository` beside the domain's other ports (next to `OutdoorDashboardRepository`, the precedent —
+a projection shaped for one card still belongs to the domain whose rows it returns), `SqlAgendaRepository`
+in the journal adapters, and `order_agenda_entries` / `agenda_for_day` in
+`app/core/journal/services/agenda.py`. The dashboard keeps what is genuinely its own: `AgendaDay`'s
+labelled day and `AgendaSectionData`'s tomorrow-beneath-today shape, both of which import `AgendaEntry` —
+the dashboard → journal direction that already existed. `app/core/dashboard/models/repositories.py` is
+deleted rather than left empty; a later dashboard-owned port can recreate it, and will have to make the
+argument this move settled.
+
+**DI got simpler as a direct result.** `JournalProvider` now provides `AgendaRepository`, `DashboardProvider`
+consumes it (it already needs `JournalProvider` for the date resolver and the summary repository), and the
+assembler takes the port by injection. The first implementation could not do that: with the port in the
+dashboard domain, `JournalProvider` depending on it would have broken every container that registers
+`JournalProvider` alone — `tests/integration/api/conftest.py` and
+`tests/integration/journal/test_journal_date_resolver.py` among them — so the provider had to build
+`SqlAgendaRepository(connection)` by hand, the way `task_anchor_repository` does. Moving the port removed
+the need for the workaround entirely. *The general point is that a DI provider reaching around the
+container to build an adapter by hand is usually a domain boundary complaining.*
+
+**Decisions taken.**
+
+1. **Open decision 4, the agenda's share of the prompt budget:** `MAX_AGENDA_ENTRIES = 20` and
+   `MAX_AGENDA_PARTICIPANTS = 10`, both **stated in the prompt** when they bite — `(N further events on
+   this day are not listed; the agenda above is capped at 20.)` and `with A, B, … and N more`. Neither
+   truncates silently, because a model told "and 6 more" can say the day was full while one handed a
+   quietly shortened list will describe it as complete. Entries are capped in agenda order, so what
+   survives is the earliest of the day. Phases 4 and 6 budget their groups against these.
+2. **The agenda read belongs to the journal domain, and was moved there rather than imported across.**
+   The first cut had the journal domain importing a dashboard port and model, with the dashboard already
+   importing this domain's date resolver and summary repository — mutual acquaintance at package level,
+   no module cycle, and recorded as an accepted cost. That was the wrong call and was corrected before
+   merge: the read is over journal tables, so one of the two directions was simply wrong, and "accepted
+   coupling" was papering over it. **A second caller is the evidence that settles which domain owns a
+   read**; one caller is not, which is why the original placement looked defensible when it was made.
+
+**Tests.** Unit (`test_daily_summary_prompt_builder.py`): today's prompt carries the entry, its
+`09:00-09:30`, its location and its participant; the same input on a past day *and* on a future day
+produces neither the heading nor the title; an all-day entry reads `All day: …`; a timed entry with no
+clock columns gets no time and is not mislabelled all-day; a cancelled entry is marked and the
+never-describe-as-happening instruction is present; an empty agenda adds no heading; 25 entries render 20
+and say `5 further events`, with the 21st title absent; 12 participants render 10 and say `and 2 more`;
+the do-not-restate instruction is present; and the pre-existing tone constraints all survive. The existing
+twenty tests are unchanged — including the one asserting the prompt contains no bare `UTC`, which is a
+real constraint on the new static wording rather than an assertion to relax.
+(`test_daily_summary_input_assembler.py`): today's entries arrive in agenda order, the window handed to
+the port is `local_day_window` on the anchor day, the day is resolved fourteen hours east and eleven hours
+west of UTC (where UTC's date and the user's are never the same, so a UTC-anchored reading cannot pass),
+and a past day, a future day and a missing port each yield an empty agenda with the port not awaited.
+(`test_agenda.py`): the extracted `agenda_for_day` passes the local-day window and anchor and
+returns the ordered tuple. Integration against real Postgres
+(`test_daily_summary_agenda_input.py`, real repositories on the test's savepoint connection, seeded through
+the agenda suite's own `EventSeeder`): a timed event with a location and a participant contact and an
+all-day event both arrive with the all-day one pinned first; a journal without calendar info does not; nor
+does another user's event; a cancelled event arrives flagged; a far-east user's local day is read as theirs
+— 07:00 there is *yesterday* in UTC, so a UTC-anchored window could not reach it — and tomorrow's event,
+which 07:00 there puts inside *this* UTC day, is not on today's agenda, so both ends of the window are
+pinned by a case a UTC anchor would fail; and a past *and* a future day each assemble no agenda while still
+assembling that day's journals — the negative cases run against days that really have events on them,
+because a negative assertion on an empty day proves nothing.
+
+Review caught one test that proved nothing on its own terms: asserting an empty agenda for *yesterday*
+never reached the query, because the current-day guard answers before the database is asked. **A negative
+agenda assertion is only worth writing for a day the query actually runs on** — which is why the
+replacement asks about today and seeds the event on the neighbouring day instead.
+
+It also caught that every one of these tests read the clock twice — once in the helper computing the date
+to assert against, once inside `EventSeeder.event` choosing the day to seed — so a local-midnight crossing
+mid-test could make the two disagree and fail a correct implementation. `EventSeeder.event` gained an
+optional `on_day`; and a round later, that the hole was still open at the *other* end, because `assemble`
+was taking a third reading inside `_agenda_for`. Each test now takes **one** instant, derives its local
+date from it, seeds with it and passes it to `assemble`. The consequence worth recording is asymmetric:
+the positive cases would have failed loudly, but the **absence cases would have passed while exercising no
+SQL at all** — the assembler's current-day guard answering before the query — so nothing would have
+signalled the loss. *The same rule as the service's, and for the same reason: a test that computes a date
+to assert against must derive every other date it uses from that same reading.*
+
+Unit (`test_daily_summary_prompt_builder.py`, timezone rendering): a foreign zone is named beside the time,
+the user's own is not (naming every row would make the exception invisible), a null zone reads as UTC and
+is named when the user is elsewhere, an all-day entry names none, and the section carries the
+not-directly-comparable warning. Service (`test_daily_summary_service.py`): the assembler and the prompt
+builder are handed the *same* `now`, and it is timezone-aware.
+
+**E2E deferred to Phase 8**, as this phase states. Nothing user-visible changes: the agenda is an input to
+an AI call, the REST and MCP read contracts are untouched, and the only observable difference is in
+generated prose, which cannot be asserted without the multi-outcome test this repo forbids.
+
+**Overrun recorded (delivery rule 3).** ~1,390 tracked against a 500-line target and a 560 estimate, in
+one PR of two commits — the feature, then the domain move. Not split into two PRs: the move is only
+correct *because* of the second caller the feature adds, so a reviewer reading them apart would see a
+refactor with no stated cause. Not split the other way either — a "gathers the agenda but does not render
+it" half would ship a read whose only consumer is the phase after it, the dead end rule 9 exists to
+prevent. The overrun is prose, test volume and a correction rather than scope creep, and it sits below
+Phase 2's recorded 1,450.
 
 #### Phase 4: Extended Inputs — Tasks Due in the Current Window
 
@@ -10865,11 +11095,24 @@ and dates. No e2e (Phase 8).
       writes `GENERATED` over the `PENDING` marker with a pre-change summary. The persist step must be
       able to tell the row was invalidated after the claim (an `invalidated_at` column per open decision
       2, or an inputs version compared at persist) and leave it `PENDING` so the next read regenerates.
+- [ ] **The agenda is an input too, and only some of the ways it changes invalidate today** (found in
+      ITER18-005 Phase 3's review). `SearchIndexerConsumer._JOURNAL_INVALIDATION_EVENTS` is
+      `{JournalCreated, JournalUpdated, JournalDeleted}`, and since Phase 3 the current day's summary is
+      grounded in that day's event journals — their times, locations, participants and cancellation. An
+      app-side EVENT edit *is* covered: `JournalWriteService` publishes `JournalUpdated` with
+      `changed_fields={"calendar_info": True}` when it saves calendar info. What is **not** established is
+      whether the inbound Google-sync paths and attendee-link-only changes publish it — a time or location
+      moved upstream, an event cancelled upstream, an attendee added or removed. Where they do not, a
+      summary generated earlier the same day keeps describing the old agenda. Establish which paths
+      publish, cover the ones that do not, and where a path genuinely cannot, record it as an accepted
+      limitation here rather than leaving it undiscovered. **Note the blast radius is one day, not
+      unbounded:** Phase 2's freshness rule regenerates today's summary on the first read after local
+      midnight regardless, so a missed invalidation is stale until then and no longer.
 - [ ] Placement per open decision 3, with the consumer table in
       `docs/architecture/integration-architecture.md` updated if subscriptions change.
 
 **Required Test Coverage:** unit — the event → invalidated-day mapping for every event type, including the
-two-day retarget case. Integration — publish → relay → invalidation marks stale without regenerating; a
+two-day retarget case and each agenda-changing path that publishes. Integration — publish → relay → invalidation marks stale without regenerating; a
 subsequent read regenerates once; four rapid mutations produce one regeneration; an important-date change
 invalidates only the current day (or the recorded limitation is asserted); an explicit regenerate still
 forces one. No e2e (Phase 8).
@@ -11224,6 +11467,23 @@ Appended as the work proceeds, in the style of iterations 16 and 17.
   `.workspace-ports` file) would cost a few lines and unblock the affected checkout. Not done here: it is
   test infrastructure shared by every iteration, and changing it inside a page-shell phase would put an
   unrelated risk in that PR.
+
+- **A read's owner is decided by its second caller, not its first** (learned in ITER18-005 Phase 3).
+  The agenda read was placed in `app/core/dashboard/` because the dashboard was its only caller, and the
+  module docstring argued the placement explicitly. When the daily summary became the second caller the
+  placement inverted a dependency, and the phase moved the port, the models, the adapter and the ordering
+  rule into the journal domain — where every table the query reads already lives. **The same question is
+  live for ITER18-004 Phases 10–13**: the upcoming-dates read is over contacts and important dates, and
+  the tasks read is over tasks, so their ports probably belong in those domains rather than in a dashboard
+  `repositories.py` — which this phase deleted. Decide it when each is written, not after.
+
+- **`EventSeeder` is a shared integration fixture living inside a test module** (found in ITER18-005
+  Phase 3). `tests/integration/api/test_home_dashboard_agenda.py` defines it and
+  `tests/integration/journal/test_daily_summary_agenda_input.py` now imports it from there, which works but
+  reads as though the second suite depends on the first. It belongs beside `linked_calendar_seeding.py`
+  and `tasks/task_seeding.py` as its own module. Not done here: moving ~235 lines would have added roughly
+  470 lines of pure churn to a phase already over its estimate, and delivery rule 7 prefers importing the
+  one seeder to copying it.
 
 - **Record the actual diff beside each phase's estimate as it lands**, in the
   `**Estimated diff:** … · **Actual:** …` form iteration 17 used. The
