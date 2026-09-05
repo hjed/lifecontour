@@ -11,6 +11,7 @@ from .contact_validation_service import ContactValidationService
 from .custom_date_type_service import CustomDateTypeService
 from .tag_hierarchy_service import TagHierarchyService
 from .tag_service import TagService
+from .upcoming_important_dates_service import UpcomingImportantDatesService
 
 __all__ = [
     "AddressValidationService",
@@ -25,4 +26,5 @@ __all__ = [
     "CustomDateTypeService",
     "TagHierarchyService",
     "TagService",
+    "UpcomingImportantDatesService",
 ]

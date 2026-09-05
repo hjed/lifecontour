@@ -16,6 +16,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactSummaryRepository,
     SqlCustomDateTypeRepository,
     SqlTagRepository,
+    SqlUpcomingImportantDateRepository,
 )
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
@@ -26,6 +27,7 @@ from app.core.contacts.models.repositories import (
     ContactSummaryRepository,
     CustomDateTypeRepository,
     TagRepository,
+    UpcomingImportantDateRepository,
 )
 from app.core.contacts.services import (
     AddressValidationService,
@@ -38,12 +40,14 @@ from app.core.contacts.services import (
     CustomDateTypeService,
     TagHierarchyService,
     TagService,
+    UpcomingImportantDatesService,
 )
 from app.core.history.models import FieldHistoryRepository
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.adapters.sql.task_contact_repository import (
     SqlTaskContactRepository,
 )
@@ -83,6 +87,33 @@ class ContactProvider(Provider):
         this container to rank upcoming important dates.
         """
         return SqlContactImportanceRepository(connection)
+
+    @provide(provides=UpcomingImportantDateRepository)
+    def get_upcoming_important_date_repository(
+        self, connection: AsyncConnection
+    ) -> SqlUpcomingImportantDateRepository:
+        """Provide the candidate read behind the upcoming-dates section."""
+        return SqlUpcomingImportantDateRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def upcoming_important_dates_service(
+        self,
+        date_resolver: JournalDateResolver,
+        candidate_repo: UpcomingImportantDateRepository,
+        importance_repo: ContactImportanceRepository,
+    ) -> UpcomingImportantDatesService:
+        """Provide the upcoming-dates read, shared by the dashboard and MCP.
+
+        ``JournalDateResolver`` comes from ``JournalProvider``, which every
+        container registering this one already registers — Dishka validates the
+        whole graph at construction, so a container missing it would fail every
+        test at once rather than only this read.
+        """
+        return UpcomingImportantDatesService(
+            date_resolver=date_resolver,
+            candidate_repo=candidate_repo,
+            importance_repo=importance_repo,
+        )
 
     @provide(provides=CustomDateTypeRepository, scope=Scope.REQUEST)
     def custom_date_type_repository(

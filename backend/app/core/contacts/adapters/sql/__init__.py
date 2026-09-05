@@ -9,6 +9,9 @@ from .contact_repository import SqlContactRepository
 from .contact_summary_repository import SqlContactSummaryRepository
 from .custom_date_type_repository import SqlCustomDateTypeRepository
 from .tag_repository import SqlTagRepository
+from .upcoming_important_date_repository import (
+    SqlUpcomingImportantDateRepository,
+)
 
 __all__ = [
     "SqlContactRepository",
@@ -20,4 +23,5 @@ __all__ = [
     "SqlContactRelationshipRepository",
     "SqlContactSummaryRepository",
     "SqlCustomDateTypeRepository",
+    "SqlUpcomingImportantDateRepository",
 ]
