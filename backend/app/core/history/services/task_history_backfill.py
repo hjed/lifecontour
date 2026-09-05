@@ -42,12 +42,25 @@ a case that does not arise.
 *And one assumption is worth naming:* the anti-join treats **any** row bearing an
 event's id as proof that the whole event was projected, so an event whose rows
 landed only partially would be skipped and stay incomplete. That cannot happen
-here — the consumer writes all of an event's rows inside one
-``engine.begin()``, so the set is atomic, and nothing deletes ``field_history``
-rows except the contact merge's re-point, which touches contact rows only. The
-alternative (comparing counts per event) would mean re-deriving each event's row
-count outside ``HistoryService``, which is the duplication this whole module
-exists to avoid.
+here — the consumer writes all of an event's rows inside one ``engine.begin()``,
+so the set is atomic. The alternative (comparing counts per event) would mean
+re-deriving each event's row count outside ``HistoryService``, which is the
+duplication this whole module exists to avoid.
+
+**What that assumption actually requires of the rest of the system**, since it
+was first written down as a claim about which rows anybody deletes and that
+claim has since expired: not that ``field_history`` rows are never deleted, but
+that no event ever loses *every* row bearing its id while the event itself is
+retained. The contact merge is the only thing that moves rows at all, and both
+of its re-points are copy-then-delete statements that preserve ``event_id`` on
+the copy — the ``entity_type='contact'`` rows since ITER13, and, since
+ITER18-006 Phase 2, the ``entity_type='task'`` rows a merge re-files under the
+survivor's ``contact:{id}`` name. So every event a merge touches still has a row
+carrying its id afterwards, and none is re-projected. **A re-point that deleted
+rather than moved, or that dropped the event id, would have the next start
+rebuild every row the merge had just carried across** — under the absorbed
+contact's name, where nothing could read it. That is the invariant to preserve
+when the next table joins the merge's list.
 """
 
 import json

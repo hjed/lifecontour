@@ -1077,8 +1077,28 @@ does not say *which* merge moved the task, where `TaskJournalLinksRepointed` nam
 construction, and taking the dependency the other way would force every container registering one
 provider to register the other.
 
-The absorbed contact's *existing* task history rows — `entity_type='task'` rows identified by their
-`contact:{id}` field name, which `repoint_entity_history` cannot address — are ITER18-006 Phase 2.
+**The records those links had already written move too** (ITER18-006 Phase 2), and they need a
+second statement because they are addressed by a different column.
+`FieldHistoryRepository.repoint_entity_history` finds a contact's own rows by `entity_id`; a
+person's record of a task is an `entity_type='task'` row that names them only in its field name, so
+`repoint_contact_task_history` matches `contact:{absorbed}` and rewrites it to `contact:{survivor}`.
+It is called from the merge beside the other history re-point, and lives on the history port rather
+than a tasks one because that domain already owns the read half — the contact aggregation predicate
+selects a person's task records by that same field name.
+
+**Leaving them would have been the destructive choice.** `field_history` has no foreign key to
+`contacts`, so a merge does not delete these rows, it strands them: nothing raises, and no query can
+reach them again once the id in their field name is gone. That is the failure mode this whole
+sub-iteration is about — the link half was a cascade nobody saw, and the history half is a row
+nobody can read — and it is why the merge specification's *non-destructive history* is satisfied by
+rewriting rather than by leaving well alone.
+
+**One row is deliberately left where the projection puts it.** The `TaskUpdated` above names the
+absorbed contact leaving, and is projected *after* the merge commits, so no statement inside the
+merge can reach it. It stays: a task's own history reads every field name filed against it, so that
+row is the task's record of who it used to reference, and moving it onto the survivor would render
+as a removal beside the arrival from the same merge. The rewrite therefore runs inside the merge
+transaction and the later row is out of its scope by design, not by omission.
 
 ### Incomplete Outdoor Activities Review (read projection)
 

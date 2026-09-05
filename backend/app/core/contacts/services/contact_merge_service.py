@@ -210,6 +210,23 @@ class ContactMergeService:
             source_id, survivor_id, "contact", transaction
         )
 
+        # 1b-ii. And the source's *task* records, which the statement above
+        #     cannot reach. A person's record of a task is filed on the task
+        #     and names them only in its field name (``contact:{id}``), so it
+        #     is found by field name rather than by entity id — two statements
+        #     over disjoint sets, not one that could have been widened.
+        #
+        #     Without it the merge does not delete these rows, it strands them:
+        #     ``field_history`` has no foreign key to ``contacts``, so they
+        #     survive the delete in step 3 and become unreadable, since the only
+        #     predicate that selects them matches on a contact id that is gone.
+        #     Same placement and the same reason as the call above — inside this
+        #     unit of work and before that delete, after which the id it
+        #     searches for no longer exists.
+        await self.history_repo.repoint_contact_task_history(
+            source_id, survivor_id, transaction
+        )
+
         # 1c. Re-point the source's external links onto the survivor so the merge
         #     does not orphan ``sync_metadata`` link rows (no
         #     ON DELETE CASCADE). Same-service collisions are surfaced for remote

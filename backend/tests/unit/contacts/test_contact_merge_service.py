@@ -75,6 +75,7 @@ def mock_event_publisher() -> AsyncMock:
 def mock_history_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.repoint_entity_history.return_value = 0
+    repo.repoint_contact_task_history.return_value = 0
     return repo
 
 
@@ -228,6 +229,43 @@ class TestContactMergeDelegation:
         # The re-point must run before the source row is deleted.
         ordered = [call[0] for call in manager.mock_calls]
         assert ordered.index("repoint") < ordered.index("delete")
+
+    @pytest.mark.asyncio
+    async def test_repoints_task_records_then_deletes_source(
+        self,
+        merge_service,
+        mock_contact_repo,
+        mock_history_repo,
+        mock_transaction,
+    ) -> None:
+        """The absorbed contact's task records move too (ITER18-006 Phase 2).
+
+        A second call beside the one above, and it is not a duplicate of it: the
+        two address disjoint row sets by different columns. ``entity_type =
+        'contact'`` rows are found by ``entity_id`` and cannot name a task; a
+        person's task records live on the *task* and name the person only in
+        ``field_name``, so no widening of the first statement could ever reach
+        them.
+
+        Ordered against the delete for the same reason as every other re-point
+        in this merge: once the source row is gone the merge has lost the id it
+        would have searched for.
+        """
+        manager = MagicMock()
+        manager.attach_mock(
+            mock_history_repo.repoint_contact_task_history, "repoint_tasks"
+        )
+        manager.attach_mock(mock_contact_repo.delete, "delete")
+
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        mock_history_repo.repoint_contact_task_history.assert_awaited_once_with(
+            SOURCE_ID, SURVIVOR_ID, mock_transaction
+        )
+        ordered = [call[0] for call in manager.mock_calls]
+        assert ordered.index("repoint_tasks") < ordered.index("delete")
 
     @pytest.mark.asyncio
     async def test_repoints_task_contact_links(

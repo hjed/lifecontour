@@ -1424,3 +1424,454 @@ class TestAContactIsSharedButTheirTasksAreNot:
         assert entries == []
         assert count == 0
         assert await history_repo.get_task_labels([task_id]) == {}
+
+
+@pytest.mark.integration
+class TestAMergeCarriesTheTaskRecords:
+    """The absorbed contact's task records move onto the survivor (ITER18-006 Phase 2).
+
+    Phase 1 moved the ``task_contacts`` rows. It did not move what those links
+    had already written down, and that half is invisible for the same reason the
+    first half was: a contact's task record is filed on the **task**, and names
+    the person only in ``field_name``, so deleting the contact leaves the row
+    intact and unreachable. Nothing fails; the trail simply stops.
+
+    **Why the real schema.** The two things being asserted are properties of the
+    database. ``ux_field_history_event_dedup`` is what makes a task both people
+    were linked to by one event a hard error rather than a cosmetic one, and the
+    contact predicate's equality on ``contact:{id}`` is what decides whether a
+    moved row is readable at all. Neither is observable against a double.
+    """
+
+    @pytest.fixture
+    def history_repo(
+        self, clean_database: AsyncConnection
+    ) -> SqlFieldHistoryRepository:
+        return SqlFieldHistoryRepository(clean_database)
+
+    async def _contact(self, conn: AsyncConnection, first_name: str) -> int:
+        result = await conn.execute(
+            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
+            {"n": first_name},
+        )
+        return int(result.scalar_one())
+
+    async def _task(
+        self, conn: AsyncConnection, anchors: tuple[int, int], text_: str = "call back"
+    ) -> int:
+        creating_id, due_id = anchors
+        return await create_task(
+            conn,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text=text_,
+        )
+
+    async def _record(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        *,
+        task_id: int,
+        contact_id: int,
+        event_id: str,
+        linked: bool = True,
+        source: Provenance = Provenance.UI,
+        changed_by: str = "ui",
+        created_at: datetime | None = None,
+        owner: str = USER_ID,
+    ) -> None:
+        """The row the projection writes when a task gains or loses a person."""
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=contact_field_name(contact_id),
+                old_value=None if linked else str(contact_id),
+                new_value=str(contact_id) if linked else None,
+                changed_by=changed_by,
+                source=source,
+                event_id=event_id,
+                created_at=created_at,
+                user_id=owner,
+            )
+        )
+
+    async def _feed_field_names(
+        self, history_repo: SqlFieldHistoryRepository, contact_id: int
+    ) -> list[str]:
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", contact_id, reader_user_id=USER_ID
+        )
+        return [e.field_name for e in entries]
+
+    async def _count_field(
+        self, conn: AsyncConnection, *, entity_type: str, field_name: str
+    ) -> int:
+        result = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM field_history "
+                "WHERE entity_type = :et AND field_name = :fn"
+            ),
+            {"et": entity_type, "fn": field_name},
+        )
+        return int(result.scalar_one())
+
+    async def test_the_absorbed_contacts_records_reach_the_survivors_feed(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Criterion 5, stated as the read it is about rather than as a row count."""
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        first = await self._task(clean_database, task_anchors)
+        second = await self._task(clean_database, task_anchors, "return the book")
+        await self._record(
+            history_repo, task_id=first, contact_id=absorbed, event_id="evt-1"
+        )
+        await self._record(
+            history_repo, task_id=second, contact_id=absorbed, event_id="evt-2"
+        )
+
+        assert await self._feed_field_names(history_repo, survivor) == []
+
+        moved = await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        assert moved == 2
+        assert await self._feed_field_names(history_repo, survivor) == [
+            contact_field_name(survivor),
+            contact_field_name(survivor),
+        ]
+        assert await self._feed_field_names(history_repo, absorbed) == []
+
+    async def test_an_unlink_record_moves_as_readily_as_a_link(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The trail is the whole trail, not the flattering half of it.
+
+        A person removed from a task is part of what happened to them, and the
+        statement keys on the field name rather than on the direction, so both
+        halves of a link-then-unlink pair arrive together.
+        """
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        task_id = await self._task(clean_database, task_anchors)
+        await self._record(
+            history_repo, task_id=task_id, contact_id=absorbed, event_id="evt-link"
+        )
+        await self._record(
+            history_repo,
+            task_id=task_id,
+            contact_id=absorbed,
+            event_id="evt-unlink",
+            linked=False,
+        )
+
+        moved = await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", survivor, reader_user_id=USER_ID
+        )
+        assert moved == 2
+        assert {(e.old_value, e.new_value) for e in entries} == {
+            (None, str(absorbed)),
+            (str(absorbed), None),
+        }
+
+    async def test_the_moved_row_keeps_its_provenance_event_and_owner(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Every column that decides how a row reads, or whether it reads at all.
+
+        ``user_id`` is the one that would fail loudest and most quietly: both
+        task branches of the contact predicate are owner-scoped, so a row that
+        lost its owner would disappear from **every** feed rather than surface
+        on the wrong one. ``event_id`` is the other: the startup backfill treats
+        any row bearing an event's id as proof that event was projected, so
+        dropping it here would have the next restart rebuild the row this
+        statement just moved.
+        """
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        task_id = await self._task(clean_database, task_anchors)
+        occurred_at = datetime(2024, 3, 2, 8, 15, tzinfo=UTC)
+        await self._record(
+            history_repo,
+            task_id=task_id,
+            contact_id=absorbed,
+            event_id="evt-provenance",
+            source=Provenance.MCP,
+            changed_by="agent",
+            created_at=occurred_at,
+        )
+
+        await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        entries = await history_repo.get_history_for_aggregate(
+            "contact", survivor, reader_user_id=USER_ID
+        )
+        assert len(entries) == 1
+        moved = entries[0]
+        assert moved.entity_type == "task"
+        assert moved.entity_id == task_id
+        assert moved.event_id == "evt-provenance"
+        assert moved.source == Provenance.MCP
+        assert moved.changed_by == "agent"
+        # The read hands back an ISO string; what matters is that the instant is
+        # the one the original change happened at, not the moment of the merge.
+        assert moved.created_at == occurred_at.isoformat()
+
+    async def test_a_task_both_people_were_on_collapses_to_one_row(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The conflict clause is what stops this being a failed merge.
+
+        One event can name both people — a task created with the pair on it
+        writes a row per person under a single ``event_id`` — and once the
+        absorbed contact's row takes the survivor's field name the two agree on
+        all four columns of ``ux_field_history_event_dedup``. ``ON CONFLICT``
+        cannot rescue an ``UPDATE``, which is why the statement copies and then
+        deletes. **Removing ``ON CONFLICT DO NOTHING`` must fail this test**,
+        which is the one thing asked of it.
+        """
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        task_id = await self._task(clean_database, task_anchors)
+        for contact_id in (absorbed, survivor):
+            await self._record(
+                history_repo,
+                task_id=task_id,
+                contact_id=contact_id,
+                event_id="evt-created-with-both",
+            )
+
+        moved = await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        # The absorbed row is dropped rather than duplicated: the survivor was
+        # already on this task under this event and gained nothing.
+        assert moved == 0
+        assert await self._feed_field_names(history_repo, survivor) == [
+            contact_field_name(survivor)
+        ]
+        assert (
+            await self._count_field(
+                clean_database,
+                entity_type="task",
+                field_name=contact_field_name(absorbed),
+            )
+            == 0
+        )
+
+    async def test_the_same_task_under_two_events_keeps_both_rows(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The dedup key leads on ``event_id``, so this is not a collapse.
+
+        Two people added to one task by two separate actions are two facts, and
+        the survivor's feed should carry both after the merge. Without this the
+        conflict clause could be over-read as "one row per task".
+        """
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        task_id = await self._task(clean_database, task_anchors)
+        await self._record(
+            history_repo, task_id=task_id, contact_id=absorbed, event_id="evt-added-her"
+        )
+        await self._record(
+            history_repo, task_id=task_id, contact_id=survivor, event_id="evt-added-him"
+        )
+
+        moved = await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        assert moved == 1
+        assert await self._feed_field_names(history_repo, survivor) == [
+            contact_field_name(survivor),
+            contact_field_name(survivor),
+        ]
+
+    async def test_re_running_the_move_changes_nothing(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Idempotent: once the absorbed name is gone there is nothing to match."""
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        task_id = await self._task(clean_database, task_anchors)
+        await self._record(
+            history_repo, task_id=task_id, contact_id=absorbed, event_id="evt-once"
+        )
+
+        first = await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+        after_first = await self._feed_field_names(history_repo, survivor)
+        second = await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+        after_second = await self._feed_field_names(history_repo, survivor)
+
+        assert (first, second) == (1, 0)
+        assert after_first == after_second == [contact_field_name(survivor)]
+
+    async def test_a_self_move_is_refused_rather_than_destructive(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Moving a contact onto itself must not empty their feed.
+
+        The copy would conflict on every row while the delete removed the
+        originals, so the guard is the difference between a no-op and losing a
+        person's entire task trail. The merge rejects a self-merge before it
+        reaches here; the guard is for the caller that does not.
+        """
+        contact_id = await self._contact(clean_database, "Same")
+        task_id = await self._task(clean_database, task_anchors)
+        await self._record(
+            history_repo, task_id=task_id, contact_id=contact_id, event_id="evt-self"
+        )
+
+        moved = await history_repo.repoint_contact_task_history(
+            contact_id, contact_id, clean_database
+        )
+
+        assert moved == 0
+        assert await self._feed_field_names(history_repo, contact_id) == [
+            contact_field_name(contact_id)
+        ]
+
+    async def test_a_third_persons_records_are_untouched(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Equality on the field name, never a prefix match.
+
+        ``contact:1`` must not match ``contact:12``, which the read side already
+        says in its own comment; the write side has to agree or a merge of one
+        person would sweep up another's records.
+        """
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        bystander = await self._contact(clean_database, "Someone else")
+        task_id = await self._task(clean_database, task_anchors)
+        await self._record(
+            history_repo, task_id=task_id, contact_id=absorbed, event_id="evt-hers"
+        )
+        await self._record(
+            history_repo, task_id=task_id, contact_id=bystander, event_id="evt-theirs"
+        )
+
+        await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        assert await self._feed_field_names(history_repo, bystander) == [
+            contact_field_name(bystander)
+        ]
+        assert await self._feed_field_names(history_repo, survivor) == [
+            contact_field_name(survivor)
+        ]
+
+    async def test_the_contacts_own_history_rows_are_left_to_the_other_statement(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """The two re-points address disjoint sets, and this is what says so.
+
+        ``repoint_entity_history`` moves ``entity_type='contact'`` rows by
+        ``entity_id``; this one moves ``entity_type='task'`` rows by field name.
+        A statement that reached both would move a contact's own edits twice.
+        """
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="contact",
+                entity_id=absorbed,
+                field_name="first_name",
+                old_value="Sarah",
+                new_value="Sarah Jane",
+                event_id="evt-renamed",
+            )
+        )
+
+        moved = await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        assert moved == 0
+        rows = await history_repo.get_entity_history("contact", absorbed)
+        assert [r.field_name for r in rows] == ["first_name"]
+
+    async def test_the_delete_marker_of_a_moved_task_follows_it(
+        self,
+        history_repo: SqlFieldHistoryRepository,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """The marker rides on the link row, so moving one moves both.
+
+        A hard-deleted task the absorbed contact was on reaches their feed
+        through a subquery over the link rows, not through ``tasks`` — so the
+        survivor inherits the ending as well as the commitment, and does so
+        without this statement having to know the marker exists.
+        """
+        absorbed = await self._contact(clean_database, "Sarah")
+        survivor = await self._contact(clean_database, "Sara")
+        task_id = await self._task(clean_database, task_anchors)
+        await self._record(
+            history_repo, task_id=task_id, contact_id=absorbed, event_id="evt-linked"
+        )
+        await history_repo.record_change(
+            FieldHistoryEntry(
+                entity_type="task",
+                entity_id=task_id,
+                field_name=DELETED_MARKER,
+                old_value=None,
+                new_value=None,
+                event_id="evt-deleted",
+                user_id=USER_ID,
+            )
+        )
+        await clean_database.execute(
+            text("DELETE FROM tasks WHERE id = :id"), {"id": task_id}
+        )
+
+        await history_repo.repoint_contact_task_history(
+            absorbed, survivor, clean_database
+        )
+
+        assert set(await self._feed_field_names(history_repo, survivor)) == {
+            contact_field_name(survivor),
+            DELETED_MARKER,
+        }
+        assert await self._feed_field_names(history_repo, absorbed) == []
