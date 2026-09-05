@@ -10172,8 +10172,13 @@ absent threw out of render — and because the disclosure is a child of the page
 **whole dashboard** with it: summary, tasks and dates blanked together. It surfaced because the summary
 block's `dashboardBody` mock predates Phase 6 and served `agenda: {status: 'ready', data: {entries: []}}`,
 a payload the API can no longer produce; 20 of the 57 tests failed on it. Both halves are fixed — the mock
-now carries a `tomorrow`, and `AgendaCard` guards on the day itself rather than on the section, with a
-regression test that constructs the malformed payload deliberately. **The general lesson is the
+now carries a `tomorrow`, and `AgendaCard` guards on **both** fields the disclosure reads on its first
+two lines — the date and the entries array — rather than on the section, with regression tests that
+construct each malformed payload deliberately. Review caught the first attempt guarding only the key, and
+the automated reviewer then caught it guarding only the list: a `tomorrow` with entries but no date still
+reached `parseISO(undefined)` and still took the page down. Three passes to guard two fields is itself the
+lesson — **a guard written against one remembered failure protects against that failure, not against the
+class**, and the class here is "the payload does not have the shape this component's first lines assume". **The general lesson is the
 specification's own:** *"sections should render independently"* has to hold against a section that breaks
 its contract, not only one that reports `unavailable`, and a card that reads a nested field is the place
 that rule gets tested. Worth Phase 16 revisiting as it hardens the other three sections.

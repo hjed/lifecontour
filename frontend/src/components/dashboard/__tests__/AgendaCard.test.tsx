@@ -362,17 +362,22 @@ describe('AgendaCard', () => {
     });
 
     /**
-     * The same failure one step further in: a `tomorrow` that is there but
-     * carries no list. From the disclosure's seat this is indistinguishable
-     * from the case above — it reads `entries.length` either way — so the
-     * guard is on the shape, not on the key.
+     * The same failure one step further in, in both directions: a `tomorrow`
+     * that is there but carries no list, and one that carries a list but no
+     * date. From the disclosure's seat these are indistinguishable from a
+     * missing `tomorrow` — its first two lines read `date` and
+     * `entries.length` — so the guard is on the whole shape, not on the key
+     * and not on one field.
      */
-    it('keeps today drawn when tomorrow arrives with no entries list', async () => {
+    it.each([
+      ['no entries list', { date: TOMORROW_DATE }],
+      ['no date', { entries: [] }],
+    ])('keeps today drawn when tomorrow arrives with %s', async (_, day) => {
       serveAgenda({
         status: DashboardSectionStatus.READY,
         data: {
           entries: [STANDUP],
-          tomorrow: { date: TOMORROW_DATE },
+          tomorrow: day,
         } as unknown as HomeDashboardAgenda,
       });
 

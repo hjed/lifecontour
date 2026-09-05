@@ -64,6 +64,18 @@ export function AgendaCard() {
   const agenda =
     section?.status === DashboardSectionStatus.READY ? section.data : null;
 
+  // Both fields the disclosure reads on its first line, not just one of them:
+  // the type promises a `tomorrow` carrying a date *and* an entries array on
+  // every ready agenda, but a payload that broke either half used to throw out
+  // of render and take the *whole page* with it — the summary, the tasks and
+  // the dates included. The specification's "sections render independently"
+  // has to survive a section that breaks its contract, not only one that
+  // reports itself unavailable, and a missing date, a missing list and a
+  // missing `tomorrow` all fail identically from the reader's seat.
+  const tomorrow = agenda?.tomorrow;
+  const hasTomorrow =
+    typeof tomorrow?.date === 'string' && Array.isArray(tomorrow.entries);
+
   return (
     <DashboardSectionCard
       {...AGENDA_SECTION}
@@ -72,16 +84,8 @@ export function AgendaCard() {
         agenda ? undefined : <AgendaPlaceholder pending={isPending} />
       }
       footer={
-        // Guarded on the shape the disclosure actually reads, not merely on
-        // the section: the type promises a `tomorrow` with an `entries` array
-        // on every ready agenda, but a payload that broke that promise used to
-        // throw out of render and take the *whole page* with it — the summary,
-        // the tasks and the dates included. The specification's "sections
-        // render independently" has to survive a section that breaks its
-        // contract, not only one that reports itself unavailable, and a
-        // missing key and a null list fail identically from the reader's seat.
-        Array.isArray(agenda?.tomorrow?.entries) ? (
-          <TomorrowDisclosure day={agenda.tomorrow} />
+        hasTomorrow && tomorrow ? (
+          <TomorrowDisclosure day={tomorrow} />
         ) : undefined
       }
     >
