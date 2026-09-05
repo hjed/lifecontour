@@ -151,6 +151,66 @@ class HistoryAggregationStrategy:
     where_clause: str
 
 
+# The contact's own child rows, as ``(entity_type, table, id column)``. The id
+# column is the one a ``field_history`` row's ``entity_id`` holds for that type,
+# which for a tag is the *tag's* id rather than the link row's.
+_CONTACT_CHILD_SOURCES: tuple[tuple[str, str, str], ...] = (
+    ("contact_method", "contact_methods", "id"),
+    ("contact_address", "contact_addresses", "id"),
+    ("contact_note", "contact_notes", "id"),
+    ("contact_tag", "contact_tags", "tag_id"),
+)
+
+
+def contact_owned_history_predicate(
+    root_id: str, *, table_alias: str = "", indent: str = "    "
+) -> str:
+    """SQL matching the ``field_history`` rows that belong to one contact.
+
+    **Every branch pairs an ``entity_type`` with the one table its ``entity_id``
+    is drawn from**, which is the whole point of the shape. Testing the type set
+    and the id set independently — ``entity_type IN (...) AND entity_id IN
+    (SELECT ... UNION ...)`` — reads as the same thing and is not: the four child
+    tables have independent id sequences, so a ``contact_note`` row numbered 5
+    then matches any contact owning a *method* numbered 5. That was a real
+    over-count in the search ranking (#1396), from a second transcription of this
+    predicate rather than a second use of it; hence one renderer, two callers.
+
+    Covers the contact row and its four child types only. The contact history
+    feed appends its own further branches — relationships, important dates, the
+    summary, and the owner-scoped task rows — because those belong to a feed
+    rather than to an activity count.
+
+    Args:
+        root_id: SQL naming the contact: a bind parameter such as ``":root_id"``,
+            or a correlated column such as ``"c.id"``. Interpolated into the
+            statement, so callers pass an expression this codebase wrote — never
+            a value read from a request.
+        table_alias: Alias qualifying the ``field_history`` columns, empty when
+            the statement leaves them unqualified.
+        indent: Leading whitespace for each continuation line, so an embedded
+            fragment lines up with the statement around it.
+
+    Returns:
+        The branches, ``OR``-joined and **not** enclosed in parentheses. Each
+        branch is parenthesised, so the fragment drops straight into a statement
+        whose predicate is this alone, or into a longer ``OR`` chain — which is
+        what both callers do. A caller narrowing it with ``AND`` must wrap it
+        first: ``AND`` binds tighter than ``OR``, so an unwrapped
+        ``<fragment> AND <condition>`` would constrain the last branch only and
+        let every other one through unfiltered.
+    """
+    column = f"{table_alias}." if table_alias else ""
+    branches = [
+        f"({column}entity_type = 'contact' AND {column}entity_id = {root_id})",
+        *(
+            f"({column}entity_type = '{entity_type}' AND {column}entity_id IN (SELECT {id_column} FROM {table} WHERE contact_id = {root_id}))"
+            for entity_type, table, id_column in _CONTACT_CHILD_SOURCES
+        ),
+    ]
+    return f"\n{indent}OR ".join(branches)
+
+
 # The contact aggregation predicate: the contact itself, all related sub-entities,
 # and the rows recording a task's membership of this person.
 # This is the generalisation of the previously hard-coded contact history WHERE clause.
@@ -201,11 +261,7 @@ class HistoryAggregationStrategy:
 # contact linked to" by another user's link rows would leak exactly what the outer
 # filter refuses.
 _CONTACT_AGGREGATION_WHERE = f"""
-    (entity_type = 'contact' AND entity_id = :root_id)
-    OR (entity_type = 'contact_method' AND entity_id IN (SELECT id FROM contact_methods WHERE contact_id = :root_id))
-    OR (entity_type = 'contact_address' AND entity_id IN (SELECT id FROM contact_addresses WHERE contact_id = :root_id))
-    OR (entity_type = 'contact_note' AND entity_id IN (SELECT id FROM contact_notes WHERE contact_id = :root_id))
-    OR (entity_type = 'contact_tag' AND entity_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = :root_id))
+    {contact_owned_history_predicate(":root_id")}
     OR (entity_type = 'contact_relationship' AND entity_id IN (SELECT id FROM contact_relationships WHERE from_contact_id = :root_id OR to_contact_id = :root_id))
     OR (entity_type = 'contact_important_date' AND entity_id IN (SELECT id FROM contact_important_dates WHERE contact_id = :root_id))
     OR (entity_type = 'contact_summary' AND entity_id = :root_id)
