@@ -27,10 +27,10 @@ describe('AgendaParticipantStack', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('is a labelled group of one avatar per participant, named for them', () => {
+  it('is a labelled list of one avatar per participant, named for them', () => {
     render(<AgendaParticipantStack participants={[SAM, ALEX]} />);
 
-    const group = screen.getByRole('group', { name: 'Participants' });
+    const group = screen.getByRole('list', { name: 'Participants' });
     const avatars = within(group).getAllByRole('img');
     expect(avatars.map(avatar => avatar.getAttribute('aria-label'))).toEqual([
       'Sam Taylor',

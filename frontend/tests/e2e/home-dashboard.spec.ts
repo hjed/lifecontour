@@ -616,7 +616,24 @@ const AGENDA_LIST_NAME = "Today's agenda";
 const AGENDA_EMPTY_LINE = 'Nothing scheduled today.';
 
 /**
- * Today at a given UTC clock time, as an ISO instant.
+ * The day the dashboard is anchored on, read from the API — once per test.
+ *
+ * The e2e user has no configured timezone, so this is the UTC day, and every
+ * fixture in a test is placed on it rather than on a `new Date()` read at
+ * seeding time: a date read per fixture can straddle 00:00 UTC and split one
+ * test's events across two days. Reading the anchor also documents where
+ * "today" comes from — the server, as the page-shell test above insists. The
+ * residual window (midnight passing between seeding and the page's own read)
+ * is inherent to a page that is always about today, and is not closed here.
+ */
+async function anchorDay(page: Page): Promise<string> {
+  const response = await page.request.get('/api/home-dashboard');
+  expect(response.ok()).toBe(true);
+  return (await response.json()).meta.anchor.date as string;
+}
+
+/**
+ * A clock time on the anchor day, as a UTC ISO instant.
  *
  * A timed event's `event_date_range` carries the instant it begins, and that
  * instant — not the clock column — is what the agenda orders timed entries
@@ -624,11 +641,8 @@ const AGENDA_EMPTY_LINE = 'Nothing scheduled today.';
  * time, or two events seeded at the same instant would tie and fall back to
  * creation order. `12:00:00` is used for all-day events, which match by date.
  */
-function todayAtUtc(clock: string): string {
-  const [hours, minutes] = clock.split(':').map(Number);
-  const d = new Date();
-  d.setUTCHours(hours, minutes, 0, 0);
-  return d.toISOString();
+function atUtc(day: string, clock: string): string {
+  return new Date(`${day}T${clock}Z`).toISOString();
 }
 
 interface AgendaEventFixture {
@@ -641,16 +655,19 @@ interface AgendaEventFixture {
   contactIds?: string[];
 }
 
-/** One event journal on today's agenda, created through the API. */
+/** One event journal on the anchor day's agenda, created through the API. */
 async function createAgendaEvent(
   dataManager: TestDataManager,
+  day: string,
   fixture: AgendaEventFixture
 ): Promise<TestJournal> {
   const timed = !fixture.allDay;
-  const start = todayAtUtc(
+  const start = atUtc(
+    day,
     timed && fixture.startTime ? fixture.startTime : '12:00:00'
   );
-  const end = todayAtUtc(
+  const end = atUtc(
+    day,
     timed && fixture.endTime ? fixture.endTime : '12:00:00'
   );
   return dataManager.createJournal({
@@ -728,26 +745,27 @@ test.describe('Home Dashboard — the agenda card', () => {
     }) => {
       const dataManager = new TestDataManager(page);
       testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
 
       const [calendar] = await dataManager.createCalendars([
         { name: 'Agenda Card Cal', color: '#8B5CF6' },
       ]);
       // Seeded deliberately out of order: the card must not simply draw them
       // in creation order.
-      const dinner = await createAgendaEvent(dataManager, {
+      const dinner = await createAgendaEvent(dataManager, day, {
         title: 'Agenda Dinner',
         startTime: '19:00:00',
         endTime: '21:00:00',
         calendarId: calendar.id,
       });
-      const standup = await createAgendaEvent(dataManager, {
+      const standup = await createAgendaEvent(dataManager, day, {
         title: 'Agenda Standup',
         startTime: '09:00:00',
         endTime: '09:30:00',
         location: 'The small room',
         calendarId: calendar.id,
       });
-      const holiday = await createAgendaEvent(dataManager, {
+      const holiday = await createAgendaEvent(dataManager, day, {
         title: 'Agenda Holiday',
         allDay: true,
         calendarId: calendar.id,
@@ -805,11 +823,12 @@ test.describe('Home Dashboard — the agenda card', () => {
     }) => {
       const dataManager = new TestDataManager(page);
       testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
 
       const [calendar] = await dataManager.createCalendars([
         { name: 'Agenda Link Cal', color: '#10B981' },
       ]);
-      const standup = await createAgendaEvent(dataManager, {
+      const standup = await createAgendaEvent(dataManager, day, {
         title: 'Agenda Linked Standup',
         startTime: '09:00:00',
         endTime: '09:30:00',
@@ -836,6 +855,7 @@ test.describe('Home Dashboard — the agenda card', () => {
     }) => {
       const dataManager = new TestDataManager(page);
       testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
 
       const [calendar] = await dataManager.createCalendars([
         { name: 'Agenda Tag Cal', color: '#3B82F6' },
@@ -847,7 +867,7 @@ test.describe('Home Dashboard — the agenda card', () => {
         { firstName: 'Sam', lastName: 'Taylor' },
         { firstName: 'Alex', lastName: 'Chen' },
       ]);
-      const coffee = await createAgendaEvent(dataManager, {
+      const coffee = await createAgendaEvent(dataManager, day, {
         title: 'Agenda Coffee',
         startTime: '10:00:00',
         endTime: '10:30:00',
@@ -866,7 +886,7 @@ test.describe('Home Dashboard — the agenda card', () => {
       await expect(badge).toBeVisible();
       await expect(badge).toHaveCSS('border-color', 'rgb(239, 68, 68)');
 
-      const participants = row.getByRole('group', { name: 'Participants' });
+      const participants = row.getByRole('list', { name: 'Participants' });
       await expect(
         participants.getByRole('img', {
           name: `${sam.firstName} ${sam.lastName}`,
@@ -887,17 +907,18 @@ test.describe('Home Dashboard — the agenda card', () => {
     }) => {
       const dataManager = new TestDataManager(page);
       testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
 
       const [calendar] = await dataManager.createCalendars([
         { name: 'Agenda Cancel Cal', color: '#F59E0B' },
       ]);
-      const cancelled = await createAgendaEvent(dataManager, {
+      const cancelled = await createAgendaEvent(dataManager, day, {
         title: 'Agenda Cancelled Lunch',
         startTime: '12:00:00',
         endTime: '13:00:00',
         calendarId: calendar.id,
       });
-      const confirmed = await createAgendaEvent(dataManager, {
+      const confirmed = await createAgendaEvent(dataManager, day, {
         title: 'Agenda Confirmed Walk',
         startTime: '17:00:00',
         endTime: '18:00:00',
@@ -950,6 +971,7 @@ test.describe('Home Dashboard — the agenda card', () => {
     }) => {
       const dataManager = new TestDataManager(page);
       testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
 
       const [calendar] = await dataManager.createCalendars([
         { name: 'Agenda Mobile Cal', color: '#EC4899' },
@@ -966,7 +988,7 @@ test.describe('Home Dashboard — the agenda card', () => {
         { firstName: 'Kim', lastName: 'Nguyen' },
         { firstName: 'Taylor', lastName: 'Brooks' },
       ]);
-      const busy = await createAgendaEvent(dataManager, {
+      const busy = await createAgendaEvent(dataManager, day, {
         title:
           'Agenda Quarterly planning offsite with the whole extended leadership group',
         startTime: '09:00:00',

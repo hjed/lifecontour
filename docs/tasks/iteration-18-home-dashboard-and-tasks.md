@@ -10048,8 +10048,10 @@ write path derives the instant from the date and clock in the event's zone (whic
 all-day case `agenda_repository.py` records as knowingly unserved), or `order_agenda_entries` breaks
 ties on `start_time`. Both are backend, and the second is the smaller change — **owned by Phase 16**
 alongside the other agenda correctness follow-ups, or by a journals-domain fix if one lands first. The
-e2e fixtures here set each event's instant from its clock time, as a correctly-stored event looks, and
-say so in `todayAtUtc`'s docstring.
+e2e fixtures here set each event's instant from its clock time, as a correctly-stored event looks, on
+the anchor day read **once per test** from the API (`anchorDay` / `atUtc` in the spec) — review caught
+that a `new Date()` read per fixture could straddle 00:00 UTC and split one test's events across two
+days.
 
 **Local e2e infrastructure notes (not repo defects), recorded for whoever runs the suite next:**
 
@@ -10079,7 +10081,9 @@ say so in `todayAtUtc`'s docstring.
   order equals payload order, with the payload served in wireframe order.
 - **The stack shows three, then `+N`** — gap 18. The wireframe fixes no cap; three keeps a row to one
   line at 375 px beside its tags. The `+N` names the hidden participants in its label, so a screen-reader
-  user hears the whole guest list rather than "plus two".
+  user hears the whole guest list rather than "plus two". The stack is a native `ul` named
+  "Participants" rather than a `div` with `role="group"` — a list of people is what it is, and Sonar's
+  prefer-a-native-element rule agreed.
 - **Three ways to hold nothing, kept apart.** The card reads the query itself (Phase 3's arrangement),
   which makes "still loading" and "unavailable" real renderings it has to choose. Both are one quiet line
   in **W9**'s idiom — `Loading today's agenda...` and `Today's agenda is unavailable.` — passed to the

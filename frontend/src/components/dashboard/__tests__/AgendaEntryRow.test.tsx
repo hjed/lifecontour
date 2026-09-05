@@ -59,8 +59,9 @@ function renderRow(entry: HomeDashboardAgendaEntry) {
   );
 }
 
+/** The entry's own `li` — first in document order; the participant stack nests its own list items inside it. */
 function row() {
-  return screen.getByRole('listitem');
+  return screen.getAllByRole('listitem')[0];
 }
 
 describe('AgendaEntryRow', () => {
@@ -148,14 +149,16 @@ describe('AgendaEntryRow', () => {
     it('renders the avatar stack when there is anyone', () => {
       renderRow(COFFEE);
 
-      const stack = screen.getByRole('group', { name: 'Participants' });
+      const stack = screen.getByRole('list', { name: 'Participants' });
       expect(within(stack).getAllByRole('img')).toHaveLength(2);
     });
 
     it('renders no stack when there is nobody', () => {
       renderRow(HOLIDAY);
 
-      expect(screen.queryByRole('group')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('list', { name: 'Participants' })
+      ).not.toBeInTheDocument();
     });
   });
 
