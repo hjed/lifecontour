@@ -10912,6 +10912,21 @@ the way it is worded — `ON CONFLICT DO NOTHING` was removed and both duplicate
    application start rebuild every row the merge had just carried across, under the absorbed
    contact's name where nothing could read it. Both are asserted by the preservation test.
 
+5. **A merge cannot re-point a history row that has not been written yet, and the boundary is
+   recorded rather than moved.** Every writer of `field_history` is a consumer — the projection and
+   the startup backfill — so an event that committed *before* the merge but is projected *after* it
+   lands under `contact:{absorbed}` where no feed can reach it. Link a person to a task and merge
+   them within the outbox relay's latency and that one line is lost from the survivor's feed. Raised
+   by review on this PR, verified, and deliberately not fixed here for two reasons. **It is not this
+   phase's defect**: `repoint_entity_history` has had exactly the same exposure on
+   `entity_type='contact'` rows since ITER13-004, and a fix that closed the task half alone would
+   leave the merge inconsistent about which of its own re-points survive a slow relay. **And the
+   shape of the fix is not a wider statement** — it needs the survivor to be discoverable at
+   *projection* time, which means a durable source-to-survivor mapping the projection consults, or a
+   second re-point driven by `ContactMerged` and bounded by `created_at` so it cannot also drag the
+   merge's own departure row across (decision 2). Either is a phase, not a line. Carried to the
+   follow-ups below.
+
 **Documentation:** the *Known limitation, half repaired* note in
 [database-design.md](../architecture/database-design.md) is retired, replaced by the second
 statement's entry beside `repoint_entity_history` — why a rewrite is the non-destructive option
@@ -11013,6 +11028,24 @@ Appended as the work proceeds, in the style of iterations 16 and 17.
   or multiplies by anything; an agent reading the schema is simply told the wrong range and could format
   `7.5` as 750%. The fix is one docstring in `app/mcp/domains/journals/schemas.py`, left alone here
   because it is the journals domain and calibration rule 7 says a phase does not reach into a second one.
+- **A contact merge's history re-points cannot reach a row the projection has not written yet**
+  (raised by review on ITER18-006 Phase 2, and older than that phase). Every writer of
+  `field_history` is a consumer — `HistoryProjectionConsumer` and `TaskHistoryBackfill` — so an event
+  that commits before a merge but is projected after it writes its row under the *absorbed*
+  contact's id, after that contact is gone. Both of the merge's re-points are exposed:
+  `repoint_entity_history` on `entity_type='contact'` rows since ITER13-004, and
+  `repoint_contact_task_history` on the `contact:{id}` task rows since ITER18-006 Phase 2. The window
+  is the outbox relay's latency and the cost is one missing line on the survivor's feed, not a lost
+  link — Phase 1 moves the `task_contacts` row itself, synchronously, inside the merge. *The general
+  point, which is the reusable half:* **a transaction cannot repair rows that a consumer has not
+  written yet, so any "fix up the past" step in a write path has a race against its own projection**,
+  and the repair has to be reachable from the projection rather than from the transaction. Two
+  designs, both a phase rather than a line: a durable source-to-survivor mapping the projection
+  consults when it writes a `contact:{id}` row, which also makes the merge survive a full replay; or
+  a second re-point driven by the `ContactMerged` event and bounded by `created_at`, which relies on
+  the stream being consumed in order and must exclude the merge's own departure row (ITER18-006
+  Phase 2, decision 2) or it would move the one row that has to stay.
+
 - **`page` is unbounded above on the journal and contact history surfaces** (found while fixing the
   same defect on the task one in ITER18-003 Phase 8). `GET /api/journals/{id}/history`,
   `GET /api/contacts/{id}/history` and the `get_journal_history` MCP tool all declare `page` as

@@ -417,4 +417,16 @@ class FieldHistoryRepository(ABC):
 
         Callers must run this **before** deleting the absorbed contact, inside
         the merge's unit of work: afterwards the id it searches for is gone.
+
+        **It moves the rows that exist when it runs, and history is written
+        asynchronously**, so a record whose event committed before the merge but
+        had not been projected yet is not moved — the projection writes it under
+        ``contact:{old_contact_id}`` afterwards, where no feed can reach it. The
+        window is the outbox relay's latency, and the shape is not this method's:
+        :meth:`repoint_entity_history` has had the same exposure on
+        ``entity_type='contact'`` rows since ITER13-004, because every writer of
+        this table is a consumer rather than the transaction that caused the
+        change. Closing it needs the *survivor* to be discoverable at projection
+        time, which is a durable merge mapping rather than a wider statement;
+        recorded as a follow-up on iteration 18 rather than attempted here.
         """
