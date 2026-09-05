@@ -139,7 +139,13 @@ class TestTodaysAgendaAgainstRealJournals:
     async def test_the_day_is_the_users_local_day(
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
-        """Fourteen hours ahead of UTC, the user's today is its own date."""
+        """Fourteen hours ahead of UTC, the user's today is its own date.
+
+        07:00 on the user's today is **yesterday** in UTC, so a window anchored
+        on UTC's date would not reach it. That is what this asserts: not merely
+        that the event is found, but that it is found on a day UTC has not
+        started yet.
+        """
         local_today = today_in_zone(FAR_EAST)
         await event_seeder.event(title="Morning swim", timezone=FAR_EAST, hour=7)
 
@@ -147,22 +153,23 @@ class TestTodaysAgendaAgainstRealJournals:
 
         assert titles(result.agenda) == ["Morning swim"]
 
-    async def test_the_utc_date_is_not_the_users_day(
+    async def test_tomorrows_event_is_not_on_todays_agenda(
         self, assembler: DailySummaryInputAssembler, event_seeder: EventSeeder
     ) -> None:
-        """The same event is not on a day the user is not having.
+        """The window has a far end, and only the query can prove where it is.
 
-        Skipped by construction rather than by data state: whenever the two
-        dates differ this asserts the UTC date is empty, and when they agree
-        there is no second date to assert about — so the seeded day is offset to
-        guarantee the difference instead.
+        Assembled for the user's **today**, so the agenda query really runs —
+        unlike an assertion about some other date, which the current-day guard
+        would answer without asking the database at all. 07:00 tomorrow in
+        UTC+14 is *this* UTC day, so a window anchored on UTC's date would put
+        tomorrow's event on today's agenda; the local window must not.
         """
         local_today = today_in_zone(FAR_EAST)
-        await event_seeder.event(title="Morning swim", timezone=FAR_EAST, hour=7)
-
-        result = await assembler.assemble(
-            USER_ID, local_today - datetime.timedelta(days=1), FAR_EAST
+        await event_seeder.event(
+            title="Tomorrow's swim", timezone=FAR_EAST, hour=7, day_offset=1
         )
+
+        result = await assembler.assemble(USER_ID, local_today, FAR_EAST)
 
         assert result.agenda == []
 

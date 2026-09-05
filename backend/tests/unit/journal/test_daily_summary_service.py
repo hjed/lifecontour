@@ -3,7 +3,7 @@
 import json
 from datetime import UTC, date, datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 from core_shared.models.contacts.entities import SummaryStatus
@@ -110,7 +110,7 @@ class TestDailySummaryServiceGeneration:
         assert result.mood_average == 7.5
         assert result.generated_at is not None
         mock_input_assembler.assemble.assert_called_once_with(
-            "user123", date(2026, 4, 27), "UTC"
+            "user123", date(2026, 4, 27), "UTC", now=ANY
         )
         mock_prompt_builder.build.assert_called_once()
 
@@ -478,7 +478,7 @@ class TestDailySummaryServiceFreshness:
         assert result.status == SummaryStatus.GENERATED
         assert result.summary_text == "This morning's."
         mock_input_assembler.assemble.assert_called_once_with(
-            "user123", self._SYDNEY_TODAY, "Australia/Sydney"
+            "user123", self._SYDNEY_TODAY, "Australia/Sydney", now=ANY
         )
         # The existing pipeline ran: the GENERATING claim guards concurrency.
         # ...carrying the generated_at this run saw, so a run that finished in
@@ -1036,3 +1036,44 @@ class TestDailySummaryGeminiToolContext:
         assert seen["container"] is sentinel_container
         # ...and it is reset afterward so nothing leaks to the next request.
         assert mcp_deps.mcp_background_container.get() is None
+
+
+class TestTheDayIsResolvedFromOneInstant:
+    """Assembly and prompt building must agree about which day is today.
+
+    Each decides it for itself — the assembler whether to *gather* the agenda,
+    the builder whether to *render* it — and each reads the clock only if the
+    service does not hand it one. Two independent reads leave a window, narrow
+    but real, in which local midnight falls between them: the assembler sees a
+    day that is not yet today and gathers nothing, the builder sees one that is
+    and labels the prompt accordingly, and the result is a today-prompt whose
+    agenda is silently missing. Sharing one instant closes it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_assembler_and_the_prompt_builder_are_given_the_same_now(
+        self,
+        service: DailySummaryService,
+        mock_input_assembler: AsyncMock,
+        mock_prompt_builder: MagicMock,
+    ) -> None:
+        await service.get_or_generate("user123", date(2026, 4, 27), AsyncMock())
+
+        assembled_now = mock_input_assembler.assemble.call_args.kwargs["now"]
+        built_now = mock_prompt_builder.build.call_args.kwargs["now"]
+
+        assert assembled_now is not None
+        assert assembled_now == built_now
+
+    @pytest.mark.asyncio
+    async def test_the_shared_instant_is_timezone_aware(
+        self,
+        service: DailySummaryService,
+        mock_input_assembler: AsyncMock,
+    ) -> None:
+        """A naive instant would be read as UTC by one side and guessed by the other."""
+        await service.get_or_generate("user123", date(2026, 4, 27), AsyncMock())
+
+        assembled_now = mock_input_assembler.assemble.call_args.kwargs["now"]
+
+        assert assembled_now.tzinfo is not None

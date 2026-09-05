@@ -10724,6 +10724,14 @@ now).date()`, which is the local date it already needed for the overview's `(Tod
 cannot disagree; the builder is not re-resolving the day for this rule, it is reusing the answer it had.
 The *rendering* half is assertable without a database, which is what makes "a past-day prompt is
 unchanged" a unit test rather than an integration one.
+
+**They agree because they are given one instant, not because they read the clock at the same moment.**
+`get_or_generate` now reads `datetime.now(UTC)` once and hands it to both. The first cut let each default
+to its own read, which is equivalent almost always and wrong across one boundary: local midnight falling
+between assembly and prompt building leaves the assembler gathering nothing for a day that is not yet
+today, and the builder labelling the prompt `(Today)` over an agenda that is silently absent. The window is
+a few milliseconds wide — assembly, an eligibility check and a claim write — but it is reachable, and a
+shared instant closes it rather than narrowing it. Caught in review; asserted by two service tests.
 Both take an optional `now` that defaults to reading the instant themselves, mirroring
 `DailySummaryFreshnessChecker`'s injectable clock: the local-midnight boundary is pinnable in tests and
 `DailySummaryService` is untouched by this phase.
@@ -10738,6 +10746,16 @@ observation the summary exists to make, and it cannot be made from an entry the 
 all-day entry, and **no time at all** for a timed entry whose clock columns are empty. `starts_at` is not
 re-anchored into the user's zone to manufacture one: the row records its own zone, and asserting an hour in
 a zone the row does not record is precisely the defect `SqlAgendaRepository`'s docstring exists to prevent.
+
+**And the zone those clock times are in is named when it is not the reader's.** The first cut rendered them
+bare under the line "Times are the user's local clock times", which is false: migration 0045 derives the
+columns `AT TIME ZONE jci.timezone`, so they are the **event's** local time and a null zone means UTC.
+[API Design](../architecture/api-design.md) already spells out the consequence for any surface that
+renders them bare — *"a 09:00 New York meeting on a Sydney reader's agenda reads as a morning event that
+sorts into their evening"* — which is exactly what the model would have been told. An entry whose zone is
+not the user's now renders `09:00-09:30 (America/New_York): …`, and the section says such times cannot be
+compared with the rest without converting them. The zone rides with the *time*, so an all-day entry names
+none: it happens on a date and has no clock value to qualify. Caught in review.
 
 **Tone.** The prompt keeps every constraint it had and gains five lines: keep it short; ground everything
 in the journals, the agenda and the tool results — the pre-existing grounding line named only journals and
@@ -10811,9 +10829,22 @@ returns the ordered tuple. Integration against real Postgres
 the agenda suite's own `EventSeeder`): a timed event with a location and a participant contact and an
 all-day event both arrive with the all-day one pinned first; a journal without calendar info does not; nor
 does another user's event; a cancelled event arrives flagged; a far-east user's local day is read as theirs
-and the neighbouring UTC date is empty; and a past *and* a future day each assemble no agenda while still
+— 07:00 there is *yesterday* in UTC, so a UTC-anchored window could not reach it — and tomorrow's event,
+which 07:00 there puts inside *this* UTC day, is not on today's agenda, so both ends of the window are
+pinned by a case a UTC anchor would fail; and a past *and* a future day each assemble no agenda while still
 assembling that day's journals — the negative cases run against days that really have events on them,
 because a negative assertion on an empty day proves nothing.
+
+Review caught one test that proved nothing on its own terms: asserting an empty agenda for *yesterday*
+never reached the query, because the current-day guard answers before the database is asked. **A negative
+agenda assertion is only worth writing for a day the query actually runs on** — which is why the
+replacement asks about today and seeds the event on the neighbouring day instead.
+
+Unit (`test_daily_summary_prompt_builder.py`, timezone rendering): a foreign zone is named beside the time,
+the user's own is not (naming every row would make the exception invisible), a null zone reads as UTC and
+is named when the user is elsewhere, an all-day entry names none, and the section carries the
+not-directly-comparable warning. Service (`test_daily_summary_service.py`): the assembler and the prompt
+builder are handed the *same* `now`, and it is timezone-aware.
 
 **E2E deferred to Phase 8**, as this phase states. Nothing user-visible changes: the agenda is an input to
 an AI call, the REST and MCP read contracts are untouched, and the only observable difference is in
@@ -10909,11 +10940,24 @@ and dates. No e2e (Phase 8).
       writes `GENERATED` over the `PENDING` marker with a pre-change summary. The persist step must be
       able to tell the row was invalidated after the claim (an `invalidated_at` column per open decision
       2, or an inputs version compared at persist) and leave it `PENDING` so the next read regenerates.
+- [ ] **The agenda is an input too, and only some of the ways it changes invalidate today** (found in
+      ITER18-005 Phase 3's review). `SearchIndexerConsumer._JOURNAL_INVALIDATION_EVENTS` is
+      `{JournalCreated, JournalUpdated, JournalDeleted}`, and since Phase 3 the current day's summary is
+      grounded in that day's event journals — their times, locations, participants and cancellation. An
+      app-side EVENT edit *is* covered: `JournalWriteService` publishes `JournalUpdated` with
+      `changed_fields={"calendar_info": True}` when it saves calendar info. What is **not** established is
+      whether the inbound Google-sync paths and attendee-link-only changes publish it — a time or location
+      moved upstream, an event cancelled upstream, an attendee added or removed. Where they do not, a
+      summary generated earlier the same day keeps describing the old agenda. Establish which paths
+      publish, cover the ones that do not, and where a path genuinely cannot, record it as an accepted
+      limitation here rather than leaving it undiscovered. **Note the blast radius is one day, not
+      unbounded:** Phase 2's freshness rule regenerates today's summary on the first read after local
+      midnight regardless, so a missed invalidation is stale until then and no longer.
 - [ ] Placement per open decision 3, with the consumer table in
       `docs/architecture/integration-architecture.md` updated if subscriptions change.
 
 **Required Test Coverage:** unit — the event → invalidated-day mapping for every event type, including the
-two-day retarget case. Integration — publish → relay → invalidation marks stale without regenerating; a
+two-day retarget case and each agenda-changing path that publishes. Integration — publish → relay → invalidation marks stale without regenerating; a
 subsequent read regenerates once; four rapid mutations produce one regeneration; an important-date change
 invalidates only the current day (or the recorded limitation is asserted); an explicit regenerate still
 forces one. No e2e (Phase 8).

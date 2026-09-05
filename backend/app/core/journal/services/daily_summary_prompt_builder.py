@@ -76,7 +76,7 @@ class DailySummaryPromptBuilder:
         sections.append(self._build_day_overview(summary_input, temporal_context))
 
         # 3. Today's agenda — nothing at all for any other day
-        agenda_section = self._build_agenda(summary_input, temporal_context)
+        agenda_section = self._build_agenda(summary_input, temporal_context, timezone)
         if agenda_section:
             sections.append(agenda_section)
 
@@ -154,7 +154,10 @@ class DailySummaryPromptBuilder:
         return "\n".join(lines)
 
     def _build_agenda(
-        self, summary_input: DailySummaryInput, temporal_context: str
+        self,
+        summary_input: DailySummaryInput,
+        temporal_context: str,
+        timezone: str,
     ) -> str:
         """The day's scheduled events, for the current day and no other.
 
@@ -170,12 +173,14 @@ class DailySummaryPromptBuilder:
 
         lines = [
             "## Today's Agenda",
-            "The events scheduled on this day, in the order the user sees them. "
-            "Times are the user's local clock times.",
+            "The events scheduled on this day, in the order the user sees them.",
+            "Each time is the clock time on the event itself. Where that is not "
+            "the user's own timezone the zone is named after it, and those times "
+            "cannot be compared with the rest without converting them.",
             "Entries marked [CANCELLED] did not go ahead — never describe one as "
             "something the user is doing.",
         ]
-        lines.extend(self._agenda_line(entry) for entry in shown)
+        lines.extend(self._agenda_line(entry, timezone) for entry in shown)
         if omitted:
             lines.append(
                 f"({omitted} further events on this day are not listed; the agenda "
@@ -184,7 +189,7 @@ class DailySummaryPromptBuilder:
         return "\n".join(lines)
 
     @staticmethod
-    def _agenda_line(entry: AgendaEntry) -> str:
+    def _agenda_line(entry: AgendaEntry, timezone: str) -> str:
         """One agenda entry as a single line.
 
         **The time comes from the clock columns, never from the instant.** An
@@ -192,17 +197,31 @@ class DailySummaryPromptBuilder:
         clock time from it would assert an hour in a zone the row does not
         record — the defect the agenda's own read exists to avoid. A timed event
         with no clock columns therefore gets no time rather than a wrong one.
+
+        **And those clock times are the *event's*, not the reader's.** Migration
+        0045 derives them ``AT TIME ZONE jci.timezone``, so a 09:00 New York
+        meeting stores ``09:00`` however far from New York the user is; a null
+        zone means UTC. A zone that is not the user's is therefore named beside
+        the time, because otherwise that meeting reads to the model as a morning
+        appointment on a Sydney day — the failure the API design document
+        predicts for any surface that renders these values bare.
         """
         parts: list[str] = []
         if entry.is_cancelled:
             parts.append("[CANCELLED]")
 
+        # Only a rendered time can be misread as the user's, so the zone is
+        # named with the time or not at all: an all-day entry happens on a date
+        # and has no clock value for a zone to qualify.
+        zone = entry.timezone or DEFAULT_TIMEZONE
+        elsewhere = f" ({zone})" if zone != timezone else ""
+
         if entry.is_all_day:
             parts.append("All day:")
         elif entry.start_time is not None and entry.end_time is not None:
-            parts.append(f"{entry.start_time:%H:%M}-{entry.end_time:%H:%M}:")
+            parts.append(f"{entry.start_time:%H:%M}-{entry.end_time:%H:%M}{elsewhere}:")
         elif entry.start_time is not None:
-            parts.append(f"{entry.start_time:%H:%M}:")
+            parts.append(f"{entry.start_time:%H:%M}{elsewhere}:")
 
         parts.append(entry.title)
         if entry.location:

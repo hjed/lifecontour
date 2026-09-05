@@ -123,6 +123,14 @@ class DailySummaryService:
         # input assembly and eligibility all read "today" from it.
         timezone = await self._resolve_timezone(user_id)
 
+        # And the *instant* is read once, for the two that must agree about
+        # which day is today: the assembler decides whether to gather the
+        # agenda, the prompt builder decides whether to render it. Reading the
+        # clock separately leaves a window — narrow, but real — where local
+        # midnight falls between them and the prompt is labelled today while
+        # silently carrying no agenda.
+        now = datetime.now(tz=UTC)
+
         # 1. Check cache (read — no transaction held). A GENERATED row is
         #    served unless it is today's and was not generated today, in which
         #    case it falls through to the same generate path an invalidated
@@ -153,7 +161,7 @@ class DailySummaryService:
 
         # 2. Assemble input (scoped to the user's local day — reads only)
         summary_input = await self._input_assembler.assemble(
-            user_id, summary_date, timezone
+            user_id, summary_date, timezone, now=now
         )
 
         # 3. Check eligibility. Today (in the user's timezone) is always
@@ -191,7 +199,9 @@ class DailySummaryService:
 
         # 5. Build prompt and call Gemini — with NO transaction held.
         try:
-            prompt = self._prompt_builder.build(summary_input, timezone=timezone)
+            prompt = self._prompt_builder.build(
+                summary_input, now=now, timezone=timezone
+            )
             raw_response = await self._call_gemini(prompt)
             result = self._parse_response(raw_response)
         except Exception as e:

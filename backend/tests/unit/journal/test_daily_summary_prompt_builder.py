@@ -459,3 +459,81 @@ class TestToneAndSafetyInstructions:
         assert "practical and descriptive rather than speculative" in prompt
         assert "Do not invent information" in prompt
         assert "Do not rewrite the journal record" in prompt
+
+
+class TestAnEventInAnotherTimezone:
+    """The clock columns are the *event's* local time, not the reader's.
+
+    Migration 0045 derives ``start_time``/``end_time`` ``AT TIME ZONE
+    jci.timezone``, so a 09:00 New York meeting stores ``09:00`` for a Sydney
+    user too. Rendering it bare tells the model the user has a morning
+    appointment — the failure the API design document names.
+    """
+
+    def test_a_foreign_zone_is_named_beside_the_time(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(title="New York sync", timezone="America/New_York")
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        assert "09:00-09:30 (America/New_York): New York sync" in prompt
+
+    def test_the_users_own_zone_is_not_named(self) -> None:
+        """Naming the zone on every row would make the exception invisible."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(timezone="Australia/Sydney")
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        assert "09:00-09:30: Design review" in prompt
+        assert "(Australia/Sydney)" not in prompt
+
+    def test_a_missing_zone_reads_as_utc_and_is_named_when_it_differs(self) -> None:
+        """A null zone means UTC, which is still not a Sydney user's clock."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(timezone=None)
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        assert "09:00-09:30 (UTC): Design review" in prompt
+
+    def test_an_all_day_entry_names_no_zone(self) -> None:
+        """An all-day event happens on a date; there is no clock value to qualify."""
+        builder = DailySummaryPromptBuilder()
+        entry = _agenda_entry(
+            title="Public holiday",
+            is_all_day=True,
+            start_time=None,
+            end_time=None,
+            timezone="America/New_York",
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[entry]),
+            now=_NOW,
+            timezone="Australia/Sydney",
+        )
+
+        assert "All day: Public holiday" in prompt
+        assert "America/New_York" not in prompt
+
+    def test_the_section_warns_that_a_named_zone_is_not_comparable(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=[_agenda_entry()]), now=_NOW
+        )
+
+        assert "clock time on the event itself" in prompt
