@@ -42,6 +42,14 @@ interface DashboardSectionCardProps {
   /** Rendered in place of the entries while the section holds none. */
   readonly emptyIcon: DecorativeIcon;
   readonly emptyMessage: string;
+  /**
+   * Rendered instead of the empty line while the section holds no entries
+   * for a reason *other* than there being none — the query is still in
+   * flight, or the section came back unavailable. "Nothing scheduled" would
+   * be a false claim about either, so a card passes what is true instead.
+   * Ignored once there are entries.
+   */
+  readonly placeholder?: React.ReactNode;
   readonly children?: React.ReactNode;
   readonly testId?: string;
 }
@@ -54,6 +62,7 @@ export function DashboardSectionCard({
   listLabel,
   emptyIcon,
   emptyMessage,
+  placeholder,
   children,
   testId,
 }: DashboardSectionCardProps) {
@@ -88,9 +97,10 @@ export function DashboardSectionCard({
         <ul aria-label={listLabel} className='min-w-0 space-y-3'>
           {children}
         </ul>
-        {isEmpty && (
-          <WidgetEmptyState icon={emptyIcon} message={emptyMessage} />
-        )}
+        {isEmpty &&
+          (placeholder ?? (
+            <WidgetEmptyState icon={emptyIcon} message={emptyMessage} />
+          ))}
       </CardContent>
     </Card>
   );

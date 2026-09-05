@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures';
+import { TestDataManager } from './data-management';
+import { test, expect, type TestJournal } from './fixtures';
 
 /**
  * Home Dashboard — page shell (ITER18-004 Phase 3)
@@ -575,6 +576,439 @@ test.describe('Home Dashboard — the AI daily summary card', () => {
       expect(cardBox).not.toBeNull();
       expect(gridBox).not.toBeNull();
       expect(cardBox!.y).toBeLessThan(gridBox!.y);
+
+      const overflow = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+    });
+  });
+});
+
+/**
+ * Home Dashboard — the agenda card (ITER18-004 Phase 7)
+ *
+ * **W11**–**W18** and wireframe gap 1: today's event journals as bordered
+ * accent-bar rows, all-day above timed, each with its title link, time and
+ * location, tags and participants; the cancelled marker; and the single line
+ * for a day with nothing on it.
+ *
+ * Fixture-driven, unlike the summary block above: an event journal *can* be
+ * created deterministically, so each test seeds its own through the API and
+ * asserts only on rows it created, by the unique titles the data manager
+ * gave them. Other specs in the run may leave journals on the same day; every
+ * assertion here is scoped to this test's own rows, and the ordering tests
+ * compare those rows' positions rather than counting the list.
+ *
+ * **The e2e user has no configured timezone**, so the backend's day
+ * boundaries are UTC. Every journal is therefore placed at **noon UTC today**
+ * with `timezone: 'UTC'` on its event data — a local-noon instant can read as
+ * tomorrow (or yesterday) on a UTC-anchored dashboard, which is the Phase 17
+ * fixture rule.
+ *
+ * The one mocked test is the empty state, for the reason the summary block
+ * gives for `unavailable`: the account is shared across the run, so a
+ * real-data "nothing scheduled" would depend on suite ordering.
+ */
+
+const AGENDA_LIST_NAME = "Today's agenda";
+const AGENDA_EMPTY_LINE = 'Nothing scheduled today.';
+
+/**
+ * The day the dashboard is anchored on, read from the API — once per test.
+ *
+ * The e2e user has no configured timezone, so this is the UTC day, and every
+ * fixture in a test is placed on it rather than on a `new Date()` read at
+ * seeding time: a date read per fixture can straddle 00:00 UTC and split one
+ * test's events across two days. Reading the anchor also documents where
+ * "today" comes from — the server, as the page-shell test above insists. The
+ * residual window (midnight passing between seeding and the page's own read)
+ * is inherent to a page that is always about today, and is not closed here.
+ */
+async function anchorDay(page: Page): Promise<string> {
+  const response = await page.request.get('/api/home-dashboard');
+  expect(response.ok()).toBe(true);
+  return (await response.json()).meta.anchor.date as string;
+}
+
+/**
+ * A clock time on the anchor day, as a UTC ISO instant.
+ *
+ * A timed event's `event_date_range` carries the instant it begins, and that
+ * instant — not the clock column — is what the agenda orders timed entries
+ * by (wireframe gap 12). So a fixture's instant must agree with its clock
+ * time, or two events seeded at the same instant would tie and fall back to
+ * creation order. `12:00:00` is used for all-day events, which match by date.
+ */
+function atUtc(day: string, clock: string): string {
+  return new Date(`${day}T${clock}Z`).toISOString();
+}
+
+interface AgendaEventFixture {
+  title: string;
+  allDay?: boolean;
+  startTime?: string;
+  endTime?: string;
+  location?: string;
+  calendarId: string;
+  contactIds?: string[];
+}
+
+/** One event journal on the anchor day's agenda, created through the API. */
+async function createAgendaEvent(
+  dataManager: TestDataManager,
+  day: string,
+  fixture: AgendaEventFixture
+): Promise<TestJournal> {
+  const timed = !fixture.allDay;
+  const start = atUtc(
+    day,
+    timed && fixture.startTime ? fixture.startTime : '12:00:00'
+  );
+  const end = atUtc(
+    day,
+    timed && fixture.endTime ? fixture.endTime : '12:00:00'
+  );
+  return dataManager.createJournal({
+    title: fixture.title,
+    content: 'Seeded for the agenda card e2e.',
+    event_date_range: { start, end },
+    types: ['event'],
+    type_data: {
+      event: {
+        calendar_id: fixture.calendarId,
+        is_all_day: !timed,
+        sync_invitees: false,
+        timezone: 'UTC',
+        ...(timed && fixture.startTime
+          ? { start_time: fixture.startTime }
+          : {}),
+        ...(timed && fixture.endTime ? { end_time: fixture.endTime } : {}),
+        ...(fixture.location ? { location: fixture.location } : {}),
+      },
+    },
+    ...(fixture.contactIds
+      ? {
+          contacts: fixture.contactIds.map(contactId => ({
+            contact_id: contactId,
+            relationship_type: 'PARTICIPANT',
+          })),
+        }
+      : {}),
+  });
+}
+
+function agendaList(page: Page) {
+  return page.getByRole('list', { name: AGENDA_LIST_NAME });
+}
+
+/** The agenda row for one seeded journal, by the id the row carries. */
+function agendaRow(page: Page, journal: TestJournal) {
+  return agendaList(page).getByTestId(`agenda-entry-${journal.id}`);
+}
+
+/** Serve a dashboard whose agenda is ready and empty. */
+async function mockEmptyAgenda(page: Page): Promise<void> {
+  await page.route('**/api/home-dashboard', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          type: 'home-dashboards',
+          id: 'e2e-user',
+          attributes: {
+            summary: unavailableSection,
+            agenda: {
+              status: 'ready',
+              data: {
+                entries: [],
+                tomorrow: { date: SUMMARY_ANCHOR, entries: [] },
+              },
+            },
+            tasks: { status: 'ready', data: {} },
+            upcoming_dates: { status: 'ready', data: {} },
+          },
+        },
+        meta: { anchor: { date: SUMMARY_ANCHOR, timezone: SUMMARY_TIMEZONE } },
+      }),
+    });
+  });
+}
+
+test.describe('Home Dashboard — the agenda card', () => {
+  test.describe('Ordering and entry elements (W12, W13, W14, W17)', () => {
+    test('lists the all-day entry above timed entries in time order, each with its details', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+      testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
+
+      const [calendar] = await dataManager.createCalendars([
+        { name: 'Agenda Card Cal', color: '#8B5CF6' },
+      ]);
+      // Seeded deliberately out of order: the card must not simply draw them
+      // in creation order.
+      const dinner = await createAgendaEvent(dataManager, day, {
+        title: 'Agenda Dinner',
+        startTime: '19:00:00',
+        endTime: '21:00:00',
+        calendarId: calendar.id,
+      });
+      const standup = await createAgendaEvent(dataManager, day, {
+        title: 'Agenda Standup',
+        startTime: '09:00:00',
+        endTime: '09:30:00',
+        location: 'The small room',
+        calendarId: calendar.id,
+      });
+      const holiday = await createAgendaEvent(dataManager, day, {
+        title: 'Agenda Holiday',
+        allDay: true,
+        calendarId: calendar.id,
+      });
+
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const holidayRow = agendaRow(page, holiday);
+      const standupRow = agendaRow(page, standup);
+      const dinnerRow = agendaRow(page, dinner);
+      await expect(holidayRow).toBeVisible();
+      await expect(standupRow).toBeVisible();
+      await expect(dinnerRow).toBeVisible();
+
+      // W12 then W13: all-day first, then ascending by start.
+      const [holidayBox, standupBox, dinnerBox] = await Promise.all([
+        holidayRow.boundingBox(),
+        standupRow.boundingBox(),
+        dinnerRow.boundingBox(),
+      ]);
+      expect(holidayBox!.y).toBeLessThan(standupBox!.y);
+      expect(standupBox!.y).toBeLessThan(dinnerBox!.y);
+
+      // W12: the marker in place of a time.
+      await expect(holidayRow.getByTestId('agenda-entry-all-day')).toHaveText(
+        /all day/i
+      );
+      await expect(holidayRow.getByTestId('agenda-entry-time')).toHaveCount(0);
+
+      // W13: the clock range and the location beside it.
+      await expect(standupRow.getByTestId('agenda-entry-time')).toHaveText(
+        '09:00 – 09:30'
+      );
+      await expect(standupRow.getByTestId('agenda-entry-location')).toHaveText(
+        'The small room'
+      );
+      await expect(dinnerRow.getByTestId('agenda-entry-time')).toHaveText(
+        '19:00 – 21:00'
+      );
+      await expect(dinnerRow.getByTestId('agenda-entry-location')).toHaveCount(
+        0
+      );
+
+      // W17: the accent bar keyed to the calendar's colour.
+      await expect(standupRow.getByTestId('agenda-entry-accent')).toHaveCSS(
+        'background-color',
+        'rgb(139, 92, 246)'
+      );
+    });
+
+    test('links each title to its journal', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+      testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
+
+      const [calendar] = await dataManager.createCalendars([
+        { name: 'Agenda Link Cal', color: '#10B981' },
+      ]);
+      const standup = await createAgendaEvent(dataManager, day, {
+        title: 'Agenda Linked Standup',
+        startTime: '09:00:00',
+        endTime: '09:30:00',
+        calendarId: calendar.id,
+      });
+
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const link = agendaRow(page, standup).getByRole('link', {
+        name: standup.title,
+      });
+      await expect(link).toBeVisible();
+      await link.click();
+
+      await expect(page).toHaveURL(new RegExp(`/journals/${standup.id}$`));
+    });
+  });
+
+  test.describe('Tags and participants (W15, W16)', () => {
+    test('shows the tag in its colour and every participant by name', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+      testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
+
+      const [calendar] = await dataManager.createCalendars([
+        { name: 'Agenda Tag Cal', color: '#3B82F6' },
+      ]);
+      const [tag] = await dataManager.createJournalTags([
+        { name: 'agenda-social', color: '#EF4444' },
+      ]);
+      const [sam, alex] = await dataManager.createContacts([
+        { firstName: 'Sam', lastName: 'Taylor' },
+        { firstName: 'Alex', lastName: 'Chen' },
+      ]);
+      const coffee = await createAgendaEvent(dataManager, day, {
+        title: 'Agenda Coffee',
+        startTime: '10:00:00',
+        endTime: '10:30:00',
+        calendarId: calendar.id,
+        contactIds: [sam.id, alex.id],
+      });
+      await dataManager.assignTagsToJournal(coffee.id, [tag.id]);
+
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const row = agendaRow(page, coffee);
+      await expect(row).toBeVisible();
+
+      const badge = row.getByTestId('agenda-entry-tags').getByText(tag.name);
+      await expect(badge).toBeVisible();
+      await expect(badge).toHaveCSS('border-color', 'rgb(239, 68, 68)');
+
+      const participants = row.getByRole('list', { name: 'Participants' });
+      await expect(
+        participants.getByRole('img', {
+          name: `${sam.firstName} ${sam.lastName}`,
+        })
+      ).toBeVisible();
+      await expect(
+        participants.getByRole('img', {
+          name: `${alex.firstName} ${alex.lastName}`,
+        })
+      ).toBeVisible();
+    });
+  });
+
+  test.describe('Cancelled entries (W18)', () => {
+    test('shows a cancelled event marked, beside a confirmed one that is not', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+      testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
+
+      const [calendar] = await dataManager.createCalendars([
+        { name: 'Agenda Cancel Cal', color: '#F59E0B' },
+      ]);
+      const cancelled = await createAgendaEvent(dataManager, day, {
+        title: 'Agenda Cancelled Lunch',
+        startTime: '12:00:00',
+        endTime: '13:00:00',
+        calendarId: calendar.id,
+      });
+      const confirmed = await createAgendaEvent(dataManager, day, {
+        title: 'Agenda Confirmed Walk',
+        startTime: '17:00:00',
+        endTime: '18:00:00',
+        calendarId: calendar.id,
+      });
+      // Asserted, not assumed: if cancelling ever stopped succeeding the test
+      // below would otherwise pass against two confirmed rows.
+      const response = await dataManager.cancelJournal(cancelled.id);
+      expect(response.ok()).toBe(true);
+
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const cancelledRow = agendaRow(page, cancelled);
+      const confirmedRow = agendaRow(page, confirmed);
+      await expect(cancelledRow).toBeVisible();
+      await expect(confirmedRow).toBeVisible();
+
+      await expect(
+        cancelledRow.getByTestId('agenda-entry-cancelled')
+      ).toHaveText(/cancelled/i);
+      await expect(
+        cancelledRow.getByRole('link', { name: cancelled.title })
+      ).toHaveCSS('text-decoration-line', 'line-through');
+      await expect(
+        confirmedRow.getByTestId('agenda-entry-cancelled')
+      ).toHaveCount(0);
+    });
+  });
+
+  test.describe('Nothing scheduled (gap 1, W29 idiom)', () => {
+    test('says so in a single line with no rows', async ({
+      authenticatedPage: page,
+    }) => {
+      await mockEmptyAgenda(page);
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const card = page.getByTestId('agenda-card');
+      await expect(card.getByText(AGENDA_EMPTY_LINE)).toBeVisible();
+      await expect(agendaList(page).getByRole('listitem')).toHaveCount(0);
+      await expect(card.getByRole('alert')).toHaveCount(0);
+    });
+  });
+
+  test.describe('Layout (W3)', () => {
+    test('overflows nothing at mobile width with a long title, many tags and many participants', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+      testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
+
+      const [calendar] = await dataManager.createCalendars([
+        { name: 'Agenda Mobile Cal', color: '#EC4899' },
+      ]);
+      const tags = await dataManager.createJournalTags([
+        { name: 'agenda-mobile-one' },
+        { name: 'agenda-mobile-two' },
+        { name: 'agenda-mobile-three' },
+        { name: 'agenda-mobile-four' },
+      ]);
+      const contacts = await dataManager.createContacts([
+        { firstName: 'Priya', lastName: 'Patel' },
+        { firstName: 'Jordan', lastName: 'Lee' },
+        { firstName: 'Kim', lastName: 'Nguyen' },
+        { firstName: 'Taylor', lastName: 'Brooks' },
+      ]);
+      const busy = await createAgendaEvent(dataManager, day, {
+        title:
+          'Agenda Quarterly planning offsite with the whole extended leadership group',
+        startTime: '09:00:00',
+        endTime: '17:00:00',
+        location: 'The Grand Conference Centre, Level 12, Boardroom B',
+        calendarId: calendar.id,
+        contactIds: contacts.map(contact => contact.id),
+      });
+      await dataManager.assignTagsToJournal(
+        busy.id,
+        tags.map(tag => tag.id)
+      );
+
+      await page.setViewportSize(MOBILE);
+      await openDashboard(page);
+
+      const row = agendaRow(page, busy);
+      await expect(row).toBeVisible();
+      // Four participants: three drawn, one folded into the counter (W16).
+      await expect(row.getByText('+1', { exact: true })).toBeVisible();
 
       const overflow = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,

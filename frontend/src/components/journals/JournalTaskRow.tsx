@@ -23,6 +23,7 @@ import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { TaskActivityFeed } from '@/components/tasks/TaskActivityFeed';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { nameParts } from '@/lib/contact-names';
 import { cn } from '@/lib/utils';
 import { lapseWording, statusWording } from '@/lib/task-display';
 import {
@@ -61,18 +62,6 @@ function accentClass(status: TaskStatus, lapsed: boolean): string {
   return status === TaskStatus.NOT_DONE
     ? 'bg-primary'
     : 'bg-muted-foreground/40';
-}
-
-/**
- * Split a display name for the avatar's initials.
- *
- * Contacts reach a task as a single `display_name`; `ContactAvatar` wants the
- * parts. Everything after the first space is the surname, which is wrong for
- * some names and right for the initials in all of them.
- */
-function nameParts(displayName: string): { first: string; last: string } {
-  const [first = '', ...rest] = displayName.trim().split(/\s+/);
-  return { first, last: rest.join(' ') };
 }
 
 export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {

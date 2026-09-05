@@ -1,26 +1,20 @@
 /**
  * @jest-environment jsdom
  *
- * The three evidence cards as this phase ships them: their wireframe headers
- * (**W11**, **W21**, **W30**), the labelled list container each will fill in a
- * later phase (**W4**), and the single quiet line each shows while it holds
- * nothing (**W29** and the wireframe's gaps 1 and 2).
+ * The evidence cards that are still shells: their wireframe headers (**W21**,
+ * **W30**), the labelled list container each will fill in a later phase
+ * (**W4**), and the single quiet line each shows while it holds nothing
+ * (**W29** and the wireframe's gap 2).
+ *
+ * The agenda card left this table when it started reading the dashboard query;
+ * its shell assertions live in `AgendaCard.test.tsx` beside its states.
  */
 
 import { render, screen } from '@testing-library/react';
-import { AgendaCard } from '../AgendaCard';
 import { TasksCard } from '../TasksCard';
 import { UpcomingDatesCard } from '../UpcomingDatesCard';
 
 describe.each([
-  {
-    name: 'AgendaCard',
-    Card: AgendaCard,
-    title: 'Agenda',
-    description: "Today's schedule in time order, all-day items first.",
-    listLabel: "Today's agenda",
-    empty: 'Nothing scheduled today.',
-  },
   {
     name: 'TasksCard',
     Card: TasksCard,
