@@ -63,6 +63,7 @@ import { Label } from '@/components/ui/label';
 import { MarkdownEditor } from '@/components/journals/MarkdownEditor';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal, useJournal } from '@/lib/api/journals';
+import { localMidnight } from '@/lib/date-utils';
 import { useCreateRoute } from '@/lib/api/routes';
 import { toast } from 'sonner';
 import {
@@ -781,9 +782,13 @@ export function JournalCreateForm({
       const result = await createJournal({
         title: values.title,
         content: values.content,
+        // Each bound is the UTC instant of local midnight, and the end is the
+        // last day inclusive. The picker already hands over local midnight;
+        // localMidnight says so, and is the same call the inline date editor
+        // makes, so there is one definition of the convention rather than two.
         event_date_range: {
-          start: values.dateRange.from.toISOString(),
-          end: endDate.toISOString(),
+          start: localMidnight(values.dateRange.from).toISOString(),
+          end: localMidnight(endDate).toISOString(),
         },
         types: values.types,
         parent_id: values.parentId ?? undefined,

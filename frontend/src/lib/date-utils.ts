@@ -28,6 +28,33 @@ export function formatDateOnly(date: Date): string {
 }
 
 /**
+ * Return the local midnight of a date's own calendar day.
+ *
+ * A journal's `event_date_range` bounds are stored as the UTC **instant** of
+ * *local* midnight — `2026-09-05` in Sydney is `2026-09-04T14:00:00Z` — so a
+ * bound is written by zeroing the local clock and then calling
+ * `toISOString()`. Zeroing the *UTC* clock instead (`setUTCHours(0, …)`) sends
+ * a different instant, one that reads back as the previous day anywhere behind
+ * UTC, which is the whole point of this helper existing rather than the call
+ * being written out at each site.
+ *
+ * The read half of the convention needs nothing: `new Date(iso)` formatted in
+ * the browser's zone already lands on the day that was written.
+ *
+ * @param date - Any instant; only its local calendar day is used
+ * @returns A new Date at 00:00:00.000 local time on that day
+ *
+ * @example
+ * localMidnight(new Date(2026, 8, 5, 13, 47)).toISOString()
+ * // "2026-09-04T14:00:00.000Z" in Australia/Sydney
+ */
+export function localMidnight(date: Date): Date {
+  const midnight = new Date(date);
+  midnight.setHours(0, 0, 0, 0);
+  return midnight;
+}
+
+/**
  * Format a date range for display with smart formatting.
  *
  * - Same day: "15 Jan 2024"
