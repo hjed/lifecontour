@@ -72,13 +72,15 @@ export function AgendaCard() {
         agenda ? undefined : <AgendaPlaceholder pending={isPending} />
       }
       footer={
-        // Guarded on the day itself rather than on `agenda`: the type promises
-        // `tomorrow` on every ready agenda, but a payload that broke that
-        // promise used to throw out of render and take the *whole page* with
-        // it — the summary, the tasks and the dates included. The
-        // specification's "sections render independently" has to survive a
-        // malformed section, not only an unavailable one.
-        agenda?.tomorrow ? (
+        // Guarded on the shape the disclosure actually reads, not merely on
+        // the section: the type promises a `tomorrow` with an `entries` array
+        // on every ready agenda, but a payload that broke that promise used to
+        // throw out of render and take the *whole page* with it — the summary,
+        // the tasks and the dates included. The specification's "sections
+        // render independently" has to survive a section that breaks its
+        // contract, not only one that reports itself unavailable, and a
+        // missing key and a null list fail identically from the reader's seat.
+        Array.isArray(agenda?.tomorrow?.entries) ? (
           <TomorrowDisclosure day={agenda.tomorrow} />
         ) : undefined
       }

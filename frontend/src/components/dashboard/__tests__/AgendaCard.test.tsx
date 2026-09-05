@@ -361,6 +361,29 @@ describe('AgendaCard', () => {
       expect(screen.queryByTestId('tomorrow-trigger')).not.toBeInTheDocument();
     });
 
+    /**
+     * The same failure one step further in: a `tomorrow` that is there but
+     * carries no list. From the disclosure's seat this is indistinguishable
+     * from the case above — it reads `entries.length` either way — so the
+     * guard is on the shape, not on the key.
+     */
+    it('keeps today drawn when tomorrow arrives with no entries list', async () => {
+      serveAgenda({
+        status: DashboardSectionStatus.READY,
+        data: {
+          entries: [STANDUP],
+          tomorrow: { date: TOMORROW_DATE },
+        } as unknown as HomeDashboardAgenda,
+      });
+
+      renderWithProviders(<AgendaCard />);
+
+      expect(
+        await within(agendaList()).findByRole('link', { name: 'Standup' })
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId('tomorrow-trigger')).not.toBeInTheDocument();
+    });
+
     it('draws none when the section is unavailable', async () => {
       serveAgenda({ status: DashboardSectionStatus.UNAVAILABLE, data: null });
 

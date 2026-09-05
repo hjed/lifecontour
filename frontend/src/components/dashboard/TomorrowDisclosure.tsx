@@ -22,11 +22,19 @@
  * Hiding the control would make "nothing on" indistinguishable from a
  * dashboard that had never looked.
  *
- * Accessibility follows the activity feed's precedent: a real button carrying
- * `aria-expanded` and `aria-controls` from Radix, over a `role="region"` named
- * by that button — so the name says *"Tomorrow — Saturday, 1 August, 2
- * events"* rather than making someone open it to find out whether it was worth
- * opening. Keyboard operation is structural, not handled here.
+ * Accessibility follows the activity feed's precedent: a real button over a
+ * `role="region"` named by it, so the name says *"Tomorrow — Saturday, 1
+ * August, 2 events"* rather than making someone open it to find out whether it
+ * was worth opening. Keyboard operation is structural, not handled here.
+ *
+ * **`aria-expanded` and `aria-controls` are left entirely to Radix.** The
+ * panel stays in the DOM but `hidden` while shut, and Radix withholds
+ * `aria-controls` until it opens — a region that is out of the accessibility
+ * tree is not one the button meaningfully controls. Writing the attribute here
+ * anyway, as this component first did, overrode that judgement to say
+ * something less true. The region is instead named with `aria-labelledby` back
+ * at the trigger, so the sentence has one source rather than two that can
+ * drift apart.
  */
 
 'use client';
@@ -58,7 +66,7 @@ interface TomorrowDisclosureProps {
 
 export function TomorrowDisclosure({ day }: TomorrowDisclosureProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const regionId = useId();
+  const triggerId = useId();
 
   // One string for the button's accessible name and the panel's: the visible
   // label and count are two elements for layout (W19 right-aligns the count),
@@ -70,8 +78,8 @@ export function TomorrowDisclosure({ day }: TomorrowDisclosureProps) {
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className='mt-3'>
       <CollapsibleTrigger
+        id={triggerId}
         aria-label={accessibleName}
-        aria-controls={regionId}
         data-testid='tomorrow-trigger'
         className='border-border hover:bg-muted/50 focus-visible:ring-ring flex w-full items-center gap-2 rounded-md border-t px-1 py-2 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none'
       >
@@ -105,9 +113,8 @@ export function TomorrowDisclosure({ day }: TomorrowDisclosureProps) {
       </CollapsibleTrigger>
 
       <CollapsibleContent
-        id={regionId}
         role='region'
-        aria-label={accessibleName}
+        aria-labelledby={triggerId}
         data-testid='tomorrow-panel'
       >
         {day.entries.length > 0 ? (

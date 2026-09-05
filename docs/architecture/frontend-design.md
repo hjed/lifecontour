@@ -1206,12 +1206,16 @@ elements are numbered **W1**–**W33**.
     maps the same `AgendaEntryRow` into a `ul` labelled "Tomorrow's agenda", so
     the two days can never drift apart in form; a clear tomorrow keeps its row,
     counts `0 events`, and opens onto `WidgetEmptyState`'s single line. The
-    trigger is a real button carrying `aria-expanded` and `aria-controls` from
-    Radix's `Collapsible` over a `role="region"` named by it, and the
-    accessible name is the whole sentence — *"Tomorrow — Saturday, 1 August, 2
-    events"* — so nobody has to open it to learn whether it was worth opening.
+    trigger is a real button over a `role="region"` named by `aria-labelledby`
+    back at it, and the accessible name is the whole sentence — *"Tomorrow —
+    Saturday, 1 August, 2 events"* — so nobody has to open it to learn whether
+    it was worth opening. **Leave `aria-expanded` and `aria-controls` to
+    Radix.** `CollapsibleContent` stays in the DOM but `hidden` while shut, and
+    Radix withholds `aria-controls` until it opens: a region out of the
+    accessibility tree is not one the button meaningfully controls, and writing
+    the attribute anyway overrides that judgement to say something less true.
     E2E must gate its clicks on `aria-expanded` rather than the panel's
-    visibility, which races the slide-in.
+    visibility, which is a rendering of the state rather than the state.
   - **`AgendaEntryRow`** is a pure function of one payload entry, shared by
     today's list and the tomorrow disclosure: a bordered row with a left accent bar keyed
     to `calendar_color` by inline style (a runtime hex value Tailwind cannot

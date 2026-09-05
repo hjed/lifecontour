@@ -10147,9 +10147,12 @@ as the regression gate rather than extended.
       and the e2e asserts the same with the URL unchanged and today's row above tomorrow's.
 - [x] Disclosure state is exposed to assistive technology (`aria-expanded` on the trigger, a controlled
       region) and the toggle is keyboard operable. — Radix supplies `aria-expanded` and `aria-controls` on
-      a real `button`; the panel is a `role="region"` whose `id` is what `aria-controls` names, labelled by
-      the same sentence as the trigger. Tab-then-Enter and Tab-then-Space are asserted separately, and every
-      icon is `aria-hidden`.
+      a real `button`, and **both are left to it**: the panel stays in the DOM but `hidden` while shut, and
+      Radix withholds `aria-controls` until it opens, because a region out of the accessibility tree is not
+      one the button meaningfully controls. Review caught this phase overriding that judgement to say
+      something less true; the override is gone and a test pins its absence. The panel is a `role="region"`
+      named by `aria-labelledby` back at the trigger, so the sentence has one source rather than two.
+      Tab-then-Enter and Tab-then-Space are asserted separately, and every icon is `aria-hidden`.
 - [x] Nothing scheduled tomorrow shows the row with a zero count and an empty line when expanded, rather
       than hiding the control. — The row stays, counting `0 events`, and opens onto `WidgetEmptyState`'s
       *"Nothing scheduled tomorrow."* — the **W29** idiom today's card uses. Two unit tests, one page-level
@@ -10157,9 +10160,9 @@ as the regression gate rather than extended.
 
 **Required Test Coverage:** unit (RTL) — collapsed default, expand/collapse, chevron and `aria-expanded`
 state, count label, empty-tomorrow case. ~~E2E in Phase 17~~, **landed here** on the ground Phases 3, 4
-and 7 used: every phase with a user-visible surface brings its own. — **Delivered:** 3 helper tests
-(`formatIsoWeekdayDate`, `formatEventCount`), 4 over the shell's `footer`, 16 over the disclosure, and 6
-new over the card against the real hook and a routed fetch. **E2E: 4 tests, green on both `firefox` and
+and 7 used: every phase with a user-visible surface brings its own. — **Delivered:** 6 helper tests (3
+each over `formatIsoWeekdayDate` and `formatEventCount`), 4 over the shell's `footer`, 17 over the
+disclosure, and 7 new over the card against the real hook and a routed fetch. **E2E: 4 tests, green on both `firefox` and
 `Mobile Chrome`**; the whole spec is 57 tests across the two projects. No backend change, so the gate is
 the endpoint's own suites re-run: `backend/tests/unit/dashboard/` (86) and the two home-dashboard
 integration files (70) — all green, alongside the full frontend suite (2,495) and `pnpm quality:check`.
@@ -10196,8 +10199,11 @@ that rule gets tested. Worth Phase 16 revisiting as it hardens the other three s
 - **Keyboard operation is asserted in RTL, not e2e.** Tab-then-Enter and Tab-then-Space are structural
   facts of a real button inside Radix's `Collapsible`, and RTL proves them deterministically; Mobile
   Chrome's virtual keyboard is a recorded flake source and buys nothing here.
-- **E2E clicks are gated on `aria-expanded`, never on the panel's visibility** — the recorded Radix
-  slide-in race. `aria-expanded` is the state; visibility is an animation of it.
+- **E2E clicks are gated on `aria-expanded`, never on the panel's visibility.** `aria-expanded` is the
+  state; visibility is a rendering of it, and the two are not simultaneous. Note that **this** collapsible
+  is not animated — `components/ui/collapsible.tsx` re-exports the primitives bare, with no `data-[state]`
+  transition — so the recorded Radix slide-in race is not what is being avoided here; the reason is the
+  mount-and-reveal gap, which exists either way.
 - **Exact counts are asserted against mocks, behaviour against real fixtures.** The e2e account is shared
   across the run, so a count read from real data would depend on suite ordering — Phase 7's reasoning for
   mocking the empty agenda, applied to the number. The fixture-driven test seeds its own events on

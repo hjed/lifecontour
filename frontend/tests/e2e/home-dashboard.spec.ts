@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { TestDataManager } from './data-management';
 import { test, expect, type TestJournal } from './fixtures';
 
@@ -259,8 +259,35 @@ const SUMMARY_TIMEZONE = 'Australia/Sydney';
 const SUMMARY_ANCHOR = new Intl.DateTimeFormat('en-CA', {
   timeZone: SUMMARY_TIMEZONE,
 }).format(new Date());
-/** The mocked day after the mocked anchor — what the disclosure labels itself with. */
-const MOCK_TOMORROW = nextDay(SUMMARY_ANCHOR);
+/**
+ * The calendar day after `day`, as `YYYY-MM-DD`.
+ *
+ * Stepped in UTC because the e2e user has no configured timezone, so the
+ * backend's day boundaries — and therefore `agenda.tomorrow.date` — are UTC.
+ * Built from the anchor the API gave rather than from a clock, for the reason
+ * {@link anchorDay} exists.
+ *
+ * Declared here, above the module-scope constant that calls it: as a hoisted
+ * `function` the order happens not to matter, but rewriting it as a `const`
+ * arrow — a routine tidy-up — would throw at module evaluation and fail all
+ * 57 tests in this file with an error pointing nowhere near the change.
+ */
+function nextDay(day: string): string {
+  const stepped = new Date(`${day}T00:00:00Z`);
+  stepped.setUTCDate(stepped.getUTCDate() + 1);
+  return stepped.toISOString().slice(0, 10);
+}
+
+/**
+ * The mocked tomorrow, **fixed** rather than derived from the clock.
+ *
+ * `SUMMARY_ANCHOR` has to be the real today, because the page reads the
+ * server's anchor; nothing requires the *mocked* tomorrow to track the
+ * calendar, and deriving it made one assertion's strength depend on the day
+ * the suite ran. A Wednesday in September is the longest label the row has to
+ * hold, which is what the mobile-overflow test needs to be worth running.
+ */
+const MOCK_TOMORROW = '2026-09-30';
 
 const REGENERATE_PATH = `**/api/journals/daily-summary/${SUMMARY_ANCHOR}/regenerate`;
 
@@ -654,20 +681,6 @@ function atUtc(day: string, clock: string): string {
   return new Date(`${day}T${clock}Z`).toISOString();
 }
 
-/**
- * The calendar day after `day`, as `YYYY-MM-DD`.
- *
- * Stepped in UTC because the e2e user has no configured timezone, so the
- * backend's day boundaries — and therefore `agenda.tomorrow.date` — are UTC.
- * Built from the anchor the API gave rather than from a clock, for the reason
- * {@link anchorDay} exists.
- */
-function nextDay(day: string): string {
-  const stepped = new Date(`${day}T00:00:00Z`);
-  stepped.setUTCDate(stepped.getUTCDate() + 1);
-  return stepped.toISOString().slice(0, 10);
-}
-
 interface AgendaEventFixture {
   title: string;
   allDay?: boolean;
@@ -724,6 +737,40 @@ async function createAgendaEvent(
 
 function agendaList(page: Page) {
   return page.getByRole('list', { name: AGENDA_LIST_NAME });
+}
+
+/**
+ * A locator's bounding box, asserted present rather than asserted away.
+ *
+ * The same guard `sectionBoxes` uses: a null box should fail as an assertion
+ * naming the element, not as a `TypeError` on a property read.
+ */
+async function boxOf(locator: Locator) {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  return box!;
+}
+
+/**
+ * The weekday-and-date half of the disclosure's label, in **W19**'s form.
+ *
+ * Built with `Intl` in UTC — deliberately not the app's `formatIsoWeekdayDate`
+ * — so this asserts what the row should say rather than re-running the code
+ * that says it.
+ */
+function expectedTomorrowLabel(day: string): string {
+  const at = new Date(`${day}T00:00:00Z`);
+  const weekday = new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'UTC',
+    weekday: 'long',
+  }).format(at);
+  const dayMonth = new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'long',
+  }).format(at);
+  // W19 writes the comma; `Intl` does not put one in on its own.
+  return `${weekday}, ${dayMonth}`;
 }
 
 /** The agenda row for one seeded journal, by the id the row carries. */
@@ -1079,7 +1126,13 @@ test.describe('Home Dashboard — the agenda card', () => {
       // Collapsed on arrival: today is drawn, tomorrow is not (W19).
       await expect(todayRow).toBeVisible();
       await expect(trigger).toHaveAttribute('aria-expanded', 'false');
-      await expect(trigger).toHaveText(/Tomorrow — /);
+      // The whole label, against the day the API itself resolved — the prefix
+      // alone would pass on a row drawn a day out. Formatted here with `Intl`
+      // rather than the app's own `date-fns` helper, so the assertion is
+      // independent of the code it is checking.
+      await expect(page.getByTestId('tomorrow-label')).toHaveText(
+        `Tomorrow — ${expectedTomorrowLabel(tomorrow)}`
+      );
       await expect(holidayRow).toHaveCount(0);
       await expect(retroRow).toHaveCount(0);
       const urlBefore = page.url();
@@ -1097,19 +1150,17 @@ test.describe('Home Dashboard — the agenda card', () => {
       await expect(retroRow.getByTestId('agenda-entry-location')).toHaveText(
         'The big room'
       );
-      const [holidayBox, retroBox] = await Promise.all([
-        holidayRow.boundingBox(),
-        retroRow.boundingBox(),
-      ]);
-      expect(holidayBox!.y).toBeLessThan(retroBox!.y);
+      const holidayBox = await boxOf(holidayRow);
+      const retroBox = await boxOf(retroRow);
+      expect(holidayBox.y).toBeLessThan(retroBox.y);
 
       // In place: today is still on screen and nothing navigated.
       await expect(todayRow).toBeVisible();
       expect(page.url()).toBe(urlBefore);
       // The expanded panel is the only region the card adds, and it opens
       // beneath today's list rather than replacing it.
-      const todayBox = await todayRow.boundingBox();
-      expect(todayBox!.y).toBeLessThan(holidayBox!.y);
+      const todayBox = await boxOf(todayRow);
+      expect(todayBox.y).toBeLessThan(holidayBox.y);
 
       await trigger.click();
       await expect(trigger).toHaveAttribute('aria-expanded', 'false');

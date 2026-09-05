@@ -246,15 +246,29 @@ describe('TomorrowDisclosure', () => {
       const user = userEvent.setup();
       render(<TomorrowDisclosure day={day([STANDUP])} />);
 
-      const controls = trigger().getAttribute('aria-controls');
-      expect(controls).toBeTruthy();
-
       await user.click(trigger());
 
+      const controls = trigger().getAttribute('aria-controls');
+      expect(controls).toBeTruthy();
       const region = screen.getByRole('region', {
         name: 'Tomorrow — Saturday, 1 August, 1 event',
       });
       expect(region).toHaveAttribute('id', controls);
+    });
+
+    /**
+     * Radix leaves the panel in the DOM but `hidden` while shut, and omits
+     * `aria-controls` until it opens — a region nobody can reach is not one
+     * the button meaningfully controls. Writing the attribute here anyway
+     * (as this component first did) overrode that decision for no gain, so
+     * this pins it: shut, the panel is out of the accessibility tree and the
+     * trigger claims to control nothing.
+     */
+    it('claims to control nothing while the panel is hidden', () => {
+      render(<TomorrowDisclosure day={day([STANDUP])} />);
+
+      expect(screen.getByTestId('tomorrow-panel')).not.toBeVisible();
+      expect(trigger()).not.toHaveAttribute('aria-controls');
     });
 
     it('hides its chevron from the accessibility tree', () => {
