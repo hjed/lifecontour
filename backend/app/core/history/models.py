@@ -376,3 +376,57 @@ class FieldHistoryRepository(ABC):
         rows moved. Used by the contact merge to carry the source's history onto
         the survivor.
         """
+
+    @abstractmethod
+    async def repoint_contact_task_history(
+        self,
+        old_contact_id: int,
+        new_contact_id: int,
+        transaction: AsyncConnection,
+    ) -> int:
+        """Re-point a contact's *task* records onto another contact.
+
+        The other half of what a contact merge owes history, and it needs its
+        own statement because these rows are addressed by a different column.
+        :meth:`repoint_entity_history` finds a contact's own rows by
+        ``entity_id``; a person's record of a task is filed on the **task**
+        (``entity_type='task'``, ``entity_id=<task id>``) and names the person
+        only in ``field_name``, as ``contact:{id}``. No widening of that method
+        could reach these, and no join could either — the field name is the
+        whole of the association, deliberately, so the record survives the link
+        being removed and the task being deleted.
+
+        **Leaving them is the destructive option, which is why this exists.**
+        ``field_history`` has no foreign key to ``contacts``, so a merge does
+        not delete these rows; it strands them. Nothing raises, and nothing can
+        read them again, because the only predicate that selects them
+        (``_CONTACT_AGGREGATION_WHERE``) matches on a contact id that no longer
+        exists. The merge specification's *non-destructive history* requires the
+        source's trail to reach the survivor, and for these rows that means
+        rewriting the name.
+
+        Moves every ``entity_type='task'`` row whose ``field_name`` is
+        ``contact:{old_contact_id}`` to ``contact:{new_contact_id}``, respecting
+        the ``(event_id, entity_type, entity_id, field_name)`` dedup index
+        (``ON CONFLICT DO NOTHING``) — a task both people were put on by one
+        event already carries the survivor's row under that ``event_id``.
+        Preserves ``event_id``, ``created_at``, ``source``, ``changed_by`` and
+        ``user_id``; the last two are load-bearing rather than tidy, and the
+        adapter says why. Idempotent, a no-op on a self-move, and returns the
+        number of rows moved.
+
+        Callers must run this **before** deleting the absorbed contact, inside
+        the merge's unit of work: afterwards the id it searches for is gone.
+
+        **It moves the rows that exist when it runs, and history is written
+        asynchronously**, so a record whose event committed before the merge but
+        had not been projected yet is not moved — the projection writes it under
+        ``contact:{old_contact_id}`` afterwards, where no feed can reach it. The
+        window is the outbox relay's latency, and the shape is not this method's:
+        :meth:`repoint_entity_history` has had the same exposure on
+        ``entity_type='contact'`` rows since ITER13-004, because every writer of
+        this table is a consumer rather than the transaction that caused the
+        change. Closing it needs the *survivor* to be discoverable at projection
+        time, which is a durable merge mapping rather than a wider statement;
+        recorded as a follow-up on iteration 18 rather than attempted here.
+        """

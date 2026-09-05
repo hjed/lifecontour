@@ -10846,10 +10846,10 @@ complete in itself. Nothing depends on it, and no surface changes.
       definition of what a task event means. **A new mutating `TaskRepository` method will fail
       `test_every_port_method_is_a_read_or_a_classified_write` until this phase classifies it** — that
       guard exists for exactly this shape of change (ITER18-003 Phase 5).
-- [ ] The absorbed contact's **existing** task activity records reach the survivor's feed, so the
+- [x] The absorbed contact's **existing** task activity records reach the survivor's feed, so the
       unified record carries both contacts' trail as it already does for top-level contact rows.
       `repoint_entity_history` cannot do it: those rows are `entity_type='task'` and are identified by
-      their `contact:{id}` **field name**, not by `entity_id`.
+      their `contact:{id}` **field name**, not by `entity_id`. *(Phase 2.)*
 - [ ] Not wireframe-bearing, and no surface changes: `POST /api/contacts/{id}/merge` and
       `merge_contacts` behave the same from the caller's side.
 
@@ -10862,7 +10862,7 @@ complete in itself. Nothing depends on it, and no surface changes.
   step is removed.
 - **E2E:** none. The merge dialog is unchanged and the outcome is a record, not a screen.
 
-**Open decisions:**
+**Open decisions:** both settled — 1 by Phase 2, 2 by Phase 1; see each phase's *Decisions taken*.
 
 1. **Whether the historic activity records are rewritten or left where they are.** Rewriting
    `contact:{source}` to `contact:{survivor}` on the absorbed contact's task rows makes the survivor's
@@ -10966,26 +10966,113 @@ re-points task links*; the `CASCADE` row in the foreign-key table now names the 
 task's people* beside the journal delete guard, with the third port explained in the tasks domain's
 ports list. The history-row half of the limitation stays, pointing at Phase 2.
 
-#### Phase 2: Carry the Activity Records onto the Survivor
+#### Phase 2: Carry the Activity Records onto the Survivor ✅ COMPLETE
 
 **Prerequisites:** Phase 1, ITER18-003 Phase 9.
 **Estimated diff:** ~90 production → **~450 tracked** (×5) — one statement and the decision behind it,
-with the fixture cost a history re-point test always carries.
+with the fixture cost a history re-point test always carries. ·
+**Actual:** ~164 production → **~1,109 tracked** across 9 files (production 164 — port contract 42,
+SQL adapter 80, merge call site 17, backfill docstring 25 — 883 tests, 62 docs).
 
-**Acceptance Criteria:** criterion 5 above, and open decision 1 settled and recorded.
+*What drove the overrun, since the follow-ups ask, and it is the same finding as Phase 1's rather
+than a new one.* **The statement was estimated correctly and the tests were not.** The executable
+production is about the 90 lines predicted — a `WITH` of two CTEs, a guard and a parameter dict —
+and everything above that count is prose in the four places that had to carry a decision. What the
+estimate missed is on the test side: a history re-point's fixture cost was budgeted once, but this
+phase asserts against *three* different reads — the repository's own, a contact's aggregated feed,
+and a task's — and the third of those needs the real relay and the real consumer, because the
+decision being asserted is about what happens on either side of a commit. **A phase whose central
+decision is about ordering across a commit boundary pays for a projection harness, not for a
+statement.** That is worth carrying forward: the ×5 was applied to the write, and the cost was in
+proving the write was in the right place.
 
-**Required Test Coverage:** integration — the absorbed contact's task records read back on the
-survivor's feed after a merge; a task both contacts were linked to does not produce a duplicate row;
-rows belonging to other contacts are untouched; and the test must fail if the statement's conflict
-clause is removed. No e2e.
+**Acceptance Criteria:** criterion 5 above, and open decision 1 settled and recorded. All met.
 
-**Inherited from Phase 1, and it complicates the timing.** Phase 1's re-point publishes a `TaskUpdated`
-whose `changed_fields` names the *absorbed* contact — the departure half — and that projects into a
-`field_history` row under `field_name='contact:{absorbed}'`. It is written by the outbox consumer
-**after** the merge commits, so a rewrite statement running inside the merge transaction cannot reach
-it: Phase 1 leaves behind one new orphan of exactly the kind Phase 2 exists to clear. Either the
-rewrite has to run after projection, or the departure row has to be reconsidered. Settle it with open
-decision 1 rather than discovering it mid-phase.
+**Required Test Coverage:** integration as above. No e2e. *Delivered:* 1 unit (the merge delegates
+the re-point and does it before deleting the source) and 16 integration — 10 in
+`TestAMergeCarriesTheTaskRecords` (`tests/integration/history/test_field_history_repository_integration.py`)
+covering the row mechanics, and 6 in a new
+`tests/integration/infrastructure/events/test_contact_merge_task_records_e2e.py` covering the merge a
+person actually performs and the projection that follows it. The conflict requirement was verified
+the way it is worded — `ON CONFLICT DO NOTHING` was removed and both duplicate tests failed on
+`duplicate key value violates unique constraint "ux_field_history_event_dedup"`, then it was restored.
+
+**Decisions taken (Phase 2):**
+
+1. **Open decision 1 is settled as recommended — rewrite — but the specification settles it, not the
+   recommendation.** The decision was framed as a trade against append-only history. The
+   [contact merge specification](../product-specifications/contact-merge-product-specification.md)
+   had already answered it: *"The source contact's field history must be re-pointed onto the
+   surviving contact so the unified record carries the complete audit trail of both"*, under the
+   principle *non-destructive history*. **And the framing had the destruction the wrong way round.**
+   `field_history` has no foreign key to `contacts`, so a merge does not delete these rows, it
+   strands them — nothing raises, and the only predicate that selects them matches on a contact id
+   that is gone. Leaving them put is the option that loses the record; rewriting the name is the one
+   that keeps it. *Worth remembering past this phase:* "don't edit history" and "don't lose history"
+   are the same instinct, and when a row is addressed by a name rather than by a key they point
+   opposite ways.
+
+2. **Open decision 2's inherited timing problem is answered by leaving the row alone, and needed no
+   machinery.** The phase offered two ways out — run the rewrite after projection, or reconsider the
+   departure row — on the premise that Phase 1 leaves "one new orphan of exactly the kind Phase 2
+   exists to clear". It is not an orphan, and that premise is what was wrong. The kind Phase 2
+   clears is a row no query can reach; this one is read by the task's own history, whose predicate
+   matches **every** field name filed against the task, so it is the task's record of who it used to
+   reference. Moving it would be worse than useless: it would render on the survivor's feed as
+   *"Unlinked from a task"*, paired with the arrival row from the same merge, so the pair would read
+   as *added and removed*. The rewrite is therefore an ordinary merge-transaction statement, and the
+   row the projection writes afterwards is out of its scope deliberately.
+
+   *The general shape is worth keeping.* Two rows can be identical in form and belong in different
+   places, and what separates them here is not the data but which feed each is a fact about. A
+   statement scoped by time — "rewrite only what existed before the merge" — would have got the same
+   result for the wrong reason and broken the first time anything replayed.
+
+3. **The port is `FieldHistoryRepository.repoint_contact_task_history`, beside
+   `repoint_entity_history` rather than on a tasks port.** The history domain already owns the read
+   half of this exact predicate — `app/core/history/models.py` imports `CONTACT_FIELD_PREFIX` and
+   selects a person's task records by it — so the write is its mirror, and the merge's call site
+   gains one line beside the one already there with no DI change. It is deliberately **not** the
+   third-port situation Phase 1 argued for: that one existed because the contacts domain needed to
+   write *task* rows without being handed `TaskRepository`, and this writes no task state at all.
+   A consequence, stated because Phase 1's criterion 4 turned on the opposite:
+   `test_every_port_method_is_a_read_or_a_classified_write` guards the three tasks-domain ports, so
+   this method is correctly outside it and the guard did not go red.
+
+4. **A neighbouring module's stated assumption expired, and was rewritten rather than patched.**
+   `TaskHistoryBackfill` re-projects retained task events that no `field_history` row claims, and
+   justified its anti-join with *"nothing deletes `field_history` rows except the contact merge's
+   re-point, which touches contact rows only"*. This phase makes that false. The behaviour is
+   unaffected — the anti-join keys on `event_id` alone, and both re-points copy before they delete,
+   so every event a merge touches still has a row bearing its id — but the docstring now states the
+   invariant the anti-join actually depends on (*no event loses every row carrying its id*) instead
+   of the table-scope claim that happened to imply it. **The failure it now names is a real one:** a
+   re-point that deleted rather than moved, or that dropped `event_id`, would have the next
+   application start rebuild every row the merge had just carried across, under the absorbed
+   contact's name where nothing could read it. Both are asserted by the preservation test.
+
+5. **A merge cannot re-point a history row that has not been written yet, and the boundary is
+   recorded rather than moved.** Every writer of `field_history` is a consumer — the projection and
+   the startup backfill — so an event that committed *before* the merge but is projected *after* it
+   lands under `contact:{absorbed}` where no feed can reach it. Link a person to a task and merge
+   them within the outbox relay's latency and that one line is lost from the survivor's feed. Raised
+   by review on this PR, verified, and deliberately not fixed here for two reasons. **It is not this
+   phase's defect**: `repoint_entity_history` has had exactly the same exposure on
+   `entity_type='contact'` rows since ITER13-004, and a fix that closed the task half alone would
+   leave the merge inconsistent about which of its own re-points survive a slow relay. **And the
+   shape of the fix is not a wider statement** — it needs the survivor to be discoverable at
+   *projection* time, which means a durable source-to-survivor mapping the projection consults, or a
+   second re-point driven by `ContactMerged` and bounded by `created_at` so it cannot also drag the
+   merge's own departure row across (decision 2). Either is a phase, not a line. Carried to the
+   follow-ups below.
+
+**Documentation:** the *Known limitation, half repaired* note in
+[database-design.md](../architecture/database-design.md) is retired, replaced by the second
+statement's entry beside `repoint_entity_history` — why a rewrite is the non-destructive option
+here, which two columns on the moved row are load-bearing and what breaks without each, and which
+row is deliberately left behind. [domain-architecture.md](../architecture/domain-architecture.md)'s
+placeholder pointing at this phase becomes the same three points at the domain level, closing the
+*A contact merge carries the task's people* section.
 
 ## Specification Coverage Map
 
@@ -11080,6 +11167,24 @@ Appended as the work proceeds, in the style of iterations 16 and 17.
   or multiplies by anything; an agent reading the schema is simply told the wrong range and could format
   `7.5` as 750%. The fix is one docstring in `app/mcp/domains/journals/schemas.py`, left alone here
   because it is the journals domain and calibration rule 7 says a phase does not reach into a second one.
+- **A contact merge's history re-points cannot reach a row the projection has not written yet**
+  (raised by review on ITER18-006 Phase 2, and older than that phase). Every writer of
+  `field_history` is a consumer — `HistoryProjectionConsumer` and `TaskHistoryBackfill` — so an event
+  that commits before a merge but is projected after it writes its row under the *absorbed*
+  contact's id, after that contact is gone. Both of the merge's re-points are exposed:
+  `repoint_entity_history` on `entity_type='contact'` rows since ITER13-004, and
+  `repoint_contact_task_history` on the `contact:{id}` task rows since ITER18-006 Phase 2. The window
+  is the outbox relay's latency and the cost is one missing line on the survivor's feed, not a lost
+  link — Phase 1 moves the `task_contacts` row itself, synchronously, inside the merge. *The general
+  point, which is the reusable half:* **a transaction cannot repair rows that a consumer has not
+  written yet, so any "fix up the past" step in a write path has a race against its own projection**,
+  and the repair has to be reachable from the projection rather than from the transaction. Two
+  designs, both a phase rather than a line: a durable source-to-survivor mapping the projection
+  consults when it writes a `contact:{id}` row, which also makes the merge survive a full replay; or
+  a second re-point driven by the `ContactMerged` event and bounded by `created_at`, which relies on
+  the stream being consumed in order and must exclude the merge's own departure row (ITER18-006
+  Phase 2, decision 2) or it would move the one row that has to stay.
+
 - **`page` is unbounded above on the journal and contact history surfaces** (found while fixing the
   same defect on the task one in ITER18-003 Phase 8). `GET /api/journals/{id}/history`,
   `GET /api/contacts/{id}/history` and the `get_journal_history` MCP tool all declare `page` as

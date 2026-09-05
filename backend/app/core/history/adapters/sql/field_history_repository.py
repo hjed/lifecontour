@@ -14,11 +14,17 @@ from app.core.history.models import (
     get_aggregation_strategy,
     resolve_task_label,
 )
+from app.core.tasks.models.events import contact_field_name
 
 _SELECT_COLUMNS = (
     "id, entity_type, entity_id, field_name, old_value, new_value, "
     "changed_by, source, event_id, created_at, user_id"
 )
+
+#: The ``entity_type`` a task's history rows carry. Task events project onto the
+#: task itself, so a person's membership of one is a ``task`` row under a
+#: ``contact:{id}`` field name rather than a row of that person's own.
+_TASK_ENTITY_TYPE = "task"
 
 
 class SqlFieldHistoryRepository(FieldHistoryRepository):
@@ -209,6 +215,80 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
                 "new_entity_id": new_entity_id,
                 "old_entity_id": old_entity_id,
                 "entity_type": entity_type,
+            },
+        )
+        row = result.fetchone()
+        return int(row.moved_count) if row else 0
+
+    async def repoint_contact_task_history(
+        self,
+        old_contact_id: int,
+        new_contact_id: int,
+        transaction: AsyncConnection,
+    ) -> int:
+        """Move a contact's task records onto another contact by field name.
+
+        **Copy-then-delete, for the reason its neighbour is.** ``ON CONFLICT``
+        exists only on ``INSERT``, and the conflict is real here rather than
+        theoretical: one action can put both people on a task, writing a row per
+        person under a single ``event_id``, and the moment the absorbed row
+        takes the survivor's field name the two agree on all four columns of
+        ``ux_field_history_event_dedup``. An ``UPDATE`` would raise and fail the
+        whole merge. Both CTEs run from one snapshot, so the delete removes
+        every source row regardless of which the insert skipped, and the delete
+        cannot reach the copies — they carry the *new* field name.
+
+        **Every column is carried over, and two of them are load-bearing.**
+        ``user_id`` because both task branches of the contact predicate are
+        owner-scoped: a row that lost its owner would not surface on the wrong
+        feed, it would vanish from every feed, which is a harder failure to
+        notice than the one this method exists to fix. ``event_id`` because
+        ``TaskHistoryBackfill`` treats any row bearing an event's id as proof
+        that event was projected — drop it and the next application start would
+        rebuild, under the absorbed contact's name, every row this just moved.
+
+        The field names are built with :func:`contact_field_name` rather than
+        interpolated, because the format now has four readers and one of them is
+        the predicate that decides whether the moved row is readable at all.
+
+        A no-op when the two ids are equal: the copy would conflict on every row
+        while the delete removed the originals, so a self-move would silently
+        erase a person's whole task trail. The merge rejects a self-merge long
+        before it reaches here; this is for the caller that does not.
+        """
+        if old_contact_id == new_contact_id:
+            return 0
+        query = text(
+            """
+            WITH moved AS (
+                INSERT INTO field_history
+                    (entity_type, entity_id, field_name, old_value, new_value,
+                     changed_by, source, event_id, created_at, user_id)
+                SELECT entity_type, entity_id, :new_field_name, old_value,
+                       new_value, changed_by, source, event_id, created_at,
+                       user_id
+                FROM field_history
+                WHERE entity_type = :entity_type AND field_name = :old_field_name
+                ON CONFLICT (event_id, entity_type, entity_id, field_name)
+                    DO NOTHING
+                RETURNING 1
+            ),
+            deleted AS (
+                DELETE FROM field_history
+                WHERE entity_type = :entity_type AND field_name = :old_field_name
+                RETURNING 1
+            )
+            SELECT
+                (SELECT count(*) FROM moved) AS moved_count,
+                (SELECT count(*) FROM deleted) AS deleted_count
+            """
+        )
+        result = await transaction.execute(
+            query,
+            {
+                "entity_type": _TASK_ENTITY_TYPE,
+                "old_field_name": contact_field_name(old_contact_id),
+                "new_field_name": contact_field_name(new_contact_id),
             },
         )
         row = result.fetchone()

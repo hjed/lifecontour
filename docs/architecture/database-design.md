@@ -208,15 +208,6 @@ deployment this branch would surface another user's task on a shared contact's
 feed. Narrowing it means giving the contact domain an owner first, which is not
 a read-only change; recorded as a follow-up.
 
-*Known limitation, half repaired.* `repoint_entity_history` moves
-`entity_type='contact'` rows on a merge, so a task record filed under the
-**absorbed** contact's id does not follow the survivor. It is a `task` row
-identified by *field name*, which that statement cannot address; carrying those
-rows across is ITER18-006 Phase 2. The larger half — that the merge did not
-re-point `task_contacts` at all, so the link cascaded away with the absorbed
-contact row — was repaired by ITER18-006 Phase 1; see *[A contact merge
-re-points task links](#a-contact-merge-re-points-task-links)* below.
-
 On contact merge (ITER13-004), `FieldHistoryRepository.repoint_entity_history` moves the
 source contact's top-level (`entity_type='contact'`) rows onto the survivor so the unified
 record carries both contacts' audit trail. It is a single copy-then-delete statement that
@@ -224,6 +215,35 @@ respects `ux_field_history_event_dedup` via `ON CONFLICT DO NOTHING`, preserving
 `event_id` / `created_at` / `source` / `changed_by`. Sub-entity rows are untouched — they
 keep their own ids (already re-pointed by ITER13-001), so the `contact` aggregation strategy
 already resolves them to the survivor.
+
+**A merge moves the contact's task records too, and needs a second statement to do it**
+(`repoint_contact_task_history`, ITER18-006 Phase 2). The two are not one statement that
+could have been widened: a contact's own rows are found by `entity_id`, while a person's
+record of a task is filed on the *task* (`entity_type='task'`) and names them only in
+`field_name`, as `contact:{id}`. So the second statement matches on the field name and
+rewrites it to `contact:{survivor}`, in the same copy-then-delete form and preserving the
+same columns plus `user_id`.
+
+*Why rewriting history is the non-destructive option here, which is the opposite of how it
+sounds.* `field_history` has no foreign key to `contacts`, so a merge never deletes these
+rows — it strands them. Nothing raises, and nothing can read them again, because the only
+predicate that selects them matches on a contact id that no longer exists. The merge
+specification's *non-destructive history* requires the source's trail to reach the survivor,
+and for a row that names the person in its field name that means rewriting the name.
+
+*Two columns on the moved row are load-bearing.* `user_id`, because both task branches of
+the contact predicate are owner-scoped — a row that lost its owner would vanish from every
+feed rather than surface on the wrong one. And `event_id`, because `TaskHistoryBackfill`
+treats any row bearing an event's id as proof that the event was projected: a re-point that
+dropped it, or that deleted rather than moved, would have the next application start rebuild
+every row the merge had just carried across, under the absorbed contact's name.
+
+*One row is deliberately left behind, and it is not an orphan.* Phase 1's merge publishes a
+`TaskUpdated` per affected task naming the absorbed contact leaving, and the projection
+writes that row **after** the merge commits — out of reach of a statement inside it. It stays
+under `contact:{absorbed}`, where the task's own history reads it (that predicate matches
+every field name on the task) as the task's record of who it used to reference. Moved onto
+the survivor it would render as a removal, paired with the arrival row from the same merge.
 
 `field_name` also encodes changes to a journal's **sub-rows**, so they group under the
 parent journal (`entity_type='journal'`, `entity_id=<journal id>`) without a join and
