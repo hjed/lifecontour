@@ -12618,7 +12618,16 @@ its modules, and it adds no new module at all.
    invalidate** — is in the limitations table. Without the window test the common case would be
    ruinous: every contact save re-adds every date, so editing a phone number would cost an AI call
    for a birthday six months away.
-7. **Whose today, given `contacts` has no owner column.** The users come from
+7. **Two more contact events joined the set after review, and both are deletions in disguise.**
+   `ContactService.delete_contact` publishes only `ContactDeleted` — the important-date rows go by
+   cascade — so a summary listing one of those dates would have gone on naming a contact that no
+   longer exists. And `ContactMergeService` re-points the absorbed contact's dates onto the survivor
+   and deletes the absorbed row, publishing `ContactUpdated` with `merged_from` and never
+   `important_dates`, because the count did not move: the dates survive, but the **name** rendered
+   beside them does not, and a date line renders `entry.contact.display_name`. Both mark today
+   unconditionally, for the reason a deletion does — there is no before-image to test a window
+   against.
+8. **Whose today, given `contacts` has no owner column.** The users come from
    `journal_daily_summaries` itself. Invalidation only ever touches rows that exist, so the users
    who *can* be affected are exactly the users who already have a summary — a bound rather than a
    scan, and one that cannot drift from what invalidation actually does. Each user's today is

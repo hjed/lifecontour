@@ -882,6 +882,41 @@ class TestAnImportantDateChange:
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
 
     @pytest.mark.asyncio
+    async def test_a_deleted_contact_marks_today(
+        self, service: DailySummaryInvalidationService, summary_repo: AsyncMock
+    ) -> None:
+        """Its dates go with it, by cascade, and nothing else announces them.
+
+        ``ContactService.delete_contact`` publishes only ``ContactDeleted``; the
+        important-date rows are removed by the foreign key. A summary that
+        listed one would otherwise go on naming a contact that no longer exists.
+        Raised by review.
+        """
+        await service.invalidate_for_event("ContactDeleted", {"contact_id": 101})
+
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    @pytest.mark.asyncio
+    async def test_a_contact_merge_marks_today(
+        self, service: DailySummaryInvalidationService, summary_repo: AsyncMock
+    ) -> None:
+        """The dates survive a merge; the name rendered beside them does not.
+
+        ``ContactMergeService`` re-points the absorbed contact's date rows onto
+        the survivor and deletes the absorbed row, publishing ``ContactUpdated``
+        with ``merged_from`` — never ``important_dates``, since the count did
+        not change. A date line renders the contact's display name, so a summary
+        generated before the merge names somebody who has gone. Raised by
+        review.
+        """
+        await service.invalidate_for_event(
+            "ContactUpdated",
+            {"contact_id": 101, "changed_fields": {"merged_from": [7, 101]}},
+        )
+
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    @pytest.mark.asyncio
     async def test_a_contact_update_that_touched_no_dates_marks_nothing(
         self, service: DailySummaryInvalidationService, summary_repo: AsyncMock
     ) -> None:

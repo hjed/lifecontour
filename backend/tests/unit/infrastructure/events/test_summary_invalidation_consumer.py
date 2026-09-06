@@ -87,21 +87,30 @@ class TestWhatThisConsumerListensFor:
         """
         assert consumer._matches_event_type(event_type) is False
 
-    @pytest.mark.parametrize(
-        "event_type", ["ContactCreated", "ContactDeleted", "TagAssigned"]
-    )
+    @pytest.mark.parametrize("event_type", ["ContactCreated", "TagAssigned"])
     def test_unrelated_contact_events_are_not_subscribed(
         self, consumer: SummaryInvalidationConsumer, event_type: str
     ) -> None:
         assert consumer._matches_event_type(event_type) is False
+
+    def test_contact_deleted_is_subscribed(
+        self, consumer: SummaryInvalidationConsumer
+    ) -> None:
+        """Deleting a contact takes its important dates with it, by cascade.
+
+        Only ``ContactDeleted`` is published for that, so a summary listing one
+        of those dates would otherwise go on naming a contact that has gone.
+        """
+        assert consumer._matches_event_type("ContactDeleted") is True
 
     def test_contact_updated_is_subscribed_for_one_field_only(
         self, consumer: SummaryInvalidationConsumer
     ) -> None:
         """Subscribed at the stream, filtered in the service.
 
-        ``ContactUpdated`` is the **only** announcement that an important date
-        was removed: ``update_contact`` deletes a contact's dates and re-adds
+        ``ContactUpdated`` is the only announcement that an important date was
+        removed, and the only one that a **merge** re-pointed a contact's dates
+        onto a survivor whose name is different: ``update_contact`` deletes a contact's dates and re-adds
         them, so the one that went leaves no event of its own and the survivors'
         say nothing about it. Every other ``ContactUpdated`` — a rename, a new
         phone number — reaches the service and is discarded there, because that

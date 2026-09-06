@@ -121,9 +121,20 @@ IMPORTANT_DATE_DELETED_EVENT = "ImportantDateDeleted"
 #: the one that went, and ``ImportantDateDeleted`` has no production caller.
 CONTACT_UPDATED_EVENT = "ContactUpdated"
 
-#: The ``changed_fields`` key that says so, whose pair is a ``"count:N"`` string
-#: rather than a number.
-IMPORTANT_DATES_FIELD = "important_dates"
+#: Deleting a contact takes its important dates with it, by cascade, and
+#: publishes only this — so a summary listing one of those dates would otherwise
+#: go on naming a contact that no longer exists. Raised by review.
+CONTACT_DELETED_EVENT = "ContactDeleted"
+
+#: The ``changed_fields`` keys that mean a contact's dates are not what the
+#: summary was generated from.
+#:
+#: ``important_dates`` is a ``"count:N"`` **string** pair, written only when the
+#: count moved. ``merged_from`` is a contact merge, which re-points the absorbed
+#: contact's date rows onto the survivor and deletes the absorbed row: the dates
+#: survive but the **name** rendered beside them does not, and a date line
+#: renders ``entry.contact.display_name``. Raised by review.
+IMPORTANT_DATE_FIELDS = frozenset({"important_dates", "merged_from"})
 
 #: Everything this service handles, in one place so a consumer's subscription
 #: and a test's negatives can both be written against it rather than against a
@@ -138,6 +149,7 @@ HANDLED_EVENT_TYPES = frozenset(
         IMPORTANT_DATE_ADDED_EVENT,
         IMPORTANT_DATE_DELETED_EVENT,
         CONTACT_UPDATED_EVENT,
+        CONTACT_DELETED_EVENT,
     }
 )
 
@@ -188,6 +200,7 @@ class DailySummaryInvalidationService:
             IMPORTANT_DATE_ADDED_EVENT,
             IMPORTANT_DATE_DELETED_EVENT,
             CONTACT_UPDATED_EVENT,
+            CONTACT_DELETED_EVENT,
         ):
             targets = await self._targets_for_important_date_event(
                 event_type, event_data
@@ -399,7 +412,7 @@ class DailySummaryInvalidationService:
         announcement — there is no before-image to test and today is marked
         unconditionally.
         """
-        if event_type == CONTACT_UPDATED_EVENT and not self._changed_the_date_count(
+        if event_type == CONTACT_UPDATED_EVENT and not self._touched_important_dates(
             event_data
         ):
             return frozenset()
@@ -425,19 +438,25 @@ class DailySummaryInvalidationService:
         return frozenset(targets)
 
     @staticmethod
-    def _changed_the_date_count(event_data: Mapping[str, Any]) -> bool:
-        """Whether this contact save added or removed a date.
+    def _touched_important_dates(event_data: Mapping[str, Any]) -> bool:
+        """Whether this contact save changed what the dates section would say.
 
-        The pair is ``("count:2", "count:1")`` — strings, not numbers — and it
-        is written only when the count moved, so its presence *is* the question
-        being asked. A contact whose name changed publishes no such key, and a
-        renamed contact is a recorded limitation of this phase rather than an
-        invalidation.
+        Two keys mean it did, and they are different events wearing one type.
+        ``important_dates`` is a ``("count:2", "count:1")`` pair — strings, not
+        numbers — written only when the count moved, so its presence *is* the
+        question being asked. ``merged_from`` is a contact merge: the absorbed
+        contact's date rows are re-pointed onto the survivor and the absorbed
+        row is deleted, so the dates live on under a **different name** — and a
+        date line renders the contact's display name, so a summary generated
+        before the merge goes on naming somebody who no longer exists.
+
+        A contact whose name merely changed publishes neither key, and that
+        stays a recorded limitation rather than an invalidation.
         """
         changed_fields = event_data.get("changed_fields") or {}
-        return (
-            isinstance(changed_fields, dict) and IMPORTANT_DATES_FIELD in changed_fields
-        )
+        if not isinstance(changed_fields, dict):
+            return False
+        return bool(IMPORTANT_DATE_FIELDS & set(changed_fields))
 
     async def _stored_date(self, event_data: Mapping[str, Any]) -> Any:
         """The row this event is about, or ``None`` when it cannot be read.
