@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   Calendar as CalendarIcon,
   MapPin,
@@ -115,6 +115,25 @@ export function EventTypeEditor({
     createMode,
     onChange,
   });
+
+  /**
+   * Whether the zone in the field is the user's own doing.
+   *
+   * `useTypeEditorState` seeds its state once and reports it to the parent form
+   * once, so a configured zone that arrives *after* this editor mounted would
+   * otherwise never reach either — the new journal would be recorded, and its
+   * date bounds anchored, in the fallback zone the first render had to guess.
+   * Held to the same rule as the date picker: what the user has not chosen
+   * follows the resolved zone, what they have chosen stands.
+   */
+  const timezoneChosen = useRef(Boolean(data?.timezone));
+
+  useEffect(() => {
+    if (!createMode || timezoneChosen.current) return;
+    if (editData.timezone === userTimezone) return;
+
+    setEditData(previous => ({ ...previous, timezone: userTimezone }));
+  }, [createMode, editData.timezone, setEditData, userTimezone]);
 
   const {
     data: calendarsResponse,
@@ -310,12 +329,13 @@ export function EventTypeEditor({
           <Input
             id='timezone'
             value={editData.timezone || ''}
-            onChange={e =>
+            onChange={e => {
+              timezoneChosen.current = true;
               setEditData(previous => ({
                 ...previous,
                 timezone: e.target.value || null,
-              }))
-            }
+              }));
+            }}
             placeholder={Intl.DateTimeFormat().resolvedOptions().timeZone}
             disabled={!isEditing}
             data-testid='timezone-input'

@@ -9,6 +9,7 @@ import {
   formatIsoDateLong,
   formatIsoWeekdayDate,
   isIsoCalendarDate,
+  localDateIn,
   zonedCalendarDay,
   zonedMidnight,
 } from '../date-utils';
@@ -16,6 +17,7 @@ import {
 const SYDNEY = 'Australia/Sydney';
 const NEW_YORK = 'America/New_York';
 const SANTIAGO = 'America/Santiago';
+const APIA = 'Pacific/Apia';
 
 /**
  * A calendar day as react-day-picker hands one over: browser-local midnight,
@@ -254,6 +256,27 @@ describe('zonedMidnight', () => {
     expect(zonedMidnight(pickerDay('2025-09-07'), SANTIAGO).toISOString()).toBe(
       '2025-09-07T04:00:00.000Z'
     );
+  });
+
+  it('clamps a wholly skipped calendar day forward, never backward', () => {
+    // Samoa crossed the date line at the end of 2011: 30 December simply did
+    // not happen there. No answer is right, so the rule is the same one the
+    // Santiago gap follows — the first instant that does exist, which is the
+    // *following* day. Landing on the 29th instead would silently date an
+    // event a day earlier than the one that was picked.
+    const skipped = zonedMidnight(pickerDay('2011-12-30'), APIA);
+
+    expect(skipped.toISOString()).toBe('2011-12-30T10:00:00.000Z');
+    expect(localDateIn(APIA, skipped)).toBe('2011-12-31');
+  });
+
+  it('still resolves the days either side of a skipped one', () => {
+    expect(
+      localDateIn(APIA, zonedMidnight(pickerDay('2011-12-29'), APIA))
+    ).toBe('2011-12-29');
+    expect(
+      localDateIn(APIA, zonedMidnight(pickerDay('2011-12-31'), APIA))
+    ).toBe('2011-12-31');
   });
 
   it('takes the calendar day from the picked date, not its clock', () => {

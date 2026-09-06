@@ -172,6 +172,11 @@ export function zonedCalendarDay(
  * first instant of the day that does exist rather than a time on the previous
  * one.
  *
+ * A day the zone skips *entirely* — Samoa had no 30 December 2011 — resolves
+ * the same way and for the same reason: forward, to the start of the next day
+ * that exists. No answer is right for a day that never happened, but clamping
+ * backward would silently date something a day earlier than the day picked.
+ *
  * @example
  * zonedMidnight(new Date(2026, 8, 5), 'Australia/Sydney').toISOString()
  * // "2026-09-04T14:00:00.000Z"
