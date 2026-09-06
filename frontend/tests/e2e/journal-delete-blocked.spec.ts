@@ -32,6 +32,7 @@ import type { Locator, Page } from '@playwright/test';
 
 import { TestDataManager } from './data-management';
 import { test, expect, type TestJournal } from './fixtures';
+import { chooseDueJournal, submitRetarget } from './utils/retarget-dialog';
 
 /** A task's text, made unique so a leftover row can never satisfy an assertion. */
 function taskText(what: string): string {
@@ -283,21 +284,8 @@ test.describe('Journal Delete Guard', () => {
     });
     await expect(retarget).toBeVisible();
 
-    const search = retarget.getByTestId('future-journal-search');
-    const option = retarget.getByTestId(
-      `future-journal-option-${secondDue.id}`
-    );
-    await expect(async () => {
-      await search.fill('', { timeout: 5000 });
-      await search.fill(secondDue.title, { timeout: 5000 });
-      await expect(option).toBeVisible({ timeout: 5000 });
-      await option.click({ timeout: 5000 });
-      await expect(option).toHaveAttribute('aria-selected', 'true', {
-        timeout: 5000,
-      });
-    }).toPass({ timeout: 45000 });
-    await retarget.getByTestId('retarget-dialog-submit').click();
-    await expect(retarget).toBeHidden();
+    await chooseDueJournal(retarget, secondDue);
+    await submitRetarget(retarget);
 
     const deleteResponse = page.waitForResponse(
       response =>
