@@ -15,7 +15,7 @@ import {
   zonedCalendarDay,
   zonedMidnight,
 } from '@/lib/date-utils';
-import { useUserTimezone } from '@/lib/api/settings';
+import { useJournalTimezone } from '@/lib/api/settings';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -29,6 +29,14 @@ import type { DateRange } from 'react-day-picker';
 export interface InlineEditDateRangeProps {
   /** Current date range value */
   readonly value: EventDateRange;
+  /**
+   * The zone this journal records for itself, if it is an event that does.
+   *
+   * Its bounds are read back through it by the backend and the Google sync, so
+   * it is the zone they must be written in — see `journalTimezone`. A journal
+   * that records none is anchored on the user's own zone instead.
+   */
+  readonly eventTimezone?: string | null;
   /** Callback when date range is saved */
   readonly onSave: (value: EventDateRange) => Promise<void>;
   /** Whether the field is disabled */
@@ -46,19 +54,26 @@ export interface InlineEditDateRangeProps {
  */
 export function InlineEditDateRange({
   value,
+  eventTimezone,
   onSave,
   disabled = false,
   className,
   'data-testid': testId,
   'aria-label': ariaLabel,
 }: InlineEditDateRangeProps) {
-  // Every day this component resolves, shows or writes is anchored on the
-  // user's configured zone rather than the browser's. The two only have to be
-  // the same zone as each other — an untouched range must round-trip — and the
-  // browser's cannot play that part, because it changes when the user travels
-  // and is simply wrong for an event imported from a foreign-zone calendar
-  // (issue #1401).
-  const timezone = useUserTimezone();
+  // Every day this component resolves, shows or writes is anchored on the same
+  // zone: the journal's own if it records one, else the user's configured one.
+  // They only have to agree with *each other* for an untouched range to round-
+  // trip, and the browser's zone cannot play that part — it changes when the
+  // user travels, and it is simply not what an event imported from a
+  // foreign-zone calendar is anchored in (issue #1401).
+  const { timezone, userTimezone } = useJournalTimezone(eventTimezone);
+
+  // A date shown in a zone the user does not read dates in is ambiguous — the
+  // event's 15 January is not necessarily theirs — so the zone is named rather
+  // than left to be inferred. When it is their own zone there is nothing to
+  // disclose.
+  const foreignZone = timezone === userTimezone ? null : timezone;
 
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -141,6 +156,17 @@ export function InlineEditDateRange({
     }
   }, [dateRange, onSave, timezone]);
 
+  // Named the same way in both modes, and carried inside the control rather
+  // than beside it so it travels with the date it qualifies.
+  const timezoneLabel = foreignZone && (
+    <span
+      className='text-muted-foreground text-xs'
+      data-testid='date-range-timezone'
+    >
+      {foreignZone}
+    </span>
+  );
+
   // View mode - clickable display
   if (!isEditing) {
     return (
@@ -154,7 +180,12 @@ export function InlineEditDateRange({
         )}
         disabled={disabled}
         onClick={startEdit}
-        aria-label={ariaLabel || `Click to edit date range: ${displayValue}`}
+        aria-label={
+          ariaLabel ||
+          `Click to edit date range: ${displayValue}${
+            foreignZone ? ` (${foreignZone})` : ''
+          }`
+        }
         data-testid={testId}
       >
         <CalendarIcon
@@ -162,6 +193,7 @@ export function InlineEditDateRange({
           aria-hidden='true'
         />
         <span>{displayValue}</span>
+        {timezoneLabel}
       </button>
     );
   }
@@ -186,6 +218,7 @@ export function InlineEditDateRange({
             {dateRange?.from && dateRange?.to
               ? formatDateRange(dateRange.from, dateRange.to)
               : 'Select date range'}
+            {timezoneLabel && <span className='ml-2'>{timezoneLabel}</span>}
           </Button>
         </PopoverTrigger>
         <PopoverContent className='w-auto p-0' align='start'>

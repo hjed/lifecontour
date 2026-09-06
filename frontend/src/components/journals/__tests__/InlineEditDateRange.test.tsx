@@ -8,13 +8,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InlineEditDateRange } from '@/components/journals/InlineEditDateRange';
-import { useUserTimezone } from '@/lib/api/settings';
+import { useJournalTimezone } from '@/lib/api/settings';
 import type { EventDateRange } from '@/types/journals';
 
 // No configured zone, so the editor falls back to the browser's and these
 // display assertions keep reading in the ambient zone, as they always have.
 jest.mock('@/lib/api/settings', () => ({
-  useUserTimezone: jest.fn(),
+  useJournalTimezone: jest.fn(),
 }));
 
 describe('InlineEditDateRange', () => {
@@ -26,9 +26,11 @@ describe('InlineEditDateRange', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (useUserTimezone as jest.Mock).mockReturnValue(
-      Intl.DateTimeFormat().resolvedOptions().timeZone
-    );
+    const ambient = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    (useJournalTimezone as jest.Mock).mockReturnValue({
+      timezone: ambient,
+      userTimezone: ambient,
+    });
   });
 
   describe('Display and Formatting', () => {

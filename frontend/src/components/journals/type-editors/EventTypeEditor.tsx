@@ -33,7 +33,7 @@ import { EventState } from '@/types/journals';
 import type { CalendarInfoData } from '@/types/journals';
 import { useTypeEditorState } from './useTypeEditorState';
 import { TypeEditorActions } from './TypeEditorActions';
-import { getDefaultTimezone } from '@/components/settings/TimezoneSettings';
+import { useUserTimezone } from '@/lib/api/settings';
 
 const EVENT_STATE_OPTIONS: { value: EventState; label: string }[] = [
   { value: EventState.CONFIRMED, label: 'Confirmed' },
@@ -89,13 +89,18 @@ export function EventTypeEditor({
   createMode = false,
   onChange,
 }: EventTypeEditorProps) {
+  // The user's **configured** zone, not the browser's cached guess: it is the
+  // zone the new journal's date-range bounds will be anchored in, and the two
+  // have to agree or the backend reads the event a day out (issue #1401).
+  const userTimezone = useUserTimezone();
+
   const initialData = useMemo(() => {
     if (data) return data;
     // In create mode, default timezone to user preference
     return createMode
-      ? { ...DEFAULT_DATA, timezone: getDefaultTimezone() }
+      ? { ...DEFAULT_DATA, timezone: userTimezone }
       : DEFAULT_DATA;
-  }, [data, createMode]);
+  }, [data, createMode, userTimezone]);
 
   const {
     isEditing,

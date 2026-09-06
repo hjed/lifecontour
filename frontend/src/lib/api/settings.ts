@@ -148,6 +148,46 @@ export function useUserTimezone(): string {
   return data?.data.attributes.timezone ?? getBrowserTimezone();
 }
 
+/**
+ * The zone a journal's `event_date_range` bounds are anchored in.
+ *
+ * The event's **own** recorded zone wins whenever it has one, because
+ * `journal_calendar_info.timezone` is the zone the readers on the other side
+ * interpret those bounds through — `event_date_in_timezone`,
+ * `journal_write_service`, the Google worker's `google_event_times` and the
+ * agenda query's `AT TIME ZONE COALESCE(tz.name, 'UTC')`. Bounds anchored in a
+ * zone the row does not record are read as the wrong calendar day by every one
+ * of them, and for an imported timed event, re-declaring the zone to match the
+ * anchor would be worse still: its clock times are local to that zone, so
+ * changing it moves the event in absolute time and pushes that move to Google.
+ *
+ * Only when the journal records nothing does the user's zone apply — and a new
+ * event records the user's zone, so for anything created here the two agree.
+ *
+ * It is a named rule rather than an expression spelled out at each site
+ * because the read path and the write path disagreeing about the zone *is* the
+ * defect (issue #1401): they must resolve it identically or a range nobody
+ * touched moves a day on save.
+ */
+export function journalTimezone(
+  eventTimezone: string | null | undefined,
+  userTimezone: string
+): string {
+  return eventTimezone || userTimezone;
+}
+
+/** {@link journalTimezone}, reading the user's zone from the settings query. */
+export function useJournalTimezone(eventTimezone?: string | null): {
+  timezone: string;
+  userTimezone: string;
+} {
+  const userTimezone = useUserTimezone();
+  return {
+    timezone: journalTimezone(eventTimezone, userTimezone),
+    userTimezone,
+  };
+}
+
 export function useUpdateTimezone() {
   const queryClient = useQueryClient();
 

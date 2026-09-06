@@ -10,6 +10,7 @@ import {
   TIMEZONE_STORAGE_KEY,
   clearCachedTimezone,
   fetchUserSettings,
+  journalTimezone,
   updateTimezone,
   useUpdateTimezone,
   useUserSettings,
@@ -172,6 +173,33 @@ describe('settings API', () => {
 
       await waitFor(() => expect(result.current.isLoaded).toBe(true));
       expect(result.current.timezone).toBe('UTC');
+    });
+  });
+
+  /**
+   * `journal_calendar_info.timezone` is the zone the backend and the Google
+   * worker *read* a journal's `event_date_range` bounds through, so bounds
+   * anchored anywhere else are read as the wrong calendar day. That makes the
+   * event's own zone the anchor whenever it records one — and makes this
+   * precedence the one rule the read path and the write path must never
+   * disagree about, which is why it has a name rather than being spelled out
+   * at each site.
+   */
+  describe('journalTimezone', () => {
+    it("uses the event's own zone when the journal records one", () => {
+      expect(journalTimezone('America/New_York', 'Australia/Sydney')).toBe(
+        'America/New_York'
+      );
+    });
+
+    it.each([
+      ['no zone recorded', undefined],
+      ['an explicit null', null],
+      ['an empty string, which records nothing', ''],
+    ])('falls back to the user for %s', (_, eventTimezone) => {
+      expect(journalTimezone(eventTimezone, 'Australia/Sydney')).toBe(
+        'Australia/Sydney'
+      );
     });
   });
 

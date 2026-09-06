@@ -18,6 +18,13 @@ jest.mock('@/lib/api/journals', () => ({
   useCalendars: () => ({ data: [], isLoading: false }),
 }));
 
+// EventTypeEditor seeds a new event's timezone from the user's configured one,
+// so it reads the settings query. Stubbed here like the other API hooks above,
+// keeping these component tests free of a QueryClientProvider.
+jest.mock('@/lib/api/settings', () => ({
+  useUserTimezone: () => 'Australia/Sydney',
+}));
+
 describe('JournalTypeSection', () => {
   const mockJournalId = '123';
 

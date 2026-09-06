@@ -19,14 +19,27 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InlineEditDateRange } from '@/components/journals/InlineEditDateRange';
-import { useUserTimezone } from '@/lib/api/settings';
+import { journalTimezone, useJournalTimezone } from '@/lib/api/settings';
 import type { EventDateRange } from '@/types/journals';
 
+// `journalTimezone` is kept real — the precedence it encodes is the thing
+// under test here as much as the component is, and reimplementing it in a
+// double would let the two drift apart, which is the very defect this file
+// exists to pin down.
 jest.mock('@/lib/api/settings', () => ({
-  useUserTimezone: jest.fn(),
+  ...jest.requireActual('@/lib/api/settings'),
+  useJournalTimezone: jest.fn(),
 }));
 
-const mockUseUserTimezone = useUserTimezone as jest.Mock;
+/** The user's own configured zone, as the settings read has resolved it. */
+let configuredZone = 'America/New_York';
+
+function useResolvedZones(eventTimezone?: string | null) {
+  return {
+    timezone: journalTimezone(eventTimezone, configuredZone),
+    userTimezone: configuredZone,
+  };
+}
 
 // 15 January 2025 as the app stores it for a New York user: local midnight,
 // which is 05:00Z because January is outside daylight saving. Sixteen hours
@@ -52,14 +65,15 @@ async function saveWithoutChangingTheRange(
 describe('InlineEditDateRange with a configured zone the browser does not share', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockUseUserTimezone.mockReturnValue('America/New_York');
+    configuredZone = 'America/New_York';
+    (useJournalTimezone as jest.Mock).mockImplementation(useResolvedZones);
   });
 
   it('sanity check: the browser zone and the configured zone differ', () => {
     expect(new Date(2025, 0, 15).toISOString()).toBe(
       '2025-01-14T13:00:00.000Z'
     );
-    expect(mockUseUserTimezone()).toBe('America/New_York');
+    expect(configuredZone).toBe('America/New_York');
   });
 
   it('shows the day the event falls on in the configured zone', () => {
@@ -114,7 +128,7 @@ describe('InlineEditDateRange with a configured zone the browser does not share'
     const user = userEvent.setup();
 
     // The settings read has not landed yet: the browser's zone stands in.
-    mockUseUserTimezone.mockReturnValue('Australia/Sydney');
+    configuredZone = 'Australia/Sydney';
     const { rerender } = render(
       <InlineEditDateRange
         value={{ start: legacyUtcMidnight, end: legacyUtcMidnight }}
@@ -126,7 +140,7 @@ describe('InlineEditDateRange with a configured zone the browser does not share'
     expect(await screen.findByLabelText('Save date range')).toBeVisible();
 
     // ...and now it lands, with a zone the browser does not share.
-    mockUseUserTimezone.mockReturnValue('America/New_York');
+    configuredZone = 'America/New_York';
     rerender(
       <InlineEditDateRange
         value={{ start: legacyUtcMidnight, end: legacyUtcMidnight }}
@@ -141,6 +155,92 @@ describe('InlineEditDateRange with a configured zone the browser does not share'
     expect(onSave.mock.calls[0][0]).toEqual({
       start: '2025-01-14T05:00:00.000Z',
       end: '2025-01-14T05:00:00.000Z',
+    });
+  });
+
+  /**
+   * An event imported from a foreign-zone calendar records its own zone, and
+   * that zone is what the backend and the Google worker read its bounds
+   * through. Anchoring a save anywhere else — the user's configured zone
+   * included — moves the event a calendar day for every one of those readers.
+   */
+  describe('for a journal that records its own zone', () => {
+    // A Los Angeles event: 20 March at LA midnight, which is 07:00Z because
+    // March is inside daylight saving there. Neither Sydney (the browser) nor
+    // New York (the user) agrees with it.
+    const LOS_ANGELES_20TH = '2025-03-20T07:00:00.000Z';
+
+    function renderWithEventZone(onSave = jest.fn()) {
+      return render(
+        <InlineEditDateRange
+          value={{ start: LOS_ANGELES_20TH, end: LOS_ANGELES_20TH }}
+          eventTimezone='America/Los_Angeles'
+          onSave={onSave}
+        />
+      );
+    }
+
+    it('shows the day the event falls on in its own zone', () => {
+      renderWithEventZone();
+
+      expect(screen.getByRole('button')).toHaveTextContent('20 Mar 2025');
+    });
+
+    it('sends the range back unchanged rather than re-anchoring it', async () => {
+      const onSave = jest.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      renderWithEventZone(onSave);
+
+      await user.click(screen.getByRole('button'));
+      await user.click(await screen.findByLabelText('Save date range'));
+
+      await waitFor(() => expect(onSave).toHaveBeenCalled());
+      expect(onSave.mock.calls[0][0]).toEqual({
+        start: LOS_ANGELES_20TH,
+        end: LOS_ANGELES_20TH,
+      });
+    });
+
+    it('names the zone, because it is not the one the user reads dates in', () => {
+      renderWithEventZone();
+
+      expect(screen.getByRole('button')).toHaveTextContent(
+        'America/Los_Angeles'
+      );
+    });
+
+    it('says so in the accessible name too', () => {
+      renderWithEventZone();
+
+      expect(screen.getByRole('button')).toHaveAccessibleName(
+        expect.stringContaining('America/Los_Angeles') as unknown as string
+      );
+    });
+
+    it('keeps naming the zone while the picker is open', async () => {
+      const user = userEvent.setup();
+      renderWithEventZone();
+
+      await user.click(screen.getByRole('button'));
+
+      expect(await screen.findByLabelText('Save date range')).toBeVisible();
+      expect(screen.getByTestId('date-range-timezone')).toHaveTextContent(
+        'America/Los_Angeles'
+      );
+    });
+
+    it('says nothing when the event is in the zone the user already reads in', () => {
+      render(
+        <InlineEditDateRange
+          value={{ start: NEW_YORK_15TH, end: NEW_YORK_15TH }}
+          eventTimezone='America/New_York'
+          onSave={jest.fn()}
+        />
+      );
+
+      expect(
+        screen.queryByTestId('date-range-timezone')
+      ).not.toBeInTheDocument();
     });
   });
 

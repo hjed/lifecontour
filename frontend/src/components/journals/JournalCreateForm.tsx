@@ -64,7 +64,7 @@ import { MarkdownEditor } from '@/components/journals/MarkdownEditor';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCreateJournal, useJournal } from '@/lib/api/journals';
 import { zonedMidnight } from '@/lib/date-utils';
-import { useUserTimezone } from '@/lib/api/settings';
+import { journalTimezone, useUserTimezone } from '@/lib/api/settings';
 import { useCreateRoute } from '@/lib/api/routes';
 import { toast } from 'sonner';
 import {
@@ -484,8 +484,8 @@ export function JournalCreateForm({
     useCreateJournal();
   const { mutateAsync: createRoute, isPending: isCreatingRoute } =
     useCreateRoute();
-  /** The zone the submitted date range's day boundaries are anchored on. */
-  const timezone = useUserTimezone();
+  /** The user's own zone, the fallback when the journal records none. */
+  const userTimezone = useUserTimezone();
   const [typeData, setTypeData] = useState<TypeDataState>({});
   const [abseilKey, setAbseilKey] = useState(0);
   // Snapshot of type-specific values applied from a template. Passed as the
@@ -770,6 +770,12 @@ export function JournalCreateForm({
         return;
       }
 
+      const rangeTimezone = journalTimezone(
+        (submittedTypeData[JournalType.EVENT] as CalendarInfoData | undefined)
+          ?.timezone,
+        userTimezone
+      );
+
       // Extract pending routes to upload them separately since backend doesn't accept them in JournalCreateData
       let pendingRoutes: { name: string; gpx_data: string }[] = [];
       const fitnessData = submittedTypeData[JournalType.FITNESS] as
@@ -785,15 +791,18 @@ export function JournalCreateForm({
       const result = await createJournal({
         title: values.title,
         content: values.content,
-        // Each bound is the UTC instant of midnight on its day in the user's
-        // configured zone, and the end is the last day inclusive. Anchoring on
-        // the browser's zone instead would put a journal created here at a
-        // different instant from the one the inline date editor writes for the
-        // same day, so the two share `zonedMidnight` and there is one
-        // definition of the convention rather than two (issue #1401).
+        // Each bound is the UTC instant of midnight on its day in the zone the
+        // journal itself records, and the end is the last day inclusive. Taken
+        // from the event data being submitted rather than from the user's
+        // settings, because that is the zone the backend and the Google sync
+        // will read these bounds back through: the two travel in one request
+        // and must agree, or the event lands on the wrong day (issue #1401).
         event_date_range: {
-          start: zonedMidnight(values.dateRange.from, timezone).toISOString(),
-          end: zonedMidnight(endDate, timezone).toISOString(),
+          start: zonedMidnight(
+            values.dateRange.from,
+            rangeTimezone
+          ).toISOString(),
+          end: zonedMidnight(endDate, rangeTimezone).toISOString(),
         },
         types: values.types,
         parent_id: values.parentId ?? undefined,
