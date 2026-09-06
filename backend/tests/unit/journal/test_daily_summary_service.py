@@ -59,6 +59,11 @@ def mock_summary_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.find_by_user_and_date.return_value = None
     repo.upsert.side_effect = lambda s: s  # Return what's passed in
+    # The guarded write a finished generation goes through. Returning what it
+    # was given is the *accepted* case; a test exercising the refusal sets it to
+    # ``None``, which is what the repository returns when the row was
+    # invalidated after this run gathered its inputs.
+    repo.complete_generation.side_effect = lambda s, **_: s
     repo.update_status.return_value = None  # No existing row by default
     repo.claim_for_generation.return_value = True  # This run wins the marker
     repo.invalidate_for_date.return_value = None
@@ -244,7 +249,8 @@ class TestDailySummaryServiceGeneration:
         )
 
         assert result is completed
-        # No GENERATED summary was upserted (only the GENERATING marker).
+        # Nothing wrote a GENERATED summary (only the GENERATING marker).
+        mock_summary_repo.complete_generation.assert_not_called()
         generated_upserts = [
             call
             for call in mock_summary_repo.upsert.call_args_list
@@ -1124,3 +1130,123 @@ class TestTheDayIsResolvedFromOneInstant:
 
         assembled_now = mock_input_assembler.assemble.call_args.kwargs["now"]
         assert checker.is_stale.call_args.kwargs["now"] == assembled_now
+
+
+class TestARefusedWriteHandsTheDayBack:
+    """What the service does when the guarded write says no.
+
+    The repository refuses to write a finished summary over a row that was
+    invalidated after this run gathered its inputs. That leaves the row exactly
+    as the claim left it — ``GENERATING`` — and that status is not inert:
+    ``get_or_generate`` returns early on it, so leaving it there would strand
+    the day behind a marker nothing clears.
+    """
+
+    @staticmethod
+    def _service(
+        mock_prompt_builder: MagicMock, mock_summary_repo: AsyncMock
+    ) -> DailySummaryService:
+        assembler = AsyncMock()
+        assembler.assemble.return_value = DailySummaryInput(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            journals=[],
+            journal_count=2,
+            event_count=0,
+            contact_names=[],
+            mood_values=[],
+        )
+        eligibility = MagicMock()
+        eligibility.is_eligible.return_value = True
+        return DailySummaryService(
+            input_assembler=assembler,
+            eligibility_checker=eligibility,
+            prompt_builder=mock_prompt_builder,
+            summary_repo=mock_summary_repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            _gemini_response_override=json.dumps({"summary_text": "Already stale."}),
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_refused_write_moves_the_row_back_to_pending(
+        self, mock_prompt_builder: MagicMock, mock_summary_repo: AsyncMock
+    ) -> None:
+        # ``side_effect`` wins over ``return_value``, so the fixture's
+        # accept-everything default has to be cleared to refuse.
+        mock_summary_repo.complete_generation.side_effect = None
+        mock_summary_repo.complete_generation.return_value = None
+        generating = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            status=SummaryStatus.GENERATING,
+        )
+        mock_summary_repo.find_by_user_and_date.side_effect = [
+            None,  # the cache check
+            None,  # the concurrent-completion re-read
+            generating,  # what the refusal found
+            generating,  # what it hands back
+        ]
+
+        await self._service(mock_prompt_builder, mock_summary_repo).get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
+
+        mock_summary_repo.invalidate_for_date.assert_awaited_once_with(
+            "user123", date(2026, 4, 27)
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_concurrently_finished_summary_is_left_alone(
+        self, mock_prompt_builder: MagicMock, mock_summary_repo: AsyncMock
+    ) -> None:
+        """The other reason a write is refused, and it must not be undone.
+
+        If a faster run completed the day between this one's re-read and its
+        write, the row is ``GENERATED`` and good. Marking it stale would discard
+        a perfectly current summary and pay for another.
+        """
+        # ``side_effect`` wins over ``return_value``, so the fixture's
+        # accept-everything default has to be cleared to refuse.
+        mock_summary_repo.complete_generation.side_effect = None
+        mock_summary_repo.complete_generation.return_value = None
+        completed = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            summary_text="Written by the faster run.",
+            status=SummaryStatus.GENERATED,
+        )
+        mock_summary_repo.find_by_user_and_date.side_effect = [None, None, completed]
+
+        result = await self._service(
+            mock_prompt_builder, mock_summary_repo
+        ).get_or_generate("user123", date(2026, 4, 27), transaction=_NO_TXN)
+
+        assert result is completed
+        mock_summary_repo.invalidate_for_date.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_stamp_the_write_is_guarded_on_is_read_before_assembly(
+        self, mock_prompt_builder: MagicMock, mock_summary_repo: AsyncMock
+    ) -> None:
+        """Which is what makes the guard cover the window the defect lives in.
+
+        The claim compares ``generated_at``, and an invalidation does not move
+        that — so an input change landing between the read and the claim still
+        wins its claim. Comparing the stamp as it was **before** the inputs were
+        gathered is what catches it.
+        """
+        stamped = JournalDailySummary(
+            user_id="user123",
+            summary_date=date(2026, 4, 27),
+            status=SummaryStatus.PENDING,
+            invalidated_at=datetime(2026, 4, 27, 6, 0, tzinfo=UTC),
+        )
+        mock_summary_repo.find_by_user_and_date.return_value = stamped
+
+        await self._service(mock_prompt_builder, mock_summary_repo).get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
+
+        _, kwargs = mock_summary_repo.complete_generation.call_args
+        assert kwargs["seen_invalidated_at"] == datetime(2026, 4, 27, 6, 0, tzinfo=UTC)

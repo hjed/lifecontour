@@ -688,6 +688,13 @@ class JournalOutboxEventProcessor:
             event_data=payload.model_dump(),
         )
 
+        # The journal's own fields did not move, so no ``JournalUpdated`` was
+        # published — but the calendar info and the attendees above may have,
+        # and the current day's summary is grounded in both. Nothing else will
+        # say so, so this does.
+        if not fields_changed:
+            await self._invalidate_summary_for_journal(existing_journal_id)
+
         logger.info(
             "Updated journal from inbound sync event",
             journal_id=saved_journal.id,
@@ -996,6 +1003,57 @@ class JournalOutboxEventProcessor:
             external_event_id=linked.external_event_id,
         )
 
+    async def _invalidate_summary_for_journal(self, journal_id: int) -> None:
+        """Mark the journal's days stale, for a change that publishes nothing.
+
+        Three inbound paths change what a day's agenda says without publishing a
+        journal event: an update where only the **calendar info** moved (a time,
+        a location, an all-day flag), one where only the **attendees** did, and
+        an upstream **cancellation**, which writes ``event_state`` in raw SQL.
+        Each leaves ``JournalService`` uncalled, so the consumer that owns
+        summary freshness never hears about it and the day goes on describing an
+        agenda that has changed.
+
+        Publishing ``JournalUpdated`` here would be tidier and is deliberately
+        not done: the Google worker consumes that event to sync a journal *out*,
+        so announcing an inbound change would echo it straight back upstream.
+
+        Failure is logged and swallowed. A summary left stale is a worse day's
+        prose; a raised exception here would fail the sync itself and leave the
+        journal unwritten, which is worse than that.
+        """
+        from app.core.journal.adapters.sql.daily_summary_repository import (
+            SqlJournalDailySummaryRepository,
+        )
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+        from app.core.journal.services.daily_summary_invalidation_service import (
+            invalidate_days_of_journal,
+        )
+        from app.core.journal.services.journal_date_resolver import JournalDateResolver
+        from app.core.settings.adapters.sql.user_settings_repository import (
+            SqlUserSettingsRepository,
+        )
+
+        try:
+            journal = await SqlJournalRepository(self.connection).find_by_id(journal_id)
+            if journal is None:
+                return
+            await invalidate_days_of_journal(
+                journal,
+                date_resolver=JournalDateResolver(
+                    SqlUserSettingsRepository(self.connection)
+                ),
+                summary_repo=SqlJournalDailySummaryRepository(self.connection),
+            )
+        except Exception:  # noqa: BLE001 — a stale summary must not fail a sync
+            logger.warning(
+                "Could not mark the daily summary stale for an inbound change",
+                journal_id=journal_id,
+                exc_info=True,
+            )
+
     async def _mark_journal_cancelled(
         self,
         journal_id: int,
@@ -1068,6 +1126,11 @@ class JournalOutboxEventProcessor:
                 "now": datetime.now(UTC),
             },
         )
+
+        # The agenda shows a cancelled event *marked as cancelled* rather than
+        # dropping it (**W18**), so the day's prose is wrong until the summary
+        # is regenerated — and this write publishes nothing.
+        await self._invalidate_summary_for_journal(journal_id)
 
     async def _has_other_live_links(self, journal_id: int, calendar_id: UUID) -> bool:
         """Whether a calendar *other than this one* still holds the event.

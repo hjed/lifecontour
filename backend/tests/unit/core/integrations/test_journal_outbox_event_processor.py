@@ -10,7 +10,7 @@ import inspect
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -145,15 +145,23 @@ def _make_journal_row(
     title: str = "Old Title",
     content: str = "Old content",
     updated_at: datetime | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
 ) -> MagicMock:
-    """Create a mock journal row for DB lookups."""
+    """Create a mock journal row for DB lookups.
+
+    ``start``/``end`` default to an hour *before* the payload's, so the inbound
+    event changes the journal — which is what nearly every test here wants. A
+    test about the **unchanged** case passes the payload's own instants, since
+    that is the only way ``fields_changed`` comes out false.
+    """
     row = MagicMock()
     row.id = journal_id
     row.user_id = "1"
     row.title = title
     row.content = content
-    row.event_date_range_start = datetime(2026, 3, 20, 9, 0, tzinfo=UTC)
-    row.event_date_range_end = datetime(2026, 3, 20, 10, 0, tzinfo=UTC)
+    row.event_date_range_start = start or datetime(2026, 3, 20, 9, 0, tzinfo=UTC)
+    row.event_date_range_end = end or datetime(2026, 3, 20, 10, 0, tzinfo=UTC)
     row.parent_id = None
     row.order = None
     row.created_at = datetime(2026, 3, 1, tzinfo=UTC)
@@ -3082,3 +3090,165 @@ class TestStickyCancellationDecision(_SeriesProcessorTestBase):
         mock_journal_service.delete_journal.assert_not_called()
         # Falls through to the (idempotent) mark-cancelled writes.
         _assert_marked_cancelled(mock_connection)
+
+
+class TestWhichInboundPathsAnnounceAnAgendaChange:
+    """Which of these paths publish a journal event, and which cannot.
+
+    The current day's summary is grounded in that day's **event journals** —
+    their times, locations, participants and cancellation — and the consumer
+    that marks a day stale hears about them through ``JournalUpdated``. So the
+    question ITER18-005 Phase 7 asks of this processor is *which inbound paths
+    publish one*, and the answer is not uniform:
+
+    - a change to the **journal's own fields** (title, content, dates) calls
+      ``JournalService.update_journal``, which publishes — nothing to add;
+    - a change to **calendar info alone** — a time, a location, an all-day flag
+      moved upstream — leaves ``fields_changed`` false, so ``update_journal`` is
+      never called and no event exists;
+    - a change to the **attendees alone** is written by ``_sync_contact_relationships``
+      in raw SQL and likewise announces nothing;
+    - an **upstream cancellation** writes ``event_state`` in raw SQL, and the
+      agenda renders a cancelled event *marked as cancelled* rather than
+      dropping it, so the day's prose is wrong until something says so.
+
+    The three that cannot publish invalidate the day directly instead.
+    Publishing ``JournalUpdated`` from here would have been tidier and is
+    deliberately not done: the Google worker consumes that event to sync the
+    journal *out*, so an inbound change would echo back upstream.
+    """
+
+    @pytest.fixture
+    def mock_connection(self) -> AsyncMock:
+        conn = AsyncMock(spec=AsyncConnection)
+        conn.execute = AsyncMock()
+        return conn
+
+    @pytest.fixture
+    def mock_journal_service(self) -> AsyncMock:
+        from app.core.journal.services.journal_service import JournalService
+
+        return AsyncMock(spec=JournalService)
+
+    @pytest.fixture
+    def processor(
+        self, mock_connection: AsyncMock, mock_journal_service: AsyncMock
+    ) -> JournalOutboxEventProcessor:
+        return JournalOutboxEventProcessor(
+            journal_service=mock_journal_service,
+            connection=mock_connection,
+            contact_repository=MagicMock(),
+            strava_athlete_mapping_repository=MagicMock(),
+        )
+
+    @staticmethod
+    def _unchanged_journal_row() -> MagicMock:
+        """A stored journal identical to what the inbound payload carries."""
+        return _make_journal_row(
+            title="Team Meeting",
+            content="Weekly sync",
+            start=datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
+            end=datetime(2026, 3, 20, 11, 0, tzinfo=UTC),
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_field_change_publishes_and_needs_no_direct_invalidation(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The published event is what the consumer acts on; two would be waste."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-new"',
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),
+            _mock_fetchone(_make_link_row()),
+            _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+        ]
+        mock_journal_service.update_journal.return_value = _make_journal()
+
+        with patch.object(
+            processor, "_invalidate_summary_for_journal", new_callable=AsyncMock
+        ) as invalidate:
+            await processor.process_event(event)
+
+        mock_journal_service.update_journal.assert_called_once()
+        invalidate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_calendar_info_only_change_publishes_nothing_so_it_invalidates(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A time or location moved upstream, with the journal row untouched."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-new"',
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(self._unchanged_journal_row()),
+            _mock_fetchone(_make_link_row()),
+            _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+        ]
+
+        with patch.object(
+            processor, "_invalidate_summary_for_journal", new_callable=AsyncMock
+        ) as invalidate:
+            await processor.process_event(event)
+
+        mock_journal_service.update_journal.assert_not_called()
+        invalidate.assert_awaited_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_an_attendee_only_change_publishes_nothing_so_it_invalidates(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The agenda names a day's participants, and this is how they change."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-new"',
+            contact_relationships=[
+                {"email": "alice@example.com", "relationship_type": "INVITEE"}
+            ],
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(self._unchanged_journal_row()),
+            _mock_fetchone(_make_link_row()),
+            _mock_empty_result(),  # _find_calendar_info
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+            _mock_empty_result(),  # relationship writes
+            _mock_empty_result(),
+            _mock_empty_result(),
+            _mock_empty_result(),
+            _mock_empty_result(),
+        ]
+
+        with patch.object(
+            processor, "_invalidate_summary_for_journal", new_callable=AsyncMock
+        ) as invalidate:
+            await processor.process_event(event)
+
+        mock_journal_service.update_journal.assert_not_called()
+        invalidate.assert_awaited_once_with(42)

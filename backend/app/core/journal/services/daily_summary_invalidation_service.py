@@ -154,6 +154,37 @@ HANDLED_EVENT_TYPES = frozenset(
 )
 
 
+async def invalidate_days_of_journal(
+    journal: Any,
+    *,
+    date_resolver: JournalDateResolver,
+    summary_repo: JournalDailySummaryRepository,
+) -> None:
+    """Mark stale every day this journal occupies.
+
+    The same rule :class:`DailySummaryInvalidationService` applies to a journal
+    event, exposed for the write paths that **publish no event for it to
+    consume**. The inbound Google sync has three: a calendar-info-only update, an
+    attendee-only update and an upstream cancellation, each of which changes the
+    day's agenda through raw SQL with nothing announced.
+
+    Publishing ``JournalUpdated`` from those paths would have been tidier and is
+    deliberately not done: the Google worker consumes that event to sync a
+    journal *out*, so an inbound change would echo straight back upstream.
+    """
+    tz = await date_resolver.timezone_for(journal.user_id)
+    span = day_span_of(journal.event_date_range, tz)
+    await summary_repo.invalidate_for_range(
+        journal.user_id, span.first_day, span.last_day
+    )
+    logger.info(
+        "Marked daily summaries stale for a change that publishes no event",
+        user_id=journal.user_id,
+        first_day=span.first_day.isoformat(),
+        last_day=span.last_day.isoformat(),
+    )
+
+
 class DailySummaryInvalidationService:
     """Turns a domain event into the days whose summaries are now stale.
 

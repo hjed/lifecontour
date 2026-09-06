@@ -26,6 +26,13 @@ class JournalDailySummary:
     mood_average: float | None = None
     status: SummaryStatus = SummaryStatus.PENDING
     generated_at: datetime | None = None
+    #: When an input change last marked this day stale. A **change stamp**, not
+    #: a staleness flag: staleness is derived from ``generated_at`` against the
+    #: user's today. This is read with the row before its inputs are assembled
+    #: and compared again when the result is written, so a generation whose
+    #: inputs were gathered before an invalidation cannot overwrite the marker
+    #: that invalidation left.
+    invalidated_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

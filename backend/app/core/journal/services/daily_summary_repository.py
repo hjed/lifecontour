@@ -109,6 +109,40 @@ class JournalDailySummaryRepository(ABC):
         pass
 
     @abstractmethod
+    async def complete_generation(
+        self,
+        summary: JournalDailySummary,
+        *,
+        seen_invalidated_at: datetime | None,
+    ) -> JournalDailySummary | None:
+        """Write a finished summary, unless its inputs went stale while it ran.
+
+        The write that closes ITER18-005 Phase 7's race. ``get_or_generate``
+        reads the row, assembles the day's inputs and only then claims the row —
+        and ``claim_for_generation`` compares ``generated_at``, which an
+        invalidation does not move. So an input change landing in that window
+        leaves a ``PENDING`` marker that the finishing generation would
+        otherwise overwrite with a summary of the *old* inputs.
+
+        A status guard cannot catch it: by this point the row **is**
+        ``GENERATING``, because this caller claimed it. What catches it is
+        ``invalidated_at``, read with the row before assembly and compared here.
+
+        Args:
+            summary: The finished summary to write
+            seen_invalidated_at: The row's ``invalidated_at`` as the caller saw
+                it **before assembling its inputs**, or ``None`` if it saw no
+                row. Compared with ``IS NOT DISTINCT FROM``, so a never-
+                invalidated row matches a caller that saw none.
+
+        Returns:
+            The written summary, or ``None`` when the write was refused because
+            the row was invalidated in the meantime — in which case it is left
+            ``PENDING`` and the next read regenerates it.
+        """
+        pass
+
+    @abstractmethod
     async def user_ids_with_summaries(self) -> list[str]:
         """Every user that has at least one daily summary row.
 

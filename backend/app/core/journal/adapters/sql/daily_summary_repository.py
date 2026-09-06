@@ -36,6 +36,7 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
             else None,
             status=SummaryStatus(row.status),
             generated_at=row.generated_at,
+            invalidated_at=row.invalidated_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -48,7 +49,7 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
             """
             SELECT id, user_id, summary_date, summary_text,
                    journal_count, event_count, contact_count, mood_average,
-                   status, generated_at, created_at, updated_at
+                   status, generated_at, invalidated_at, created_at, updated_at
             FROM journal_daily_summaries
             WHERE user_id = :user_id AND summary_date = :summary_date
         """
@@ -118,7 +119,7 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
             WHERE user_id = :user_id AND summary_date = :summary_date
             RETURNING id, user_id, summary_date, summary_text,
                       journal_count, event_count, contact_count, mood_average,
-                      status, generated_at, created_at, updated_at
+                      status, generated_at, invalidated_at, created_at, updated_at
         """
         )
         result = await self.conn.execute(
@@ -179,6 +180,66 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
         """
         await self.invalidate_for_range(user_id, summary_date, summary_date)
 
+    async def complete_generation(
+        self,
+        summary: JournalDailySummary,
+        *,
+        seen_invalidated_at: datetime | None,
+    ) -> JournalDailySummary | None:
+        """Write the finished summary, unless the row was invalidated since.
+
+        An ``UPDATE`` rather than the upsert, because the row is guaranteed to
+        exist: this caller claimed it. Two predicates guard it, and they answer
+        different questions — the status, that this generation still holds the
+        claim, and ``invalidated_at``, that nothing changed the day's inputs
+        after they were gathered. ``IS NOT DISTINCT FROM`` so a row that has
+        never been invalidated matches a caller that saw none.
+
+        Returning nothing means the write was refused, and the row is left as it
+        is — ``PENDING`` — so the next read regenerates from current inputs.
+        """
+        query = text(
+            """
+            UPDATE journal_daily_summaries
+            SET summary_text = :summary_text,
+                journal_count = :journal_count,
+                event_count = :event_count,
+                contact_count = :contact_count,
+                mood_average = :mood_average,
+                status = :status,
+                generated_at = :generated_at,
+                updated_at = NOW()
+            WHERE user_id = :user_id
+              AND summary_date = :summary_date
+              AND status = :generating
+              AND invalidated_at IS NOT DISTINCT FROM
+                  CAST(:seen_invalidated_at AS TIMESTAMP WITH TIME ZONE)
+            RETURNING id, user_id, summary_date, summary_text,
+                      journal_count, event_count, contact_count, mood_average,
+                      status, generated_at, invalidated_at, created_at, updated_at
+        """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": summary.user_id,
+                "summary_date": summary.summary_date,
+                "summary_text": summary.summary_text,
+                "journal_count": summary.journal_count,
+                "event_count": summary.event_count,
+                "contact_count": summary.contact_count,
+                "mood_average": summary.mood_average,
+                "status": str(summary.status),
+                "generated_at": summary.generated_at,
+                "generating": SummaryStatus.GENERATING.value,
+                "seen_invalidated_at": seen_invalidated_at,
+            },
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        return self._row_to_entity(row)
+
     async def user_ids_with_summaries(self) -> list[str]:
         """Every user with at least one summary row, each once.
 
@@ -204,17 +265,32 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
         a row for a day the user may never open. That is also why an unbounded
         span is safe here and needs no cap.
 
-        ``status != :status`` keeps an already-``PENDING`` row untouched, so a
-        second invalidation of the same span moves no ``updated_at`` and the
-        four-mutations-one-regeneration property costs one write, not four.
+        **An already-``PENDING`` row is written again, deliberately.** Skipping
+        it would save an ``UPDATE`` and reopen the race ``invalidated_at``
+        exists to close: a request that read a stale row and is assembling its
+        inputs would not see the change, because the stamp it compares against
+        at persist would not have moved. The saving was never the point — four
+        ticks costing one *regeneration* is, and that holds regardless, because
+        none of these writes generates anything.
+
+        **``clock_timestamp()`` rather than ``NOW()``, and the difference is
+        load-bearing.** ``NOW()`` is the *transaction's* start time, so two
+        invalidations inside one transaction stamp the row identically and the
+        persist guard cannot tell them apart — it would compare equal and allow
+        a write of inputs gathered before the second one. ``clock_timestamp()``
+        advances within a transaction, which is what "when this row was marked"
+        actually means. It is also the only form under which the guard is
+        *testable*: the integration fixture runs a whole test in one
+        transaction, so every ``NOW()`` in it returns the same instant.
         """
         query = text(
             """
             UPDATE journal_daily_summaries
-            SET status = :status, updated_at = NOW()
+            SET status = :status,
+                invalidated_at = clock_timestamp(),
+                updated_at = NOW()
             WHERE user_id = :user_id
               AND summary_date BETWEEN :first_day AND :last_day
-              AND status != :status
         """
         )
         await self.conn.execute(

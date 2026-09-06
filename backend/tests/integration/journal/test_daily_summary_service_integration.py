@@ -485,3 +485,174 @@ class TestDailySummaryFreshnessIntegration:
         assert observed["status"] == SummaryStatus.GENERATING
         assert len(first_calls) == 1
         assert second_calls == []
+
+
+@pytest.mark.integration
+class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
+    """The race ITER18-005 Phase 2's review found, closed in Phase 7c.
+
+    ``get_or_generate`` reads the row, assembles the day's inputs, then claims
+    the row by compare-and-set on ``generated_at``. An invalidation landing in
+    between moves the status to ``PENDING`` and leaves ``generated_at`` alone —
+    so the claim still succeeds, and the finishing generation used to write
+    ``GENERATED`` over the marker with a summary assembled **before** the
+    change. The day then looked fresh while describing something no longer
+    true, until the next input change or local midnight.
+
+    A status guard at persist cannot close this: by then the row *is*
+    ``GENERATING``, because this request claimed it. What can is a change stamp
+    the invalidation moves and the persist compares — ``invalidated_at``, read
+    with the row before assembly.
+    """
+
+    @pytest.fixture
+    def racing_service(self, async_connection):
+        """A service whose input assembly invalidates the row as it runs.
+
+        The invalidation lands inside the window the defect lives in, which is
+        the only way to exercise it: doing it before the read would be seen by
+        the cache check, and after the persist would simply be the next change.
+        """
+        repo = SqlJournalDailySummaryRepository(async_connection)
+
+        async def assemble_and_invalidate(*args, **kwargs) -> DailySummaryInput:
+            await repo.invalidate_for_date(_USER, _DATE)
+            return DailySummaryInput(
+                user_id=_USER,
+                summary_date=_DATE,
+                journals=[],
+                journal_count=2,
+                event_count=1,
+                contact_names=["Alice"],
+                mood_values=[7, 8],
+            )
+
+        assembler = AsyncMock()
+        assembler.assemble.side_effect = assemble_and_invalidate
+        eligibility = MagicMock()
+        eligibility.is_eligible.return_value = True
+        prompt_builder = MagicMock()
+        prompt_builder.build.return_value = "prompt"
+        return DailySummaryService(
+            input_assembler=assembler,
+            eligibility_checker=eligibility,
+            prompt_builder=prompt_builder,
+            summary_repo=repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            _gemini_response_override=json.dumps(
+                {"summary_text": "Written from inputs that are already out of date."}
+            ),
+        )
+
+    async def _seed_stale(self, async_connection) -> None:
+        """The state a day is actually in when this race can happen.
+
+        ``PENDING`` with its previous prose still standing: something changed,
+        the row is marked, and the next reader — this one — is about to
+        regenerate it. A ``GENERATED`` row could not reach the generation path
+        at all for a past day, since it would be served from cache.
+        """
+        repo = SqlJournalDailySummaryRepository(async_connection)
+        await repo.upsert(
+            JournalDailySummary(
+                user_id=_USER,
+                summary_date=_DATE,
+                summary_text="The prose the user is looking at.",
+                status=SummaryStatus.GENERATED,
+                generated_at=datetime(2026, 4, 27, 7, 0, tzinfo=UTC),
+            )
+        )
+        await repo.invalidate_for_date(_USER, _DATE)
+
+    @pytest.mark.asyncio
+    async def test_the_stale_generation_is_discarded_and_the_row_stays_pending(
+        self, racing_service, async_connection
+    ):
+        await self._seed_stale(async_connection)
+
+        await racing_service.get_or_generate(_USER, _DATE, async_connection)
+
+        repo = SqlJournalDailySummaryRepository(async_connection)
+        row = await repo.find_by_user_and_date(_USER, _DATE)
+        assert row is not None
+        assert row.status == SummaryStatus.PENDING
+        assert row.summary_text != "Written from inputs that are already out of date."
+
+    @pytest.mark.asyncio
+    async def test_the_next_read_regenerates_it(self, racing_service, async_connection):
+        """Which is what makes discarding the result the right answer.
+
+        Nothing is lost by throwing the stale summary away: the ``PENDING``
+        marker is exactly what the next read acts on, and that read assembles
+        inputs which now include the change.
+        """
+        await self._seed_stale(async_connection)
+        await racing_service.get_or_generate(_USER, _DATE, async_connection)
+
+        repo = SqlJournalDailySummaryRepository(async_connection)
+        service = DailySummaryService(
+            input_assembler=_calm_assembler(),
+            eligibility_checker=_always_eligible(),
+            prompt_builder=_static_prompt(),
+            summary_repo=repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            _gemini_response_override=json.dumps(
+                {"summary_text": "Written from the inputs as they now are."}
+            ),
+        )
+
+        result = await service.get_or_generate(_USER, _DATE, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == "Written from the inputs as they now are."
+
+    @pytest.mark.asyncio
+    async def test_a_quiet_generation_is_written_as_before(self, async_connection):
+        """The guard must not refuse the ordinary case, which is nearly all of them."""
+        await self._seed_stale(async_connection)
+        repo = SqlJournalDailySummaryRepository(async_connection)
+        await repo.invalidate_for_date(_USER, _DATE)
+        service = DailySummaryService(
+            input_assembler=_calm_assembler(),
+            eligibility_checker=_always_eligible(),
+            prompt_builder=_static_prompt(),
+            summary_repo=repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+            _gemini_response_override=json.dumps({"summary_text": "All quiet."}),
+        )
+
+        result = await service.get_or_generate(_USER, _DATE, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == "All quiet."
+
+
+def _calm_assembler() -> AsyncMock:
+    assembler = AsyncMock()
+    assembler.assemble.return_value = DailySummaryInput(
+        user_id=_USER,
+        summary_date=_DATE,
+        journals=[],
+        journal_count=2,
+        event_count=1,
+        contact_names=["Alice"],
+        mood_values=[7, 8],
+    )
+    return assembler
+
+
+def _always_eligible() -> MagicMock:
+    eligibility = MagicMock()
+    eligibility.is_eligible.return_value = True
+    return eligibility
+
+
+def _static_prompt() -> MagicMock:
+    prompt_builder = MagicMock()
+    prompt_builder.build.return_value = "prompt"
+    return prompt_builder
