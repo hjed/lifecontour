@@ -443,3 +443,73 @@ class TestWhatMustNotInvalidate:
         )
 
         assert parameters == {"self", "journal_repo", "date_resolver", "summary_repo"}
+
+
+class TestAJournalMergeMovingTheTargetsDates:
+    """A merge moves the surviving journal's dates, and the day it left matters.
+
+    ``JournalMergeService`` used to publish ``changed_fields["event_date_range"]``
+    as a ``{start, end}`` mapping of the **new** range alone. Nothing could use
+    that: the history projection skips any value that is not a two-element
+    sequence, and this mapping has no old range in it at all, so the day the
+    target moved off kept a summary that still counted it. The merge now
+    publishes the same ``(old, new)`` pair every other date change does.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_pair_a_merge_now_publishes_marks_both_days(
+        self,
+        service: DailySummaryInvalidationService,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        journal_repo.find_by_id.return_value = _journal(
+            start=_instant(27, 9), end=_instant(27, 10)
+        )
+
+        await service.invalidate_for_event(
+            "JournalUpdated",
+            {
+                "journal_id": JOURNAL_ID,
+                "changed_fields": {
+                    "event_date_range": [
+                        _range_string(_instant(20, 9), _instant(20, 10)),
+                        _range_string(_instant(27, 9), _instant(27, 10)),
+                    ],
+                    "merged_from": [7, 42],
+                },
+            },
+        )
+
+        assert _invalidated(summary_repo) == {
+            (USER_ID, datetime.date(2026, 4, 20), datetime.date(2026, 4, 20)),
+            (USER_ID, datetime.date(2026, 4, 27), datetime.date(2026, 4, 27)),
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_mapping_it_used_to_publish_marks_only_the_current_day(
+        self,
+        service: DailySummaryInvalidationService,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """Pinned so the old shape cannot come back unnoticed.
+
+        A mapping carries no old range, so there is nothing to recover from it —
+        which is why the fix had to be at the publisher rather than here.
+        """
+        await service.invalidate_for_event(
+            "JournalUpdated",
+            {
+                "journal_id": JOURNAL_ID,
+                "changed_fields": {
+                    "event_date_range": {
+                        "start": _instant(27, 9).isoformat(),
+                        "end": _instant(27, 10).isoformat(),
+                    }
+                },
+            },
+        )
+
+        assert _invalidated(summary_repo) == {
+            (USER_ID, datetime.date(2026, 4, 27), datetime.date(2026, 4, 27))
+        }

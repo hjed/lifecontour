@@ -12157,7 +12157,21 @@ uncalled — a patched-out method that no longer exists would pass either way.
 6. **The subscription is derived from the service, not restated.** The consumer's patterns are
    `HANDLED_EVENT_TYPES`; a second list is a second thing to remember to extend, which is exactly how
    the three-event set came to be wrong in four ways.
-7. **`projection_harness` was generalised rather than copied.** Its engine patch and outbox relay
+7. **Two publishers were corrected after review, both in `JournalMergeService`.** A merge deletes the
+   absorbed journal and moves the survivor's dates, and neither told this consumer anything usable:
+   the `JournalDeleted` it publishes carried no `event_date_range` (so the absorbed journal's days
+   kept counting it), and `_apply_date_range_override` wrote `changed_fields["event_date_range"]` as
+   a `{start, end}` **mapping of the new range alone**. Nothing could use that mapping — the history
+   projection skips any value that is not a two-element sequence, so a merge's date change produced
+   no history row either — and it contained no old range to recover the vacated day from, which is
+   why the fix had to be at the publisher. Both now match what every other date change publishes.
+
+   A third finding from the same review is recorded as a limitation rather than fixed: a journal
+   **moved and then deleted** before either event is consumed loses the day it left, because
+   `JournalUpdated` carries no `user_id` — unlike `JournalCreated` and `JournalDeleted` — and the row
+   that would have answered is gone. Closing it means adding that field across the event's six
+   publishers, which is its own change.
+8. **`projection_harness` was generalised rather than copied.** Its engine patch and outbox relay
    moved to `consumer_harness`, and the projection's four existing suites (104 tests) pass unedited —
    the proof the move changed nothing.
 

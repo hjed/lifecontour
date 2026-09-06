@@ -143,8 +143,16 @@ class DailySummaryInvalidationService:
 
         journal = await self.journal_repo.find_by_id(int(journal_id))
         if journal is None:
-            # Deleted between the write and this consumer running. Its own
-            # deletion event carries the days, so nothing is lost by returning.
+            # Deleted between the write and this consumer running. The deletion
+            # event carries the days the journal held *at deletion*, so the only
+            # thing lost is the span an update said it had **left** — a journal
+            # moved to another day and then deleted before either event was
+            # consumed. That day cannot be attributed here: ``JournalUpdated``
+            # names no ``user_id`` (unlike ``JournalCreated`` and
+            # ``JournalDeleted``), and the row that would have answered is gone.
+            # Recorded as a limitation of ITER18-005 Phase 7 rather than closed,
+            # because closing it means adding ``user_id`` to that payload across
+            # its six publishers. Raised by review.
             logger.debug(
                 "Journal no longer exists; its deletion event carries the days",
                 journal_id=journal_id,
