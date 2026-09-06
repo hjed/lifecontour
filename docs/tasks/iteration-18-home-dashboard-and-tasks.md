@@ -12445,6 +12445,14 @@ Keeping it whole would put one PR at roughly twice calibration rule 16's ~1,500 
 rule 10 reserves for a phase whose split would ship a dead end — and no part of this one is a dead end:
 7a alone fixes four recorded defects.
 
+**Actual for the phase: 35 files, ~4,970 added lines** (7a ~2,500, 7b ~1,100, 7c ~1,050), against the
+~3,000 recorded here — **1.7× a figure that was itself 5× the original estimate**, and no frontend file
+touched. The recorded split was right about *shape* and wrong about *size*, in the direction rule 14
+already names: every part of this phase is a rule rather than a capability, and a rule is priced by its
+distinguishable cases. The number that would have predicted it is **event types × span shapes ×
+surfaces**, not modules — 7a's own overrun note works that arithmetic out, and 7b, estimated that way
+afterwards, came in within 10%.
+
 **Acceptance Criteria:**
 
 - [x] Invalidation follows the summary's **inputs**: journal changes (as today), task changes (created,
