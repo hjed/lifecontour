@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
+  getBrowserTimezone,
   getDefaultTimezone,
   TIMEZONE_STORAGE_KEY,
   useUpdateTimezone,
@@ -34,14 +35,6 @@ import {
  * and Button into every module that wanted the timezone.
  */
 export { getDefaultTimezone };
-
-/**
- * Resolve the browser's timezone. Safe for SSR (returns 'UTC').
- */
-function getBrowserTimezone(): string {
-  if (typeof window === 'undefined') return 'UTC';
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
 
 export function TimezoneSettings() {
   const browserTimezone = getBrowserTimezone();

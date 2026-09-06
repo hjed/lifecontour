@@ -540,6 +540,12 @@ export function JournalDetailView({
                   journal.event_date_range.end) && (
                   <InlineEditDateRange
                     value={journal.event_date_range}
+                    eventTimezone={
+                      (
+                        journal.type_data?.[JournalType.EVENT] as
+                          CalendarInfoData | undefined
+                      )?.timezone
+                    }
                     onSave={handleDateRangeSave}
                     aria-label='Event date range'
                     data-testid='journal-date-range-field'

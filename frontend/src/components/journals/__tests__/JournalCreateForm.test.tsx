@@ -69,6 +69,13 @@ jest.mock('@/lib/api/journals', () => ({
   }),
 }));
 
+// A configured zone that is neither the ambient one nor any zone the tests
+// type in, so "which zone was used" is always answerable from the value alone.
+jest.mock('@/lib/api/settings', () => ({
+  ...jest.requireActual('@/lib/api/settings'),
+  useUserTimezone: () => 'Pacific/Auckland',
+}));
+
 // Mock next/navigation
 const mockPush = jest.fn();
 jest.mock('next/navigation', () => ({
@@ -631,6 +638,77 @@ describe('JournalCreateForm', () => {
           })
         );
       });
+    });
+
+    /**
+     * `journal_calendar_info.timezone` is the zone the backend and the Google
+     * sync read a journal's `event_date_range` bounds back through, so the
+     * range and the event travelling in one create request have to agree about
+     * it. They did not: the range was anchored on the user's own zone while the
+     * event recorded its own, which put an event on the wrong calendar day for
+     * everything that resolves those bounds (#1401).
+     *
+     * The expected instant does not depend on the ambient zone, which is the
+     * point of the fix: the day comes from the picker and the anchor comes from
+     * the event.
+     */
+    it('anchors the date range in the zone the event records', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockResolvedValueOnce({
+        data: { id: '4', type: 'journals', attributes: {} },
+      });
+
+      renderWithClient(<JournalCreateForm />);
+
+      await user.type(screen.getByLabelText(/title/i), 'Conference');
+      await user.click(screen.getByLabelText(/^event$/i));
+
+      const selectTrigger = screen.getByTestId('calendar-id-input');
+      await user.click(selectTrigger);
+      await user.keyboard('[ArrowDown]');
+      await user.keyboard('[Enter]');
+
+      const timezoneInput = screen.getByLabelText(/timezone/i);
+      await user.clear(timezoneInput);
+      await user.type(timezoneInput, 'America/Los_Angeles');
+
+      // `fireEvent.change` rather than typing: a date input emits an onChange
+      // per keystroke, and the partial values in between parse as invalid
+      // dates that leave the field in an error state the form never leaves.
+      const [startDate, endDate] = screen.getAllByLabelText(/date/i);
+      fireEvent.change(startDate, { target: { value: '2025-01-15' } });
+      fireEvent.change(endDate, { target: { value: '2025-01-15' } });
+
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event_date_range: expect.objectContaining({
+              // 15 January at Los Angeles midnight. The user's own zone would
+              // have produced a different instant, read back as another day.
+              start: '2025-01-15T08:00:00.000Z',
+            }),
+          })
+        );
+      });
+    });
+
+    /**
+     * A new event has no zone of its own yet, so it takes the user's — and it
+     * must be the *configured* one, because that is what the date range it is
+     * submitted alongside will be anchored in. Seeding it from the browser
+     * instead is what made the two disagree.
+     */
+    it('seeds a new event with the configured zone', async () => {
+      const user = userEvent.setup();
+      renderWithClient(<JournalCreateForm />);
+
+      await user.click(screen.getByLabelText(/^event$/i));
+
+      expect(await screen.findByLabelText(/timezone/i)).toHaveValue(
+        'Pacific/Auckland'
+      );
     });
 
     it('includes plan type_data key when PLAN is selected', async () => {

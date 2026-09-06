@@ -19,7 +19,6 @@ from app.api.settings.schemas import (
 )
 from app.core.settings.models import UserSettingsRepository
 from app.core.settings.services.user_settings_service import UserSettingsService
-from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(prefix="/user-settings", tags=["settings"])
@@ -34,12 +33,17 @@ async def get_user_settings(
 ) -> UserSettingsResponse:
     """Get the authenticated user's settings.
 
-    Returns the stored timezone, or the default (UTC) when none is set yet,
-    so the settings UI always has a value to display.
+    Returns the stored timezone, or ``None`` when the user has not set one.
+    The ``UTC`` default is deliberately *not* substituted here: the frontend
+    anchors the day boundaries it writes on this value and falls back to the
+    browser's zone when it is absent, so reporting a default it cannot tell
+    apart from a real choice would move every unconfigured user's writes onto
+    UTC midnight (issue #1401). Callers wanting a zone to resolve with should
+    use the repository's ``get_timezone``, which still applies the default.
     """
     try:
         settings = await repository.get_by_user_id(str(user.id))
-        timezone = settings.timezone if settings else DEFAULT_TIMEZONE
+        timezone = settings.timezone if settings else None
 
         return UserSettingsResponse(
             data=UserSettingsData(

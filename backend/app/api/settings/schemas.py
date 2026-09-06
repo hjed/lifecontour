@@ -34,9 +34,20 @@ class UserSettingsRequest(BaseModel):
 
 
 class UserSettingsAttributes(BaseModel):
-    """Attributes for user settings."""
+    """Attributes for user settings.
 
-    timezone: str = Field(..., description="IANA timezone name")
+    ``timezone`` is nullable, and ``null`` means the user has **not** chosen
+    one — not that they chose UTC. The two have to stay distinguishable: the
+    frontend anchors the day boundaries it writes on the configured zone and
+    falls back to the browser's when there is none, so answering with the
+    ``UTC`` default would silently move every unconfigured user's writes onto
+    UTC midnight (issue #1401).
+    """
+
+    timezone: str | None = Field(
+        ...,
+        description="IANA timezone name, or null when the user has not set one",
+    )
 
 
 class UserSettingsData(BaseModel):

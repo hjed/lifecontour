@@ -12,7 +12,12 @@ import { validateRequired } from '@/lib/validation';
 import { useUpdateJournal } from '@/lib/api/journals';
 import { InlineEditField } from '@/components/contacts/InlineEditField';
 import { InlineEditDateRange } from './InlineEditDateRange';
-import type { JournalResource, EventDateRange } from '@/types/journals';
+import { JournalType } from '@/types/journals';
+import type {
+  CalendarInfoData,
+  JournalResource,
+  EventDateRange,
+} from '@/types/journals';
 
 interface JournalIdentityInlineProps {
   readonly journal: JournalResource;
@@ -28,6 +33,14 @@ export function JournalIdentityInline({
   className,
 }: JournalIdentityInlineProps) {
   const updateJournal = useUpdateJournal();
+
+  // The zone the journal's own bounds are anchored in, when it is an event
+  // that records one. The editor needs it to read and write the same days the
+  // backend does — see `journalTimezone`.
+  const eventTimezone = (
+    journal.attributes.type_data?.[JournalType.EVENT] as
+      CalendarInfoData | undefined
+  )?.timezone;
 
   // Handle title update
   const handleTitleSave = useCallback(
@@ -75,6 +88,7 @@ export function JournalIdentityInline({
         <div>
           <InlineEditDateRange
             value={journal.attributes.event_date_range}
+            eventTimezone={eventTimezone}
             onSave={handleDateRangeSave}
             aria-label='Event date range'
             data-testid='journal-date-range-field'

@@ -22,7 +22,7 @@
  * only the convenience that keeps a doomed choice off the list.
  */
 
-import { formatIsoDate } from '@/lib/date-utils';
+import { formatIsoDate, localDateIn, todayIn } from '@/lib/date-utils';
 import { EventState, JournalType } from '@/types/journals';
 import type { CalendarInfoData, JournalResource } from '@/types/journals';
 
@@ -59,55 +59,15 @@ export interface FutureJournalContext {
   readonly today: string;
 }
 
-function dateParts(
-  timezone: string | undefined,
-  instant: Date
-): Intl.DateTimeFormatPart[] {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(instant);
-}
-
 /**
- * The calendar date `instant` falls on in `timezone`, as `YYYY-MM-DD`.
+ * Resolving an instant to a day in a named zone is a general date utility, so
+ * `date-utils` owns it. Re-exported here because this module's callers reach
+ * for it as part of the future-journal rules, and because `date-utils` cannot
+ * import back the other way.
  *
- * Assembled from `formatToParts` rather than from a locale whose numeric
- * format happens to be ISO-shaped, so the answer does not depend on which ICU
- * data the browser shipped. An unrecognised zone falls back to the browser's
- * rather than throwing: a stale cached timezone should degrade the ordering,
- * not blank the picker.
+ * `todayIn` is not used here; it is re-exported for the same callers.
  */
-export function localDateIn(timezone: string, instant: string | Date): string {
-  const moment = instant instanceof Date ? instant : new Date(instant);
-
-  let parts: Intl.DateTimeFormatPart[];
-  try {
-    parts = dateParts(timezone, moment);
-  } catch {
-    try {
-      // An unrecognised zone: the browser's is a worse answer than the user's
-      // but a far better one than none.
-      parts = dateParts(undefined, moment);
-    } catch {
-      // An unparseable instant, which only a malformed listing produces. `''`
-      // is never greater than a real date, so the journal is left out of the
-      // offer rather than shown under a date nobody can trust.
-      return '';
-    }
-  }
-
-  const value = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find(part => part.type === type)?.value ?? '';
-  return `${value('year')}-${value('month')}-${value('day')}`;
-}
-
-/** Today's date in `timezone` — never the browser's date, and never UTC's. */
-export function todayIn(timezone: string, now?: Date): string {
-  return localDateIn(timezone, now ?? new Date());
-}
+export { localDateIn, todayIn };
 
 /**
  * `date` moved forward by whole days, staying an ISO calendar date.

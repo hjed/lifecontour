@@ -620,20 +620,43 @@ in UTC where a zone *is* recorded is a day early for any zone ahead of UTC, whic
 reported.
 
 Everything that writes a range follows this: `JournalCreateForm` and `InlineEditDateRange` both send
-`localMidnight(...).toISOString()` (`frontend/src/lib/date-utils.ts`), and since #1385 the inbound Google
-sync stores an imported all-day event at local midnight in the user's zone and records that zone.
-Migration **0109** moved the all-day rows imported *before* that — which sat at UTC midnight with no zone,
-and pushed back to Google a day early for a user west of UTC — onto the same convention.
+`zonedMidnight(day, timezone).toISOString()` (`frontend/src/lib/date-utils.ts`), and since #1385 the
+inbound Google sync stores an imported all-day event at local midnight in the user's zone and records that
+zone. Migration **0109** moved the all-day rows imported *before* that — which sat at UTC midnight with no
+zone, and pushed back to Google a day early for a user west of UTC — onto the same convention.
 
-**`localMidnight` is midnight in the *browser's* zone, not the event's.** For a journal whose recorded
-zone differs from the browser's — a user travelling, or an event imported from a foreign-zone calendar —
-editing the range writes an instant anchored in the browser's zone, which can read back a calendar day
-out. This is the same browser-versus-configured-zone divergence the journal list has (below): the picker
-*displays* browser-local dates too, so writing in the event's zone while displaying in the browser's would
-only move the inconsistency. Closing it means moving the display, the picker and the write onto one zone
-together — tracked as **issue #1401**, alongside the client-side timezone work recorded as ITER18-004
-Phase 3. It is not a regression: the `setUTCHours(0, …)` this replaced landed a day out in that case too,
-and the convention fix corrected the ordinary same-zone case.
+**Which zone a write anchors on** is `journalTimezone` (`frontend/src/lib/api/settings.ts`), and it is
+the journal's **own recorded zone** whenever it has one:
+
+> `journal_calendar_info.timezone` → the user's **configured** zone → the browser's.
+
+The event's zone comes first because it is the zone every reader on the other side interprets the bounds
+through — the four listed above. Bounds anchored in a zone the row does not record are read as the wrong
+calendar day by all of them, and re-declaring the row's zone to match the anchor would be worse for an
+imported timed event: its `start_time`/`end_time` are local to that zone, so changing it moves the event
+in absolute time and pushes that move back to Google. A journal that records nothing falls to the user's
+configured zone, and a newly created event records *that* zone (`EventTypeEditor` seeds it from
+`useUserTimezone`), so anything created here has the two agreeing by construction.
+
+The browser's zone is the last resort only, because it changes when the user travels. And the editor
+reads *and* writes through whichever zone won: `zonedCalendarDay` resolves a stored instant to the day it
+falls on there, the picker opens and displays that day, and `zonedMidnight` anchors the save back on the
+same zone. The two are inverses, so a range nobody touched is written back as the instant it arrived as —
+the property that failed when the anchor was the browser's, moving a New York event a day for a user
+reading it from Sydney (#1401).
+
+**A zone that is not the user's own is shown, not implied.** A Sydney user looking at a New York event
+sees *its* 15 January, which is not theirs, so `InlineEditDateRange` names the zone beside the date — in
+view mode, while editing, and in the control's accessible name. When the two coincide there is nothing to
+disclose and nothing is drawn.
+
+That precedence is also why `GET /api/user-settings` answers `timezone: null` rather than the `UTC`
+default when a user has never configured one: the frontend needs to tell "chose UTC" from "told us
+nothing", and only the second may fall back to the browser. `UserSettingsRepository.get_timezone` still
+applies the default everywhere the backend resolves a zone for itself.
+
+What this deliberately does **not** move: the journal **list** still groups and labels in the browser's
+zone — the `groupJournalsByDay` divergence described below, whose follow-up is ITER18-004 Phase 3.
 
 Clock times are a separate matter: `journal_calendar_info.start_time/end_time` are local to whatever zone
 the row records, so they must never be re-anchored in a zone the row does not state. With no zone, the

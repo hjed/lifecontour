@@ -30,6 +30,7 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { clearCachedTimezone } from '@/lib/api/settings';
 
 // Initial auth state
 const initialState: AuthState = {
@@ -188,6 +189,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // so we don't display a false "Session expired" message
       dispatch({ type: 'SESSION_EXPIRED' });
       dispatch({ type: 'CLEAR_ERROR' });
+      clearCachedTimezone();
       return;
     }
 
@@ -196,6 +198,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } else {
       // Session check complete, no user found
       dispatch({ type: 'SESSION_EXPIRED' });
+      // No authenticated user means no cached zone. An explicit logout is not
+      // the only way a session ends — a server-side expiry, a failed check and
+      // an unauthenticated first load all land here without going near the
+      // logout mutation — and the cache is keyed by browser rather than by
+      // account, so anything left behind would stand in for whoever signs in
+      // next while their own settings read is still in flight.
+      clearCachedTimezone();
     }
   }, [sessionUser, isSessionLoading, sessionError]);
 
@@ -266,6 +275,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     onSuccess: () => {
       dispatch({ type: 'LOGOUT_SUCCESS' });
       queryClient.clear();
+      // `queryClient.clear()` empties the in-memory caches; the timezone also
+      // has a localStorage one, and that is keyed by browser rather than by
+      // account. The session effect clears it on every unauthenticated
+      // settlement too, but that runs a refetch later — clearing here closes
+      // the window rather than waiting for it.
+      clearCachedTimezone();
       toast.success(SUCCESS_MESSAGES.SIGNED_OUT);
     },
     onError: error => {
