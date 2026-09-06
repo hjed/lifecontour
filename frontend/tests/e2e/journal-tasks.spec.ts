@@ -22,6 +22,7 @@ import type { Locator, Page } from '@playwright/test';
 
 import { TestDataManager, utcDayOffset } from './data-management';
 import { test, expect, type TestJournal } from './fixtures';
+import { chooseDueJournal, submitRetarget } from './utils/retarget-dialog';
 
 /** A task's text, made unique so a leftover row can never satisfy an assertion. */
 function taskText(what: string): string {
@@ -40,42 +41,6 @@ async function openJournal(page: Page, journal: TestJournal): Promise<Locator> {
   const section = page.getByTestId('journal-tasks-section');
   await expect(section).toBeVisible();
   return section;
-}
-
-/**
- * Choose a due journal in a `FutureJournalPicker`.
- *
- * Wrapped in `toPass` around the whole fill-then-click sequence, following
- * `journals-merge.spec.ts`: on mobile a touch-blur can dismiss the option list
- * between the two steps, and retrying half the sequence would retry the wrong
- * half. Every step is idempotent — refilling the search re-runs it, and
- * clicking an already-chosen option chooses it again — so the retry is safe.
- *
- * **Every step inside carries a short timeout of its own, the click included.**
- * `toPass` only retries what it has budget left for, and the click would
- * otherwise inherit the project's action timeout — 30s on Mobile Chrome, the
- * whole budget — so one hung click would consume the retries this exists for.
- *
- * The search is filled with the journal's title even though the option is
- * addressed by id, because the picker reads a 90-day window and the shared user
- * may hold more journals in it than one page returns.
- */
-async function chooseDueJournal(
-  scope: Locator,
-  journal: TestJournal
-): Promise<void> {
-  const search = scope.getByTestId('future-journal-search');
-  const option = scope.getByTestId(`future-journal-option-${journal.id}`);
-
-  await expect(async () => {
-    await search.fill('', { timeout: 5000 });
-    await search.fill(journal.title, { timeout: 5000 });
-    await expect(option).toBeVisible({ timeout: 5000 });
-    await option.click({ timeout: 5000 });
-    await expect(option).toHaveAttribute('aria-selected', 'true', {
-      timeout: 5000,
-    });
-  }).toPass({ timeout: 45000 });
 }
 
 /**
@@ -254,8 +219,7 @@ test.describe('Journal Task Surface', () => {
     await expect(dialog.getByTestId('retarget-keeps-previous')).toBeVisible();
 
     await chooseDueJournal(dialog, secondDue);
-    await dialog.getByTestId('retarget-dialog-submit').click();
-    await expect(dialog).toBeHidden();
+    await submitRetarget(dialog);
 
     // The model's one automatic link: the journal it was due in keeps it as a
     // mention, so the trail of a deferred commitment stays visible.
@@ -420,8 +384,7 @@ test.describe('Journal Task Surface', () => {
     await expect(dialog).toBeVisible();
 
     await chooseDueJournal(dialog, rescueJournal);
-    await dialog.getByTestId('retarget-dialog-submit').click();
-    await expect(dialog).toBeHidden();
+    await submitRetarget(dialog);
 
     await expect(row.getByTestId('journal-task-lapsed')).toBeHidden();
     await expect(row.getByText('Not done', { exact: true })).toBeVisible();

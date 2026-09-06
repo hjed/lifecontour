@@ -24,6 +24,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { JsonApiErrorResponse } from '@/types/api';
+import { ImportantDateTypeEnum } from '@/types/contacts';
 import { API_ENDPOINTS, ERROR_MESSAGES } from '@/lib/constants';
 
 /** Whether a section has a payload for you. */
@@ -154,8 +155,70 @@ export interface HomeDashboardAgenda {
 /** Not-done tasks due in the next seven days. Fields land in Phase 13. */
 export type HomeDashboardTasks = Record<string, never>;
 
-/** Important contact dates in the same seven days. Fields land in Phase 11. */
-export type HomeDashboardUpcomingDates = Record<string, never>;
+/**
+ * One important contact date coming up, as a row renders it (W31).
+ *
+ * Two fields carry traps worth knowing before rendering either:
+ *
+ * - **`days_away` is authoritative and must not be re-derived.** It counts from
+ *   the window's first day, which the server resolved in the user's configured
+ *   zone. Subtracting `occurs_on` from the browser's today can land a day out
+ *   near midnight in any zone away from that one, so the chip renders this
+ *   number rather than working one out.
+ * - **`years` is null where there is no answer**, and **`0` is a real count**.
+ *   A row with no stored year, or one recorded after the occurrence, has no
+ *   age to show and degrades to the bare type; a first birthday genuinely
+ *   turns 0. Test `years !== null`, never truthiness.
+ */
+export interface HomeDashboardUpcomingDate {
+  contact_id: number;
+  /** Their nickname where they have one, by the app's usual display rule. */
+  contact_name: string;
+  photo_url: string | null;
+  date_type: ImportantDateTypeEnum;
+  /** Present only for a `custom` date. Show this, never the word "custom". */
+  custom_date_type_name: string | null;
+  /** The day it falls on this time round, `YYYY-MM-DD` in the anchor's zone. */
+  occurs_on: string;
+  /** Days from the window's first day; `0` is today. See the note above. */
+  days_away: number;
+  /** The age or count this occurrence makes, or null. See the note above. */
+  years: number | null;
+  /**
+   * Whether `occurs_on` stands in for a 29 February in a year without one.
+   * Sent so a surface can say so rather than appearing to show a wrong day.
+   */
+  observed_for_leap_day: boolean;
+}
+
+/** The span the dates were read for, in the acting user's timezone. */
+export interface HomeDashboardUpcomingDatesWindow {
+  /** Today in the user's zone — the window includes it. */
+  start_date: string;
+  /** The last day, also included. */
+  end_date: string;
+  /** How far ahead the section looked, echoed so no arithmetic is needed. */
+  days_ahead: number;
+}
+
+/**
+ * Important contact dates in the same seven days the tasks cover.
+ *
+ * **The whole window travels and `total` equals `dates.length`**: the server
+ * caps nothing, so the card's show-more reveals the remainder from data it
+ * already holds rather than making a second request. `total` is named anyway
+ * because it is the number the show-more displays.
+ *
+ * The order is date ascending and, within a day, by how much the contact
+ * matters to you — inferred from signals the payload deliberately omits, so a
+ * surface **cannot** reproduce this order and must not re-sort. An **empty
+ * list is a real answer** and is not the section being unavailable.
+ */
+export interface HomeDashboardUpcomingDates {
+  window: HomeDashboardUpcomingDatesWindow;
+  total: number;
+  dates: HomeDashboardUpcomingDate[];
+}
 
 export interface HomeDashboardAttributes {
   summary: DashboardSection<HomeDashboardSummary>;

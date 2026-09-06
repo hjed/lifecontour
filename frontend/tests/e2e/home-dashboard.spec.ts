@@ -289,6 +289,24 @@ function nextDay(day: string): string {
  */
 const MOCK_TOMORROW = '2026-09-30';
 
+/**
+ * A ready upcoming-dates section holding nothing.
+ *
+ * `data: {}` served a payload the API cannot produce — the same mistake the
+ * agenda's `tomorrow` note below records. Since ITER18-004 Phase 12 the card
+ * reads this section, and a ready one that carries no `dates` is a broken
+ * contract rather than an empty week, so these mocks now send the real shape.
+ */
+const MOCK_EMPTY_UPCOMING_DATES = {
+  window: {
+    start_date: SUMMARY_ANCHOR,
+    end_date: MOCK_TOMORROW,
+    days_ahead: 7,
+  },
+  total: 0,
+  dates: [],
+};
+
 const REGENERATE_PATH = `**/api/journals/daily-summary/${SUMMARY_ANCHOR}/regenerate`;
 
 const SUMMARY_PROSE = 'A quiet Wednesday. Two journals and one long walk.';
@@ -353,7 +371,7 @@ function dashboardBody(summary: SummarySection) {
           data: { entries: [], tomorrow: { date: MOCK_TOMORROW, entries: [] } },
         },
         tasks: { status: 'ready', data: {} },
-        upcoming_dates: { status: 'ready', data: {} },
+        upcoming_dates: { status: 'ready', data: MOCK_EMPTY_UPCOMING_DATES },
       },
     },
     meta: { anchor: { date: SUMMARY_ANCHOR, timezone: SUMMARY_TIMEZONE } },
@@ -833,7 +851,10 @@ async function mockAgenda(
               },
             },
             tasks: { status: 'ready', data: {} },
-            upcoming_dates: { status: 'ready', data: {} },
+            upcoming_dates: {
+              status: 'ready',
+              data: MOCK_EMPTY_UPCOMING_DATES,
+            },
           },
         },
         meta: { anchor: { date: SUMMARY_ANCHOR, timezone: SUMMARY_TIMEZONE } },

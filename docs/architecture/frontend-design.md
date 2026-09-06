@@ -1240,6 +1240,50 @@ elements are numbered **W1**–**W33**.
     gets the same signal without extra ARIA. `nameParts` in
     `src/lib/contact-names.ts` splits a display name for the avatar's initials
     and is shared with `JournalTaskRow`.
+- **Upcoming-dates card**: `UpcomingDatesCard` (**W30**–**W32**) reads
+  `useHomeDashboard()` itself and maps `upcoming_dates.data.dates` to one
+  `UpcomingDateRow` each, **in the server's order** — date ascending, then
+  contact importance descending, is the backend's rule (ITER18-004 Phase 11),
+  and the payload deliberately publishes none of the importance signals it
+  ranked by, so the card *could not* reproduce that order even if it tried.
+  **The cap of three lives here and nowhere else** (**W32**, wireframe gap 3):
+  the server sends the whole window with its `total`, the card draws three, and
+  the centred `link`-variant show-more reveals the remainder **in place** from
+  data already held — asserted against the request count, not only the DOM,
+  because a card that refetched would still look right on screen. The button
+  names `total` rather than the hidden count, as **W32** writes it. Ready-and-
+  empty draws the **W29** line (wireframe gap 2); pending and unavailable each
+  draw a quiet line of their own in **W9**'s idiom (`upcoming-dates-loading`,
+  `upcoming-dates-unavailable`), placeholders until Phase 16's skeletons. The
+  `dates` array is guarded with `Array.isArray` for the same reason the agenda
+  guards its `tomorrow`, and with the same limit: this protects the one field
+  the card reads, not an arbitrarily malformed section.
+  - **`UpcomingDateRow`** is a pure function of one payload row, with **no
+    clock**, and that is load-bearing rather than convenient. `occurs_on` is a
+    calendar day the server resolved in the user's configured zone and
+    `days_away` counts from the window's first day in it, so both are rendered
+    as given: deriving either would consult the *browser's* zone and answer a
+    day out near midnight, which `UpcomingDateRow.timezone.test.tsx` pins under
+    the repo's pinned-zone jest environment. The row draws a ringed
+    `ContactAvatar` (initials via the shared `nameParts`), the contact's name as
+    a `Link` to `/contacts/{id}`, a colour-coded `outline` type badge, the
+    occurrence via `formatIsoWeekdayDate`, and a right-aligned bordered chip in
+    `tabular-nums` (**W31**). A `observed_for_leap_day` row says so in a muted
+    aside, because a 29 February date shown on the 28th would otherwise read as
+    a quietly wrong day.
+  - **The wording lives in `src/lib/upcoming-dates-display.ts`**, beside
+    `agenda-display` and for the same reason: two of these are product rules
+    rather than formatting, and a pure function can be asserted without a DOM.
+    A **custom** date is shown under the name its owner gave it and never under
+    the word "custom", the database's word for it. The derived count is shown
+    only where the stored precision produced one — `years === null` suppresses
+    it and **zero does not**, because a first birthday turns 0. Both the label
+    and colour maps are `Record`s over `ImportantDateTypeEnum`, so a date type
+    added to the backend is a compile error rather than a blank badge. Two
+    deliberate divergences from **W31** are recorded in the wireframe: the
+    anniversaries are named in full rather than both shortened to
+    *"Anniversary"*, and the occurrence reuses `formatIsoWeekdayDate` rather
+    than a formatter differing from it by one comma.
 - **Navigation**: the sidebar carries a top-level **Home** link to `/`
   (`nav-link-home`), a deliberate addition to the wireframe, which shows only
   the header logo link (wireframe gap 4). It is a plain link rather than a

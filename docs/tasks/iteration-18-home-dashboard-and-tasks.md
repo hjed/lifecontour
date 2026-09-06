@@ -10759,24 +10759,147 @@ its docstring and schema, which is what an agent actually reads, and the task to
 - **A shared lightweight contact reference.** `TaskContactRef` and `UpcomingDateContact` are the same three
   fields. Extract at the third caller, not before.
 
-#### Phase 12: Upcoming Dates — Card
+#### Phase 12: Upcoming Dates — Card ✅ COMPLETE
 
 **Prerequisites:** Phases 3 and 11.
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4) · **Actual:** 469 production → **1,376
+tracked** (469 production, 846 tests, 61 documentation). **3.1× the production estimate and 2.3× the
+tracked one**, and 1.8× tests against production.
+
+**Delivery rule 3:** shipped as **two stacked PRs** — #1411, the contract, the wording module and the row,
+and its successor, the card — because rule 3 requires a split above 500 and the estimate history in this
+iteration has undershot every phase. The split was **recorded before work started**, as the rule asks.
+Rule 9 holds either side: PR 1 adds a row nobody renders, so it breaks nothing.
 
 **Acceptance Criteria:**
 
-- [ ] Card header and description per **W30**; one row per occurrence with avatar, contact name linking to
+- [x] Card header and description per **W30**; one row per occurrence with avatar, contact name linking to
       the contact, type badge, full occurrence date, and the right-aligned **"in N days"** chip in
-      `tabular-nums` (**W31**).
-- [ ] The type badge carries the derived age or years where precision allows (`Birthday · turns 35`,
-      `Anniversary · 34 years`) and degrades to the bare type otherwise (**W31**).
-- [ ] Show-more reveals the rest of the window and names the full count (**W32**).
-- [ ] Nothing in the window renders a single line (wireframe gap 2, **W29** idiom).
+      `tabular-nums` (**W31**). — `UpcomingDateRow`, a pure function of one payload row with **no clock**;
+      the header was already in place from Phase 3.
+- [x] The type badge carries the derived age or years where precision allows (`Birthday · turns 35`,
+      `Anniversary · 34 years`) and degrades to the bare type otherwise (**W31**). — `dateBadgeLabel`,
+      suppressed by `years === null` and **not** by falsiness; see the decisions below for the anniversary
+      wording, which diverges.
+- [x] Show-more reveals the rest of the window and names the full count (**W32**). — A centred
+      `link`-variant button naming `total`, revealing the remainder **in place**, asserted against the
+      request count as well as the DOM.
+- [x] Nothing in the window renders a single line (wireframe gap 2, **W29** idiom). — The shell's empty
+      line, now with three states that render no rows kept apart from one another.
 
 **Required Test Coverage:** unit (RTL) — row rendering for each precision; the "in N days" values including
 today, tomorrow and **a near-midnight non-UTC case**; cap and show-more behaviour; the empty line. E2E in
-Phase 17.
+Phase 17. — **Delivered:** 54 unit, in four files.
+
+- `frontend/src/lib/__tests__/upcoming-dates-display.test.ts` (**22**, new) — every type's label, the
+  custom name, the unknown-type fallback, `turns N` against `N years` and its singular, `years: 0`
+  rendering where `years: null` degrades, each type's colour distinct, and the show-more's wording.
+- `frontend/src/components/dashboard/__tests__/UpcomingDateRow.test.tsx` (**15**, new) — the link target,
+  the avatar with and without a photo, both precisions, the custom name with the word "custom" asserted
+  absent, the leap-day note and its absence, the three chip values, `tabular-nums`, and decorative icons
+  hidden.
+- `frontend/src/components/dashboard/__tests__/UpcomingDateRow.timezone.test.tsx` (**3**, new) — the
+  near-midnight non-UTC case, under the repo's pinned-zone environment.
+- `frontend/src/components/dashboard/__tests__/UpcomingDatesCard.test.tsx` (**14**, new) — the cap, the
+  server's order preserved, the show-more's wording, reveal-in-place, the request count, the show-more
+  withdrawn and never offered when the window fits, and the empty, pending and unavailable renderings kept
+  apart.
+
+**The frontend had never typed this section, which is why the phase is larger than a card.** Phase 11
+shipped the whole read — window, total and resolved occurrences — but
+`HomeDashboardUpcomingDates` was still `Record<string, never>` on this side, so the first job was the wire
+contract and the four dashboard fixtures leaning on the empty type. That is ~90 lines nobody costed,
+and it is most of the gap between the estimate and the actual.
+
+**Decisions taken (Phase 12):**
+
+- **The two "now"s question, asked of a card.** Phase 11 generalised its clock-drift finding into a
+  question to ask of every read — *how many clocks does this consult?* — and the card's answer has to be
+  **none**. `occurs_on` is a calendar day the server resolved in the user's configured zone and
+  `days_away` counts from the window's first day in it, so both are rendered as given. The test that pins
+  it is set up so a browser-derived answer is *visibly* wrong rather than merely unproven: 23:30 on 30
+  July in New York, against a Sydney-resolved 31 July that is two days out. Browser arithmetic says
+  "Today"; parsing `occurs_on` as an instant labels it Thursday 30 July. Both are asserted against, and a
+  third test confirms the browser really is on the previous local day, so the other two cannot pass
+  vacuously in a UTC worker.
+- **The cap is applied by the card and the show-more costs no request** — the shape Phase 11 settled and
+  gap 3 records. What is worth recording is *how it is asserted*: against the dashboard endpoint's own
+  call count, not just the DOM, because a card that refetched on expand would still look right on screen.
+  That is the same defence-in-depth blindness Phase 11's sixth mutation found on the server, met on the
+  client.
+- **`years === null` suppresses the suffix; falsiness does not.** The schema says in terms that `0` is a
+  real count, and a first birthday is exactly the row most worth noticing. Pinned by a test, and the
+  mutation to `!date.years` fails it.
+- **The two anniversary types are named in full — a deliberate W31 divergence** (wireframe gap 19). The
+  wireframe writes *"Anniversary · 34 years"*, but its sample shows one anniversary where the model has
+  two, and this section shows a week of several contacts at once: a badge that could mean a wedding or a
+  job says nothing. A **custom** date is drawn under the name its owner gave it, never under the word
+  "custom", which is the database's word for it.
+- **The label and colour maps are `Record`s over the enum**, so a date type added to the backend is a
+  **compile error** here rather than a badge that quietly reads `graduation_day`. The wire value is still
+  typed as `string` at the function boundary and falls back to a humanised form, because the value crosses
+  a network and a build can be older than the server it talks to.
+- **The wording is a module, not the component** — `lib/upcoming-dates-display.ts`, beside
+  `agenda-display`. Two of these are product rules rather than formatting, and a pure function can be
+  asserted without a DOM; that is what made the `years: 0` and custom-name rules cheap enough to pin
+  properly.
+- **`formatIsoWeekdayDate` is reused rather than near-duplicated** (gap 20). It writes *"Friday, 31 July"*
+  where W31 writes it without the comma, and a second formatter differing from the first by one comma is
+  not worth the place it could drift.
+- **The leap-day substitution is shown** (gap 21). Phase 11 sends `observed_for_leap_day` precisely so a
+  surface can account for itself; a 29 February date drawn on the 28th with no note reads as a quietly
+  wrong day.
+- **Loading and unavailable placeholders ship here, though no criterion asks for them.** The moment the
+  card starts reading the query, *"No important dates in the next seven days."* becomes a **false claim**
+  about a section that failed or has not answered. Phase 16 replaces both with the real treatment (gap 9);
+  these are the placeholders until then, as the agenda's are.
+- **The row's identity is composed, because none travels.** The payload carries the resolved occurrence,
+  not the row it came from, so the React key is `contact_id`, `date_type`, the custom name and `occurs_on`
+  with the index appended — a contact can hold two custom dates of the same name on one day, which is
+  degenerate but not impossible, and a duplicate key is a rendering bug. Recorded as a follow-up rather
+  than a payload change, which a card phase must not make.
+
+**Mutation checks.** Four were run, each reverted after and each verified byte-identical to a copy the
+harness took itself — Phase 11's lesson about a harness that reverts a directory it does not own.
+
+| Mutation | Tests failed |
+|---|---|
+| Cap the card at five | 6 |
+| Derive `days_away` from the browser clock | 4 |
+| Render the show-more unconditionally | 4 |
+| Test `years` for truthiness rather than `!== null` | 1 |
+
+**The fourth is the one worth recording, and it is the weakest of the four on purpose.** One test fails,
+and it is the only test in the suite that would: `years: 0` appears nowhere else, because nowhere else
+needs it. A mutation that a single test catches is usually a sign the coverage is thin — here it is the
+opposite, a rule the schema states explicitly and which has exactly one observable instance. What would
+have been thin is not writing it.
+
+**Two fixture repairs that were not the point but are worth naming.** The four dashboard fixtures passing
+`data: {}` for this section stopped type-checking; three now say what is true of them — the section is not
+part of what they test — and the page's says ready-and-empty. The **e2e** mocks did the same thing and did
+not type-check their way to being caught: `home-dashboard.spec.ts` served `upcoming_dates: {status:
+'ready', data: {}}`, a payload the API cannot produce, which is the mistake Phase 6 recorded for the
+agenda's `tomorrow` in the very same function. Both now send the real shape. **A route mock is a claim
+about the contract**, and nothing type-checks it — the only defence is repairing them in the phase that
+changes the contract.
+
+**E2E:** none added — the deferral this phase states, with Phase 17 owning wireframe conformance. The
+existing `home-dashboard.spec.ts` could **not be run locally**: this worktree's derived
+`REDIS_TEST_PORT` (6600) is held by a non-Docker host process, so the `test` profile cannot come up. The
+change to that file is the mock repair above; CI runs the suite on the PR.
+
+**Docs:** `frontend-design.md` gained the card, the row and the display module beside the agenda's entries;
+the wireframe gained gaps 19–21 (the anniversary names, the comma, the leap-day note) and gap 3 now records
+that the cap was applied and how the "no second request" half is asserted.
+
+**Follow-ups (not done here):**
+
+- **An occurrence carries no id.** The row's React key is composed from four fields plus the index.
+  A payload change is the real fix and belongs to a phase that has a reason for one.
+- **A shared lightweight contact reference** — Phase 11's follow-up, now at its **third** caller
+  (`TaskContactRef`, `UpcomingDateContact`, and this card's row). The threshold Phase 11 named has been
+  reached; the extraction belongs to whichever phase next touches two of the three.
 
 #### Phase 13: Tasks Section — Backend Assembly
 
