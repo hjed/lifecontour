@@ -24,7 +24,7 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.journals.daily_summary import JournalDailySummary
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import Task, TaskStatus
 from core_shared.stream_client import StreamClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -40,6 +40,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.timezone_utils import resolve_timezone
+from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.summary_invalidation_consumer import (
     SummaryInvalidationConsumer,
 )
@@ -78,7 +79,7 @@ def journal_repository(async_connection: AsyncConnection) -> SqlJournalRepositor
 
 
 @pytest.fixture
-def task_service(async_connection: AsyncConnection):
+def task_service(async_connection: AsyncConnection) -> TaskService:
     return service_on(async_connection, SqlUserSettingsRepository(async_connection))
 
 
@@ -120,6 +121,17 @@ def summary_service(
         gemini_model="gemini-2.5-pro",
         _gemini_response_override=json.dumps({"summary_text": "A productive day."}),
     )
+
+
+def _created_id(task: Task) -> int:
+    """The id a freshly created task must have.
+
+    ``Task.id`` is optional on the model because an unsaved task has none;
+    everything the service returns has been persisted, so the assertion is a
+    statement about this test's setup rather than a defensive check.
+    """
+    assert task.id is not None
+    return task.id
 
 
 async def _seed_generated_summary(
@@ -172,7 +184,7 @@ class TestTickingTasksOff:
     @pytest.mark.asyncio
     async def test_four_ticks_in_a_row_cost_one_regeneration(
         self,
-        task_service,
+        task_service: TaskService,
         journal_repository: SqlJournalRepository,
         summary_repo: SqlJournalDailySummaryRepository,
         summary_service: DailySummaryService,
@@ -196,7 +208,7 @@ class TestTickingTasksOff:
             journal_repository, days_offset=0, user_id=USER_ID
         )
         task_ids = [
-            (
+            _created_id(
                 await task_service.create_task(
                     user_id=USER_ID,
                     creating_journal_id=creating_journal_id,
@@ -204,7 +216,7 @@ class TestTickingTasksOff:
                     text=f"commitment {index}",
                     transaction=async_connection,
                 )
-            ).id
+            )
             for index in range(4)
         ]
         for task_id in task_ids:
@@ -257,7 +269,7 @@ class TestRetargetingATask:
     @pytest.mark.asyncio
     async def test_the_day_that_lost_it_and_the_day_that_gained_it(
         self,
-        task_service,
+        task_service: TaskService,
         journal_repository: SqlJournalRepository,
         summary_repo: SqlJournalDailySummaryRepository,
         async_connection: AsyncConnection,
@@ -298,7 +310,7 @@ class TestRetargetingATask:
 
         await task_service.retarget_due_journal(
             user_id=USER_ID,
-            task_id=task.id,
+            task_id=_created_id(task),
             due_journal_id=second_due,
             transaction=async_connection,
         )
@@ -311,7 +323,7 @@ class TestRetargetingATask:
     @pytest.mark.asyncio
     async def test_a_task_due_beyond_the_week_leaves_today_alone(
         self,
-        task_service,
+        task_service: TaskService,
         journal_repository: SqlJournalRepository,
         summary_repo: SqlJournalDailySummaryRepository,
         async_connection: AsyncConnection,
