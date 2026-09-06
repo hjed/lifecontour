@@ -100,8 +100,12 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
 2. **Upcoming-dates empty state is not depicted.** Same treatment — one line, in the idiom of W29.
 3. **Upcoming dates depicts a cap of three** — three rows plus a show-more reading *"Show all 5 this
    week"*, i.e. two occurrences hidden. The specification requires a cap and a show-more but fixes no
-   number, so the choice is between three (what the wireframe draws) and five (symmetry with the tasks
-   section). Recorded as an open decision in ITER18-004; the wireframe is evidence for three, not five.
+   number, so the choice was between three (what the wireframe draws) and five (symmetry with the tasks
+   section). **Resolved in ITER18-004 Phase 11: three, as drawn.** Symmetry was declined because **W3**
+   already grants the three columns independent heights, so it buys nothing the wireframe did not draw.
+   The cap is applied by the card (Phase 12); the payload carries the **whole** window with its total, so
+   the show-more reveals the remainder without a second request and can name a count larger than the rows
+   on screen.
 4. **No sidebar entry for the dashboard.** The wireframe's sidebar shows Contacts / Journals /
    Integrations only; "Home" is reachable solely from the header logo link (W1), which is today's
    behaviour. The specification asks for the home page to be reachable from the primary navigation as

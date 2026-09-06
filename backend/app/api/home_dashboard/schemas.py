@@ -25,14 +25,22 @@ as ``TaskReadAttributes`` already does.
 from __future__ import annotations
 
 from collections.abc import Callable
+
+# A second alias for the same type, for the one model that also has a field
+# **named** ``date_type``: a field name shadows a module-level alias inside a
+# class body, and the annotation would resolve to the field rather than to
+# ``datetime.date``.
+from datetime import date as calendar_date
 from datetime import date as date_type
 from datetime import datetime as datetime_type
 from datetime import time as time_type
 from typing import Literal
 
+from core_shared.models.contacts.important_date_types import ImportantDateType
 from pydantic import BaseModel, Field
 
 from app.api.common.schemas import JsonApiLinks
+from app.core.contacts.models.upcoming_dates import UpcomingContactDate
 from app.core.dashboard.models.sections import (
     AgendaDay,
     AgendaSectionData,
@@ -41,6 +49,7 @@ from app.core.dashboard.models.sections import (
     HomeDashboard,
     SectionStatus,
     SummarySectionData,
+    UpcomingDatesSectionData,
 )
 from app.core.journal.models.agenda import AgendaEntry
 
@@ -281,8 +290,125 @@ class TasksSectionSchema(BaseModel):
     """Not-done tasks due in the next seven days. Fields land in Phase 13."""
 
 
+class UpcomingDateSchema(BaseModel):
+    """One important date coming up, as a row renders it (**W31**)."""
+
+    contact_id: int = Field(..., description="The contact, for linking to them")
+    contact_name: str = Field(
+        ...,
+        description=(
+            "The name to show — their nickname where they have one, by the same "
+            "rule the rest of the app displays a contact under."
+        ),
+    )
+    photo_url: str | None = Field(
+        default=None, description="Their avatar, or null when they have none"
+    )
+    date_type: ImportantDateType = Field(
+        ...,
+        description=(
+            "What kind of date it is. Every type participates: `year` precision "
+            "is what decides a date has no occurrence, not the type, so a "
+            "`first_met` recorded to the day is here as a real anniversary."
+        ),
+    )
+    custom_date_type_name: str | None = Field(
+        default=None,
+        description=(
+            "What the user called this kind of date, present only when "
+            "`date_type` is `custom`. Show this rather than the word "
+            '"custom", which means nothing to the person who named it.'
+        ),
+    )
+    occurs_on: calendar_date = Field(
+        ...,
+        description=(
+            "The day it falls on **this time round**, as `YYYY-MM-DD` in "
+            "`meta.anchor.timezone`. A recurring date is already resolved into "
+            "the window, so this is a real day in it and not the year it was "
+            "first recorded."
+        ),
+    )
+    days_away: int = Field(
+        ...,
+        description=(
+            "How many days from the window's first day — `0` means today. Sent "
+            "rather than left to be derived, because subtracting two dates in "
+            "the browser's zone can disagree with the day the server windowed "
+            "on."
+        ),
+    )
+    years: int | None = Field(
+        default=None,
+        description=(
+            "How many years this occurrence makes — an age for a birthday, a "
+            "count for an anniversary. **Null where there is no answer**: the "
+            "date was recorded without a year, or with one after the "
+            "occurrence. Render the bare type in that case rather than "
+            "inventing a number. `0` is a real count, not a missing one."
+        ),
+    )
+    observed_for_leap_day: bool = Field(
+        ...,
+        description=(
+            "Whether `occurs_on` is a stand-in — true only for a 29 February "
+            "date in a year that has no 29th, which is observed on the 28th. "
+            "Sent so the substitution is visible rather than looking like a "
+            "quietly different date."
+        ),
+    )
+
+
+class UpcomingDatesWindowSchema(BaseModel):
+    """The span the dates were read for, in the acting user's timezone."""
+
+    start_date: date_type = Field(
+        ..., description="Today in your timezone — the window includes it"
+    )
+    end_date: date_type = Field(
+        ..., description="The last day in the window, which is also included"
+    )
+    days_ahead: int = Field(
+        ...,
+        description=(
+            "How far ahead this section looked. Echoed rather than left to be "
+            "derived by subtracting the two dates, so a surface can label "
+            "itself without doing calendar arithmetic."
+        ),
+    )
+
+
 class UpcomingDatesSectionSchema(BaseModel):
-    """Important contact dates in the next seven days. Fields land in Phase 11."""
+    """Important contact dates falling in the same seven days the tasks cover."""
+
+    window: UpcomingDatesWindowSchema = Field(
+        ...,
+        description=(
+            "The span these dates were read for. Present even when `dates` is "
+            "empty, which is the case a section cannot describe without it."
+        ),
+    )
+    total: int = Field(
+        ...,
+        description=(
+            "How many dates fall in the window. The same as `dates.length`, "
+            "because the window is **not capped** — the whole of it travels so "
+            "a show-more costs no second request — and named because that is "
+            "the number a truncated list's show-more displays."
+        ),
+    )
+    dates: list[UpcomingDateSchema] = Field(
+        default_factory=list,
+        description=(
+            "The occurrences, ordered by date ascending and, within a day, by "
+            "how much the contact matters to you. That ranking is **inferred** "
+            "from favourite status and recent activity and is deliberately not "
+            "published here: there is no importance field for a user to set, "
+            "and none for a surface to show. An **empty list is a real "
+            "answer** — nothing is coming up — and is not the same as the "
+            "section being unavailable, where `data` is null instead."
+        ),
+    )
 
 
 class HomeDashboardAttributes(BaseModel):
@@ -440,6 +566,43 @@ def _agenda(data: AgendaSectionData) -> AgendaSectionSchema:
     )
 
 
+def _upcoming_date(date: UpcomingContactDate) -> UpcomingDateSchema:
+    """One occurrence on the wire — a transcription, deciding nothing.
+
+    The recurrence was resolved and the row was ranked before this is reached,
+    so neither is recomputed here. The importance the row was ranked *by* is
+    deliberately dropped: it is a ranking input, not something the page shows.
+    """
+    return UpcomingDateSchema(
+        contact_id=date.contact.id,
+        contact_name=date.contact.display_name,
+        photo_url=date.contact.photo_url,
+        date_type=date.occurrence.important_date.date_type,
+        custom_date_type_name=date.occurrence.important_date.custom_date_type_name,
+        occurs_on=date.occurrence.occurs_on,
+        days_away=date.occurrence.days_away,
+        years=date.occurrence.years,
+        observed_for_leap_day=date.occurrence.observed_for_leap_day,
+    )
+
+
+def _upcoming_dates(data: UpcomingDatesSectionData) -> UpcomingDatesSectionSchema:
+    """The upcoming-dates payload, preserving the order the service settled on.
+
+    ``total`` is derived from the same tuple the rows come from, so the count
+    and the list cannot drift apart on the wire.
+    """
+    return UpcomingDatesSectionSchema(
+        window=UpcomingDatesWindowSchema(
+            start_date=data.window.first_day,
+            end_date=data.window.last_day,
+            days_ahead=data.window.days_ahead,
+        ),
+        total=len(data.dates),
+        dates=[_upcoming_date(date) for date in data.dates],
+    )
+
+
 def _summary(data: SummarySectionData) -> SummarySectionSchema:
     """The summary payload on the wire — a field-for-field copy.
 
@@ -495,7 +658,7 @@ def to_home_dashboard_response(
                 upcoming_dates=_rendered(
                     dashboard.upcoming_dates,
                     DashboardSectionSchema[UpcomingDatesSectionSchema],
-                    lambda _data: UpcomingDatesSectionSchema(),
+                    _upcoming_dates,
                 ),
             ),
             links=JsonApiLinks(self=home_dashboard_self_link(base_url)),

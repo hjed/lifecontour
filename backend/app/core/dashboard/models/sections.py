@@ -19,10 +19,9 @@ meaningful says so with a ready payload instead; both kinds are in use, and whic
 a section is belongs to the section, not to this envelope.
 
 The payload types are declared here from the outset and filled by their own
-phases. Summary and agenda (today and tomorrow) are filled; tasks and upcoming
-dates are still empty,
-which serialises as ``{}`` — ready, holding nothing — until the phases that give
-them fields land.
+phases. Summary, agenda (today and tomorrow) and upcoming dates are filled;
+tasks is still empty, which serialises as ``{}`` — ready, holding nothing —
+until Phase 13 gives it fields.
 
 **The agenda's rows are not declared here.** ``AgendaEntry`` and the tag and
 participant it carries live in ``app.core.journal.models.agenda``, because they
@@ -37,6 +36,9 @@ from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 
+from core_shared.models.date_window import UpcomingWindow
+
+from app.core.contacts.models.upcoming_dates import UpcomingContactDate
 from app.core.journal.models.agenda import AgendaEntry
 
 
@@ -166,7 +168,29 @@ class TasksSectionData:
 
 @dataclass(frozen=True)
 class UpcomingDatesSectionData:
-    """Important contact dates falling in the next seven days. Filled by Phase 11."""
+    """Important contact dates falling in the same seven days the tasks cover.
+
+    **The rows are not declared here**, for the reason the agenda's are not:
+    ``UpcomingContactDate`` describes contacts, and the daily summary reads the
+    same occurrences (ITER18-005 Phase 6). What is the dashboard's own is this
+    pairing of the window with the rows it found.
+
+    The window rides in the payload rather than being left to a client to derive
+    from ``meta.anchor``: a section that says "the next seven days" must be able
+    to say so when it found **nothing**, and an empty list has no rows to
+    subtract dates from.
+
+    **Uncapped.** ITER18-004 Phase 13 settled the shape for both evidence
+    sections — the whole window travels and the card applies its cap (three, per
+    open decision 3), so a show-more reveals the rest without a second request.
+
+    Attributes:
+        window: The span these dates were read for
+        dates: The occurrences in it, ordered by date then contact importance
+    """
+
+    window: UpcomingWindow
+    dates: tuple[UpcomingContactDate, ...] = ()
 
 
 @dataclass(frozen=True)

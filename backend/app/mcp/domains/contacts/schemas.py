@@ -5,6 +5,7 @@ AI-friendly data formats for contact information that provide
 structured, contextual data for AI analysis and decision making.
 """
 
+from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -456,3 +457,85 @@ class ContactActionResponse(BaseModel):
 
     status: str = Field(description="Action resolution status (e.g., 'success').")
     message: str = Field(description="Description of the completed action.")
+
+
+class UpcomingImportantDateResponse(BaseModel):
+    """One important date coming up, in the form an agent reports it."""
+
+    contact_id: int = Field(description="The contact whose date this is")
+    contact_name: str = Field(
+        description="The name to call them by — their nickname where they have one"
+    )
+    date_type: str = Field(
+        description=(
+            "What kind of date it is: birthday, marriage_anniversary, "
+            "work_anniversary, first_met, or custom."
+        )
+    )
+    custom_date_type_name: str | None = Field(
+        default=None,
+        description=(
+            "What the user named this kind of date. Present only when date_type "
+            "is custom, and the thing to say out loud in that case — 'custom' "
+            "means nothing to the person who named it."
+        ),
+    )
+    occurs_on: date = Field(
+        description=(
+            "The day it falls on this time round, in the user's timezone. "
+            "Already resolved into the window: this is a real day in it, not "
+            "the year the date was first recorded."
+        )
+    )
+    days_away: int = Field(
+        description=(
+            "How many days from today, where 0 means today and 1 tomorrow. Use "
+            "this rather than subtracting dates yourself, which needs the "
+            "user's timezone to be right."
+        )
+    )
+    years: int | None = Field(
+        default=None,
+        description=(
+            "How many years this makes — an age for a birthday, a count for an "
+            "anniversary. **Null when there is no answer**, because the date was "
+            "recorded without a year or with one after the occurrence. Say the "
+            "bare type in that case; do not work a number out from anything else."
+        ),
+    )
+    observed_for_leap_day: bool = Field(
+        description=(
+            "True only for a 29 February date in a year that has no 29th, which "
+            "is observed on the 28th. When it is true, occurs_on is a stand-in "
+            "rather than the day the user wrote down."
+        )
+    )
+
+
+class UpcomingImportantDatesWindow(BaseModel):
+    """The span the answer covers, in the user's timezone."""
+
+    start_date: date = Field(description="Today for the user — the window includes it")
+    end_date: date = Field(description="The last day, which is also included")
+    days_ahead: int = Field(description="How far ahead this answer looked")
+
+
+class UpcomingImportantDatesResponse(BaseModel):
+    """The important contact dates coming up, ready to be read out."""
+
+    window: UpcomingImportantDatesWindow = Field(
+        description="The span these dates fall in, present even when there are none"
+    )
+    total_count: int = Field(
+        description="How many dates fall in the window — the whole of it is here"
+    )
+    dates: list[UpcomingImportantDateResponse] = Field(
+        default_factory=list,
+        description=(
+            "The dates, soonest first and, within a day, the contact who matters "
+            "most to the user first. An empty list is an ordinary answer."
+        ),
+    )
+    summary: str = Field(
+        description="A one-line summary of the window and what is in it"
+    )

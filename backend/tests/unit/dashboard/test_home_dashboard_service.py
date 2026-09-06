@@ -18,16 +18,31 @@ from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from core_shared.models.contacts.entities import SummaryStatus
+from core_shared.models.contacts.entities import ImportantDate, SummaryStatus
+from core_shared.models.contacts.important_date_occurrence import (
+    ImportantDateOccurrence,
+)
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
+from core_shared.models.date_window import upcoming_window
 from core_shared.models.journals.daily_summary import JournalDailySummary
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.importance import ContactImportance
+from app.core.contacts.models.upcoming_dates import (
+    UpcomingContactDate,
+    UpcomingContactDates,
+    UpcomingDateContact,
+)
 from app.core.dashboard.models.sections import (
     AgendaDay,
     AgendaSectionData,
     DashboardSummaryState,
     HomeDashboard,
     SectionStatus,
+    UpcomingDatesSectionData,
 )
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
 from app.core.journal.models.agenda import AgendaEntry
@@ -42,6 +57,34 @@ SERVICE_LOGGER = HomeDashboardService.__module__
 # 00:30 on 31 July in Sydney (+10), while UTC is still on the 30th — the instant
 # that tells a local reading apart from a UTC one.
 JUST_PAST_SYDNEY_MIDNIGHT = datetime.datetime(2026, 7, 30, 14, 30, tzinfo=datetime.UTC)
+
+# The day the Sydney instant above lands on, and the day every section windows on.
+ANCHOR = datetime.date(2026, 7, 31)
+
+UPCOMING_BIRTHDAY = UpcomingContactDate(
+    occurrence=ImportantDateOccurrence(
+        important_date=ImportantDate(
+            id=1,
+            contact_id=7,
+            date_type=ImportantDateType.BIRTHDAY,
+            precision=DatePrecision.DAY_MONTH,
+            month=8,
+            day=2,
+        ),
+        occurs_on=datetime.date(2026, 8, 2),
+        days_away=2,
+        years=None,
+        observed_for_leap_day=False,
+    ),
+    contact=UpcomingDateContact(id=7, display_name="Ada Lovelace", photo_url=None),
+    importance=ContactImportance(
+        contact_id=7,
+        is_favourite=False,
+        journal_count_30d=0,
+        activity_count_30d=0,
+        last_activity_at=None,
+    ),
+)
 
 
 @pytest.fixture
@@ -134,16 +177,34 @@ def mock_agenda_repo() -> AsyncMock:
 
 
 @pytest.fixture
+def mock_upcoming_dates_service() -> AsyncMock:
+    """The contacts read, answering with an empty window by default.
+
+    Mocked rather than built from repositories because what this suite asserts
+    about it is the *wiring* — that the section is asked, with the dashboard's
+    own anchor, and that its failure stays local. What it returns is the
+    contacts domain's business and has its own tests.
+    """
+    service = AsyncMock()
+    service.upcoming_dates.return_value = UpcomingContactDates(
+        window=upcoming_window(ANCHOR), dates=()
+    )
+    return service
+
+
+@pytest.fixture
 def service(
     date_resolver: JournalDateResolver,
     mock_summary_repo: AsyncMock,
     mock_agenda_repo: AsyncMock,
+    mock_upcoming_dates_service: AsyncMock,
     connection: MagicMock,
 ) -> HomeDashboardService:
     return HomeDashboardService(
         date_resolver=date_resolver,
         summary_repo=mock_summary_repo,
         agenda_repo=mock_agenda_repo,
+        upcoming_dates_service=mock_upcoming_dates_service,
         connection=connection,
     )
 
@@ -158,8 +219,8 @@ class TestTheFourSectionEnvelope:
     ) -> None:
         """Later phases fill this contract; none of them adds a section to it.
 
-        Three of the four still answer with an empty payload, which is itself the
-        assertion: a section without a query yet is *ready and holding nothing*,
+        The one still without a query answers with an empty payload, which is
+        itself the assertion: such a section is *ready and holding nothing*,
         never absent from the projection.
         """
         dashboard = await service.dashboard(USER_ID)
@@ -293,12 +354,14 @@ class TestPerSectionIsolation:
         date_resolver: JournalDateResolver,
         mock_summary_repo: AsyncMock,
         mock_agenda_repo: AsyncMock,
+        mock_upcoming_dates_service: AsyncMock,
     ) -> None:
         """``savepoint(None)`` no-ops, so the guard is still the guard."""
         service = HomeDashboardService(
             date_resolver=date_resolver,
             summary_repo=mock_summary_repo,
             agenda_repo=mock_agenda_repo,
+            upcoming_dates_service=mock_upcoming_dates_service,
             connection=None,
         )
 
@@ -808,4 +871,116 @@ class TestTomorrow:
         assert dashboard.agenda.status is SectionStatus.UNAVAILABLE
         assert dashboard.agenda.data is None
         for name in ("summary", "tasks", "upcoming_dates"):
+            assert getattr(dashboard, name).status is SectionStatus.READY, name
+
+
+class TestTheUpcomingDatesSection:
+    """The section is read through the shared contacts service, not its own query."""
+
+    async def test_the_whole_page_is_read_as_at_one_instant(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """A pinned ``now`` must pin the ranking as well as the window.
+
+        The upcoming-dates section is ordered within a day by importance
+        signals, and those are counted over the thirty days back from an
+        instant. Handing down only the *day* left that instant to be sampled
+        again inside the contacts service, so a caller who pinned ``now`` got a
+        window fixed to one moment and a tie-break computed from another —
+        which is not the single as-at snapshot this projection is supposed to
+        be. Raised by the review on #1407.
+
+        Sydney rather than UTC so the day and the instant are visibly different
+        things: the anchor is the 31st while the instant is still the 30th.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        mock_upcoming_dates_service.upcoming_dates.assert_awaited_once_with(
+            USER_ID, today=ANCHOR, now=JUST_PAST_SYDNEY_MIDNIGHT
+        )
+
+    async def test_an_unpinned_page_still_shares_one_instant(
+        self,
+        service: HomeDashboardService,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """The ordinary request: nobody supplies an instant, so the service
+        samples one and every section is read as at that same one."""
+        await service.dashboard(USER_ID)
+
+        moment = mock_upcoming_dates_service.upcoming_dates.await_args.kwargs["now"]
+        assert moment is not None
+        assert moment.tzinfo is not None
+
+    async def test_it_asks_for_the_dashboards_own_anchor(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """The anchor is resolved once for the whole page and handed down, so
+        this section cannot land on a different day from the agenda beside it.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        assert mock_upcoming_dates_service.upcoming_dates.await_args.kwargs[
+            "today"
+        ] == datetime.date(2026, 7, 31)
+
+    async def test_reading_it_costs_no_second_settings_read(
+        self, service: HomeDashboardService, mock_settings_repo: AsyncMock
+    ) -> None:
+        """Passing the anchor down is what makes this true; asking the contacts
+        service to resolve its own would be a second read of the same row."""
+        await service.dashboard(USER_ID)
+
+        mock_settings_repo.get_timezone.assert_awaited_once_with(USER_ID)
+
+    async def test_the_window_and_the_dates_reach_the_payload(
+        self,
+        service: HomeDashboardService,
+        mock_upcoming_dates_service: AsyncMock,
+        mock_settings_repo: AsyncMock,
+    ) -> None:
+        window = upcoming_window(ANCHOR)
+        mock_upcoming_dates_service.upcoming_dates.return_value = UpcomingContactDates(
+            window=window, dates=(UPCOMING_BIRTHDAY,)
+        )
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.upcoming_dates.data == UpcomingDatesSectionData(
+            window=window, dates=(UPCOMING_BIRTHDAY,)
+        )
+
+    async def test_an_empty_window_is_ready_rather_than_unavailable(
+        self, service: HomeDashboardService
+    ) -> None:
+        """ "Nothing coming up" is an answer, and a good one — it must not arrive
+        looking like the section that could not answer at all."""
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.upcoming_dates.status is SectionStatus.READY
+        assert dashboard.upcoming_dates.data is not None
+        assert dashboard.upcoming_dates.data.dates == ()
+
+    async def test_a_failure_reading_it_leaves_the_other_three_alone(
+        self, service: HomeDashboardService, mock_upcoming_dates_service: AsyncMock
+    ) -> None:
+        mock_upcoming_dates_service.upcoming_dates.side_effect = RuntimeError(
+            "contacts query blew up"
+        )
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.upcoming_dates.status is SectionStatus.UNAVAILABLE
+        assert dashboard.upcoming_dates.data is None
+        for name in ("summary", "agenda", "tasks"):
             assert getattr(dashboard, name).status is SectionStatus.READY, name

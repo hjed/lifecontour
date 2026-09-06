@@ -73,8 +73,9 @@ domain/
 #### Contacts Domain
 - **Entities**: Contact, Tag, ContactMethod, ContactNote, ContactAddress
 - **Value Objects**: Email, PhoneNumber, Address, TagName, CountryCode
-- **Domain Services**: ContactValidationService, TagHierarchyService, ContactHistoryService, AddressValidationService
-- **Ports**: ContactRepository, TagRepository, ContactHistoryRepository, ContactEventPublisher
+- **Domain Services**: ContactValidationService, TagHierarchyService, ContactHistoryService, AddressValidationService, UpcomingImportantDatesService
+  (see *[Upcoming important dates](#upcoming-important-dates)*)
+- **Ports**: ContactRepository, TagRepository, ContactHistoryRepository, ContactEventPublisher, ContactImportanceRepository, UpcomingImportantDateRepository
 - **Business Rules**:
   - Contact name validation (first_name required)
   - Email uniqueness validation
@@ -970,6 +971,74 @@ MCP's list analogue `browse_journals_by_date_window` anchors its window on `date
 than the configured zone, so a timezone-derived lapse verdict on that payload would disagree with
 itself about what day it is. That is a defect worth fixing on its own terms.
 
+### Upcoming important dates
+
+`UpcomingImportantDatesService.upcoming_dates` answers "whose birthdays and anniversaries are coming
+up": the [specification's](../product-specifications/home-dashboard-and-tasks-product-specification.md)
+upcoming-dates section, over **the same seven days** the tasks section covers. Three callers share it —
+the home dashboard's section, the MCP tool `list_upcoming_important_dates`, and (from ITER18-005) the
+daily summary's inputs — which is why it lives in the contacts domain rather than in the dashboard's.
+
+**The recurrence is a rule, not a column, so it does not go into SQL.** A stored important date is a
+month and a day, sometimes with a year, so "does it fall in the next seven days" cannot be a `BETWEEN`.
+What the database is asked instead is the narrow question it can answer cheaply: **which stored
+`(month, day)` pairs could land in this window** — at most 91, and eight for the week the dashboard
+shows. `resolve_occurrence` (`core_shared/models/contacts/important_date_occurrence.py`) then decides
+which of those actually do, in which year, and what count of years they make. Putting any of that in
+the statement would be a second definition of a rule that has 56 unit tests, in a place none of them
+could reach.
+
+**The candidate set is not simply the window's days, and the exception is the leap day.** A row stored
+as 29 February is *observed* on **28 February** in a year that has no 29th, so its occurrence date and
+its stored pair are different. A filter built from the literal pairs the window spells would never
+fetch the row — and a leap-day birthday would be absent from the section in three years out of four,
+**silently**, because a row that is never fetched cannot be reported as dropped. `window_month_days`
+adds `(2, 29)` exactly when the window covers a 28 February that is not itself a leap day. Nothing
+broader is needed: a real 29 February is already one of the window's own days, and every other
+unplaceable pair (30 February, 31 April) yields no occurrence at all.
+
+**The pairs reach the statement as two parallel integer arrays**, joined through a multi-argument
+`unnest`. Not a literal `IN (VALUES …)` list, which would build a different statement for every window
+length; and not two independent `= ANY` filters on month and day, which would match 3 August for a
+window covering 14 September — the pair must be matched as a pair.
+
+**Two statements, and one for a quiet week.** The candidate query is one; Phase 10's batched
+`ContactImportanceRepository.for_contacts` is the other, and it short-circuits without a round trip on
+an empty batch. The signals batch is keyed off the **candidates** rather than the survivors, which
+keeps the recurrence rule to a single pass — the two sets are provably the same set, since a row only
+becomes a candidate by matching a day the window covers.
+
+**Ordering is date ascending then contact importance descending, in one pass.**
+`ContactImportance.ranking_key` negates its signals for exactly this, so
+`(occurs_on, *ranking_key, contact_id, date_id)` sorts ascending throughout rather than needing a
+second sort or a `reverse` that would flip the date too. Importance breaks ties *within* a day and
+never reorders the days. The trailing pair is load-bearing rather than defensive: a week routinely
+holds two dates on one day, two contacts with identical signals are ordinary, and without it the same
+request could answer in a different order between runs — which a user sees as the list shuffling
+itself.
+
+**Importance is inferred, and it stays off the wire.** The signals are the favourite flag, the recent
+journal count and the recent activity count, in that precedence — `CONTACT_IMPORTANCE_ORDER`, which the
+MeiliSearch contact ranking rules also derive from, so a contact who ranks highly in search ranks
+highly here and the section still ranks with search down. The specification requires importance to
+remain unconfigured; no surface publishes the numbers, and a test pins the exact field set of a row so
+one cannot start to.
+
+**Whose today is the caller's when the caller knows.** The service takes `today` and resolves its own
+only when nobody supplies one, so the dashboard — which resolves a single anchor for all four
+sections — causes no second settings read and cannot land this section on a different day from the
+agenda beside it. This is the structural form of ITER18-001 Phase 14's bug, which read the clock twice
+and could build a window against one day while judging its rows against the next.
+
+**Not scoped by user.** `contacts` has no owner column in this schema and every other contacts
+repository is likewise unscoped, so this port diverges from the dashboard ports' rule that every method
+takes a `user_id` — recorded rather than left silent. When contacts gain an owner, this read, the
+importance read and their callers are one change.
+
+**Uncapped, like the tasks window.** The whole window travels with its total and the card applies the
+cap (three), so a show-more costs no second request. `days_ahead` is bounded at 90 by the shared
+window, in the domain as well as on each surface.
+
 ### The upcoming window
 
 `TaskReadService.read_models_for_upcoming_window` answers the other half of "where tasks appear": the
@@ -981,7 +1050,19 @@ query ITER18-004's tasks section consumes, which is why its shape is settled her
 **The window is arithmetic, and it is pure.** `upcoming_window` and `select_upcoming_tasks`
 (`core_shared/models/tasks/upcoming.py`) take a date the caller resolved and the models the caller
 assembled, and hold the whole rule: where the window starts and ends, which tasks it drops, and what
-order the survivors come back in. `select_upcoming_tasks` returns an `UpcomingTasks` carrying the
+order the survivors come back in.
+
+**One window type, two domains, two error vocabularies.** `UpcomingWindow`, `upcoming_window` and the
+bound live in `core_shared/models/date_window.py`, not in the tasks domain that first needed them.
+ITER18-004's upcoming-dates section covers "the next seven days, **matching the tasks window**", so
+these are not two similar spans but one span two sections must agree on — a second definition would be
+two rules that happen to agree today. What each domain keeps is the **translation**: the shared module
+raises a neutral `DateWindowError`, `tasks/upcoming.py` converts it to `TaskValidationError` and the
+contacts side to `ContactValidationError`, because a re-export could not do that — `except
+TaskValidationError` does not catch a `DateWindowError`, and a contacts endpoint answering with a task
+error would be nonsense. Every existing import goes through the `core_shared.models.tasks` package
+`__init__`, so the promotion moved no call site and the tasks window's tests passed unedited, which is
+what makes it a refactor rather than a claim. `select_upcoming_tasks` returns an `UpcomingTasks` carrying the
 window beside the tasks — the same shape `group_tasks_by_link_role` returns its `journal_id` in, and
 for the same reason: a surface renders "the next seven days" as well as the rows, and an **empty**
 answer has no rows to derive the window from.
