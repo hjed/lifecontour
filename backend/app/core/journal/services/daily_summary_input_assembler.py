@@ -15,6 +15,15 @@ dashboard's tasks section consumes, exclusions and ordering included, and a
 summary that re-derived "what is coming up" would eventually describe a week the
 dashboard beneath it does not show.
 
+**The week's important contact dates come through the contacts domain's own
+read**, for the third time on the same reasoning:
+``UpcomingImportantDatesService.upcoming_dates`` answers the dashboard's
+upcoming-dates section and the ``list_upcoming_important_dates`` tool, and it
+holds the recurrence rule — which stored ``(month, day)`` pairs can land in the
+window, and the 29 February observed on the 28th. Re-deriving any of that here
+would be a second copy of a rule with fifty-six unit tests, in a place none of
+them could reach.
+
 **A past day gets its own listing instead**, and only ever instead:
 ``read_models_due_in_journals`` reports what was due in that day's journals and
 how each commitment stands **now**. The two are complementary rather than
@@ -45,6 +54,10 @@ if TYPE_CHECKING:
 
     from core_shared.models.tasks import TaskReadModel, UpcomingTasks
 
+    from app.core.contacts.models.upcoming_dates import UpcomingContactDates
+    from app.core.contacts.services.upcoming_important_dates_service import (
+        UpcomingImportantDatesService,
+    )
     from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.models.repositories import (
         AgendaRepository,
@@ -82,6 +95,7 @@ class DailySummaryInputAssembler:
         series_repo: JournalSeriesRepository | None = None,
         agenda_repo: AgendaRepository | None = None,
         task_read_service: TaskReadService | None = None,
+        upcoming_dates_service: UpcomingImportantDatesService | None = None,
     ) -> None:
         self._journal_repo = journal_repo
         self._mood_repo = mood_repo
@@ -90,6 +104,7 @@ class DailySummaryInputAssembler:
         self._series_repo = series_repo
         self._agenda_repo = agenda_repo
         self._task_read_service = task_read_service
+        self._upcoming_dates_service = upcoming_dates_service
 
     async def assemble(
         self,
@@ -106,18 +121,18 @@ class DailySummaryInputAssembler:
         in the user's ``timezone`` (then converted to UTC for the query) so the
         summary covers the user's local day rather than the UTC day.
 
-        When ``summary_date`` is **today** in that timezone, the day's agenda
-        and the week's tasks are gathered too. Neither is for any other day:
-        forward-looking material belongs to the current day, and a past day
-        should cost no extra read.
+        When ``summary_date`` is **today** in that timezone, the day's agenda,
+        the week's tasks and the week's important contact dates are gathered
+        too. None of the three is for any other day: forward-looking material
+        belongs to the current day, and a past day should cost no extra read.
 
         **The clock is read once, here, and imposed on everything below it.**
-        Left to default, the agenda guard, the tasks guard and the tasks read
-        would each sample the wall clock, and an assembly crossing local
-        midnight between two of them would gather a window for one day while the
-        rest of the input describes another. One reading cannot disagree with
-        itself. ``DailySummaryService`` already hands an instant down for the
-        same reason; this closes the hole for every other caller.
+        Left to default, each guard and each read would sample the wall clock,
+        and an assembly crossing local midnight between two of them would gather
+        a window for one day while the rest of the input describes another. One
+        reading cannot disagree with itself. ``DailySummaryService`` already
+        hands an instant down for the same reason; this closes the hole for
+        every other caller.
 
         ``now`` exists only so the local-midnight boundary can be pinned in
         tests, as ``DailySummaryFreshnessChecker``'s injectable clock is —
@@ -240,6 +255,9 @@ class DailySummaryInputAssembler:
             upcoming_tasks=await self._upcoming_tasks_for(
                 user_id, summary_date, tz, moment
             ),
+            upcoming_dates=await self._upcoming_dates_for(
+                user_id, summary_date, tz, moment
+            ),
             past_day_tasks=await self._past_day_tasks_for(
                 user_id, summary_date, journal_ids, tz, moment
             ),
@@ -309,6 +327,53 @@ class DailySummaryInputAssembler:
             days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
             now=now,
             timezone=tz,
+        )
+
+    async def _upcoming_dates_for(
+        self,
+        user_id: str,
+        summary_date: date,
+        tz: ZoneInfo,
+        now: datetime,
+    ) -> UpcomingContactDates | None:
+        """Whose important dates are coming up, when the day is the user's today.
+
+        The contacts domain's own read, reused whole rather than re-derived. Its
+        recurrence rule comes with it — which stored ``(month, day)`` pairs can
+        land in the window, the 29 February observed on the 28th, the derived
+        count of years, and the ranking by date then contact importance — and
+        none of that is written twice. The dashboard's section and the
+        ``list_upcoming_important_dates`` tool are answered by the same call, so
+        the summary cannot describe a different week from the card beside it.
+
+        ``None`` for any other day, and distinct from an empty answer: a past day
+        was never asked, while a today with nothing coming up is a fact about the
+        user's week. The read is skipped rather than filtered afterwards, so a
+        past-day summary costs no extra round trip.
+
+        **Both halves of "which day is it" travel, and each buys something
+        different.** ``today`` pins the day *and* stops the service resolving its
+        own through ``JournalDateResolver`` — this assembly has already read
+        ``user_settings`` to decide the day it is summarising, and a second read
+        is a second statement under READ COMMITTED that can see a timezone change
+        the first did not. ``now`` is the instant the contact-importance signals
+        measure their thirty-day recency window back from, which ``today`` does
+        not pin: supplying only one would leave half the answer sampling its own
+        clock, the defect that read's own review found twice.
+
+        There is no ``timezone`` argument to hand down, unlike the tasks
+        listing's: ``today`` *is* the resolved answer, so there is nothing left
+        for a zone to decide here.
+        """
+        if summary_date != today_in(tz, now):
+            return None
+        if self._upcoming_dates_service is None:
+            return None
+        return await self._upcoming_dates_service.upcoming_dates(
+            user_id,
+            days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
+            today=summary_date,
+            now=now,
         )
 
     async def _past_day_tasks_for(

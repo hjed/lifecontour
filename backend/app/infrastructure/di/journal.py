@@ -8,6 +8,9 @@ from core_shared.models.journals import (
 from dishka import AsyncContainer, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.services.upcoming_important_dates_service import (
+    UpcomingImportantDatesService,
+)
 from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
@@ -230,12 +233,20 @@ class JournalProvider(Provider):
     container for another domain's adapter is usually a boundary complaining;
     two of them is the boundary saying the edge belongs in the graph.
 
+    The summary's third forward-looking input made the same call a second time
+    and for the same reason: ``UpcomingImportantDatesService`` needs the date
+    resolver *and* two contacts-domain adapters, so hand-building it here would
+    reach around the container again — and the recurrence rule it holds is the
+    thing being reused, not either statement underneath. No cycle results:
+    everything the contacts domain reaches for here is a journal *port* and none
+    of it reaches back.
+
     So a container registering this provider must also register
     ``TaskProvider``, ``ContactProvider`` and ``IntegrationProvider`` (which
     ``ContactProvider``'s merge service reaches for), alongside the
     ``SettingsProvider`` and ``InfrastructureProvider`` it already needed. Every
-    container but one already did; the exception is
-    ``tests/integration/journal/test_journal_date_resolver.py``.
+    container does; ``tests/integration/journal/test_journal_date_resolver.py``
+    was the last exception and gained them with the upcoming-tasks input.
     """
 
     @provide(scope=Scope.REQUEST)
@@ -810,6 +821,7 @@ class JournalProvider(Provider):
         series_repo: JournalSeriesRepository,
         agenda_repo: AgendaRepository,
         task_read_service: TaskReadService,
+        upcoming_dates_service: UpcomingImportantDatesService,
     ) -> DailySummaryInputAssembler:
         """Provide a DailySummaryInputAssembler instance.
 
@@ -819,6 +831,15 @@ class JournalProvider(Provider):
         The read service rather than the repository, because what the summary
         wants is the *listing*: its window, its exclusions and its order, none
         of which live in SQL.
+
+        ``UpcomingImportantDatesService`` comes from ``ContactProvider`` on the
+        same reasoning and at no graph cost: every container that registers
+        ``JournalProvider`` already registers ``ContactProvider``, which
+        ``ContactProvider`` itself requires anyway because it resolves
+        ``JournalDateResolver`` from here. The service rather than the two
+        repositories, because what the summary wants is the *answer*: the
+        recurrence rule, the leap-day candidate and the importance ranking, none
+        of which live in either statement alone.
         """
         return DailySummaryInputAssembler(
             journal_repo=journal_repo,
@@ -828,6 +849,7 @@ class JournalProvider(Provider):
             series_repo=series_repo,
             agenda_repo=agenda_repo,
             task_read_service=task_read_service,
+            upcoming_dates_service=upcoming_dates_service,
         )
 
     @provide(scope=Scope.REQUEST)

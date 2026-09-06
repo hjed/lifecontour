@@ -24,6 +24,11 @@ from app.core.journal.services.daily_summary_input_assembler import (
     DailySummaryInputAssembler,
 )
 from app.core.journal.services.journal_date_resolver import local_day_window
+from tests.unit.journal.upcoming_date_doubles import (
+    coming_up,
+    occurring,
+    stored_date,
+)
 
 # See the note in ``test_daily_summary_prompt_builder``: this suite was outside
 # CI's marker selection too.
@@ -1013,3 +1018,234 @@ class TestOnePastDayReadingPerAssembly:
         kwargs = mock_task_read_service.read_models_due_in_journals.await_args.kwargs
         assert kwargs["timezone"] == ZoneInfo(FAR_EAST)
         assert kwargs["now"] == now
+
+
+@pytest.fixture
+def mock_upcoming_dates_service() -> AsyncMock:
+    service = AsyncMock()
+    # *Gathered, nothing coming up* — the shape a quiet week really has. Left
+    # unset an ``AsyncMock`` hands back another mock, and a test asserting the
+    # week was empty would pass against anything.
+    service.upcoming_dates.return_value = coming_up()
+    return service
+
+
+@pytest.fixture
+def dates_assembler(
+    mock_journal_repo: AsyncMock,
+    mock_mood_repo: AsyncMock,
+    mock_contact_rel_repo: AsyncMock,
+    mock_summary_repo: AsyncMock,
+    mock_agenda_repo: AsyncMock,
+    mock_task_read_service: AsyncMock,
+    mock_upcoming_dates_service: AsyncMock,
+) -> DailySummaryInputAssembler:
+    """Every collaborator, so the fourth guard is exercised beside the other three."""
+    return DailySummaryInputAssembler(
+        journal_repo=mock_journal_repo,
+        mood_repo=mock_mood_repo,
+        contact_relationship_repo=mock_contact_rel_repo,
+        summary_repo=mock_summary_repo,
+        agenda_repo=mock_agenda_repo,
+        task_read_service=mock_task_read_service,
+        upcoming_dates_service=mock_upcoming_dates_service,
+    )
+
+
+class TestTheUpcomingDatesAreAssembled:
+    """Whose dates are coming up travels with the current day's input."""
+
+    @pytest.mark.asyncio
+    async def test_assembles_the_weeks_dates(
+        self,
+        dates_assembler: DailySummaryInputAssembler,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """The read's answer arrives whole — its order and its window."""
+        mock_upcoming_dates_service.upcoming_dates.return_value = coming_up(
+            occurring(stored_date(1, month=4, day=28), name="First Person"),
+            occurring(stored_date(2, month=5, day=1), name="Second Person"),
+        )
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        result = await dates_assembler.assemble(
+            "user123", date(2026, 4, 27), "UTC", now=now
+        )
+
+        assert result.upcoming_dates is not None
+        assert [
+            entry.contact.display_name for entry in result.upcoming_dates.dates
+        ] == [
+            "First Person",
+            "Second Person",
+        ]
+        assert result.upcoming_dates.window.first_day == date(2026, 4, 27)
+        assert result.upcoming_dates.window.last_day == date(2026, 5, 4)
+
+    @pytest.mark.asyncio
+    async def test_asks_for_seven_days_at_the_assemblys_own_day_and_instant(
+        self,
+        dates_assembler: DailySummaryInputAssembler,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """Both halves of the question travel, and each buys something.
+
+        ``today`` pins the day **and** skips the service's own
+        ``user_settings`` read — this assembly has already read that row to
+        decide which day it is summarising, and a second statement under READ
+        COMMITTED can see a timezone change the first did not. ``now`` pins the
+        instant the importance signals measure their thirty-day recency back
+        from, which is the other half the signature asks for.
+        """
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        await dates_assembler.assemble("user123", date(2026, 4, 27), "UTC", now=now)
+
+        mock_upcoming_dates_service.upcoming_dates.assert_awaited_once_with(
+            "user123",
+            days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
+            today=date(2026, 4, 27),
+            now=now,
+        )
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_east_of_utc(
+        self,
+        dates_assembler: DailySummaryInputAssembler,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """UTC's date is still the 26th, but the user's day is the 27th."""
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        gathered = await dates_assembler.assemble(
+            "user123", date(2026, 4, 27), FAR_EAST, now=now
+        )
+        stale = await dates_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_EAST, now=now
+        )
+
+        assert gathered.upcoming_dates is not None
+        assert stale.upcoming_dates is None
+        assert mock_upcoming_dates_service.upcoming_dates.await_count == 1
+        assert mock_upcoming_dates_service.upcoming_dates.await_args.kwargs[
+            "today"
+        ] == date(2026, 4, 27)
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_west_of_utc(
+        self,
+        dates_assembler: DailySummaryInputAssembler,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """UTC has ticked over to the 27th; in Niue it is still the 26th."""
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        ahead = await dates_assembler.assemble(
+            "user123", date(2026, 4, 27), FAR_WEST, now=now
+        )
+        assert ahead.upcoming_dates is None
+
+        gathered = await dates_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_WEST, now=now
+        )
+        assert gathered.upcoming_dates is not None
+        assert mock_upcoming_dates_service.upcoming_dates.await_count == 1
+        assert mock_upcoming_dates_service.upcoming_dates.await_args.kwargs[
+            "today"
+        ] == date(2026, 4, 26)
+
+    @pytest.mark.asyncio
+    async def test_a_quiet_week_is_not_the_same_as_nothing_gathered(
+        self, dates_assembler: DailySummaryInputAssembler
+    ) -> None:
+        """An empty week is a fact about it; a past day was never asked."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await dates_assembler.assemble(
+            "user123", date(2026, 4, 27), "UTC", now=now
+        )
+
+        assert result.upcoming_dates is not None
+        assert result.upcoming_dates.dates == ()
+
+
+class TestDatesAreNotReadForAnyOtherDay:
+    """Forward-looking material is the current day's, and costs nothing else."""
+
+    @pytest.mark.asyncio
+    async def test_past_day_does_not_read_dates(
+        self,
+        dates_assembler: DailySummaryInputAssembler,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await dates_assembler.assemble(
+            "user123", date(2026, 4, 26), "UTC", now=now
+        )
+
+        assert result.upcoming_dates is None
+        mock_upcoming_dates_service.upcoming_dates.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_future_day_does_not_read_dates(
+        self,
+        dates_assembler: DailySummaryInputAssembler,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await dates_assembler.assemble(
+            "user123", date(2026, 4, 28), "UTC", now=now
+        )
+
+        assert result.upcoming_dates is None
+        mock_upcoming_dates_service.upcoming_dates.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_without_the_service_defaults_to_nothing_gathered(
+        self, assembler: DailySummaryInputAssembler
+    ) -> None:
+        """The dependency is optional, as the agenda port and read service are."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await assembler.assemble("user123", date(2026, 4, 27), "UTC", now=now)
+
+        assert result.upcoming_dates is None
+
+
+class TestOneClockReadingWithFourGuards:
+    """The fourth day question hangs off the same single reading as the others."""
+
+    @pytest.mark.asyncio
+    async def test_the_clock_is_still_read_once(
+        self,
+        dates_assembler: DailySummaryInputAssembler,
+        mock_upcoming_dates_service: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Adding a guard must not add a reading.
+
+        Each collaborator left to itself samples the wall clock afresh, and an
+        assembly crossing local midnight between two of them gathers a week for
+        one day while the rest of the input describes another.
+        """
+        instant = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+        readings = 0
+
+        def _counting_clock() -> datetime:
+            nonlocal readings
+            readings += 1
+            return instant
+
+        monkeypatch.setattr(daily_summary_input_assembler, "_utc_now", _counting_clock)
+
+        await dates_assembler.assemble("user123", date(2026, 4, 27), "UTC")
+
+        assert readings == 1
+        mock_upcoming_dates_service.upcoming_dates.assert_awaited_once_with(
+            "user123",
+            days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
+            today=date(2026, 4, 27),
+            now=instant,
+        )
