@@ -143,6 +143,34 @@ class JournalDailySummaryRepository(ABC):
         pass
 
     @abstractmethod
+    async def release_claim(self, user_id: str, summary_date: date) -> bool:
+        """Move a ``GENERATING`` row back to ``PENDING``, in one statement.
+
+        What a discarded generation does with the claim it is no longer going to
+        honour. ``GENERATING`` is not an inert status — ``get_or_generate``
+        returns early on it — so a claim left behind would strand the day behind
+        a marker nothing clears.
+
+        **One statement, guarded on the status**, rather than a read followed by
+        a write: the gap between the two is long enough for a concurrent run to
+        *finish* the day, and resetting a completed summary would discard a good
+        generation and pay for another. The guard makes that impossible.
+
+        What the guard cannot exclude is a concurrent run that has re-*claimed*
+        the row in the meantime, since one claim looks exactly like another with
+        no claim identity on the row. That case costs a regeneration and no
+        correctness: the row goes to ``PENDING``, the other run's write is
+        refused in its turn, and the next read generates from current inputs.
+        The alternative — leaving a claim nobody will honour — strands the day
+        indefinitely, which is the worse of the two by far.
+
+        Returns:
+            Whether a row was released, so a caller can tell "my claim" from
+            "somebody else's finished summary" without a second read.
+        """
+        pass
+
+    @abstractmethod
     async def user_ids_with_summaries(self) -> list[str]:
         """Every user that has at least one daily summary row.
 

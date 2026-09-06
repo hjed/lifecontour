@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals.daily_summary import JournalDailySummary
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.daily_summary_repository import (
     SqlJournalDailySummaryRepository,
@@ -506,7 +507,7 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
     """
 
     @pytest.fixture
-    def racing_service(self, async_connection):
+    def racing_service(self, async_connection: AsyncConnection) -> DailySummaryService:
         """A service whose input assembly invalidates the row as it runs.
 
         The invalidation lands inside the window the defect lives in, which is
@@ -515,7 +516,9 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
         """
         repo = SqlJournalDailySummaryRepository(async_connection)
 
-        async def assemble_and_invalidate(*args, **kwargs) -> DailySummaryInput:
+        async def assemble_and_invalidate(
+            *_args: object, **_kwargs: object
+        ) -> DailySummaryInput:
             await repo.invalidate_for_date(_USER, _DATE)
             return DailySummaryInput(
                 user_id=_USER,
@@ -545,7 +548,7 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
             ),
         )
 
-    async def _seed_stale(self, async_connection) -> None:
+    async def _seed_stale(self, async_connection: AsyncConnection) -> None:
         """The state a day is actually in when this race can happen.
 
         ``PENDING`` with its previous prose still standing: something changed,
@@ -567,8 +570,8 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
 
     @pytest.mark.asyncio
     async def test_the_stale_generation_is_discarded_and_the_row_stays_pending(
-        self, racing_service, async_connection
-    ):
+        self, racing_service: DailySummaryService, async_connection: AsyncConnection
+    ) -> None:
         await self._seed_stale(async_connection)
 
         await racing_service.get_or_generate(_USER, _DATE, async_connection)
@@ -580,7 +583,9 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
         assert row.summary_text != "Written from inputs that are already out of date."
 
     @pytest.mark.asyncio
-    async def test_the_next_read_regenerates_it(self, racing_service, async_connection):
+    async def test_the_next_read_regenerates_it(
+        self, racing_service: DailySummaryService, async_connection: AsyncConnection
+    ) -> None:
         """Which is what makes discarding the result the right answer.
 
         Nothing is lost by throwing the stale summary away: the ``PENDING``
@@ -610,7 +615,9 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
         assert result.summary_text == "Written from the inputs as they now are."
 
     @pytest.mark.asyncio
-    async def test_a_quiet_generation_is_written_as_before(self, async_connection):
+    async def test_a_quiet_generation_is_written_as_before(
+        self, async_connection: AsyncConnection
+    ) -> None:
         """The guard must not refuse the ordinary case, which is nearly all of them."""
         await self._seed_stale(async_connection)
         repo = SqlJournalDailySummaryRepository(async_connection)

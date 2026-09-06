@@ -569,3 +569,78 @@ class TestListingTheUsersThatHaveSummaries:
         listed = await daily_summary_repo.user_ids_with_summaries()
 
         assert "user_who_never_read_a_summary" not in listed
+
+
+class TestReleasingAClaimNobodyWillHonour:
+    """What a discarded generation does with the claim it is abandoning.
+
+    ``GENERATING`` is not an inert status — ``get_or_generate`` returns early on
+    it — so a claim left behind strands the day. Releasing it is one guarded
+    statement rather than a read followed by a write, because the gap between
+    those is long enough for a concurrent run to finish the day, and resetting a
+    *completed* summary would discard a good generation and pay for another.
+    """
+
+    _USER = "user_release_claim"
+    _DATE = date(2026, 4, 27)
+
+    @pytest.mark.asyncio
+    async def test_a_claim_is_released_to_pending(self, daily_summary_repo):
+        await daily_summary_repo.upsert(
+            JournalDailySummary(
+                user_id=self._USER,
+                summary_date=self._DATE,
+                summary_text="The prose the user is looking at.",
+                status=SummaryStatus.GENERATING,
+            )
+        )
+
+        assert await daily_summary_repo.release_claim(self._USER, self._DATE) is True
+
+        row = await daily_summary_repo.find_by_user_and_date(self._USER, self._DATE)
+        assert row is not None
+        assert row.status == SummaryStatus.PENDING
+        assert row.summary_text == "The prose the user is looking at."
+
+    @pytest.mark.asyncio
+    async def test_a_finished_summary_is_never_released(self, daily_summary_repo):
+        """The race review found: a concurrent run finished it in the meantime."""
+        await daily_summary_repo.upsert(
+            JournalDailySummary(
+                user_id=self._USER,
+                summary_date=self._DATE,
+                summary_text="Written by the faster run.",
+                status=SummaryStatus.GENERATED,
+                generated_at=datetime(2026, 4, 27, 8, 0, tzinfo=UTC),
+            )
+        )
+
+        assert await daily_summary_repo.release_claim(self._USER, self._DATE) is False
+
+        row = await daily_summary_repo.find_by_user_and_date(self._USER, self._DATE)
+        assert row is not None
+        assert row.status == SummaryStatus.GENERATED
+        assert row.summary_text == "Written by the faster run."
+
+    @pytest.mark.asyncio
+    async def test_releasing_moves_the_change_stamp(self, daily_summary_repo):
+        """So a request already assembling inputs can see the claim was dropped."""
+        await daily_summary_repo.upsert(
+            JournalDailySummary(
+                user_id=self._USER,
+                summary_date=self._DATE,
+                status=SummaryStatus.GENERATING,
+            )
+        )
+        before = await daily_summary_repo.find_by_user_and_date(self._USER, self._DATE)
+        assert before is not None and before.invalidated_at is None
+
+        await daily_summary_repo.release_claim(self._USER, self._DATE)
+
+        after = await daily_summary_repo.find_by_user_and_date(self._USER, self._DATE)
+        assert after is not None
+        assert after.invalidated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_a_day_with_no_row_releases_nothing(self, daily_summary_repo):
+        assert await daily_summary_repo.release_claim("nobody", self._DATE) is False

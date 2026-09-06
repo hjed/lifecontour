@@ -20,6 +20,7 @@ while asserting nothing.
 """
 
 from datetime import UTC, date, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from core_shared.models.contacts.entities import SummaryStatus
@@ -177,3 +178,61 @@ class TestAnInboundUpdateThatChangesNoJournalField:
         )
 
         assert await _status_on(async_connection, day) is None
+
+
+@pytest.mark.integration
+class TestAFailedInvalidationDoesNotTakeTheSyncWithIt:
+    """The helper is best-effort, and in PostgreSQL that needs a SAVEPOINT.
+
+    A failed statement poisons its transaction, so catching the exception
+    without rolling back to a savepoint would leave the enclosing unit of work
+    aborted — and the inbound journal and calendar writes this helper exists to
+    preserve would go down with it. Raised by review on the first cut, which
+    caught the exception and returned.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_journal_write_survives_a_broken_invalidation(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id="physio-4",
+                start=WHEN,
+            )
+        )
+        journal_id = created["journal_id"]
+        day = await _journal_day(async_connection, journal_id)
+        await _seed_generated_summary(async_connection, day)
+
+        # A statement that fails the way a real one would — against the database,
+        # inside the helper — rather than an exception raised in Python, which
+        # would not poison anything and so would not test the fix.
+        async def explode(*_args: object, **_kwargs: object) -> None:
+            await async_connection.execute(text("SELECT no_such_column"))
+
+        with patch(
+            "app.core.journal.services.daily_summary_invalidation_service"
+            ".invalidate_days_of_journal",
+            side_effect=explode,
+        ):
+            await processor.process_event(
+                sync_event(
+                    "journal_event.updated",
+                    calendar_id=calendar_id,
+                    external_event_id="physio-4",
+                    existing_journal_id=journal_id,
+                    start=WHEN,
+                    etag='"etag-moved"',
+                )
+            )
+
+        # The transaction is still usable and the journal is still there, which
+        # is the whole point: a stale summary is a worse day's prose, a failed
+        # sync is a lost journal.
+        assert await _journal_day(async_connection, journal_id) == day
+        assert await _status_on(async_connection, day) == SummaryStatus.GENERATED

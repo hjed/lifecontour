@@ -1018,8 +1018,15 @@ class JournalOutboxEventProcessor:
         not done: the Google worker consumes that event to sync a journal *out*,
         so announcing an inbound change would echo it straight back upstream.
 
-        Failure is logged and swallowed. A summary left stale is a worse day's
-        prose; a raised exception here would fail the sync itself and leave the
+        Failure is logged and swallowed **inside a SAVEPOINT**, which is what
+        makes swallowing it possible at all: a failed statement poisons its
+        transaction in PostgreSQL, so catching the exception without rolling
+        back to a savepoint would leave the enclosing unit of work aborted and
+        take the inbound journal and calendar writes down with it — the exact
+        harm this best-effort helper exists to avoid. Raised by review, which is
+        also where ``JournalService.delete_journal`` learned it.
+
+        A summary left stale is a worse day's prose; a failed sync leaves the
         journal unwritten, which is worse than that.
         """
         from app.core.journal.adapters.sql.daily_summary_repository import (
@@ -1037,16 +1044,19 @@ class JournalOutboxEventProcessor:
         )
 
         try:
-            journal = await SqlJournalRepository(self.connection).find_by_id(journal_id)
-            if journal is None:
-                return
-            await invalidate_days_of_journal(
-                journal,
-                date_resolver=JournalDateResolver(
-                    SqlUserSettingsRepository(self.connection)
-                ),
-                summary_repo=SqlJournalDailySummaryRepository(self.connection),
-            )
+            async with savepoint(self.connection):
+                journal = await SqlJournalRepository(self.connection).find_by_id(
+                    journal_id
+                )
+                if journal is None:
+                    return
+                await invalidate_days_of_journal(
+                    journal,
+                    date_resolver=JournalDateResolver(
+                        SqlUserSettingsRepository(self.connection)
+                    ),
+                    summary_repo=SqlJournalDailySummaryRepository(self.connection),
+                )
         except Exception:  # noqa: BLE001 — a stale summary must not fail a sync
             logger.warning(
                 "Could not mark the daily summary stale for an inbound change",

@@ -240,6 +240,36 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
             return None
         return self._row_to_entity(row)
 
+    async def release_claim(self, user_id: str, summary_date: date) -> bool:
+        """Move a ``GENERATING`` row back to ``PENDING``. One statement.
+
+        ``invalidated_at`` moves with it, for the reason
+        :meth:`invalidate_for_range` gives: a request already assembling inputs
+        for this day must be able to see that the claim it is about to write
+        against has been released.
+        """
+        result = await self.conn.execute(
+            text(
+                """
+                UPDATE journal_daily_summaries
+                SET status = :pending,
+                    invalidated_at = clock_timestamp(),
+                    updated_at = NOW()
+                WHERE user_id = :user_id
+                  AND summary_date = :summary_date
+                  AND status = :generating
+                RETURNING id
+            """
+            ),
+            {
+                "user_id": user_id,
+                "summary_date": summary_date,
+                "pending": SummaryStatus.PENDING.value,
+                "generating": SummaryStatus.GENERATING.value,
+            },
+        )
+        return result.fetchone() is not None
+
     async def user_ids_with_summaries(self) -> list[str]:
         """Every user with at least one summary row, each once.
 

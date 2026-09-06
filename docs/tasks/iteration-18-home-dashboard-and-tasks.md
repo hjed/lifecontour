@@ -12683,9 +12683,16 @@ gathered".
    of these writes generates anything.
 2. **A refused write left the row `GENERATING`, which is worse than the defect.** That status is not
    inert: `get_or_generate` returns early on it, so the day would have been stranded behind a marker
-   nothing clears. `_release_refused_claim` moves it back to `PENDING` — and **only when the row is
-   still this run's claim**, because a refusal can also mean a faster concurrent run finished the
-   summary, and marking that stale would throw away a good generation and pay for another.
+   nothing clears. `_release_refused_claim` moves it back to `PENDING` — and **only a claim**, because
+   a refusal can also mean a faster concurrent run finished the summary, and marking that stale would
+   throw away a good generation and pay for another.
+
+   *Review found the first cut of this did read-then-write*, which leaves exactly the gap it was
+   guarding against: the concurrent run can finish between the read and the write. It is now one
+   guarded statement, `release_claim`, which can never touch a completed summary. What a single
+   statement still cannot exclude is a run that has **re-claimed** the row, since one claim looks like
+   another with no claim identity on the row — that costs a regeneration and no correctness, and the
+   alternative, leaving a claim nobody will honour, strands the day indefinitely.
 
 **`clock_timestamp()` rather than `NOW()`**, which is the kind of detail that is invisible until it
 is load-bearing. `NOW()` is the *transaction's* start time, so two invalidations inside one
@@ -12732,6 +12739,15 @@ against real rows.
 | A refused write leaves the row `GENERATING` | 3 |
 | The inbound no-op update invalidates nothing | 3 |
 | An upstream cancellation invalidates nothing | 1 |
+| The inbound invalidation drops its `SAVEPOINT` | 1 |
+
+**Review found one more defect after the phase entry was first written, and it was real.** The
+best-effort invalidation in the inbound processor caught its exceptions **without a savepoint**. A
+failed statement poisons its transaction in PostgreSQL, so the catch would have left the enclosing
+unit of work aborted and taken the inbound journal and calendar writes down with it — the exact harm
+the helper exists to avoid. It now runs inside `savepoint(self.connection)`, the same guard
+`JournalService.delete_journal` uses, and an integration test fails a real statement inside the
+helper and asserts the journal survives.
 
 ##### Accepted limitations across Phase 7
 

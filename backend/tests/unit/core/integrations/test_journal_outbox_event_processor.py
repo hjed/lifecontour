@@ -2954,12 +2954,16 @@ class TestSeriesCancelledFanOutSavepoints(_SeriesProcessorTestBase):
         with pytest.raises(JournalOutboxEventProcessingError):
             await processor.process_event(_make_series_cancelled_event())
 
-        # One savepoint per item: the failed delete rolled back, the
-        # successful mark-cancelled committed.
+        # One savepoint per item — the failed delete rolled back, the successful
+        # mark-cancelled committed — **plus one** for the summary invalidation
+        # the surviving item performs. That invalidation is best-effort and runs
+        # in a savepoint of its own for the same reason the items do: a failed
+        # statement poisons the transaction, and swallowing its exception
+        # without rolling back would abort the whole inbound sync.
         savepoint = mock_connection.begin_nested.return_value
-        assert mock_connection.begin_nested.await_count == 2
+        assert mock_connection.begin_nested.await_count == 3
         savepoint.rollback.assert_awaited_once()
-        savepoint.commit.assert_awaited_once()
+        assert savepoint.commit.await_count == 2
 
 
 class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):

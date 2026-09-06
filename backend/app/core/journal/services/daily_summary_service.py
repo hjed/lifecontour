@@ -366,16 +366,15 @@ class DailySummaryService:
         criterion asks for in as many words, and is what makes the next read
         regenerate.
 
-        **Only when the row is still this run's claim.** A refusal can also mean
-        a concurrent run finished the summary between the re-read above and the
-        write; marking that fresh result stale would throw away a perfectly good
-        generation and pay for another.
+        **Only a claim, and the check is the statement itself.** A refusal can
+        also mean a concurrent run *finished* the summary between the re-read
+        above and the write, and marking that fresh result stale would throw
+        away a good generation and pay for another. Reading the status here and
+        writing in a second statement would leave exactly that gap open, so the
+        release is one guarded ``UPDATE`` instead — raised by review on the
+        first cut, which did read-then-write.
         """
-        current = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
-        if current is None or current.status != SummaryStatus.GENERATING:
-            return current
-
-        await self._summary_repo.invalidate_for_date(user_id, summary_date)
+        await self._summary_repo.release_claim(user_id, summary_date)
         return await self._summary_repo.find_by_user_and_date(user_id, summary_date)
 
     @transactional

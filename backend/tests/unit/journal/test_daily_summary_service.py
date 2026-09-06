@@ -67,6 +67,7 @@ def mock_summary_repo() -> AsyncMock:
     repo.update_status.return_value = None  # No existing row by default
     repo.claim_for_generation.return_value = True  # This run wins the marker
     repo.invalidate_for_date.return_value = None
+    repo.release_claim.return_value = True
     return repo
 
 
@@ -1181,20 +1182,24 @@ class TestARefusedWriteHandsTheDayBack:
             summary_date=date(2026, 4, 27),
             status=SummaryStatus.GENERATING,
         )
+        mock_summary_repo.release_claim.return_value = True
         mock_summary_repo.find_by_user_and_date.side_effect = [
             None,  # the cache check
             None,  # the concurrent-completion re-read
-            generating,  # what the refusal found
-            generating,  # what it hands back
+            generating,  # what it hands back after releasing the claim
         ]
 
         await self._service(mock_prompt_builder, mock_summary_repo).get_or_generate(
             "user123", date(2026, 4, 27), transaction=_NO_TXN
         )
 
-        mock_summary_repo.invalidate_for_date.assert_awaited_once_with(
+        # One guarded statement, not a read followed by a write: the gap
+        # between those is long enough for a concurrent run to finish the day,
+        # and this must never reset a completed summary.
+        mock_summary_repo.release_claim.assert_awaited_once_with(
             "user123", date(2026, 4, 27)
         )
+        mock_summary_repo.invalidate_for_date.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_a_concurrently_finished_summary_is_left_alone(
@@ -1216,6 +1221,8 @@ class TestARefusedWriteHandsTheDayBack:
             summary_text="Written by the faster run.",
             status=SummaryStatus.GENERATED,
         )
+        # The guarded release finds no GENERATING row and changes nothing.
+        mock_summary_repo.release_claim.return_value = False
         mock_summary_repo.find_by_user_and_date.side_effect = [None, None, completed]
 
         result = await self._service(
@@ -1223,7 +1230,9 @@ class TestARefusedWriteHandsTheDayBack:
         ).get_or_generate("user123", date(2026, 4, 27), transaction=_NO_TXN)
 
         assert result is completed
-        mock_summary_repo.invalidate_for_date.assert_not_awaited()
+        # The release is refused by its own guard rather than skipped by a
+        # status check here, so calling it is correct and harmless.
+        assert mock_summary_repo.release_claim.await_count == 1
 
     @pytest.mark.asyncio
     async def test_the_stamp_the_write_is_guarded_on_is_read_before_assembly(
