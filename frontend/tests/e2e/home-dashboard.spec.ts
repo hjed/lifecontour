@@ -273,8 +273,19 @@ const SUMMARY_ANCHOR = new Intl.DateTimeFormat('en-CA', {
  * 57 tests in this file with an error pointing nowhere near the change.
  */
 function nextDay(day: string): string {
+  return daysAfter(day, 1);
+}
+
+/**
+ * The calendar day `count` days after `day`, as `YYYY-MM-DD`.
+ *
+ * Stepped in UTC for the reason {@link nextDay} gives, and the two share this
+ * so a window's far end and an agenda's tomorrow cannot be stepped two
+ * different ways.
+ */
+function daysAfter(day: string, count: number): string {
   const stepped = new Date(`${day}T00:00:00Z`);
-  stepped.setUTCDate(stepped.getUTCDate() + 1);
+  stepped.setUTCDate(stepped.getUTCDate() + count);
   return stepped.toISOString().slice(0, 10);
 }
 
@@ -290,6 +301,24 @@ function nextDay(day: string): string {
 const MOCK_TOMORROW = '2026-09-30';
 
 /**
+ * The seven-day window both evidence sections are read for.
+ *
+ * **Derived from the anchor, not from `MOCK_TOMORROW`.** Those are different
+ * days doing different jobs: the mocked tomorrow is the agenda disclosure's
+ * label and is deliberately fixed, while this is a span the server computes
+ * from the day it anchored on. Pairing `days_ahead: 7` with a fixed end date
+ * a day after a *moving* start made a window that could not exist — the exact
+ * defect these mocks were corrected to stop, reintroduced by copying the wrong
+ * constant. Shared by both sections because the API sends them one window:
+ * the tasks and the dates cover the same week by construction.
+ */
+const MOCK_WINDOW = {
+  start_date: SUMMARY_ANCHOR,
+  end_date: daysAfter(SUMMARY_ANCHOR, 7),
+  days_ahead: 7,
+};
+
+/**
  * A ready upcoming-dates section holding nothing.
  *
  * `data: {}` served a payload the API cannot produce — the same mistake the
@@ -298,11 +327,7 @@ const MOCK_TOMORROW = '2026-09-30';
  * contract rather than an empty week, so these mocks now send the real shape.
  */
 const MOCK_EMPTY_UPCOMING_DATES = {
-  window: {
-    start_date: SUMMARY_ANCHOR,
-    end_date: MOCK_TOMORROW,
-    days_ahead: 7,
-  },
+  window: MOCK_WINDOW,
   total: 0,
   dates: [],
 };
@@ -316,11 +341,7 @@ const MOCK_EMPTY_UPCOMING_DATES = {
  * Phase 14; the mock stops lying now.
  */
 const MOCK_EMPTY_TASKS = {
-  window: {
-    start_date: SUMMARY_ANCHOR,
-    end_date: MOCK_TOMORROW,
-    days_ahead: 7,
-  },
+  window: MOCK_WINDOW,
   total: 0,
   tasks: [],
 };

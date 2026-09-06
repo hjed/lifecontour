@@ -73,6 +73,22 @@ const TOMORROW_DATE = '2026-07-30';
 const ANCHOR_DISPLAY = 'Wednesday, 29 July 2026';
 
 /**
+ * The seven-day window both evidence sections are read for.
+ *
+ * Spelled out rather than derived, like the anchor above — but `end_date` is
+ * genuinely `ANCHOR_DATE` plus `days_ahead`, which the first version of these
+ * mocks got wrong by a day in both sections. A window whose three fields
+ * disagree is a payload the endpoint cannot produce, and a mock that sends one
+ * can hide a card relying on bounds the server never sends. Shared, because
+ * the API sends the two sections one window: they cover the same week.
+ */
+const EMPTY_WINDOW = {
+  start_date: ANCHOR_DATE,
+  end_date: '2026-08-05',
+  days_ahead: 7,
+};
+
+/**
  * A ready upcoming-dates section holding nothing.
  *
  * These tests are about the page's frame, not its dates, so the section is
@@ -80,7 +96,7 @@ const ANCHOR_DISPLAY = 'Wednesday, 29 July 2026';
  * dates card in the one state the frame assertions expect.
  */
 const EMPTY_UPCOMING_DATES: HomeDashboardUpcomingDates = {
-  window: { start_date: ANCHOR_DATE, end_date: '2026-08-04', days_ahead: 7 },
+  window: EMPTY_WINDOW,
   total: 0,
   dates: [],
 };
@@ -93,7 +109,7 @@ const EMPTY_UPCOMING_DATES: HomeDashboardUpcomingDates = {
  * card that reads it lands in Phase 14; the shape is right from now.
  */
 const EMPTY_TASKS: HomeDashboardTasks = {
-  window: { start_date: ANCHOR_DATE, end_date: '2026-08-04', days_ahead: 7 },
+  window: EMPTY_WINDOW,
   total: 0,
   tasks: [],
 };

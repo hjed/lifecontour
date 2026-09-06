@@ -11101,6 +11101,28 @@ total settings reads — which, at a level where the read service is a double, i
 `test_the_dashboard_itself_resolves_the_zone_once`, and its docstring points at the integration test that
 counts the real total. Same lesson as the gap above, applied to the test that was left behind by it.
 
+**Acted on from the PR review** (`auggie review` on #1416). One finding, low severity, and it was right
+— and it is the same defect this phase had just corrected, reintroduced in the correction itself.
+
+- **A mock window whose three fields could not describe any real week.** The new e2e tasks fixture paired
+  `days_ahead: 7` with `end_date: MOCK_TOMORROW` — a *fixed* 2026-09-30 — against a `start_date` that is
+  the real today. The end was neither seven days after the start nor related to it. It was copied
+  verbatim from the dates mock beside it, which had carried the same fault since Phase 12. The window is
+  now derived, `daysAfter(SUMMARY_ANCHOR, 7)`, and **both sections share one constant**, because the API
+  sends them one window.
+- **The category, not the case.** Two more hand-written windows were wrong the same way, both
+  pre-existing: `page.test.tsx` had 2026-07-29 → 08-04 (six days) in the dates mock *and*, by the same
+  copy, in the tasks mock this phase added; `UpcomingDatesCard.test.tsx` had 2026-07-31 → 08-06. All
+  three are corrected, and where two sections sit in one fixture they now share a single window object
+  rather than repeating one. Nothing on the server needed changing: the integration suite already
+  asserts `end_date == anchor + days_ahead` through the endpoint, which is why the drift could only
+  survive in mocks.
+- **Why it is worth more than its severity.** Nothing renders these bounds yet, so nothing failed. But
+  the reason these mocks were rewritten at all is that a mock stating the endpoint's shape while sending
+  something else can hide a card built on bounds the server never sends — and Phase 14 is the card. The
+  general form is the one this phase keeps meeting: **a fixture copied from its neighbour inherits the
+  neighbour's bug, and a comment claiming it is "the real shape" makes the copy look reviewed.**
+
 **A deliberate divergence from the plan, recorded because it moves work between phases.** The plan said
 to seed the cancelled due journal through the calendar sync processor, following ITER18-001 Phase 14's
 ruling that a test seeding an operation's post-condition has assumed one side of a seam. It is written

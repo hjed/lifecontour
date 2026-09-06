@@ -72,7 +72,9 @@ function upcomingDates(
   dates: HomeDashboardUpcomingDate[]
 ): HomeDashboardUpcomingDates {
   return {
-    window: { start_date: ANCHOR_DATE, end_date: '2026-08-06', days_ahead: 7 },
+    // `end_date` is `ANCHOR_DATE` plus `days_ahead`; it read 08-06 and the
+    // three fields disagreed, which is a window the endpoint cannot send.
+    window: { start_date: ANCHOR_DATE, end_date: '2026-08-07', days_ahead: 7 },
     // Named on the wire and derived from the same list here, because the
     // server does not cap: total is what the show-more displays.
     total: dates.length,
