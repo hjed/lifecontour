@@ -20,6 +20,8 @@ journal existing, being owned by the acting user, and being future-dated — are
 service-layer concerns and arrive with Phases 3 and 4.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 import pytest_asyncio
 from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
@@ -1043,4 +1045,256 @@ class TestDueTaskCounts:
             )
 
         assert counts == {}
+        assert statements == []
+
+
+@pytest.mark.integration
+class TestTasksDueInJournals:
+    """Every task due in a set of journals, whatever became of it.
+
+    The daily summary's past-day read. Its subject is a *journal* rather than a
+    task, like ``count_not_done_tasks_by_due_journal`` above and unlike anything
+    else here — but where the indicator asks *how many are still live*, this asks
+    *which ones were due, and what happened to them*, which is why it is a
+    sibling query rather than a widening of either that one or
+    ``find_upcoming_tasks``.
+
+    **The status filter is its defining absence.** ``find_upcoming_tasks`` drops
+    everything but ``NOT_DONE`` because a done commitment is not upcoming; here a
+    done commitment is precisely the answer. So the first test below is the one
+    that separates a correct implementation from a copy of its neighbour.
+    """
+
+    async def test_returns_tasks_in_every_status(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Done, cancelled and not-done all come back — nothing is filtered.
+
+        A summary of a past day reports how each commitment resolved, and two of
+        the three resolutions are statuses the sibling listings exist to exclude.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=-1)
+        for status in (TaskStatus.NOT_DONE, TaskStatus.DONE, TaskStatus.CANCELLED):
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text=f"a {status.value} task",
+                status=status,
+            )
+
+        tasks = await task_repository.find_tasks_due_in_journals([due_id], USER_ID)
+
+        assert {task.status for task in tasks} == {
+            TaskStatus.NOT_DONE,
+            TaskStatus.DONE,
+            TaskStatus.CANCELLED,
+        }
+
+    async def test_a_task_carries_its_whole_row_back(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """The entity, not an id — the read model is assembled from these fields."""
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=-1)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="book the hut",
+            status=TaskStatus.DONE,
+        )
+
+        (task,) = await task_repository.find_tasks_due_in_journals([due_id], USER_ID)
+
+        assert task.id == task_id
+        assert task.user_id == USER_ID
+        assert task.text == "book the hut"
+        assert task.status is TaskStatus.DONE
+        assert task.creating_journal_id == creating_id
+        assert task.due_journal_id == due_id
+
+    async def test_only_the_due_anchor_qualifies(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A journal that recorded a commitment is not a journal it was due in.
+
+        The same distinction the indicator draws, and it matters more here: the
+        creating journal is nearly always in the past, so a query reading it
+        would attribute half the user's commitments to whatever day they were
+        first written down.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        mentioned_id = await create_journal(journal_repository, title="Mentioned")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=-1)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="one commitment, three journals",
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mentioned_id
+        )
+
+        found = await task_repository.find_tasks_due_in_journals(
+            [creating_id, mentioned_id], USER_ID
+        )
+
+        assert found == []
+
+    async def test_another_users_task_is_invisible(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A foreign task due in the caller's journal never reaches their prompt.
+
+        Nothing in the schema forbids the row — the anchors point at ``journals``
+        without comparing owners — so the predicate is the only thing keeping one
+        user's commitments out of another's summary, and a real second user's row
+        is the only way to show it is there.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=-1)
+        await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="not yours to see",
+            user_id=OTHER_USER_ID,
+        )
+
+        assert await task_repository.find_tasks_due_in_journals([due_id], USER_ID) == []
+
+    async def test_journals_outside_the_set_are_not_read(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """The answer is about the ids asked for, not about the user's tasks.
+
+        A day is a handful of journals out of a much longer list, and a query
+        that ignored its argument would still satisfy every assertion above.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        asked_id = await create_journal(
+            journal_repository, title="Asked", days_offset=-1
+        )
+        other_id = await create_journal(
+            journal_repository, title="Other", days_offset=-2
+        )
+        for due_id, task_text in ((asked_id, "on the day"), (other_id, "another day")):
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text=task_text,
+            )
+
+        tasks = await task_repository.find_tasks_due_in_journals([asked_id], USER_ID)
+
+        assert [task.text for task in tasks] == ["on the day"]
+
+    async def test_several_journals_are_answered_in_one_statement(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """A day is a set of journals, and it costs one read however many.
+
+        A functional test cannot see an N+1 — the answer is right either way —
+        so the statement count is asserted directly, as the batched link reads
+        beside this one are.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_ids = [
+            await create_journal(
+                journal_repository, title=f"Due {index}", days_offset=-1
+            )
+            for index in range(3)
+        ]
+        for index, due_id in enumerate(due_ids):
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text=f"task {index}",
+            )
+
+        with recorded_statements(async_connection) as statements:
+            tasks = await task_repository.find_tasks_due_in_journals(due_ids, USER_ID)
+
+        assert len(tasks) == 3
+        assert len(statements) == 1
+
+    async def test_the_order_is_the_due_journals_own(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ):
+        """Earliest journal first, ties broken by task id.
+
+        The day's own order, so the prompt reads down the day rather than down
+        the ``tasks`` table. The tie-break is what makes it **total**: a day's
+        journal commonly holds several tasks sharing one start, and without it
+        the same request could answer differently between runs.
+        """
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        later_id = await create_journal(
+            journal_repository,
+            title="Afternoon",
+            start=datetime(2026, 5, 4, 15, tzinfo=UTC),
+        )
+        earlier_id = await create_journal(
+            journal_repository,
+            title="Morning",
+            start=datetime(2026, 5, 4, 9, tzinfo=UTC),
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=later_id,
+            text="third",
+        )
+        for task_text in ("first", "second"):
+            await create_task(
+                async_connection,
+                creating_journal_id=creating_id,
+                due_journal_id=earlier_id,
+                text=task_text,
+            )
+
+        tasks = await task_repository.find_tasks_due_in_journals(
+            [later_id, earlier_id], USER_ID
+        )
+
+        assert [task.text for task in tasks] == ["first", "second", "third"]
+
+    async def test_an_empty_set_issues_no_statement(
+        self, task_repository: SqlTaskRepository, async_connection: AsyncConnection
+    ):
+        """A day with no journals has nothing to ask about.
+
+        The quiet-day case the always-eligible rule exists for, and the same
+        short-circuit ``count_not_done_tasks_by_due_journal`` takes.
+        """
+        with recorded_statements(async_connection) as statements:
+            tasks = await task_repository.find_tasks_due_in_journals([], USER_ID)
+
+        assert tasks == []
         assert statements == []

@@ -521,6 +521,10 @@ def _upcoming(*models: TaskReadModel, today: date = date(2026, 4, 27)) -> Upcomi
 def mock_task_read_service() -> AsyncMock:
     service = AsyncMock()
     service.read_models_for_upcoming_window.return_value = _upcoming()
+    # Both listings default to *gathered, nothing found*, which is the shape a
+    # quiet day really has. Left unset, an ``AsyncMock`` would hand back another
+    # mock, and a test asserting "nothing was due" would pass against anything.
+    service.read_models_due_in_journals.return_value = []
     return service
 
 
@@ -783,5 +787,229 @@ class TestOneTimezoneReadingPerAssembly:
         kwargs = (
             mock_task_read_service.read_models_for_upcoming_window.await_args.kwargs
         )
+        assert kwargs["timezone"] == ZoneInfo(FAR_EAST)
+        assert kwargs["now"] == now
+
+
+class TestThePastDaysTasksAreAssembled:
+    """What was due on a day that has been and gone, and how it stands now."""
+
+    @pytest.mark.asyncio
+    async def test_assembles_the_days_commitments(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """The listing's answer arrives whole, in the order it came back."""
+        first = _read_model(1, due_date=date(2026, 4, 26), text="book the venue")
+        second = _read_model(2, due_date=date(2026, 4, 26), text="call the council")
+        mock_task_read_service.read_models_due_in_journals.return_value = [
+            first,
+            second,
+        ]
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), "UTC", now=now
+        )
+
+        assert result.past_day_tasks is not None
+        assert [model.task.text for model in result.past_day_tasks] == [
+            "book the venue",
+            "call the council",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_asks_about_exactly_the_days_journals(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_journal_repo: AsyncMock,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """The journals already fetched, not a second window over the same day.
+
+        The day's journals were selected by *overlap*, so a multi-day journal
+        running through the day is one of them. Re-deriving the span inside the
+        tasks read would answer for a quietly different set than the one the
+        prompt is describing.
+        """
+        mock_journal_repo.get_all.return_value = [
+            _make_journal(journal_id=11),
+            _make_journal(journal_id=12),
+        ]
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        await tasks_assembler.assemble("user123", date(2026, 4, 26), "UTC", now=now)
+
+        mock_task_read_service.read_models_due_in_journals.assert_awaited_once_with(
+            "user123",
+            [11, 12],
+            now=now,
+            timezone=ZoneInfo("UTC"),
+        )
+
+    @pytest.mark.asyncio
+    async def test_nothing_due_is_not_the_same_as_nothing_gathered(
+        self, tasks_assembler: DailySummaryInputAssembler
+    ) -> None:
+        """An empty day is a fact about it; a current day was never asked.
+
+        The same distinction the week's window keeps, and load-bearing for the
+        same reason: only one of the two is something the prompt can say.
+        """
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), "UTC", now=now
+        )
+
+        assert result.past_day_tasks == []
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_east_of_utc(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """UTC's date is still the 26th, but the user's day is already the 27th.
+
+        So *their* 26th is a past day and their 27th is today — the opposite of
+        what a UTC-anchored guard would decide about both.
+        """
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        past = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_EAST, now=now
+        )
+        current = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 27), FAR_EAST, now=now
+        )
+
+        assert past.past_day_tasks is not None
+        assert current.past_day_tasks is None
+        assert mock_task_read_service.read_models_due_in_journals.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_today_is_resolved_west_of_utc(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """UTC has ticked over to the 27th; in Niue it is still the 26th."""
+        now = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+
+        current = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_WEST, now=now
+        )
+        assert current.past_day_tasks is None
+
+        past = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 25), FAR_WEST, now=now
+        )
+        assert past.past_day_tasks is not None
+        assert mock_task_read_service.read_models_due_in_journals.await_count == 1
+
+
+class TestPastDayTasksAreNotReadForAnyOtherDay:
+    """A resolution is a past day's, and the two guards are separate rules."""
+
+    @pytest.mark.asyncio
+    async def test_the_current_day_does_not_read_them(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """Today's commitments are the week's window, and listing them twice
+        would put the same task in two sections of one prompt."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 27), "UTC", now=now
+        )
+
+        assert result.past_day_tasks is None
+        mock_task_read_service.read_models_due_in_journals.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_future_day_does_not_read_them(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """Nothing has resolved on a day that has not happened."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 28), "UTC", now=now
+        )
+
+        assert result.past_day_tasks is None
+        mock_task_read_service.read_models_due_in_journals.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_without_the_read_service_defaults_to_nothing_gathered(
+        self, assembler: DailySummaryInputAssembler
+    ) -> None:
+        """The dependency is optional, as the agenda port and the window are."""
+        now = datetime(2026, 4, 27, 9, 0, tzinfo=UTC)
+
+        result = await assembler.assemble("user123", date(2026, 4, 26), "UTC", now=now)
+
+        assert result.past_day_tasks is None
+
+
+class TestOnePastDayReadingPerAssembly:
+    """A past day's read takes the same instant and zone every other one does."""
+
+    @pytest.mark.asyncio
+    async def test_the_clock_is_read_once_for_a_past_day_too(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Three guards now hang off one reading rather than two.
+
+        The past-day guard is the third question this assembly asks about which
+        day it is, and a third independent sampling of the wall clock is a third
+        chance for one assembly to straddle local midnight.
+        """
+        instant = datetime(2026, 4, 27, 3, 0, tzinfo=UTC)
+        readings = 0
+
+        def _counting_clock() -> datetime:
+            nonlocal readings
+            readings += 1
+            return instant
+
+        monkeypatch.setattr(daily_summary_input_assembler, "_utc_now", _counting_clock)
+
+        await tasks_assembler.assemble("user123", date(2026, 4, 26), "UTC")
+
+        assert readings == 1
+        kwargs = mock_task_read_service.read_models_due_in_journals.await_args.kwargs
+        assert kwargs["now"] == instant
+
+    @pytest.mark.asyncio
+    async def test_the_zone_handed_down_is_the_one_the_day_was_judged_in(
+        self,
+        tasks_assembler: DailySummaryInputAssembler,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """The guard and the read cannot be told apart by the zone they used.
+
+        Asserted at the boundary that separates them: 13:00Z is the 26th in UTC
+        and already the 27th in Kiritimati, so the 26th is only a *past* day if
+        the guard judged it in the user's zone — and the read is only reached
+        when it does.
+        """
+        now = datetime(2026, 4, 26, 13, 0, tzinfo=UTC)
+
+        gathered = await tasks_assembler.assemble(
+            "user123", date(2026, 4, 26), FAR_EAST, now=now
+        )
+
+        assert gathered.past_day_tasks is not None
+        kwargs = mock_task_read_service.read_models_due_in_journals.await_args.kwargs
         assert kwargs["timezone"] == ZoneInfo(FAR_EAST)
         assert kwargs["now"] == now

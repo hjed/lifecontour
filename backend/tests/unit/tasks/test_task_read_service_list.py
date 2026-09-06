@@ -28,11 +28,16 @@ import datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from core_shared.models.journals import EventDateRange, Journal, JournalNotFoundError
-from core_shared.models.tasks import LapseReason, Task, TaskLinkRole, TaskStatus
+from core_shared.models.journals import JournalNotFoundError
+from core_shared.models.tasks import LapseReason, TaskLinkRole, TaskStatus
 
-from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_read_service import TaskReadService
+from tests.unit.tasks.read_service_doubles import (
+    FAR_FUTURE,
+    journal_repo_knowing,
+    make_journal,
+    make_task,
+)
 from tests.unit.tasks.task_doubles import OTHER_USER_ID, USER_ID
 
 # The journal being viewed, plus the ones its tasks reach out to.
@@ -40,45 +45,10 @@ JOURNAL_ID = 100
 ELSEWHERE_ID = 200
 FURTHER_OUT_ID = 300
 
-# Every journal below is dated far enough out that nothing lapses by accident;
-# the lapse tests move a date deliberately.
-FAR_FUTURE = datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC)
+# The two dates this suite moves deliberately; ``FAR_FUTURE``, the default
+# every other journal takes, is shared with the sibling suites.
 NEARER_FUTURE = datetime.datetime(2029, 1, 1, tzinfo=datetime.UTC)
 LONG_PAST = datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)
-
-
-def make_journal(
-    journal_id: int,
-    start: datetime.datetime = FAR_FUTURE,
-    *,
-    title: str = "Permit Meeting",
-) -> Journal:
-    """A persisted journal, as the repository hands it back."""
-    return Journal(
-        id=journal_id,
-        user_id=USER_ID,
-        title=title,
-        content="content",
-        event_date_range=EventDateRange(start=start, end=start),
-    )
-
-
-def make_task(
-    task_id: int,
-    *,
-    creating_journal_id: int,
-    due_journal_id: int,
-    status: TaskStatus = TaskStatus.NOT_DONE,
-) -> Task:
-    """A persisted task, as the repository hands it back."""
-    return Task(
-        id=task_id,
-        user_id=USER_ID,
-        text=f"task {task_id}",
-        creating_journal_id=creating_journal_id,
-        due_journal_id=due_journal_id,
-        status=status,
-    )
 
 
 @pytest.fixture
@@ -96,60 +66,24 @@ def task_repo() -> AsyncMock:
 @pytest.fixture
 def journal_repo() -> AsyncMock:
     """A journal repository that knows every journal these tests name."""
-    repo = AsyncMock()
     known = {
         JOURNAL_ID: make_journal(JOURNAL_ID, title="Tuesday"),
         ELSEWHERE_ID: make_journal(ELSEWHERE_ID, title="Monday Planning"),
         FURTHER_OUT_ID: make_journal(FURTHER_OUT_ID, title="Trip Prep"),
     }
 
-    async def fetch(_user_id: str, journal_ids: list[int]) -> list[Journal]:
-        return [known[journal_id] for journal_id in journal_ids if journal_id in known]
-
-    repo.find_by_ids_for_user.side_effect = fetch
-    return repo
+    return journal_repo_knowing(known)
 
 
 @pytest.fixture
-def contact_repo() -> AsyncMock:
-    """A contact repository that knows nobody unless a test says otherwise."""
-    repo = AsyncMock()
-    repo.find_names_by_ids.return_value = {}
-    return repo
+def service(read_service: TaskReadService) -> TaskReadService:
+    """This file's own name for the shared ``read_service`` fixture.
 
-
-@pytest.fixture
-def calendar_info_repo() -> AsyncMock:
-    """A calendar-info repository reporting nothing cancelled."""
-    repo = AsyncMock()
-    repo.find_cancelled_journal_ids.return_value = set()
-    return repo
-
-
-@pytest.fixture
-def settings_repo() -> AsyncMock:
-    """A settings repository with no configured timezone — the UTC fallback."""
-    repo = AsyncMock()
-    repo.get_timezone.return_value = None
-    return repo
-
-
-@pytest.fixture
-def service(
-    task_repo: AsyncMock,
-    journal_repo: AsyncMock,
-    contact_repo: AsyncMock,
-    calendar_info_repo: AsyncMock,
-    settings_repo: AsyncMock,
-) -> TaskReadService:
-    """The service under test, over mocked ports."""
-    return TaskReadService(
-        task_repo=task_repo,
-        journal_repo=journal_repo,
-        contact_repo=contact_repo,
-        calendar_info_repo=calendar_info_repo,
-        date_resolver=JournalDateResolver(settings_repo),
-    )
+    An alias rather than a rename: the ports it wires up are defined once in
+    ``conftest.py`` now, and keeping the local name spared ~50 test signatures
+    a change that would have said nothing.
+    """
+    return read_service
 
 
 def seed_many(task_repo: AsyncMock, count: int) -> None:

@@ -316,6 +316,66 @@ class TaskRepository(ABC):
         """
 
     @abstractmethod
+    async def find_tasks_due_in_journals(
+        self, journal_ids: list[int], user_id: str
+    ) -> list[Task]:
+        """The user's tasks due in any of these journals, in **every** status.
+
+        The daily summary's past-day read: *what was due on this day, and what
+        became of it*. Its subject is a journal rather than a task, like
+        :meth:`count_not_done_tasks_by_due_journal` and unlike everything else
+        here — but the two ask different questions, which is why this is a
+        sibling rather than a widening of either it or :meth:`find_upcoming_tasks`.
+
+        **Nothing is filtered by status, and that absence is the method.** The
+        other two listings drop everything but ``NOT_DONE``, because a finished
+        commitment is neither live nor upcoming. Here a finished commitment is
+        the answer: a summary reporting how a day resolved has to be able to say
+        *done* and *cancelled*.
+
+        **The status returned is the current one**, read from the row as it
+        stands. There is no reconstruction of what was true on the day and no
+        replay of ``field_history`` — so a past day regenerated after a lapsed
+        task was finally completed reports it as done. That is the honest answer
+        to "what became of this", and it is what the user sees on the journal.
+
+        **Only the due anchor qualifies.** A journal a task was created in or
+        merely mentions did not have it *due* in it, and the creating journal is
+        nearly always in the past — a query reading it would attribute half a
+        user's commitments to whatever day they were first written down. A task
+        holding two roles in one journal is therefore returned once without
+        needing to be de-duplicated.
+
+        **Journal ids rather than a date window**, unlike
+        :meth:`find_upcoming_tasks`. The caller — the summary's input assembler —
+        has already selected the day's journals, by *overlap* rather than by
+        start date, so a multi-day journal running through the day is one of
+        them. Taking a window here would be a second and quietly different
+        definition of "that day's journals" than the one the prompt is
+        describing.
+
+        **Lapsing is not filtered here**, matching both siblings' reasoning: it
+        depends on the user's timezone and on a batched cancellation lookup the
+        caller already makes, so the verdict belongs to ``TaskReadService``. On
+        this read it is not an exclusion at all but part of the answer — *how*
+        an unfinished commitment lapsed is what the summary reports.
+
+        Args:
+            journal_ids: The day's journals. An empty list reads nothing at all.
+            user_id: The acting user. Load-bearing, as on
+                :meth:`count_not_done_tasks_by_due_journal`: nothing in the
+                schema stops a task being anchored to a journal somebody else
+                owns, so without the predicate one user's commitments could
+                reach another's summary.
+
+        Returns:
+            The matching tasks, ordered by due-journal start then task id — the
+            day's own order, so a caller renders down the day rather than down
+            the ``tasks`` table. The tie-break makes the order total: a journal
+            commonly holds several tasks sharing one start.
+        """
+
+    @abstractmethod
     async def list_intermediate_journal_ids_for_tasks(
         self, task_ids: list[int], user_id: str
     ) -> dict[int, list[int]]:

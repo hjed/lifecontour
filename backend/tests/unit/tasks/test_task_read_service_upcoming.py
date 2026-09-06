@@ -25,19 +25,18 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from core_shared.models.journals import EventDateRange, Journal
-from core_shared.models.tasks import Task, TaskStatus, TaskValidationError
+from core_shared.models.tasks import TaskValidationError
 
-from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_read_service import TaskReadService
+from tests.unit.tasks.read_service_doubles import (
+    CREATED_IN_ID,
+    journal_repo_knowing,
+    make_journal,
+    make_task,
+)
 from tests.unit.tasks.task_doubles import OTHER_USER_ID, USER_ID
 
 pytestmark = pytest.mark.unit
-
-# The journal every task below arose in — always in the past, as a creating
-# journal almost always is, so it can never be mistaken for the due anchor the
-# window judges.
-CREATED_IN_ID = 100
 
 # Somewhere inside a default window anchored on NOW, and somewhere beyond it.
 IN_WINDOW_ID = 200
@@ -54,37 +53,6 @@ TODAY_UTC = datetime.date(2026, 8, 11)
 TODAY_KIRITIMATI = datetime.date(2026, 8, 12)
 
 
-def make_journal(
-    journal_id: int, day: datetime.date, *, title: str = "Permit Meeting"
-) -> Journal:
-    """A persisted journal dated on ``day``, as the repository hands it back."""
-    start = datetime.datetime.combine(day, datetime.time(9, 0), tzinfo=UTC)
-    return Journal(
-        id=journal_id,
-        user_id=USER_ID,
-        title=title,
-        content="content",
-        event_date_range=EventDateRange(start=start, end=start),
-    )
-
-
-def make_task(
-    task_id: int,
-    *,
-    due_journal_id: int,
-    status: TaskStatus = TaskStatus.NOT_DONE,
-) -> Task:
-    """A persisted task, as the repository hands it back."""
-    return Task(
-        id=task_id,
-        user_id=USER_ID,
-        text=f"task {task_id}",
-        creating_journal_id=CREATED_IN_ID,
-        due_journal_id=due_journal_id,
-        status=status,
-    )
-
-
 @pytest.fixture
 def task_repo() -> AsyncMock:
     """A task repository holding one task due inside the window."""
@@ -98,7 +66,6 @@ def task_repo() -> AsyncMock:
 @pytest.fixture
 def journal_repo() -> AsyncMock:
     """A journal repository that knows every journal these tests name."""
-    repo = AsyncMock()
     known = {
         CREATED_IN_ID: make_journal(
             CREATED_IN_ID, TODAY_UTC - datetime.timedelta(days=30), title="Monday"
@@ -114,53 +81,18 @@ def journal_repo() -> AsyncMock:
         ),
     }
 
-    async def fetch(_user_id: str, journal_ids: list[int]) -> list[Journal]:
-        return [known[journal_id] for journal_id in journal_ids if journal_id in known]
-
-    repo.find_by_ids_for_user.side_effect = fetch
-    return repo
+    return journal_repo_knowing(known)
 
 
 @pytest.fixture
-def contact_repo() -> AsyncMock:
-    """A contact repository that knows nobody unless a test says otherwise."""
-    repo = AsyncMock()
-    repo.find_names_by_ids.return_value = {}
-    return repo
+def service(read_service: TaskReadService) -> TaskReadService:
+    """This file's own name for the shared ``read_service`` fixture.
 
-
-@pytest.fixture
-def calendar_info_repo() -> AsyncMock:
-    """A calendar-info repository reporting nothing cancelled."""
-    repo = AsyncMock()
-    repo.find_cancelled_journal_ids.return_value = set()
-    return repo
-
-
-@pytest.fixture
-def settings_repo() -> AsyncMock:
-    """A settings repository with no configured timezone — the UTC fallback."""
-    repo = AsyncMock()
-    repo.get_timezone.return_value = None
-    return repo
-
-
-@pytest.fixture
-def service(
-    task_repo: AsyncMock,
-    journal_repo: AsyncMock,
-    contact_repo: AsyncMock,
-    calendar_info_repo: AsyncMock,
-    settings_repo: AsyncMock,
-) -> TaskReadService:
-    """The service under test, over mocked ports."""
-    return TaskReadService(
-        task_repo=task_repo,
-        journal_repo=journal_repo,
-        contact_repo=contact_repo,
-        calendar_info_repo=calendar_info_repo,
-        date_resolver=JournalDateResolver(settings_repo),
-    )
+    An alias rather than a rename: the ports it wires up are defined once in
+    ``conftest.py`` now, and keeping the local name spared ~50 test signatures
+    a change that would have said nothing.
+    """
+    return read_service
 
 
 def window_bounds(task_repo: AsyncMock) -> tuple[datetime.datetime, datetime.datetime]:

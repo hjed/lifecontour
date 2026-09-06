@@ -14,6 +14,13 @@ reasoning: ``TaskReadService.read_models_for_upcoming_window`` is the query the
 dashboard's tasks section consumes, exclusions and ordering included, and a
 summary that re-derived "what is coming up" would eventually describe a week the
 dashboard beneath it does not show.
+
+**A past day gets its own listing instead**, and only ever instead:
+``read_models_due_in_journals`` reports what was due in that day's journals and
+how each commitment stands **now**. The two are complementary rather than
+alternatives to one query — the week's window excludes done, cancelled and
+lapsed tasks, which are exactly the answers a past day is being asked for — and
+their guards are exclusive, so no task can appear in two sections of one prompt.
 """
 
 from __future__ import annotations
@@ -36,7 +43,7 @@ from app.core.settings.timezone_utils import DEFAULT_TIMEZONE, resolve_timezone
 if TYPE_CHECKING:
     from zoneinfo import ZoneInfo
 
-    from core_shared.models.tasks import UpcomingTasks
+    from core_shared.models.tasks import TaskReadModel, UpcomingTasks
 
     from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.models.repositories import (
@@ -233,6 +240,9 @@ class DailySummaryInputAssembler:
             upcoming_tasks=await self._upcoming_tasks_for(
                 user_id, summary_date, tz, moment
             ),
+            past_day_tasks=await self._past_day_tasks_for(
+                user_id, summary_date, journal_ids, tz, moment
+            ),
         )
 
     async def _agenda_for(
@@ -297,6 +307,56 @@ class DailySummaryInputAssembler:
         return await self._task_read_service.read_models_for_upcoming_window(
             user_id,
             days_ahead=DEFAULT_UPCOMING_DAYS_AHEAD,
+            now=now,
+            timezone=tz,
+        )
+
+    async def _past_day_tasks_for(
+        self,
+        user_id: str,
+        summary_date: date,
+        journal_ids: list[int],
+        tz: ZoneInfo,
+        now: datetime,
+    ) -> list[TaskReadModel] | None:
+        """What was due on this day and how it resolved, once the day has gone.
+
+        The mirror of :meth:`_upcoming_tasks_for`, and its complement: this fires
+        only for a day already behind the user's today, that one only for today
+        itself, so the same task can never be listed in two sections of one
+        prompt. A future day gets neither, having resolved nothing and being no
+        part of the current day's week.
+
+        **The day's own journals are the question, not a second window over the
+        same dates.** They were selected above by *overlap*, so a multi-day
+        journal running through the day is one of them; re-deriving the span
+        inside the tasks read would answer for a quietly different set of
+        journals than the one the prompt goes on to describe.
+
+        **Nothing is reconstructed.** The listing reports each task's status as
+        it stands now — ``field_history`` is never replayed — so a past day
+        regenerated after a lapsed task was finally completed describes it as
+        done. That consequence is the phase's, deliberate, and the honest answer
+        to "what became of this": it is what the user sees on the journal.
+
+        ``None`` for any other day, and distinct from an empty answer on the same
+        terms the week's window keeps: ``None`` was never asked, while a past day
+        with nothing due is a fact about that day. The read is reached even when
+        the day holds no journals at all, because that guard belongs to the
+        listing — which answers without a query — and keeping it there leaves
+        this one purely about *which day it is*.
+
+        Both halves of "which day is it" travel, as they do above and for the
+        same reason: one instant and one already-resolved zone, so no two
+        decisions in this assembly can disagree about the user's day.
+        """
+        if summary_date >= today_in(tz, now):
+            return None
+        if self._task_read_service is None:
+            return None
+        return await self._task_read_service.read_models_due_in_journals(
+            user_id,
+            journal_ids,
             now=now,
             timezone=tz,
         )

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from core_shared.models.tasks import LapseReason, TaskStatus
+
 from app.core.settings.timezone_utils import (
     DEFAULT_TIMEZONE,
     format_datetime,
@@ -76,6 +78,33 @@ def _capped(value: str, cap: int) -> str:
     return value if len(value) <= cap else value[:cap] + "..."
 
 
+def _overflow_note(omitted: int, *, subject: str, cap: int) -> str:
+    """``(3 further tasks due on this day are not listed; …)`` — or nothing.
+
+    The counted remainder every capped **list** in this prompt ends with. A
+    model told "and 6 more" can say the day was full; one handed a quietly
+    shortened list will describe it as complete.
+
+    **Shared only once a third caller appeared.** The upcoming-tasks phase left
+    this duplicated between the agenda and the week's tasks on the grounds that
+    parameterising the noun *and* the phrase would produce a template neither
+    caller could read. The past-day resolutions made it a third copy, and with
+    only ``subject`` varying — *events on this day*, *tasks due in this window*,
+    *tasks due on this day* — each call site still reads as its own sentence.
+    The agenda's wording moved from "the agenda above" to "the list above" with
+    that extraction; nothing asserted the old phrase.
+
+    Returning ``""`` for nothing omitted keeps the caller's decision at the
+    caller, the way :func:`_with_people` returns ``None``.
+    """
+    if not omitted:
+        return ""
+    return (
+        f"({omitted} further {subject} are not listed; "
+        f"the list above is capped at {cap}.)"
+    )
+
+
 def _with_people(names: list[str], cap: int) -> str | None:
     """``with A, B and 2 more`` — or nothing at all when there is nobody.
 
@@ -119,9 +148,10 @@ class DailySummaryPromptBuilder:
         2. Day overview (date, counts)
         3. Today's agenda (current day only)
         4. Tasks due in the week ahead (current day only)
-        5. Journal entries (title, content, types, contacts, mood)
-        6. Previous summary (for incremental update)
-        7. Output format specification
+        5. How this day's tasks resolved (past day only)
+        6. Journal entries (title, content, types, contacts, mood)
+        7. Previous summary (for incremental update)
+        8. Output format specification
         """
         sections: list[str] = []
 
@@ -146,18 +176,27 @@ class DailySummaryPromptBuilder:
         if tasks_section:
             sections.append(tasks_section)
 
-        # 5. Journal entries
+        # 5. How this day's commitments resolved — a past day's, and only a
+        #    past day's. Mutually exclusive with the section above, so the two
+        #    occupy one slot in the prompt rather than competing for it.
+        resolutions_section = self._build_past_day_tasks(
+            summary_input, temporal_context
+        )
+        if resolutions_section:
+            sections.append(resolutions_section)
+
+        # 6. Journal entries
         entries_section = self._build_journal_entries(summary_input)
         if entries_section:
             sections.append(entries_section)
 
-        # 6. Previous summary
+        # 7. Previous summary
         if summary_input.previous_summary:
             sections.append(
                 self._build_previous_summary(summary_input.previous_summary)
             )
 
-        # 7. Output format
+        # 8. Output format
         sections.append(self._build_output_format())
 
         return "\n\n".join(sections)
@@ -253,11 +292,11 @@ class DailySummaryPromptBuilder:
             self._agenda_line(entry, timezone, summary_input.summary_date)
             for entry in shown
         )
-        if omitted:
-            lines.append(
-                f"({omitted} further events on this day are not listed; the agenda "
-                f"above is capped at {MAX_AGENDA_ENTRIES}.)"
-            )
+        note = _overflow_note(
+            omitted, subject="events on this day", cap=MAX_AGENDA_ENTRIES
+        )
+        if note:
+            lines.append(note)
         return "\n".join(lines)
 
     @classmethod
@@ -401,11 +440,11 @@ class DailySummaryPromptBuilder:
         lines.extend(
             cls._task_line(model, upcoming.window.first_day) for model in shown
         )
-        if omitted:
-            lines.append(
-                f"({omitted} further tasks due in this window are not listed; the "
-                f"list above is capped at {MAX_TASK_ENTRIES}.)"
-            )
+        note = _overflow_note(
+            omitted, subject="tasks due in this window", cap=MAX_TASK_ENTRIES
+        )
+        if note:
+            lines.append(note)
         return "\n".join(lines)
 
     @classmethod
@@ -442,6 +481,114 @@ class DailySummaryPromptBuilder:
             parts.append(people)
 
         return f"- {' '.join(parts)}"
+
+    @classmethod
+    def _build_past_day_tasks(
+        cls, summary_input: DailySummaryInput, temporal_context: str
+    ) -> str:
+        """What was due on this day and how it stands, for a past day and no other.
+
+        The complement of :meth:`_build_upcoming_tasks`, not a variant of it: that
+        section lists what is still outstanding in the week ahead, this one lists
+        what was due on a day gone by *including* the commitments already settled.
+        Their guards are mutually exclusive — ``Past`` here, ``Today`` there — so
+        a task due today can never be rendered twice in one prompt.
+
+        **The section says outright that the statuses are current.** They are read
+        at generation time and nothing replays field history, so a day
+        regenerated after a lapsed task was finally completed reports it as done.
+        Left unsaid, a model reading "done" beside a past date would narrate the
+        user finishing it *on the day* — which the data does not say, and which is
+        false exactly when the honest answer matters most.
+
+        The second of the two guards on the temporal rule, the assembler's being
+        the first. Each resolves the local date through the same pair underneath,
+        so the two cannot disagree, and having the rendering half here is what
+        makes "a past-day prompt carries no forward-looking material" assertable
+        without a database.
+
+        An empty day contributes nothing rather than an empty heading, the stance
+        both sections above already take.
+        """
+        resolved = summary_input.past_day_tasks
+        if temporal_context != "Past" or not resolved:
+            return ""
+
+        shown = resolved[:MAX_TASK_ENTRIES]
+        omitted = len(resolved) - len(shown)
+
+        lines = [
+            "## Tasks Due On This Day",
+            "The commitments due in this day's journals, and how each one stands now.",
+            "These are current statuses rather than a reconstruction of the day: a "
+            "task finished later reads as done here, so describe where things "
+            "stand rather than what the user did on the day.",
+        ]
+        lines.extend(cls._past_task_line(model) for model in shown)
+        note = _overflow_note(
+            omitted, subject="tasks due on this day", cap=MAX_TASK_ENTRIES
+        )
+        if note:
+            lines.append(note)
+        return "\n".join(lines)
+
+    @classmethod
+    def _past_task_line(cls, model: TaskReadModel) -> str:
+        """One resolved commitment as a single line.
+
+        **No date, unlike the forward-looking line.** Those tasks are spread over
+        a week, so each needs its due date and a relative label to be placed at
+        all; every task here is due on the day the prompt is already headed with,
+        and repeating it would be noise the model has to read past. The journal
+        title is what distinguishes one from another.
+
+        The text is capped for the reason :data:`MAX_TASK_TEXT_LENGTH` gives —
+        ``tasks.text`` is unbounded whichever section renders it, and a cap on the
+        list is not a cap on an item.
+        """
+        parts = [
+            _capped(model.task.text, MAX_TASK_TEXT_LENGTH),
+            f'(in "{model.due_journal.title}")',
+        ]
+
+        people = _with_people(
+            [contact.display_name for contact in model.contacts], MAX_TASK_CONTACTS
+        )
+        if people:
+            parts.append(people)
+
+        return f"- {' '.join(parts)} — {cls._resolution(model)}"
+
+    @staticmethod
+    def _resolution(model: TaskReadModel) -> str:
+        """How this commitment stands now, in the words the product already uses.
+
+        Derived rather than stored: the status is the task's own and the lapse is
+        the verdict ``build_task_read_model`` already reached, so this can never
+        disagree with the marker the user sees on the journal. The vocabulary
+        deliberately mirrors the frontend's ``statusWording`` and ``lapseWording``
+        (``frontend/src/lib/task-display.ts``) — the summary and the UI describing
+        one task in two vocabularies is how a user comes to think they are two
+        different things.
+
+        The two lapse causes are worded apart because they are different news:
+        "the day went by" and "the meeting was called off" ask the user for
+        different things, which is why the rule returns a reason rather than a
+        boolean.
+        """
+        if model.task.status is TaskStatus.DONE:
+            return "done"
+        if model.task.status is TaskStatus.CANCELLED:
+            return "cancelled"
+        if model.lapse_reason is LapseReason.DUE_JOURNAL_CANCELLED:
+            return "still not done; lapsed, its due journal was cancelled"
+        if model.lapse_reason is LapseReason.DATE_PASSED:
+            return "still not done; lapsed, the day passed"
+        # Unreachable through this section: a not-done task due in a journal of a
+        # day already behind today has lapsed by one cause or the other. Kept, and
+        # worded as the plain truth about the task, because inventing a phrase for
+        # a state that would mean the guards were wrong is worse than saying less.
+        return "still not done"
 
     @staticmethod
     def _relative_day(due: date, today: date) -> str:
