@@ -8,9 +8,10 @@ day are four ``UPDATE``\\ s and no generations, and a summary is never
 regenerated underneath a user because **nothing that could generate one is
 injected here**.
 
-It reads three things and writes one: the journal (for the days it occupies),
-the user's timezone (because a day is local, never UTC's), and the summary
-repository (to mark the span). The day arithmetic itself lives in
+It reads four things and writes one: the journal (for the days it occupies), the
+task (for the due journal a payload does not name), the contact's dates (to tell
+a birthday this week from one in November), and the user's timezone (because a
+day is local, never UTC's). The day arithmetic itself lives in
 :mod:`app.core.journal.services.daily_summary_invalidation_targets`, which is
 pure.
 
@@ -25,9 +26,12 @@ possible.
 
 from __future__ import annotations
 
+import datetime
 from typing import TYPE_CHECKING, Any
 
 import structlog
+from core_shared.models.contacts.important_date_occurrence import resolve_occurrence
+from core_shared.models.date_window import DEFAULT_UPCOMING_DAYS_AHEAD, upcoming_window
 
 from app.core.journal.models.events import parse_event_date_range
 from app.core.journal.services.daily_summary_invalidation_targets import (
@@ -35,18 +39,35 @@ from app.core.journal.services.daily_summary_invalidation_targets import (
     InvalidationTarget,
     day_span_of,
     targets_for_journal,
+    targets_for_task_due_span,
 )
+from app.core.journal.services.journal_date_resolver import today_in
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
+    from zoneinfo import ZoneInfo
 
+    from app.core.contacts.models.repositories import ContactRepository
     from app.core.journal.models.repositories import JournalRepository
     from app.core.journal.services.daily_summary_repository import (
         JournalDailySummaryRepository,
     )
     from app.core.journal.services.journal_date_resolver import JournalDateResolver
+    from app.core.tasks.models.repositories import TaskRepository
 
 logger = structlog.get_logger()
+
+
+def _utc_now() -> datetime.datetime:
+    """The clock, read **once** per event and handed down from there.
+
+    Module-level so tests can pin it, and read once because an event that
+    sampled it twice could build a window against one local day and judge the
+    task's own day against the next — the defect ITER18-001 Phase 14 found and
+    ITER18-004 Phase 11's review found twice more.
+    """
+    return datetime.datetime.now(tz=datetime.UTC)
+
 
 #: Journal events whose subject is a journal that still exists, so its days can
 #: be read from the row. ``JournalUpdated`` is here and does one thing more: it
@@ -72,11 +93,52 @@ JOURNAL_DELETED_EVENT = "JournalDeleted"
 #: relationships. The journal travels on the payload; see the event's docstring.
 JOURNAL_CONTACT_EVENT = "ContactSummaryRefreshRequested"
 
+#: Task events whose subject still exists and whose **due** journal decides the
+#: days. ``TaskJournalLinked``/``TaskJournalUnlinked`` are deliberately absent:
+#: a task's intermediate journals are populated on the read model and never
+#: rendered, so attaching one cannot change a prompt.
+TASK_SPAN_EVENTS = frozenset(
+    {
+        "TaskCreated",
+        "TaskUpdated",
+        "TaskDueJournalRetargeted",
+        "TaskJournalLinksRepointed",
+    }
+)
+
+#: A deleted task has no row and a deliberately minimal payload, so its day
+#: cannot be resolved at all; see :meth:`_targets_for_deleted_task`.
+TASK_DELETED_EVENT = "TaskDeleted"
+
+#: Important-date events. The app publishes ``ImportantDateAdded`` for every
+#: surviving date whenever a contact is saved — ``update_contact`` deletes them
+#: all and re-adds them — so these fire on an add, an edit *and* a delete.
+IMPORTANT_DATE_ADDED_EVENT = "ImportantDateAdded"
+IMPORTANT_DATE_DELETED_EVENT = "ImportantDateDeleted"
+
+#: A contact save that changed how many dates it has. This is the **only**
+#: announcement that a date was removed: the re-add above publishes nothing for
+#: the one that went, and ``ImportantDateDeleted`` has no production caller.
+CONTACT_UPDATED_EVENT = "ContactUpdated"
+
+#: The ``changed_fields`` key that says so, whose pair is a ``"count:N"`` string
+#: rather than a number.
+IMPORTANT_DATES_FIELD = "important_dates"
+
 #: Everything this service handles, in one place so a consumer's subscription
 #: and a test's negatives can both be written against it rather than against a
 #: list somebody has to remember to extend.
 HANDLED_EVENT_TYPES = frozenset(
-    JOURNAL_SPAN_EVENTS | {JOURNAL_DELETED_EVENT, JOURNAL_CONTACT_EVENT}
+    JOURNAL_SPAN_EVENTS
+    | TASK_SPAN_EVENTS
+    | {
+        JOURNAL_DELETED_EVENT,
+        JOURNAL_CONTACT_EVENT,
+        TASK_DELETED_EVENT,
+        IMPORTANT_DATE_ADDED_EVENT,
+        IMPORTANT_DATE_DELETED_EVENT,
+        CONTACT_UPDATED_EVENT,
+    }
 )
 
 
@@ -94,10 +156,14 @@ class DailySummaryInvalidationService:
         journal_repo: JournalRepository,
         date_resolver: JournalDateResolver,
         summary_repo: JournalDailySummaryRepository,
+        task_repo: TaskRepository,
+        contact_repo: ContactRepository,
     ) -> None:
         self.journal_repo = journal_repo
         self.date_resolver = date_resolver
         self.summary_repo = summary_repo
+        self.task_repo = task_repo
+        self.contact_repo = contact_repo
 
     async def invalidate_for_event(
         self, event_type: str, event_data: Mapping[str, Any]
@@ -114,6 +180,18 @@ class DailySummaryInvalidationService:
             targets = await self._targets_for_deleted_journal(event_data)
         elif event_type == JOURNAL_CONTACT_EVENT:
             targets = await self._targets_for_journal_contact_change(event_data)
+        elif event_type in TASK_SPAN_EVENTS:
+            targets = await self._targets_for_task_event(event_type, event_data)
+        elif event_type == TASK_DELETED_EVENT:
+            targets = await self._targets_for_deleted_task(event_data)
+        elif event_type in (
+            IMPORTANT_DATE_ADDED_EVENT,
+            IMPORTANT_DATE_DELETED_EVENT,
+            CONTACT_UPDATED_EVENT,
+        ):
+            targets = await self._targets_for_important_date_event(
+                event_type, event_data
+            )
         else:
             return
 
@@ -209,6 +287,175 @@ class DailySummaryInvalidationService:
 
         tz = await self.date_resolver.timezone_for(str(user_id))
         return targets_for_journal(str(user_id), day_span_of(event_date_range, tz))
+
+    async def _targets_for_task_event(
+        self, event_type: str, event_data: Mapping[str, Any]
+    ) -> frozenset[InvalidationTarget]:
+        """The days a task change makes stale, via its **due** journal.
+
+        A retarget names two journals and yields two answers — the day that lost
+        the task and the day that gained it, which is the criterion in its own
+        words. Everything else names at most one, and ``TaskUpdated`` names
+        none: it carries only what changed, never an anchor it kept, so the task
+        is read for it.
+        """
+        user_id = event_data.get("user_id")
+        if not user_id:
+            logger.debug("No user_id on the task event; nothing to invalidate")
+            return frozenset()
+
+        journal_ids = self._due_journal_ids(event_type, event_data)
+        if not journal_ids:
+            task_id = event_data.get("task_id")
+            if task_id is None:
+                return frozenset()
+            task = await self.task_repo.find_by_id(int(task_id), str(user_id))
+            if task is None:
+                # Deleted between the write and this consumer running; its own
+                # deletion event is what speaks for it.
+                logger.debug("Task no longer exists", task_id=task_id)
+                return frozenset()
+            journal_ids = [task.due_journal_id]
+
+        now = _utc_now()
+        tz = await self.date_resolver.timezone_for(str(user_id))
+        today = today_in(tz, now)
+        window = upcoming_window(today, DEFAULT_UPCOMING_DAYS_AHEAD)
+
+        targets: set[InvalidationTarget] = set()
+        for journal_id in journal_ids:
+            journal = await self.journal_repo.find_by_id(journal_id)
+            if journal is None:
+                # A merge's absorbed journal is deleted by the merge itself, so
+                # this is expected rather than exceptional — and the day it was
+                # on is covered by its own ``JournalDeleted``, which carries the
+                # days it occupied.
+                continue
+            targets |= targets_for_task_due_span(
+                str(user_id),
+                day_span_of(journal.event_date_range, tz),
+                today=today,
+                window=window,
+            )
+        return frozenset(targets)
+
+    @staticmethod
+    def _due_journal_ids(event_type: str, event_data: Mapping[str, Any]) -> list[int]:
+        """The due journals a payload names, which is none, one or two.
+
+        ``TaskCreated`` carries the anchor outright. A retarget and a journal
+        merge both carry an ``(old, new)`` pair under ``due_journal_id`` — and
+        the merge's is conditional, because only some merges move the anchor, so
+        its absence means the task's due journal did not change.
+        """
+        if event_type == "TaskCreated":
+            due_journal_id = event_data.get("due_journal_id")
+            return [int(due_journal_id)] if due_journal_id is not None else []
+
+        changed_fields = event_data.get("changed_fields") or {}
+        if not isinstance(changed_fields, dict):
+            return []
+        pair = changed_fields.get("due_journal_id")
+        if not isinstance(pair, list | tuple):
+            return []
+        return [int(journal_id) for journal_id in pair if journal_id is not None]
+
+    async def _targets_for_deleted_task(
+        self, event_data: Mapping[str, Any]
+    ) -> frozenset[InvalidationTarget]:
+        """Today, and only today, because no day can be resolved.
+
+        ``TaskDeleted``'s payload is deliberately minimal — that domain's
+        standing decision, so a delete costs one statement and no read — and the
+        row is gone, so its due journal is unknowable. Today is marked because a
+        task the user has deleted still named in today's prose is the visible
+        harm. **A past day that named it goes on doing so**, and that is
+        recorded as a limitation of this phase rather than hidden here.
+        """
+        user_id = event_data.get("user_id")
+        if not user_id:
+            return frozenset()
+        today = today_in(
+            await self.date_resolver.timezone_for(str(user_id)), _utc_now()
+        )
+        return frozenset({InvalidationTarget.for_day(str(user_id), today)})
+
+    async def _targets_for_important_date_event(
+        self, event_type: str, event_data: Mapping[str, Any]
+    ) -> frozenset[InvalidationTarget]:
+        """The current day of every user who has a summary to make stale.
+
+        **Whose day?** ``contacts`` carries no owner column, so none of these
+        events names a user. Invalidation only ever touches rows that exist, so
+        the set that can possibly be affected *is* the users who already have a
+        summary row — which is a bound rather than a scan, and where the users
+        come from.
+
+        **Which of them?** Only those whose week the date falls in, when there
+        is a row left to ask. There usually is: ``update_contact`` re-adds every
+        date on every contact save, so without the window test editing a phone
+        number would cost an AI call for a birthday six months away. When the
+        row is gone — a deletion, or the count pair that is a deletion's only
+        announcement — there is no before-image to test and today is marked
+        unconditionally.
+        """
+        if event_type == CONTACT_UPDATED_EVENT and not self._changed_the_date_count(
+            event_data
+        ):
+            return frozenset()
+
+        stored = None
+        if event_type == IMPORTANT_DATE_ADDED_EVENT:
+            stored = await self._stored_date(event_data)
+
+        now = _utc_now()
+        targets: set[InvalidationTarget] = set()
+        for user_id in await self.summary_repo.user_ids_with_summaries():
+            tz: ZoneInfo = await self.date_resolver.timezone_for(user_id)
+            today = today_in(tz, now)
+            window = upcoming_window(today, DEFAULT_UPCOMING_DAYS_AHEAD)
+            if stored is not None and (
+                resolve_occurrence(
+                    stored, first_day=window.first_day, last_day=window.last_day
+                )
+                is None
+            ):
+                continue
+            targets.add(InvalidationTarget.for_day(user_id, today))
+        return frozenset(targets)
+
+    @staticmethod
+    def _changed_the_date_count(event_data: Mapping[str, Any]) -> bool:
+        """Whether this contact save added or removed a date.
+
+        The pair is ``("count:2", "count:1")`` — strings, not numbers — and it
+        is written only when the count moved, so its presence *is* the question
+        being asked. A contact whose name changed publishes no such key, and a
+        renamed contact is a recorded limitation of this phase rather than an
+        invalidation.
+        """
+        changed_fields = event_data.get("changed_fields") or {}
+        return (
+            isinstance(changed_fields, dict) and IMPORTANT_DATES_FIELD in changed_fields
+        )
+
+    async def _stored_date(self, event_data: Mapping[str, Any]) -> Any:
+        """The row this event is about, or ``None`` when it cannot be read.
+
+        Read through the contact's dates rather than by id alone because that is
+        the port this domain has; the list is a handful of rows. ``None`` — a
+        missing id, a contact since deleted, a date since removed — falls
+        through to marking today, which is the safe answer when the window
+        cannot be tested.
+        """
+        contact_id = event_data.get("contact_id")
+        date_id = event_data.get("date_id")
+        if contact_id is None or date_id is None:
+            return None
+        dates: Iterable[Any] = await self.contact_repo.get_important_dates(
+            int(contact_id)
+        )
+        return next((row for row in dates if row.id == int(date_id)), None)
 
     async def _targets_for_journal_contact_change(
         self, event_data: Mapping[str, Any]

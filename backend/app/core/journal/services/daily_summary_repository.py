@@ -109,6 +109,21 @@ class JournalDailySummaryRepository(ABC):
         pass
 
     @abstractmethod
+    async def user_ids_with_summaries(self) -> list[str]:
+        """Every user that has at least one daily summary row.
+
+        The bound an important-date change is applied over. Those events name no
+        user — ``contacts`` carries no owner column — and invalidation only ever
+        touches rows that exist, so the users who *can* be affected are exactly
+        the users who already have a summary. Answering from this table rather
+        than from an account listing keeps that true by construction.
+
+        Returns:
+            The distinct user ids, each once.
+        """
+        pass
+
+    @abstractmethod
     async def invalidate_for_range(
         self, user_id: str, first_day: date, last_day: date
     ) -> None:
