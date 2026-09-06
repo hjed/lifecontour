@@ -88,6 +88,16 @@ rule has the same two guards the agenda has, and `assemble` now reads the clock 
 both. Rendering names no timezone, because a task's date was already resolved in the user's. The one
 architectural consequence: `JournalProvider` consumes `TaskReadService` from `TaskProvider`, so a container
 holding either provider now holds both.
+**ITER18-005 Phase 5 complete: a past day's prompt says what was due on it and how each commitment
+resolved.** `TaskReadService.read_models_due_in_journals` — a fourth listing over the new
+`TaskRepository.find_tasks_due_in_journals`, which filters **no** status because done and cancelled are
+the answers — reports each task as it stands *now*: nothing replays `field_history`, so a past day
+regenerated after a lapsed task was finally completed describes it as done, and the code says so in four
+places. `DailySummaryInput.past_day_tasks` and `## Tasks Due On This Day` mirror Phase 4's shape exactly,
+including the two guards, and the two guards are **exclusive** — a past day for one, today for the other
+— so no task can appear in two sections of one prompt. The day arrives as the journal ids `assemble`
+already fetched rather than as a second date window, because those journals were matched by *overlap* and
+a window over due-journal starts would describe a different day than the prompt does.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -11446,24 +11456,167 @@ contents, so none changed.
 **Docs:** this entry, ITER18-005's baseline trail above, and `domain-architecture.md`'s *The upcoming
 window*, which gained the second caller, what it settled, and the injectable zone the review added.
 
-#### Phase 5: Extended Inputs — Past-Day Task Resolution
+#### Phase 5: Extended Inputs — Past-Day Task Resolution ✅ COMPLETE
 
 **Prerequisites:** Phase 4.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Overrun recorded before work started per
+delivery rule 3: ~250 production, ~700 tests, ~150 documentation → ~1,100 tracked.** Phases 3 and 4 came
+in at 2.5× and 2.7× on the same file, and this phase adds a port method, an adapter statement and a
+fourth task listing that neither of those needed — the estimate above budgets only for the rendering.
+Splitting is refused under delivery rule 9: a repository query with no renderer, and a renderer with no
+data, are each unshippable alone. **Actual: 437 production (of which roughly two thirds are docstrings
+and comments), ~1,990 tests, ~40 documentation → ~2,470 tracked** — 5.6× the phase's estimate and 2.2×
+the recorded one. The production half came in at 1.7× the recorded figure; the tests at 2.8×, which is
+where the whole overrun lives. Two new test files carrying this repository's docstring density are ~1,090
+lines for 35 collected tests, and the phase needed both: a listing whose defining property is an
+**absent** filter cannot be proved by the assembly test alone.
 
 **Acceptance Criteria:**
 
-- [ ] For a **past day**, the tasks that were due in that day's journals are assembled with **how they
+- [x] For a **past day**, the tasks that were due in that day's journals are assembled with **how they
       resolved** — each task's status **at the moment the summary is generated**, not a reconstruction.
       Field history is never replayed.
-- [ ] That consequence is documented in the code and here: a past-day summary regenerated after a lapsed
+- [x] That consequence is documented in the code and here: a past-day summary regenerated after a lapsed
       task was finally completed describes it as done, which is the honest answer to "what became of this"
       and matches what the user sees on the journal.
-- [ ] Past-day prompts carry no forward-looking material of any kind.
+- [x] Past-day prompts carry no forward-looking material of any kind.
 
 **Required Test Coverage:** unit — resolution reflects current status for each of done, cancelled and still
 not-done; no forward-looking material. Integration — a past day whose task was completed after the fact
 reads as done. No e2e (Phase 8).
+
+**Delivered.** The past day gets a listing of its own rather than a variant of Phase 4's, and the reason is
+one predicate: `find_upcoming_tasks` filters `status = NOT_DONE`, and *done* and *cancelled* are two of the
+three answers a resolution can have. So `TaskRepository.find_tasks_due_in_journals(journal_ids, user_id)`
+is a sibling query — one statement, the ids as a single `integer[]` following
+`count_not_done_tasks_by_due_journal`, joined to `journals` on the due anchor for the **order** rather than
+the filter — and `TaskReadService.read_models_due_in_journals` wraps it by reusing the private `_assemble`
+whole, so the batched journal, cancellation and contact reads, the lapse derivation and the one-read-per-
+collection guarantee all come with it. There is no new rule in this phase and no second definition of
+anything.
+
+**The day arrives as journal ids, not as a date window, and that is the phase's one non-obvious decision.**
+`assemble` selects the day's journals by **overlap** — `event_date_range_end >= day_start AND
+event_date_range_start <= day_end` — so a three-day trip that began on Sunday is one of Tuesday's journals
+and the summary describes it as such. A window over `due_journal.event_date_range_start`, which is what the
+sibling listing takes, would have answered for a quietly different set of journals than the prompt goes on
+to name. Handing the ids down also makes the empty case free: a day with no journals reaches a listing that
+short-circuits without a query.
+
+**Nothing is reconstructed, and the code says so in four places** — the port method, the read service, the
+`past_day_tasks` field and the prompt builder. The acceptance criterion is not merely a documented
+limitation but a *product* claim: a task completed last Thursday for last Tuesday shows as done on its
+journal, so a summary insisting it lapsed would be the surface contradicting the product. The prompt
+carries the same sentence to the model, which is where it actually bites — a model reading "done" beside a
+past date and *not* told the status is current would narrate the user finishing the task on the day, which
+the data never said.
+
+**Two guards for one rule, as Phases 3 and 4 established — and this time the two rules are exclusive.**
+The assembler reads nothing unless `summary_date < today_in(tz, moment)`; the builder emits the section
+only for `Past`. Their counterparts fire only for `Today`, so a task due today can never be rendered in two
+sections of one prompt — the failure mode this phase would otherwise have introduced, since today's tasks
+are already in the week's window. The clock is still read once per assembly, now feeding three day
+questions rather than two, and the resolved zone still travels with it.
+
+**Decisions taken.**
+
+1. **No new type, and no new enum for the resolution.** It is `task.status` plus `lapse_reason`, both
+   already derived, rendered by a pure `_resolution` in the builder — unit-testable without a database and
+   incapable of drifting from the lapse rule, because it *reads* the verdict rather than recomputing it.
+   The wording deliberately mirrors the frontend's `statusWording` / `lapseWording`
+   (`frontend/src/lib/task-display.ts`), which is the only status vocabulary the product had: the summary
+   and the UI describing one task in two vocabularies is how a user comes to think they are two things.
+   The two lapse causes stay worded apart, because "the day went by" and "the meeting was called off" are
+   different news — the reason exists for exactly that.
+2. **Open decision 4, this group's share of the prompt budget: the three constants Phase 4 already set.**
+   `MAX_TASK_ENTRIES`, `MAX_TASK_CONTACTS` and `MAX_TASK_TEXT_LENGTH`, unchanged and unduplicated. It is
+   the same group of one-line commitments rendered on a different day; a second set of numbers would need
+   a reason and there is none. Phase 6 still budgets contact dates against all three.
+3. **A task retargeted off the day is absent.** The due anchor is read as it stands, so a commitment that
+   has moved to next week is no part of how this day resolved — the same no-replay stance as the headline
+   criterion, and the integration fixture seeds it in the shape that would catch a read consulting the
+   *intermediate* table, since retargeting leaves the previous due journal behind as exactly such a link.
+4. **`_overflow_note` was extracted, reversing Phase 4's decision 3.** That phase left the cap-and-count
+   sentence duplicated between the agenda and the week's tasks, reasoning that parameterising the noun
+   *and* the phrase would leave a template neither caller could read. This phase makes it a **third** copy,
+   and with only `subject` parameterised each call site still reads as its own sentence. The cost was
+   measured rather than assumed: the agenda's wording moves from "the agenda above" to "the list above",
+   and no existing test asserted that phrase. Three assertions now pin the three subjects, so the shared
+   sentence cannot quietly rename one section's contents.
+5. **No date on the line, unlike Phase 4's.** Its tasks are spread across a week, so each needs a due date
+   and a relative label to be placed at all. Every task here is due on the day the prompt is already headed
+   with, so a date would be noise the model reads past; the journal title is what distinguishes one from
+   another. Asserted, because the obvious "consistency" fix is to add one.
+6. **No tone-line change, checked rather than assumed.** Phase 4 widened the grounding and do-not-restate
+   rules to name "the tasks", which already covers this group. Nothing there moved.
+
+**Tests: 48 unit and 25 integration** (35 of them in the two new files), plus one classification line.
+
+- `test_task_read_service_due_in_journals.py` (**18**, new) — every status returned, parametrised over the
+  three; the repository asked for exactly the day's ids; an empty day `assert_not_awaited` rather than
+  merely empty; the whole read model, journals and contacts included; the query's order preserved rather
+  than re-sorted; both lapse reasons and neither for a finished task; today resolved in a Kiritimati user's
+  zone at an instant where UTC's date differs; an **injected** zone used with the settings repository
+  `assert_not_awaited`, and resolved when omitted; owner scoping reaching the statements; and one read per
+  collection at one and eight tasks, with the contact lookup skipped when nobody is referenced.
+- `test_daily_summary_input_assembler.py` (**+10**): the day's commitments arrive in order; the read is
+  asked for exactly the journal ids already fetched; gathered-and-empty distinguished from never-asked;
+  the past/today boundary judged fourteen hours east and eleven west of UTC, where the two readings return
+  *different* days rather than merely computing differently; today, a future day and a missing collaborator
+  each yielding `None` with the service `assert_not_awaited`; the clock still counted at exactly one
+  reading with a third guard now hanging off it; and the zone handed down asserted at the boundary that
+  separates the guard from the read.
+- `test_daily_summary_prompt_builder.py` (**+20**): the heading, the line and the contacts; all four
+  resolution phrases and a mixed day carrying one of each; the "current statuses, not a reconstruction"
+  sentence; the deliberate absence of a date; the same input on **today** and on a **future** day rendering
+  neither heading nor task text; a past day handed a window *and* an agenda rendering neither, which is
+  AC3 asserted from the builder's side on an input no assembler would produce; empty and `None` adding no
+  heading; all three caps with their counted remainders and the first omitted item asserted **absent**; and
+  the three overflow subjects.
+- `test_task_repository_integration.py` (**+8**, `TestTasksDueInJournals`): every status against real rows;
+  the whole entity round-tripped; only the due anchor qualifying, with a creating and a mentioned journal
+  seeded to prove it; another user's task invisible; journals outside the set unread; several journals in
+  one statement, asserted through the statement recorder; the order by due-journal start then task id; and
+  an empty set issuing no statement at all.
+- `test_daily_summary_past_tasks_input.py` (**17**, new) — real tasks, real journals and a real
+  `TaskReadService` on the test's savepoint, seeded through the tasks suite's own helpers. The headline
+  case (due yesterday, done today, reads as done); lapsed by date and lapsed by a cancelled due journal,
+  the latter travelling from `journal_calendar_info` through the batched lookup; a cancelled task reported
+  rather than dropped; a day resolving three ways at once; the linked contact; a task due on the
+  neighbouring day absent, with that day seeded so the absence is not vacuous; a task **retargeted off**
+  the day absent; a task merely *created* on the day absent; another user's task absent beside the acting
+  user's own; a **multi-day journal** spanning the day carrying its commitment, which is the fixture that
+  makes the ids-not-a-window decision non-vacuous; today and a future day gathering `None` while still
+  gathering that day's journals; gathered-and-empty for a quiet past day and for one with no journals at
+  all; and a Kiritimati user, whose 11th is a past day at an instant when UTC's is today.
+- `test_task_event_completeness_integration.py` (**+1 line**): `find_tasks_due_in_journals` classified as a
+  read. **The guard caught it**, on this phase's first full integration run — as it did for
+  `find_upcoming_tasks` and `count_not_done_tasks_by_due_journal` before it. A new port method fails that
+  test until somebody says which kind it is, and it is working exactly as intended for the third time.
+
+**Mutation checks.** Six were run, each reverted after. Dropping the assembler's past-day guard fails **7**;
+dropping the builder's `Past` guard fails **2**; widening the query to the creating anchor fails **2**;
+dropping both lapse branches from `_resolution` fails **2**; dropping the task-text cap fails **1**; and
+adding the sibling listing's `status = 'not_done'` — the single most likely way to write this query wrong —
+fails **5**. No mutation left the suite green.
+
+**E2E:** none — the deferral this phase states, and it holds. No file under `frontend/` changes, the REST
+and MCP read contracts are untouched, and the only observable difference is in generated prose, which
+cannot be asserted without the multi-outcome test this repo forbids. ITER18-005's e2e lands in Phase 8.
+
+**MCP parity (delivery rule 5)** needs no work and no tool: `get_daily_summary` calls the same service, so
+it picks the extended input up as a property of the summary rather than of the requesting surface. No tool
+signature or docstring describes the prompt's contents, so none changed.
+
+**Shipped as a two-PR stack**, which is a review decision rather than a phase split: both land together
+and the phase is one unit. The seam is the domain boundary and there is no file overlap — the lower PR is
+the tasks-domain read (port, adapter, read service and their tests), the upper is the daily summary
+consuming it (the input field, the assembler guard, the prompt section and both documents). The lower one
+adds a read with no production caller, which is the shape ITER18-001 Phase 12 already shipped, so nothing
+is broken between them and delivery rule 9 is untouched.
+
+**Docs:** this entry, ITER18-005's baseline trail above, and `domain-architecture.md`'s new *The past-day
+resolution read* beside *The upcoming window*.
 
 #### Phase 6: Extended Inputs — Upcoming Contact Dates
 

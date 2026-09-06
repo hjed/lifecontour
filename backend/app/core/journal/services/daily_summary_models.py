@@ -11,7 +11,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core_shared.models.tasks import UpcomingTasks
+    from core_shared.models.tasks import TaskReadModel, UpcomingTasks
 
     from app.core.journal.models.agenda import AgendaEntry
 
@@ -52,6 +52,20 @@ class DailySummaryInput:
     distinction is load-bearing: ``None`` is *not gathered* (the day is not
     today, so nothing was asked for), while a present-but-empty answer is
     *gathered, nothing due*. Only the second is a fact about the user's week.
+
+    ``past_day_tasks`` is the mirror image, and the **past day's only** input:
+    the commitments due in this day's journals, each carrying how it resolved.
+    It is populated for a day already behind the user's today and for no other,
+    so it and ``upcoming_tasks`` can never both be present — a task due today
+    would otherwise appear in two sections of one prompt. The same ``None``
+    versus empty distinction applies, for the same reason.
+
+    **The resolutions are current, not reconstructed.** Each model carries the
+    task's status as it stands at generation time; nothing replays
+    ``field_history`` to rebuild what was true on the day. So a past-day summary
+    regenerated after a lapsed task was finally completed describes it as
+    **done** — the honest answer to "what became of this", and the one that
+    matches what the user sees on the journal.
     """
 
     user_id: str
@@ -64,3 +78,4 @@ class DailySummaryInput:
     previous_summary: str | None = None
     agenda: list[AgendaEntry] = field(default_factory=list)
     upcoming_tasks: UpcomingTasks | None = None
+    past_day_tasks: list[TaskReadModel] | None = None

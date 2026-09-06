@@ -1064,6 +1064,55 @@ one the service applies internally when `_assemble` takes `today` and `timezone`
 looking them up. The three sibling reads still resolve their own, because every caller of those resolves
 no timezone of its own and so has nothing to disagree with.
 
+### The past-day resolution read
+
+`TaskReadService.read_models_due_in_journals` answers the question the daily summary asks about a day
+that has already happened: *what was due in these journals, and what became of each of it?* It is the
+fourth task listing and, unlike the three above it, applies **no exclusions at all**.
+
+**The absent status filter is the method.** `find_upcoming_tasks` and `count_not_done_tasks_by_due_journal`
+both filter `status = NOT_DONE`, because a finished commitment is neither upcoming nor live. Here a
+finished commitment is the answer — *done* and *cancelled* are two of the three resolutions a past day can
+report — so `TaskRepository.find_tasks_due_in_journals` is a **sibling** query rather than a widening of
+either. Widening one would falsify a contract its own callers depend on, and the single most likely way to
+write this query wrong is to copy its neighbour's `WHERE` clause whole; a mutation check pins that.
+
+**The status is current and is never reconstructed.** Nothing replays `field_history` to rebuild what was
+true at the end of the day being summarised. The consequence is deliberate: a past-day summary regenerated
+after a lapsed task was finally completed describes it as **done**. That is the honest answer to "what
+became of this" and, more decisively, it is what the user already sees on the journal — a summary
+insisting the commitment was still outstanding would be the surface contradicting the product. It is
+stated in the port, the read service, the input field and the prompt, and the prompt tells the *model* so
+too, because a model reading "done" beside a past date and not told otherwise will narrate the user
+finishing it on the day.
+
+**The day arrives as journal ids, not as a date window** — the one place this listing's shape differs from
+the upcoming window's, and the reason is which journals a day *has*. `DailySummaryInputAssembler` selects
+them by **overlap** (`event_date_range_end >= day_start AND event_date_range_start <= day_end`), so a
+three-day trip that began on Sunday is one of Tuesday's journals and the summary describes it as such. A
+window over `journals.event_date_range_start`, which is what `find_upcoming_tasks` takes, would answer for
+a quietly different set than the prompt goes on to name. Passing the ids also makes the empty day free: the
+listing short-circuits before any query, so the assembler's guard stays purely about *which day it is*.
+
+**Only the due anchor qualifies**, as on the journal listing's counter. A journal a task was created in or
+merely mentions did not have it due, and the creating anchor is nearly always in the past — a read
+consulting it would attribute half a user's commitments to whatever day they were first written down. A
+task retargeted off the day is absent for the same reason, and retargeting is exactly what leaves the old
+due journal behind as an *intermediate* link, which is the shape that would catch a read consulting the
+wrong table.
+
+**Everything else is `_assemble`, reused whole**: the batched journal, cancellation and contact reads, the
+lapse derivation and the one-read-per-collection guarantee. The lapse is not an exclusion here but part of
+the answer — *how* an unfinished commitment lapsed is what the summary reports, and the two causes are
+worded apart because "the day went by" and "the meeting was called off" ask the user for different things.
+Ordering is the query's — due-journal start, then task id, the day's own sequence — and is not re-sorted
+in the service, because a second ordering could disagree with the first.
+
+**Its guard and the upcoming window's are exclusive**, which is what keeps a task out of two sections of
+one prompt: `summary_date < today` reaches this listing, `summary_date == today` reaches that one, and a
+future day reaches neither. Both halves of "which day is it" are injectable here from the start rather
+than added by review, for the reason the paragraph above gives.
+
 ### The journal delete guard
 
 A task can never exist without both of its journal anchors, so the

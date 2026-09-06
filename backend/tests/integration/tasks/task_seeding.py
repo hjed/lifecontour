@@ -104,6 +104,7 @@ async def create_journal(
     title: str = "Anchor Journal",
     days_offset: int = 0,
     start: datetime | None = None,
+    end: datetime | None = None,
     user_id: str = USER_ID,
 ) -> int:
     """Create a journal and return its id.
@@ -112,6 +113,12 @@ async def create_journal(
     a test asserting "a future journal is accepted" wants. Pass ``start``
     instead when the assertion is about a *date*: a date cannot be anchored on a
     moving instant, so the timezone-boundary tests fix theirs.
+
+    ``end`` defaults to an hour after the start, which is what nearly every
+    fixture wants. Pass it only for a **multi-day** journal, where the gap
+    between the two is the point: the daily summary matches a day's journals by
+    *overlap*, so a trip that began before the day and ends after it is one of
+    that day's journals though it starts on neither.
     """
     start = (
         start if start is not None else datetime.now(UTC) + timedelta(days=days_offset)
@@ -122,7 +129,7 @@ async def create_journal(
             title=title,
             content="content",
             event_date_range=EventDateRange(
-                start=start, end=start + timedelta(hours=1)
+                start=start, end=end if end is not None else start + timedelta(hours=1)
             ),
         )
     )

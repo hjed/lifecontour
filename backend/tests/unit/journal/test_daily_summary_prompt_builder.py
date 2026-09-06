@@ -8,6 +8,7 @@ from core_shared.models.tasks import (
     TaskContactRef,
     TaskJournalRef,
     TaskReadModel,
+    TaskStatus,
     UpcomingTasks,
     build_task_read_model,
     upcoming_window,
@@ -988,3 +989,403 @@ class TestAnUnboundedTaskTextIsCapped:
 
         assert "book the venue (in" in prompt
         assert "..." not in prompt
+
+
+# A day already behind ``_TODAY``, so the past-day guard fires for it.
+_YESTERDAY = date(2026, 4, 26)
+
+
+def _resolved(
+    task_id: int,
+    *,
+    status: TaskStatus = TaskStatus.NOT_DONE,
+    text: str = "book the venue",
+    journal_title: str = "Site visit",
+    cancelled: bool = False,
+    contacts: tuple[TaskContactRef, ...] = (),
+) -> TaskReadModel:
+    """One task due on the past day, judged from ``_TODAY``.
+
+    Kept apart from ``_task`` above rather than folded into it: that helper
+    always builds a *not-done* task judged on its own due date, which is exactly
+    what a forward window holds and exactly what a resolution never is. Here the
+    status varies and ``today`` is deliberately later than the due date, so
+    ``build_task_read_model`` derives the lapse the way production does.
+    """
+    due_journal = TaskJournalRef(
+        id=800 + task_id, title=journal_title, date=_YESTERDAY, cancelled=cancelled
+    )
+    return build_task_read_model(
+        task=Task(
+            id=task_id,
+            user_id="user123",
+            text=text,
+            creating_journal_id=1,
+            due_journal_id=due_journal.id,
+            status=status,
+        ),
+        creating_journal=TaskJournalRef(
+            id=1, title="where it arose", date=_YESTERDAY, cancelled=False
+        ),
+        due_journal=due_journal,
+        intermediate_journals=[],
+        contacts=contacts,
+        today=_TODAY,
+    )
+
+
+class TestPastDayTasksSection:
+    """What was due on the day, and how each commitment stands now."""
+
+    def test_a_past_prompt_carries_the_task_and_its_journal(self) -> None:
+        """The commitment, the journal it was due in, and nothing forward-looking."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[_resolved(1)]),
+            now=_NOW,
+        )
+
+        assert "## Tasks Due On This Day" in prompt
+        assert "book the venue" in prompt
+        assert '(in "Site visit")' in prompt
+
+    def test_linked_contacts_travel_with_the_task(self) -> None:
+        """The person is half of what makes a resolution worth reporting."""
+        builder = DailySummaryPromptBuilder()
+        task = _resolved(
+            1,
+            contacts=(
+                TaskContactRef(id=5, display_name="Alice Smith", photo_url=None),
+                TaskContactRef(id=6, display_name="Bob Jones", photo_url=None),
+            ),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[task]), now=_NOW
+        )
+
+        assert "with Alice Smith, Bob Jones" in prompt
+
+    def test_the_section_says_the_statuses_are_current(self) -> None:
+        """The phase's headline consequence, stated to the model itself.
+
+        Without it a model reading "done" beside a past date would narrate the
+        user finishing the task *on the day*, which the data does not say and
+        which is false whenever it was finished later.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[_resolved(1)]),
+            now=_NOW,
+        )
+
+        assert "how each one stands now" in prompt
+        assert "rather than a reconstruction of the day" in prompt
+
+    def test_no_due_date_is_repeated_on_the_line(self) -> None:
+        """The heading already names the day; the journal is what distinguishes.
+
+        The forward-looking section carries a date and a relative label because
+        its tasks are spread over a week. These are all due on the day the
+        prompt is about, so the same treatment would be noise.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[_resolved(1)]),
+            now=_NOW,
+        )
+
+        assert "Due 26 Apr" not in prompt
+        assert "(today)" not in prompt
+
+
+class TestHowEachResolutionReads:
+    """The four answers, each worded so a model cannot conflate two of them."""
+
+    def test_a_completed_task_reads_as_done(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_YESTERDAY,
+                past_day_tasks=[_resolved(1, status=TaskStatus.DONE)],
+            ),
+            now=_NOW,
+        )
+
+        assert "book the venue" in prompt
+        assert "— done" in prompt
+
+    def test_a_cancelled_task_reads_as_cancelled(self) -> None:
+        """The user called it off, which is not the same as never doing it."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_YESTERDAY,
+                past_day_tasks=[_resolved(1, status=TaskStatus.CANCELLED)],
+            ),
+            now=_NOW,
+        )
+
+        assert "— cancelled" in prompt
+        assert "still not done" not in prompt
+
+    def test_an_unfinished_task_reads_as_lapsed_because_the_day_passed(self) -> None:
+        """The ordinary past-day verdict, and the most common one."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[_resolved(1)]),
+            now=_NOW,
+        )
+
+        assert "— still not done; lapsed, the day passed" in prompt
+
+    def test_a_cancelled_due_journal_is_named_as_the_cause(self) -> None:
+        """The other lapse is different news and is worded differently.
+
+        "The day went by" and "the meeting was called off" ask the user for
+        different things, which is why the rule returns a reason rather than a
+        boolean — and why this prompt spends a clause on which one it was.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_YESTERDAY, past_day_tasks=[_resolved(1, cancelled=True)]
+            ),
+            now=_NOW,
+        )
+
+        assert "— still not done; lapsed, its due journal was cancelled" in prompt
+
+    def test_every_resolution_can_appear_in_one_day(self) -> None:
+        """A real day resolves several ways at once, and each keeps its own line."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_YESTERDAY,
+                past_day_tasks=[
+                    _resolved(1, status=TaskStatus.DONE, text="pack the rope"),
+                    _resolved(2, status=TaskStatus.CANCELLED, text="call the council"),
+                    _resolved(3, text="return the key"),
+                ],
+            ),
+            now=_NOW,
+        )
+
+        assert "- pack the rope" in prompt
+        assert "- call the council" in prompt
+        assert "- return the key" in prompt
+        assert prompt.count("— done") == 1
+        assert prompt.count("— cancelled") == 1
+        assert prompt.count("— still not done") == 1
+
+
+class TestNoResolutionsOnAnyOtherDay:
+    """A resolution belongs to a day that has been, and to no other."""
+
+    def test_the_current_day_renders_neither_heading_nor_task(self) -> None:
+        """Today's commitments are the week's window; two sections would duplicate.
+
+        The input is the same object in both cases, so this can only pass if the
+        builder is judging the day rather than the presence of the field.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                past_day_tasks=[_resolved(1, text="a resolved commitment")],
+            ),
+            now=_NOW,
+        )
+
+        assert "## Tasks Due On This Day" not in prompt
+        assert "a resolved commitment" not in prompt
+
+    def test_a_future_day_renders_neither_heading_nor_task(self) -> None:
+        """Nothing has resolved on a day that has not happened."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=date(2026, 4, 28),
+                past_day_tasks=[_resolved(1, text="a resolved commitment")],
+            ),
+            now=_NOW,
+        )
+
+        assert "## Tasks Due On This Day" not in prompt
+        assert "a resolved commitment" not in prompt
+
+    def test_a_past_prompt_carries_no_forward_looking_material(self) -> None:
+        """The other half of the same rule, asserted from this side.
+
+        A past day is handed both a window and a resolution list here, which no
+        assembler would produce — precisely so that the *builder's* guards are
+        what the assertion rests on.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_YESTERDAY,
+                past_day_tasks=[_resolved(1)],
+                upcoming_tasks=_due_soon(
+                    _task(9, due_date=_TODAY, text="next week's problem")
+                ),
+                agenda=[_agenda_entry(title="A scheduled event")],
+            ),
+            now=_NOW,
+        )
+
+        assert "## Tasks Due On This Day" in prompt
+        assert "## Tasks Due Soon" not in prompt
+        assert "next week's problem" not in prompt
+        assert "## Today's Agenda" not in prompt
+        assert "A scheduled event" not in prompt
+
+
+class TestAQuietPastDayAddsNoHeading:
+    """A heading with nothing under it reads as a section the model must fill."""
+
+    def test_an_empty_day_adds_no_heading(self) -> None:
+        """Gathered and nothing due: a real answer, but not one worth a section."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[]), now=_NOW
+        )
+
+        assert "## Tasks Due On This Day" not in prompt
+
+    def test_nothing_gathered_adds_no_heading(self) -> None:
+        """``None`` is the assembler saying it never asked."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=None), now=_NOW
+        )
+
+        assert "## Tasks Due On This Day" not in prompt
+
+
+class TestThePastDaysBudget:
+    """The same three caps the week's tasks take, because it is the same group."""
+
+    def test_the_entry_cap_states_the_overflow(self) -> None:
+        """A pathological day is capped, counted, and never silently shortened."""
+        builder = DailySummaryPromptBuilder()
+        tasks = [
+            _resolved(i, text=f"Commitment-{i:02d}")
+            for i in range(MAX_TASK_ENTRIES + 3)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=tasks), now=_NOW
+        )
+
+        assert f"Commitment-{MAX_TASK_ENTRIES - 1:02d}" in prompt
+        assert f"Commitment-{MAX_TASK_ENTRIES:02d}" not in prompt
+        assert "3 further tasks" in prompt
+
+    def test_the_contact_cap_states_the_overflow(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        task = _resolved(
+            1,
+            contacts=tuple(
+                TaskContactRef(id=i, display_name=f"Person-{i:02d}", photo_url=None)
+                for i in range(MAX_TASK_CONTACTS + 2)
+            ),
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[task]), now=_NOW
+        )
+
+        assert f"Person-{MAX_TASK_CONTACTS - 1:02d}" in prompt
+        assert f"Person-{MAX_TASK_CONTACTS:02d}" not in prompt
+        assert "and 2 more" in prompt
+
+    def test_an_unbounded_task_text_is_capped_here_too(self) -> None:
+        """``tasks.text`` is unbounded whichever section renders it.
+
+        The cap on the *list* says nothing about the size of one item, and one
+        arbitrarily large row would fail the whole day's summary — a per-day
+        outage caused by a single task.
+        """
+        builder = DailySummaryPromptBuilder()
+        task = _resolved(1, text="x" * (MAX_TASK_TEXT_LENGTH + 100))
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=[task]), now=_NOW
+        )
+
+        assert "x" * MAX_TASK_TEXT_LENGTH + "..." in prompt
+        assert "x" * (MAX_TASK_TEXT_LENGTH + 1) not in prompt
+
+
+class TestTheOverflowNoteIsSharedByAllThreeSections:
+    """One sentence, three subjects — the extraction a third copy justified.
+
+    The upcoming-tasks phase deliberately left this duplicated between the
+    agenda and the week's tasks, reasoning that parameterising the noun *and*
+    the phrase would leave a template neither caller could read. With a third
+    caller the noun is the only thing that varies, and these three assertions
+    are what stop the shared sentence quietly renaming one section's subject.
+    """
+
+    def test_the_agenda_counts_events_on_this_day(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        entries = [
+            _agenda_entry(journal_id=i, title=f"Event-{i:02d}")
+            for i in range(MAX_AGENDA_ENTRIES + 5)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, agenda=entries), now=_NOW
+        )
+
+        assert (
+            f"(5 further events on this day are not listed; the list above is "
+            f"capped at {MAX_AGENDA_ENTRIES}.)"
+        ) in prompt
+
+    def test_the_week_counts_tasks_due_in_this_window(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        tasks = [
+            _task(i, due_date=_TODAY, text=f"Task-{i:02d}")
+            for i in range(MAX_TASK_ENTRIES + 4)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_tasks=_due_soon(*tasks)),
+            now=_NOW,
+        )
+
+        assert (
+            f"(4 further tasks due in this window are not listed; the list above "
+            f"is capped at {MAX_TASK_ENTRIES}.)"
+        ) in prompt
+
+    def test_the_past_day_counts_tasks_due_on_this_day(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        tasks = [
+            _resolved(i, text=f"Commitment-{i:02d}")
+            for i in range(MAX_TASK_ENTRIES + 3)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_YESTERDAY, past_day_tasks=tasks), now=_NOW
+        )
+
+        assert (
+            f"(3 further tasks due on this day are not listed; the list above is "
+            f"capped at {MAX_TASK_ENTRIES}.)"
+        ) in prompt
