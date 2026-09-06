@@ -90,7 +90,21 @@ function dashboardDocument(
       attributes: {
         summary: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
         agenda: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-        tasks: { status: DashboardSectionStatus.READY, data: {} },
+        // Ready and empty in the shape the endpoint sends since Phase 13.
+        // These suites are about the card beside it, so the section stays a
+        // real answer holding nothing rather than an unavailable one.
+        tasks: {
+          status: DashboardSectionStatus.READY,
+          data: {
+            window: {
+              start_date: '2026-07-31',
+              end_date: '2026-08-07',
+              days_ahead: 7,
+            },
+            total: 0,
+            tasks: [],
+          },
+        },
         upcoming_dates: section,
       },
     },

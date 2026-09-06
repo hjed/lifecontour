@@ -18,16 +18,23 @@ that section reports unavailable for both. A section whose emptiness is
 meaningful says so with a ready payload instead; both kinds are in use, and which
 a section is belongs to the section, not to this envelope.
 
-The payload types are declared here from the outset and filled by their own
-phases. Summary, agenda (today and tomorrow) and upcoming dates are filled;
-tasks is still empty, which serialises as ``{}`` — ready, holding nothing —
-until Phase 13 gives it fields.
+The payload types were declared here from the outset and filled by their own
+phases; all four now carry fields, and none of those phases added, renamed or
+reshaped a section.
 
-**The agenda's rows are not declared here.** ``AgendaEntry`` and the tag and
-participant it carries live in ``app.core.journal.models.agenda``, because they
-describe journals and the daily summary reads them too. What stays is the part
-that really is the dashboard's: ``AgendaDay``'s labelled day and
+**Most sections' rows are not declared here.** ``AgendaEntry`` and the tag and
+participant it carries live in ``app.core.journal.models.agenda``, and
+``UpcomingContactDate`` in the contacts domain, because they describe journals
+and contacts and the daily summary reads them too. What stays is the part that
+really is the dashboard's: ``AgendaDay``'s labelled day and
 ``AgendaSectionData``'s tomorrow-beneath-today shape.
+
+``DashboardTask`` is the exception, and its reason is the test of the rule. The
+tasks section does not show a task read model: it shows less of one — no status,
+no lapse, neither the creating journal nor the intermediate ones — plus a field
+no read model has, the ``days_away`` its relative chip is drawn from. That is a
+row belonging to this page rather than to the tasks domain, so it is declared
+here, over the tasks domain's own journal and contact refs.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ from datetime import date
 from enum import StrEnum
 
 from core_shared.models.date_window import UpcomingWindow
+from core_shared.models.tasks import TaskContactRef, TaskJournalRef
 
 from app.core.contacts.models.upcoming_dates import UpcomingContactDate
 from app.core.journal.models.agenda import AgendaEntry
@@ -162,8 +170,69 @@ class AgendaSectionData:
 
 
 @dataclass(frozen=True)
+class DashboardTask:
+    """One task as the dashboard's row draws it (**W22**–**W27**).
+
+    A row of this section rather than a task read model on the wire, and the
+    difference is two-way. It **adds** ``days_away``, which no read model
+    carries because no other surface draws a relative due chip; and it **drops**
+    the status, the lapse, the creating journal and the intermediate journals,
+    every one of which is either constant for every row this section can hold or
+    material no dashboard row shows. A field that is always the same value
+    invites a surface to branch on it.
+
+    The two field types it does keep are the tasks domain's own
+    ``TaskJournalRef`` and ``TaskContactRef``, reused rather than re-declared:
+    they already say exactly what a row needs, and a parallel pair would be two
+    definitions of a task's journal to keep in step.
+
+    Attributes:
+        task_id: The task itself, which is what the inline done action acts on
+        text: The commitment, as the user wrote it (**W23**)
+        due_journal: The journal it is due in — id and title for the link
+            (**W26**), and the date **already resolved in the acting user's
+            timezone**. ``cancelled`` on it is always false here: a cancelled
+            due journal lapses its task, and a lapsed task is not in this
+            section.
+        days_away: How many days from the window's first day the due journal
+            falls, ``0`` meaning today. The material the relative chip is drawn
+            from (**W25**), published rather than left to be derived: the
+            window's first day is the page's anchor, and a browser subtracting
+            dates in its own zone can land a day out near midnight.
+        contacts: The people the task references, in link order (**W27**)
+    """
+
+    task_id: int
+    text: str
+    due_journal: TaskJournalRef
+    days_away: int
+    contacts: tuple[TaskContactRef, ...] = ()
+
+
+@dataclass(frozen=True)
 class TasksSectionData:
-    """Not-done tasks due in the next seven days. Filled by Phase 13."""
+    """Not-done tasks due between today and seven days ahead, soonest first.
+
+    The window rides in the payload for the reason the upcoming dates' does: a
+    section that says "the next seven days" has to be able to say so when it
+    found **nothing**, and an empty list has no rows to derive a span from.
+
+    **Uncapped.** The whole window travels and the card applies the five-item
+    cap (**W22**), so the show-more (**W28**) reveals the remainder from data the
+    page already holds rather than making a second request. The count that
+    show-more names is the length of ``tasks``.
+
+    Done, cancelled and lapsed tasks are absent, and none of those exclusions is
+    decided here: they belong to ``select_upcoming_tasks``, which the read
+    service applies before this payload is assembled.
+
+    Attributes:
+        window: The span these tasks were read for
+        tasks: The rows, ordered by due-journal date then task id
+    """
+
+    window: UpcomingWindow
+    tasks: tuple[DashboardTask, ...] = ()
 
 
 @dataclass(frozen=True)

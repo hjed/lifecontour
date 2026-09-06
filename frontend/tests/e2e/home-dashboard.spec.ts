@@ -307,6 +307,24 @@ const MOCK_EMPTY_UPCOMING_DATES = {
   dates: [],
 };
 
+/**
+ * Nothing due this week, in the shape the endpoint really sends.
+ *
+ * Since ITER18-004 Phase 13 the tasks section carries a window and a total, so
+ * a ready one holding `{}` is a broken contract rather than an empty week —
+ * the same correction the dates mock above records. Nothing renders it until
+ * Phase 14; the mock stops lying now.
+ */
+const MOCK_EMPTY_TASKS = {
+  window: {
+    start_date: SUMMARY_ANCHOR,
+    end_date: MOCK_TOMORROW,
+    days_ahead: 7,
+  },
+  total: 0,
+  tasks: [],
+};
+
 const REGENERATE_PATH = `**/api/journals/daily-summary/${SUMMARY_ANCHOR}/regenerate`;
 
 const SUMMARY_PROSE = 'A quiet Wednesday. Two journals and one long walk.';
@@ -370,7 +388,7 @@ function dashboardBody(summary: SummarySection) {
           status: 'ready',
           data: { entries: [], tomorrow: { date: MOCK_TOMORROW, entries: [] } },
         },
-        tasks: { status: 'ready', data: {} },
+        tasks: { status: 'ready', data: MOCK_EMPTY_TASKS },
         upcoming_dates: { status: 'ready', data: MOCK_EMPTY_UPCOMING_DATES },
       },
     },
@@ -850,7 +868,7 @@ async function mockAgenda(
                 },
               },
             },
-            tasks: { status: 'ready', data: {} },
+            tasks: { status: 'ready', data: MOCK_EMPTY_TASKS },
             upcoming_dates: {
               status: 'ready',
               data: MOCK_EMPTY_UPCOMING_DATES,

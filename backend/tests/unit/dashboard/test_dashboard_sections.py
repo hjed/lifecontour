@@ -16,6 +16,7 @@ today" off a section that has not told it anything.
 import datetime
 
 import pytest
+from core_shared.models.date_window import upcoming_window
 
 from app.core.dashboard.models.sections import (
     AgendaDay,
@@ -39,6 +40,11 @@ TOMORROW = datetime.date(2026, 8, 1)
 # envelope rather than the payload.
 EMPTY_AGENDA = AgendaSectionData(tomorrow=AgendaDay(date=TOMORROW))
 
+# A tasks section that read its week and found nothing in it. The window is
+# required and the rows are not, which is the shape the distinction below rests
+# on: this payload can say *what* was empty, and an unavailable section cannot.
+EMPTY_TASKS = TasksSectionData(window=upcoming_window(datetime.date(2026, 7, 31)))
+
 
 def entry(journal_id: int, *, cancelled: bool = False) -> AgendaEntry:
     return AgendaEntry(
@@ -53,7 +59,7 @@ def entry(journal_id: int, *, cancelled: bool = False) -> AgendaEntry:
 
 class TestAReadySection:
     def test_keeps_the_payload_it_was_given(self) -> None:
-        data = TasksSectionData()
+        data = EMPTY_TASKS
 
         section = DashboardSection.ready(data)
 
@@ -63,10 +69,11 @@ class TestAReadySection:
 
     def test_an_empty_payload_is_still_ready(self) -> None:
         """Nothing due this week is an answer, not a failure to answer."""
-        section = DashboardSection.ready(TasksSectionData())
+        section = DashboardSection.ready(EMPTY_TASKS)
 
         assert section.status is SectionStatus.READY
         assert section.data is not None
+        assert section.data.tasks == ()
 
 
 class TestAnUnavailableSection:

@@ -20,6 +20,7 @@ import {
 import type {
   HomeDashboardAgendaEntry,
   HomeDashboardResponse,
+  HomeDashboardTasks,
   HomeDashboardUpcomingDates,
 } from '@/lib/api/home-dashboard';
 
@@ -84,6 +85,19 @@ const EMPTY_UPCOMING_DATES: HomeDashboardUpcomingDates = {
   dates: [],
 };
 
+/**
+ * Nothing due this week, in the shape the endpoint really sends.
+ *
+ * Since ITER18-004 Phase 13 the section carries a window and a total, so a
+ * ready one holding `{}` is a broken contract rather than a quiet week. The
+ * card that reads it lands in Phase 14; the shape is right from now.
+ */
+const EMPTY_TASKS: HomeDashboardTasks = {
+  window: { start_date: ANCHOR_DATE, end_date: '2026-08-04', days_ahead: 7 },
+  total: 0,
+  tasks: [],
+};
+
 function dashboardDocument(): HomeDashboardResponse {
   return {
     data: {
@@ -105,7 +119,7 @@ function dashboardDocument(): HomeDashboardResponse {
           status: DashboardSectionStatus.READY,
           data: { entries: [], tomorrow: { date: TOMORROW_DATE, entries: [] } },
         },
-        tasks: { status: DashboardSectionStatus.READY, data: {} },
+        tasks: { status: DashboardSectionStatus.READY, data: EMPTY_TASKS },
         upcoming_dates: {
           status: DashboardSectionStatus.READY,
           data: EMPTY_UPCOMING_DATES,

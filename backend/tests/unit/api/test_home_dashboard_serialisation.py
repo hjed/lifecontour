@@ -29,6 +29,7 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.date_window import upcoming_window
+from core_shared.models.tasks import TaskContactRef, TaskJournalRef
 
 from app.api.home_dashboard.schemas import (
     HOME_DASHBOARD_RESOURCE_TYPE,
@@ -46,6 +47,7 @@ from app.core.dashboard.models.sections import (
     AgendaSectionData,
     DashboardSection,
     DashboardSummaryState,
+    DashboardTask,
     HomeDashboard,
     SummarySectionData,
     TasksSectionData,
@@ -72,10 +74,6 @@ GENERATED_SUMMARY = SummarySectionData(
     contact_count=3,
     mood_average=7.5,
 )
-
-# The section Phase 13 has yet to fill. Named rather than repeated so a phase
-# filling one has a single place to stop excluding it.
-STILL_EMPTY = ("tasks",)
 
 NINE_AM = datetime.datetime(2026, 7, 31, 9, tzinfo=datetime.UTC)
 
@@ -178,12 +176,40 @@ def dates(*rows: UpcomingContactDate) -> UpcomingDatesSectionData:
     return UpcomingDatesSectionData(window=upcoming_window(ANCHOR, 7), dates=rows)
 
 
+def task_row(
+    task_id: int,
+    *,
+    days_away: int,
+    text: str = "book the venue",
+    title: str = "Monday standup",
+    contacts: tuple[TaskContactRef, ...] = (),
+) -> DashboardTask:
+    """One row as the tasks projection produces it, ready for the wire."""
+    return DashboardTask(
+        task_id=task_id,
+        text=text,
+        due_journal=TaskJournalRef(
+            id=900 + task_id,
+            title=title,
+            date=ANCHOR + datetime.timedelta(days=days_away),
+            cancelled=False,
+        ),
+        days_away=days_away,
+        contacts=contacts,
+    )
+
+
+def tasks(*rows: DashboardTask) -> TasksSectionData:
+    """A tasks payload as the service builds one: a window and rows."""
+    return TasksSectionData(window=upcoming_window(ANCHOR, 7), tasks=rows)
+
+
 def dashboard(**overrides: object) -> HomeDashboard:
     """A dashboard with every section ready, as the service builds one."""
     sections: dict[str, object] = {
         "summary": DashboardSection.ready(GENERATED_SUMMARY),
         "agenda": DashboardSection.ready(agenda()),
-        "tasks": DashboardSection.ready(TasksSectionData()),
+        "tasks": DashboardSection.ready(tasks()),
         "upcoming_dates": DashboardSection.ready(dates()),
     }
     sections.update(overrides)
@@ -246,19 +272,18 @@ class TestTheFourSections:
         }
 
     def test_a_ready_section_carries_a_payload_object(self) -> None:
-        """Present whether or not the phase that fills it has landed yet.
+        """All four sections now carry fields, and none of them added a section.
 
-        The one unfilled section serialises as ``{}`` — "ready and holding
-        nothing", which is a real answer rather than an absence — while the
-        others carry the fields their phases gave them.
+        The envelope this contract was written around is unchanged: what each
+        phase did was fill a payload, so a ready section still means "read, and
+        here is what it holds" — including when what it holds is empty.
         """
         document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
 
         for name, section in document["data"]["attributes"].items():
             assert section["status"] == "ready", name
             assert section["data"] is not None, name
-        for name in STILL_EMPTY:
-            assert document["data"]["attributes"][name]["data"] == {}, name
+            assert section["data"] != {}, name
 
     def test_an_unavailable_section_carries_null_data(self) -> None:
         document = to_home_dashboard_response(
@@ -382,7 +407,7 @@ class TestTheSummarySection:
             "status": "unavailable",
             "data": None,
         }
-        for name in STILL_EMPTY:
+        for name in ("agenda", "tasks", "upcoming_dates"):
             assert document["data"]["attributes"][name]["status"] == "ready", name
 
     def test_the_page_can_still_name_its_day_without_a_summary(self) -> None:
@@ -833,3 +858,204 @@ class TestTheUpcomingDatesSection:
             "years",
             "observed_for_leap_day",
         }
+
+
+class TestTheTasksSection:
+    """The section's wire shape: the window, the count, and what a row draws.
+
+    The rows arrive already selected and already ordered, so nothing here is
+    about which tasks are due — it is about the row a card can render from and
+    the fields that are deliberately **not** in it.
+    """
+
+    def payload_of(self, document: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = document["data"]["attributes"]["tasks"]["data"]
+        return payload
+
+    def test_the_window_travels_with_the_rows(self) -> None:
+        """W28 names a week; the section has to be able to say which one."""
+        document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
+
+        assert self.payload_of(document)["window"] == {
+            "start_date": "2026-07-31",
+            "end_date": "2026-08-07",
+            "days_ahead": 7,
+        }
+
+    def test_the_window_is_the_same_span_the_dates_beside_it_report(self) -> None:
+        """One week two sections agree on, not two that happen to match today."""
+        document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
+
+        attributes = document["data"]["attributes"]
+        assert (
+            self.payload_of(document)["window"]
+            == attributes["upcoming_dates"]["data"]["window"]
+        )
+
+    def test_the_total_names_the_whole_window_rather_than_a_page(self) -> None:
+        """Nothing is capped server-side, so the count equals the rows sent.
+
+        It is named anyway because it is the number the show-more displays, and
+        naming it keeps a reader from mistaking it for a pagination total that
+        might exceed what arrived.
+        """
+        document = to_home_dashboard_response(
+            dashboard(
+                tasks=DashboardSection.ready(
+                    tasks(
+                        *(task_row(index, days_away=index % 8) for index in range(1, 9))
+                    )
+                )
+            )
+        ).model_dump(mode="json")
+
+        payload = self.payload_of(document)
+        assert payload["total"] == 8 == len(payload["tasks"])
+
+    def test_a_row_carries_exactly_what_a_row_draws(self) -> None:
+        """The key set is pinned, because the omissions are the decision.
+
+        Every row here is not done, not lapsed and due in an uncancelled
+        journal — those are the section's entry conditions — so publishing the
+        status, the lapse or the due journal's cancelled flag would send a
+        constant and invite a surface to branch on it. The creating and
+        intermediate journals are material no dashboard row shows.
+        """
+        document = to_home_dashboard_response(
+            dashboard(tasks=DashboardSection.ready(tasks(task_row(12, days_away=1))))
+        ).model_dump(mode="json")
+
+        (row,) = self.payload_of(document)["tasks"]
+        assert set(row) == {
+            "task_id",
+            "text",
+            "due_journal",
+            "days_away",
+            "contacts",
+        }
+        assert set(row["due_journal"]) == {"id", "title", "date"}
+
+    def test_a_row_carries_the_task_and_its_due_journal(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(
+                tasks=DashboardSection.ready(
+                    tasks(
+                        task_row(
+                            12,
+                            days_away=1,
+                            text="book the venue",
+                            title="Monday standup",
+                        )
+                    )
+                )
+            )
+        ).model_dump(mode="json")
+
+        (row,) = self.payload_of(document)["tasks"]
+        assert row["task_id"] == 12
+        assert row["text"] == "book the venue"
+        assert row["due_journal"] == {
+            "id": 912,
+            "title": "Monday standup",
+            "date": "2026-08-01",
+        }
+
+    def test_a_row_carries_the_days_away_the_chip_is_drawn_from(self) -> None:
+        """W25 renders ``Today``/``Tomorrow`` from this rather than from a clock."""
+        document = to_home_dashboard_response(
+            dashboard(
+                tasks=DashboardSection.ready(
+                    tasks(task_row(1, days_away=0), task_row(2, days_away=1))
+                )
+            )
+        ).model_dump(mode="json")
+
+        assert [row["days_away"] for row in self.payload_of(document)["tasks"]] == [
+            0,
+            1,
+        ]
+
+    def test_a_rows_contacts_carry_a_name_and_an_avatar(self) -> None:
+        """W27 draws an avatar beside a full name, so both are on the wire."""
+        document = to_home_dashboard_response(
+            dashboard(
+                tasks=DashboardSection.ready(
+                    tasks(
+                        task_row(
+                            12,
+                            days_away=1,
+                            contacts=(
+                                TaskContactRef(
+                                    id=5,
+                                    display_name="Ada Lovelace",
+                                    photo_url="/photos/ada.png",
+                                ),
+                                TaskContactRef(
+                                    id=2, display_name="Grace Hopper", photo_url=None
+                                ),
+                            ),
+                        )
+                    )
+                )
+            )
+        ).model_dump(mode="json")
+
+        (row,) = self.payload_of(document)["tasks"]
+        assert row["contacts"] == [
+            {"contact_id": 5, "name": "Ada Lovelace", "photo_url": "/photos/ada.png"},
+            {"contact_id": 2, "name": "Grace Hopper", "photo_url": None},
+        ]
+
+    def test_a_row_with_nobody_on_it_carries_an_empty_list(self) -> None:
+        """W27 renders nothing for zero contacts; null would be a third case."""
+        document = to_home_dashboard_response(
+            dashboard(tasks=DashboardSection.ready(tasks(task_row(12, days_away=1))))
+        ).model_dump(mode="json")
+
+        (row,) = self.payload_of(document)["tasks"]
+        assert row["contacts"] == []
+
+    def test_it_keeps_the_order_the_service_put_the_rows_in(self) -> None:
+        """Soonest first was decided upstream; the renderer must not re-sort."""
+        document = to_home_dashboard_response(
+            dashboard(
+                tasks=DashboardSection.ready(
+                    tasks(
+                        task_row(1, days_away=0),
+                        task_row(2, days_away=3),
+                        task_row(3, days_away=7),
+                    )
+                )
+            )
+        ).model_dump(mode="json")
+
+        rows = self.payload_of(document)["tasks"]
+        assert [row["task_id"] for row in rows] == [1, 2, 3]
+
+    def test_nothing_due_this_week_is_a_ready_empty_list(self) -> None:
+        """W29 reads as a good outcome, and it still needs its window."""
+        document = to_home_dashboard_response(dashboard()).model_dump(mode="json")
+
+        section = document["data"]["attributes"]["tasks"]
+        assert section["status"] == "ready"
+        assert section["data"]["tasks"] == []
+        assert section["data"]["total"] == 0
+        assert section["data"]["window"]["start_date"] == "2026-07-31"
+
+    def test_an_unavailable_section_is_told_apart_from_an_empty_one(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(tasks=DashboardSection.unavailable())
+        ).model_dump(mode="json")
+
+        assert document["data"]["attributes"]["tasks"] == {
+            "status": "unavailable",
+            "data": None,
+        }
+
+    def test_the_rest_of_the_page_survives_it(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(tasks=DashboardSection.unavailable())
+        ).model_dump(mode="json")
+
+        for name in ("summary", "agenda", "upcoming_dates"):
+            assert document["data"]["attributes"][name]["status"] == "ready", name

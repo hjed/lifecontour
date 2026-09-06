@@ -47,7 +47,20 @@ function makeDashboardResponse(): HomeDashboardResponse {
           status: DashboardSectionStatus.READY,
           data: { entries: [], tomorrow: { date: '2026-07-30', entries: [] } },
         },
-        tasks: { status: DashboardSectionStatus.READY, data: {} },
+        tasks: {
+          status: DashboardSectionStatus.READY,
+          // A window and a total since Phase 13; `{}` would be a shape the
+          // endpoint cannot produce.
+          data: {
+            window: {
+              start_date: '2026-07-29',
+              end_date: '2026-08-05',
+              days_ahead: 7,
+            },
+            total: 0,
+            tasks: [],
+          },
+        },
         upcoming_dates: {
           status: DashboardSectionStatus.UNAVAILABLE,
           data: null,
