@@ -98,6 +98,18 @@ including the two guards, and the two guards are **exclusive** — a past day fo
 — so no task can appear in two sections of one prompt. The day arrives as the journal ids `assemble`
 already fetched rather than as a second date window, because those journals were matched by *overlap* and
 a window over due-journal starts would describe a different day than the prompt does.
+**ITER18-005 Phase 6 complete: the current day's prompt says whose important dates are coming up.**
+`DailySummaryInputAssembler` calls `UpcomingImportantDatesService.upcoming_dates` — the read the
+dashboard's section and `list_upcoming_important_dates` already share — so the recurrence rule, the
+29 February observed on the 28th, the derived years and the ranking by date then contact importance all
+arrive with the answer and **no new SQL and no second copy of the rule** is written. `upcoming_dates` on
+the input and `## Important Dates Coming Up` in the prompt take Phase 4's shape exactly, two guards
+included; the section states outright that these are *recurring dates, not appointments*, because the
+model reads them below the agenda and would otherwise call a birthday a commitment. The assembler hands
+down **both** `today` and `now`: the first pins the day and stops a second `user_settings` read, the
+second pins the instant the importance signals count back from, and each has its own mutation. DI cost
+nothing — every container registering `JournalProvider` already registers `ContactProvider`. With this,
+open decision 4 (the prompt budget) is closed for all four input groups.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -10923,16 +10935,16 @@ journals view consumes the same summary, so it stands alone.
 
 **Acceptance Criteria:**
 
-- [ ] **Current-day inputs are augmented** with: the day's agenda (today's event journals with times,
+- [x] **Current-day inputs are augmented** with: the day's agenda (today's event journals with times,
       locations and participants), tasks due between today and seven days ahead, and important contact
-      dates falling in the next seven days.
-- [ ] **Past-day inputs are augmented** with the tasks that were due in that day's journals and how they
+      dates falling in the next seven days. — Phases 3, 4 and 6.
+- [x] **Past-day inputs are augmented** with the tasks that were due in that day's journals and how they
       resolved — where "resolved" is each task's status **at generation time**, not a point-in-time
       reconstruction. Field history is never replayed to rebuild past status, and this consequence is
       documented in the code: a past-day summary regenerated after a lapsed task was finally completed
       describes it as done.
-- [ ] Forward-looking material (upcoming dates, next-week tasks) is **current-day only**; a past-day
-      summary describes that day.
+- [x] Forward-looking material (upcoming dates, next-week tasks) is **current-day only**; a past-day
+      summary describes that day. — Two guards apiece across Phases 3–6, each with its own mutation.
 - [ ] **Eligibility:** today is **always** eligible regardless of journal count; past days keep the
       existing two-journal threshold and continue to produce no summary below it.
 - [ ] **Freshness:** today's summary is regenerated on read if it was not generated **today in the user's
@@ -10992,12 +11004,16 @@ journals view consumes the same summary, so it stands alone.
 3. **Whether task and important-date invalidation stays in `SearchIndexerConsumer`** (where journal
    invalidation lives today, incidentally) or moves to a consumer that owns summary freshness — settled in
    **Phase 6**. Moving it is cleaner but touches existing behaviour.
-4. **Prompt budget** — settled across **Phases 3–5**. Adding agenda, tasks and dates grows the prompt;
-   decide whether any input group needs a cap, and record it so a busy day cannot silently drop material.
-   **Phase 3 settled the agenda's share: `MAX_AGENDA_ENTRIES = 20` and `MAX_AGENDA_PARTICIPANTS = 10`,
-   each stating its overflow in the prompt rather than truncating.** The shape is the one Phases 4 and 5
-   should follow — a per-group constant beside `MAX_CONTENT_LENGTH`, and a counted remainder, never a
-   silently shortened list.
+4. ~~**Prompt budget**~~ — **settled and closed across Phases 3–6, for all four input groups.** Every
+   group carries a per-group constant beside `MAX_CONTENT_LENGTH` and states its overflow in the prompt
+   rather than truncating: `MAX_AGENDA_ENTRIES`/`MAX_AGENDA_PARTICIPANTS` (Phase 3),
+   `MAX_TASK_ENTRIES`/`MAX_TASK_CONTACTS`/`MAX_TASK_TEXT_LENGTH` (Phase 4, the third added by review),
+   the same three unchanged for the past day (Phase 5) and `MAX_DATE_ENTRIES` (Phase 6). Twenty
+   throughout, because they are four groups of one-line items and a different number would need a reason.
+   **A group's budget is two numbers, not one** — how many items it may carry and how large an item may
+   be — and Phase 6 closes the second half by *establishing there is nothing to cap*: the only unbounded
+   columns that reach this prompt are `journals.content` and `tasks.text`, and a contact date interpolates
+   neither. That is a checked conclusion recorded in the code, not an omission.
 
 #### Phase 1: Eligibility — Today Is Always Eligible ✅ COMPLETE
 
@@ -11812,23 +11828,199 @@ is broken between them and delivery rule 9 is untouched.
 **Docs:** this entry, ITER18-005's baseline trail above, and `domain-architecture.md`'s new *The past-day
 resolution read* beside *The upcoming window*.
 
-#### Phase 6: Extended Inputs — Upcoming Contact Dates
+#### Phase 6: Extended Inputs — Upcoming Contact Dates ✅ COMPLETE
 
 **Prerequisites:** Phase 3 and ITER18-004 Phase 9.
-**Estimated diff:** ~130 production → **~520 tracked** (×4)
+**Estimated diff:** ~130 production → **~520 tracked** (×4) · **Overrun recorded before work started per
+delivery rule 3: ~200 production, ~850 tests, ~120 documentation → ~1,170 tracked.** · **Actual: 269
+production (of which roughly half is docstrings and comments), ~1,370 tests, ~215 documentation →
+~1,855 tracked** — 3.6× the phase's estimate and 1.6× the recorded one, and **above calibration rule
+16's ~1,500 band** despite adding no entry point at all.
+
+**Where the recorded overrun was still wrong.** Production came in at 269 against a recorded 200 — close,
+and the ×5.1 of tests against production is what actually missed. Two files carry it: the new integration
+suite is 417 lines for 14 tests, and the prompt-builder additions 463 for 21, both at this repository's
+docstring density. The recorded figure was reasoned from the *production* being small, which is the
+inversion rule 14 already names — a phase whose deliverable is a rendering decision is only meaningful at
+its boundaries, and this one has a boundary per precision, per date type and per window edge. **The
+lesson for the phases after this one: budget tests from the number of distinguishable cases, not from the
+size of the code that decides them.** Below Phase 5's 2,470 and Phase 3's and 4's territory; nothing was
+deferred and no split would have helped, since the phase is four files and one capability.
 
 **Acceptance Criteria:**
 
-- [ ] Important contact dates falling in the next seven days are assembled into the **current day's** input
+- [x] Important contact dates falling in the next seven days are assembled into the **current day's** input
       and appear in the prompt, reusing ITER18-004 Phase 9's occurrence-resolution helper rather than
       re-deriving recurrence.
-- [ ] Past-day prompts contain no upcoming-dates material at all.
-- [ ] Where precision allows, the derived age or years travels with the date so the model need not infer it.
-- [ ] The existing stat counters and mood average are unchanged by any of Phases 3–6.
+- [x] Past-day prompts contain no upcoming-dates material at all.
+- [x] Where precision allows, the derived age or years travels with the date so the model need not infer it.
+- [x] The existing stat counters and mood average are unchanged by any of Phases 3–6.
 
 **Required Test Coverage:** unit — current-day inclusion, past-day exclusion, precision-dependent extras,
 the empty-window case adding nothing, and counters unchanged. Integration — assembly against real contacts
 and dates. No e2e (Phase 8).
+
+**Delivered.** The read is **called, not re-derived**, and that is the whole of the first criterion.
+`DailySummaryInputAssembler` gained an optional `UpcomingImportantDatesService` and one guard-and-call —
+`upcoming_dates(user_id, days_ahead=7, today=…, now=…)` — and everything the criterion asks for arrives
+with it: the candidate query, the leap-day pair, `resolve_occurrence` itself, the derived years and the
+ranking by date then contact importance. **There is no new SQL in this phase, no new rule, and no second
+reading of recurrence anywhere.** The criterion names the Phase 9 helper, and the honest way to reuse a
+pure rule is to call the one service that already asks it: a direct `resolve_occurrence` here would have
+needed a candidate query of its own, which is a second definition of "which dates are coming up" in the
+place least able to notice it had drifted.
+
+`DailySummaryInput` gained `upcoming_dates: UpcomingContactDates | None` — the read's own answer, **window
+and all**, the shape `upcoming_tasks` already takes. The window travels because the prompt names it
+(*"falling between today and 18 Aug — the next 7 days"*), and a builder re-deriving the span from the rows
+could not describe an empty week at all. `None` and an empty answer stay distinct and the distinction is
+load-bearing: `None` is *not gathered* (the day is not today), present-but-empty is *gathered, nothing
+coming up*, and only the second is a fact about the user's week.
+
+**Two guards for one rule, as Phases 3, 4 and 5.** The assembler skips the read unless `summary_date` is
+today in the user's zone; the prompt builder emits the section only for `Today`. Both resolve the local
+date through the same pair underneath, so they cannot disagree, and having the rendering half in the
+builder is what makes *"a past-day prompt carries no upcoming-dates material"* a unit test rather than an
+integration one. The clock is still read **once** per assembly, now feeding four day questions rather than
+three, and a test counts the readings through the monkeypatched `_utc_now` with the fourth guard hanging
+off it.
+
+**Rendering.** A line reads
+`- 29 Apr (in 2 days): Ada Lovelace — Marriage anniversary, 12 years`, and the section carries two
+sentences above the rows. The first names the window. The second says outright that **these are not
+appointments** — *"recurring dates, not appointments: nobody has scheduled anything for them"* — which is
+not decoration: the model reads them a few lines below the day's agenda, and left unsaid it will describe
+a birthday as something on the calendar. No timezone is named and none is needed, for the reason
+`_task_line` already records: an occurrence is a `date` the contacts read resolved against the user's
+today, not a clock time in a zone the reader is not in.
+
+**Decisions taken.**
+
+1. **Open decision 4, the last of its four groups: `MAX_DATE_ENTRIES = 20`, and *no* text cap — checked
+   rather than guessed.** Twenty is the agenda's and the tasks' number for Phase 5's reason: another group
+   of one-line items, and a different cap would need an argument there is not one for. The absence of a
+   `MAX_DATE_TEXT_LENGTH` is the part worth recording, because the check is **not** "it is a `VARCHAR`".
+   Two strings reach this section. `custom_date_types.name` is a `VARCHAR(100)` (migration 0044). The
+   contact's display name is **not a column at all** — `Contact.get_display_name` returns the nickname or
+   joins first, middle and last, each `String(100)` — so it is bounded by composition at roughly three
+   hundred characters rather than by a declaration. Bounded is what matters: unlike `tasks.text` and
+   `journals.content`, no single row here can push a request past the model's limit. A comment says so and
+   says which of the two facts it is, so a later reader does not "fix" it by trusting a column type that
+   is not the source. **Open decision 4 is now closed for all four input groups.**
+2. **The type wording is the full words, and the frontend's were deliberately not mirrored.** Phase 5
+   mirrored `task-display.ts` because that was the product's status vocabulary. The only date-type wording
+   that exists today is `ImportantDateInlineEditor`'s select items — `Marriage Ann.`, `Work Ann.` —
+   abbreviated to fit a 140px trigger. A prompt has no width limit, and an abbreviation the model has to
+   expand is a worse input than the phrase it stands for. **ITER18-004 Phase 12, which will settle the
+   card's row vocabulary, had not landed**: checked against `origin/main` at implementation time rather
+   than assumed, and if it lands with a shared label helper this section should mirror it.
+3. **`years` is worded by type, which is what `important_date_occurrence` says a surface must do.**
+   `turns 35` for a birthday, `35 years` for everything else — the split that module gives as its reason
+   for returning a bare count. `years is None` degrades to the bare type rather than dropping the row,
+   which is the module's rule and **W31**'s; a mutation wording every type as a birthday fails a test.
+4. **The leap-day substitution is stated in the prompt.** `observed_for_leap_day` renders
+   `(29 February, observed on the 28th this year)`. This is the flag's whole reason for existing — Phase 9
+   put it on the result so a surface *could* say so — and without it the model tells the user a 29 February
+   birthday falls on the 28th.
+5. **The relative label reuses `_relative_day` rather than `occurrence.days_away`.** They are the same
+   arithmetic (`days_away = (occurs_on - first_day).days`), and one wording rule for the whole prompt beats
+   two that must be kept agreeing. Recorded because the obvious "simplification" is to read the field.
+6. **Both halves of "which day is it" travel, and they buy different things.** `today` pins the day *and*
+   stops the service resolving its own, so the request makes no second `user_settings` statement — the
+   defect Phase 4's review found. `now` pins the instant the importance signals measure their thirty-day
+   recency from, which `today` says nothing about — the defect ITER18-004 Phase 11's review found twice.
+   Supplying one and not the other leaves half the answer sampling its own clock, and **each has its own
+   mutation**: dropping `today` fails 6, dropping `now` fails 2. There is no `timezone` argument to hand
+   down, unlike the tasks listing's, because `today` *is* the resolved answer.
+7. **DI cost nothing, and that was measured.** `UpcomingImportantDatesService` is already provided at
+   `REQUEST` scope by `ContactProvider`, and **all twelve containers registering `JournalProvider` already
+   register `ContactProvider`** — which `ContactProvider` needs anyway, since it resolves
+   `JournalDateResolver` from this provider. No container changed. `JournalProvider`'s own docstring still
+   claimed `tests/integration/journal/test_journal_date_resolver.py` was an exception that had not caught
+   up; it had, with Phase 4. **Corrected here rather than left standing**, because this phase adds a second
+   dependency on that claim — ITER18-004 Phase 11's lesson that a change of this shape is finished when
+   every claim about it has been re-read.
+8. **Two sets of test helpers were extracted rather than copied**, the call ITER18-001 Phase 7 made.
+   `tests/unit/journal/upcoming_date_doubles.py` builds the stored row, the resolved occurrence and the
+   service's answer for **both** unit suites; `tests/integration/contacts/upcoming_date_seeding.py` holds
+   the three `INSERT` helpers, taking `now` as a parameter where they had read a module constant. The
+   contacts suite that owned them keeps thin one-line bindings, so **its 30 tests pass unedited** — the
+   proof the move changed nothing rather than the claim. Copies would have been three near-identical
+   inserts and two near-identical fixture builders across four files, which is what the ≤3% duplication
+   gate exists to catch. The doubles derive the occurrence through `resolve_occurrence` rather than
+   hand-setting `years` and `observed_for_leap_day`, the reasoning the task suites give for going through
+   `build_task_read_model`: a hand-built fixture could assert a rendering the real rule never produces, and
+   the leap day is precisely what it would get wrong.
+9. **The tone rule was widened, not joined — and the class that pinned it was renamed rather than given a
+   sibling.** The grounding rule now reads *"…the journals, the agenda, the tasks, the upcoming contact
+   dates or the tool results"* and the do-not-restate rule *"…the day's agenda, journals, tasks, upcoming
+   dates or other listed material"*. `TestTheToneInstructionsCoverTasks` became
+   `TestTheToneInstructionsCoverEveryInputGroup` and each of its two tests now asserts the **superseded
+   form absent** beside the new one, so the next widening cannot half-happen. Adding a fourth class beside
+   it would have been the very mistake the rule describes: a narrow claim left standing next to a broad
+   one, which the model is free to resolve either way.
+
+**Tests: 23 unit and 14 integration**, plus two shared helper modules.
+
+- `test_daily_summary_prompt_builder.py` (**+21**): the heading, the contact, the date and its relative
+  label, including a date landing **today**; the window sentence; the not-appointments sentence; the read's
+  order preserved; all five type renderings and the custom type's own name; `turns N` against `N years`
+  with the wrong one asserted **absent** in each; the bare type when `years is None`; the leap-day caveat
+  present *and* absent; the same input on a **past** and a **future** day rendering neither heading nor
+  contact; empty and `None` adding no heading; the cap with its counted remainder and the 21st name
+  asserted absent; the fourth overflow subject beside the other three; both widened tone lines with their
+  superseded forms; and the day overview asserted **byte-identical** with and without dates, which is the
+  phase's fourth criterion rather than an appeal to the section being separate.
+- `test_daily_summary_input_assembler.py` (**+11**): the answer arrives whole with its window;
+  `today=summary_date` **and** `now=` the assembly's own instant asserted on the call kwargs; a past day, a
+  future day and a missing collaborator each yielding `None` with the service `assert_not_awaited` rather
+  than merely uncalled; the day judged fourteen hours east and eleven west of UTC, at instants where the
+  two readings return *different days*, with the `today` handed down asserted in each; gathered-and-empty
+  distinguished from never-gathered; and the clock counted at exactly one reading with a fourth guard on it.
+- `test_daily_summary_upcoming_dates_input.py` (**14**, new) — real contacts, real
+  `contact_important_dates` and a real service on the test's savepoint. The birthday with its contact and
+  its `days_away`; the derived years present at `FULL` and absent at `DAY_MONTH`; **both window edges**,
+  today included; the day *past* the window absent with a row seeded on it, so the absence is not vacuous;
+  a `YEAR`-precision row placing nothing beside one that does; a custom type's name travelling from its
+  `LEFT JOIN`; a real favourite leading a shared day; a quiet week gathered-and-empty **with its window**;
+  a **29 February** row observed on the 28th, the case a query built from the window's literal days could
+  not even fetch; a past and a future day gathering `None` **while still gathering that day's journals**,
+  with the date seeded inside the window a today-reading would have built; a Kiritimati (+14) user whose
+  week runs the 12th to the 19th while UTC's runs the 11th to the 18th; and — the one worth keeping — a
+  deliberately **contradictory `user_settings` row**, which is what makes "the settings row is never
+  consulted" observable rather than argued.
+
+**Mutation checks.** Ten were run, each backed up **per file** and restored from that copy — never
+`git checkout` of a directory, the near-miss ITER18-004 Phase 11 recorded — and each reverted after.
+
+| Mutation | Tests failed |
+|---|---|
+| Drop the assembler's current-day guard | 6 |
+| Drop the builder's `Today` guard | 2 |
+| Stop passing `today=` (the service resolves its own) | 6 |
+| Stop passing `now=` (the signals sample their own clock) | 2 |
+| Ask for a fortnight instead of the shared window | 6 |
+| Drop `MAX_DATE_ENTRIES` | 2 |
+| Drop the derived years | 2 |
+| Word every type as a birthday | 1 |
+| Drop the leap-day caveat | 1 |
+| Leave the grounding rule at its previous wording | 2 |
+
+No mutation left the suite green. The last four are the ones the integration suite cannot reach and the
+unit suite exists for; the third and fifth are the ones only the far-east fixtures catch.
+
+**E2E:** none — the deferral this phase states, and it holds. No file under `frontend/` changes, the REST
+and MCP read contracts are untouched, and the only observable difference is in generated prose, which
+cannot be asserted without the multi-outcome test this repo forbids. ITER18-005's e2e lands in Phase 8.
+
+**MCP parity (delivery rule 5)** needs no work and no tool: `get_daily_summary` calls the same service, so
+it picks the extended input up as a property of the summary rather than of the requesting surface — which
+is what ITER18-005's own acceptance criteria say. No tool signature or docstring describes the prompt's
+contents, so none changed.
+
+**Docs:** this entry, ITER18-005's baseline trail above, and `domain-architecture.md`'s *Upcoming
+important dates*, whose forward reference to this phase became a delivered third caller with the reason
+both halves of the day question travel.
 
 #### Phase 7: Input-Driven Lazy Invalidation
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core_shared.models.tasks import TaskReadModel, UpcomingTasks
 
+    from app.core.contacts.models.upcoming_dates import UpcomingContactDates
     from app.core.journal.models.agenda import AgendaEntry
 
 
@@ -53,6 +54,16 @@ class DailySummaryInput:
     today, so nothing was asked for), while a present-but-empty answer is
     *gathered, nothing due*. Only the second is a fact about the user's week.
 
+    ``upcoming_dates`` is the third of the current day's forward-looking
+    groups: the important contact dates falling in the **same seven days** the
+    tasks window covers. It carries the whole ``UpcomingContactDates`` the
+    dashboard's section and the ``list_upcoming_important_dates`` tool are
+    answered with — window, occurrences and all — for the same reason
+    ``upcoming_tasks`` does, and the same ``None``-versus-empty distinction
+    applies. Nothing here re-derives recurrence: the occurrence, its derived
+    years and the 29 February substitution are ``resolve_occurrence``'s answers,
+    reached through the one service that asks it.
+
     ``past_day_tasks`` is the mirror image, and the **past day's only** input:
     the commitments due in this day's journals, each carrying how it resolved.
     It is populated for a day already behind the user's today and for no other,
@@ -78,4 +89,5 @@ class DailySummaryInput:
     previous_summary: str | None = None
     agenda: list[AgendaEntry] = field(default_factory=list)
     upcoming_tasks: UpcomingTasks | None = None
+    upcoming_dates: UpcomingContactDates | None = None
     past_day_tasks: list[TaskReadModel] | None = None

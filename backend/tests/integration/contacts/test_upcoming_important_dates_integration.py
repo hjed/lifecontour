@@ -39,6 +39,11 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from tests.integration.contacts.upcoming_date_seeding import (
+    seed_contact,
+    seed_custom_date_type,
+    seed_important_date,
+)
 from tests.integration.statement_recorder import recorded_statements
 
 pytestmark = pytest.mark.asyncio
@@ -72,25 +77,20 @@ async def _contact(
     nick_name: str | None = None,
     photo_url: str | None = None,
 ) -> None:
-    """A bare contact with the display fields a dashboard row shows."""
-    await connection.execute(
-        text("""
-            INSERT INTO contacts (
-                id, first_name, middle_name, last_name, nick_name, photo_url,
-                created_at, updated_at
-            )
-            VALUES (:id, :first_name, :middle_name, :last_name, :nick_name,
-                    :photo_url, :now, :now)
-        """),
-        {
-            "id": contact_id,
-            "first_name": first_name,
-            "middle_name": middle_name,
-            "last_name": last_name,
-            "nick_name": nick_name,
-            "photo_url": photo_url,
-            "now": NOW,
-        },
+    """A bare contact with the display fields a dashboard row shows.
+
+    The insert itself is shared with the daily summary's date-input suite; this
+    binds it to the day this one anchors on so the tests below read unchanged.
+    """
+    await seed_contact(
+        connection,
+        contact_id,
+        now=NOW,
+        first_name=first_name,
+        last_name=last_name,
+        middle_name=middle_name,
+        nick_name=nick_name,
+        photo_url=photo_url,
     )
 
 
@@ -107,26 +107,17 @@ async def _important_date(
     custom_date_type_id: int | None = None,
 ) -> None:
     """One stored important date, at whatever precision the test needs."""
-    await connection.execute(
-        text("""
-            INSERT INTO contact_important_dates (
-                id, contact_id, date_type, precision, year, month, day,
-                custom_date_type_id, created_at, updated_at
-            )
-            VALUES (:id, :contact_id, :date_type, :precision, :year, :month,
-                    :day, :custom_date_type_id, :now, :now)
-        """),
-        {
-            "id": date_id,
-            "contact_id": contact_id,
-            "date_type": date_type.value,
-            "precision": precision.value,
-            "year": year,
-            "month": month,
-            "day": day,
-            "custom_date_type_id": custom_date_type_id,
-            "now": NOW,
-        },
+    await seed_important_date(
+        connection,
+        date_id,
+        contact_id,
+        now=NOW,
+        month=month,
+        day=day,
+        year=year,
+        precision=precision,
+        date_type=date_type,
+        custom_date_type_id=custom_date_type_id,
     )
 
 
@@ -167,13 +158,7 @@ async def _custom_date_type(
     connection: AsyncConnection, type_id: int, name: str = "Sobriety"
 ) -> None:
     """A user-named date type, so its name can travel with the row."""
-    await connection.execute(
-        text("""
-            INSERT INTO custom_date_types (id, name, created_at, updated_at)
-            VALUES (:id, :name, :now, :now)
-        """),
-        {"id": type_id, "name": name, "now": NOW},
-    )
+    await seed_custom_date_type(connection, type_id, now=NOW, name=name)
 
 
 class TestWhichRowsTheQueryFetches:

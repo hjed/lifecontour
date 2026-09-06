@@ -976,8 +976,8 @@ itself about what day it is. That is a defect worth fixing on its own terms.
 `UpcomingImportantDatesService.upcoming_dates` answers "whose birthdays and anniversaries are coming
 up": the [specification's](../product-specifications/home-dashboard-and-tasks-product-specification.md)
 upcoming-dates section, over **the same seven days** the tasks section covers. Three callers share it —
-the home dashboard's section, the MCP tool `list_upcoming_important_dates`, and (from ITER18-005) the
-daily summary's inputs — which is why it lives in the contacts domain rather than in the dashboard's.
+the home dashboard's section, the MCP tool `list_upcoming_important_dates`, and the daily summary's
+current-day inputs — which is why it lives in the contacts domain rather than in the dashboard's.
 
 **The recurrence is a rule, not a column, so it does not go into SQL.** A stored important date is a
 month and a day, sometimes with a year, so "does it fall in the next seven days" cannot be a `BETWEEN`.
@@ -1029,6 +1029,18 @@ only when nobody supplies one, so the dashboard — which resolves a single anch
 sections — causes no second settings read and cannot land this section on a different day from the
 agenda beside it. This is the structural form of ITER18-001 Phase 14's bug, which read the clock twice
 and could build a window against one day while judging its rows against the next.
+
+**The summary's assembler is the third caller, and it supplies both.** `DailySummaryInputAssembler`
+gathers this for the **current day only** — the guard the agenda and the week's tasks already have,
+so a past-day summary costs no extra round trip — and hands down `today` *and* `now`. The two pin
+different things and a caller needs both: `today` fixes the day and, because it is supplied, the
+service resolves none of its own, so the request makes no second `user_settings` statement to disagree
+with the first; `now` is what the importance signals measure their thirty-day recency back from, which
+`today` says nothing about. Supplying one and not the other leaves half the answer sampling its own
+clock — the defect this read's own review found twice. There is no timezone to pass, unlike the tasks
+listing: `today` **is** the resolved answer, so nothing is left for a zone to decide.
+`None` and an empty answer stay distinct all the way into the prompt: not gathered versus gathered and
+quiet, and only the second is a fact about the user's week.
 
 **Not scoped by user.** `contacts` has no owner column in this schema and every other contacts
 repository is likewise unscoped, so this port diverges from the dashboard ports' rule that every method

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from core_shared.models.contacts.important_date_types import ImportantDateType
 from core_shared.models.tasks import LapseReason, TaskStatus
 
 from app.core.settings.timezone_utils import (
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 
     from core_shared.models.tasks import TaskReadModel
 
+    from app.core.contacts.models.upcoming_dates import UpcomingContactDate
     from app.core.journal.models.agenda import AgendaEntry
     from app.core.journal.services.daily_summary_models import DailySummaryInput
 
@@ -64,6 +66,37 @@ MAX_AGENDA_PARTICIPANTS = 10
 # itself; these bound the pathological week within it.
 MAX_TASK_ENTRIES = 20
 MAX_TASK_CONTACTS = 10
+
+# The week's contact dates, budgeted against the same number for the same
+# reason: a fourth group of one-line items, and a different cap would need an
+# argument there is not one for. What bounds the group underneath is the
+# seven-day window itself.
+#
+# **There is deliberately no ``MAX_DATE_TEXT_LENGTH``, and the check is not
+# "it is a VARCHAR".** Two strings reach this section: the custom type's name,
+# which is ``custom_date_types.name``, a ``VARCHAR(100)`` (migration 0044); and
+# the contact's display name, which is **not a column at all** —
+# ``Contact.get_display_name`` returns the nickname or joins first, middle and
+# last, each ``String(100)``. Composed, it is bounded at roughly three hundred
+# characters, which is all that matters: unlike ``tasks.text`` and
+# ``journals.content``, no single row here can push a request past the model's
+# limit. Do not "fix" this by trusting a column type that is not the source.
+MAX_DATE_ENTRIES = 20
+
+# What each kind of important date is called when the prompt names it.
+#
+# The full words rather than the contact editor's ``Marriage Ann.`` / ``Work
+# Ann.``, which are abbreviated to fit a 140px select trigger: a prompt has no
+# width limit, and an abbreviation the model has to expand is a worse input than
+# the phrase it stands for. ``CUSTOM`` is absent because a custom date has no
+# label of ours — the user named it, and the user is the only authority on what
+# one means.
+_DATE_TYPE_LABELS: dict[ImportantDateType, str] = {
+    ImportantDateType.BIRTHDAY: "Birthday",
+    ImportantDateType.MARRIAGE_ANNIVERSARY: "Marriage anniversary",
+    ImportantDateType.WORK_ANNIVERSARY: "Work anniversary",
+    ImportantDateType.FIRST_MET: "First met",
+}
 
 
 def _capped(value: str, cap: int) -> str:
@@ -148,10 +181,11 @@ class DailySummaryPromptBuilder:
         2. Day overview (date, counts)
         3. Today's agenda (current day only)
         4. Tasks due in the week ahead (current day only)
-        5. How this day's tasks resolved (past day only)
-        6. Journal entries (title, content, types, contacts, mood)
-        7. Previous summary (for incremental update)
-        8. Output format specification
+        5. Important contact dates coming up (current day only)
+        6. How this day's tasks resolved (past day only)
+        7. Journal entries (title, content, types, contacts, mood)
+        8. Previous summary (for incremental update)
+        9. Output format specification
         """
         sections: list[str] = []
 
@@ -176,27 +210,33 @@ class DailySummaryPromptBuilder:
         if tasks_section:
             sections.append(tasks_section)
 
-        # 5. How this day's commitments resolved — a past day's, and only a
-        #    past day's. Mutually exclusive with the section above, so the two
-        #    occupy one slot in the prompt rather than competing for it.
+        # 5. Whose dates are coming up — nothing at all for any other day
+        dates_section = self._build_upcoming_dates(summary_input, temporal_context)
+        if dates_section:
+            sections.append(dates_section)
+
+        # 6. How this day's commitments resolved — a past day's, and only a
+        #    past day's. Mutually exclusive with the sections above, so the
+        #    forward-looking material and this occupy one slot in the prompt
+        #    rather than competing for it.
         resolutions_section = self._build_past_day_tasks(
             summary_input, temporal_context
         )
         if resolutions_section:
             sections.append(resolutions_section)
 
-        # 6. Journal entries
+        # 7. Journal entries
         entries_section = self._build_journal_entries(summary_input)
         if entries_section:
             sections.append(entries_section)
 
-        # 7. Previous summary
+        # 8. Previous summary
         if summary_input.previous_summary:
             sections.append(
                 self._build_previous_summary(summary_input.previous_summary)
             )
 
-        # 8. Output format
+        # 9. Output format
         sections.append(self._build_output_format())
 
         return "\n\n".join(sections)
@@ -219,11 +259,13 @@ class DailySummaryPromptBuilder:
             # rules naming different sources is a contradiction the model is
             # free to resolve by discarding whichever group is newest.
             "Do not invent information not present in the journals, the agenda, "
-            "the tasks or the tool results you were given.\n"
+            "the tasks, the upcoming contact dates or the tool results you were "
+            "given.\n"
             "Do not invent commitments the user did not make.\n"
             "Do not rewrite the journal record — just summarise.\n"
-            "Do not restate the day's agenda, journals, tasks or other listed "
-            "material item by item — the user can already see those lists.\n"
+            "Do not restate the day's agenda, journals, tasks, upcoming dates or "
+            "other listed material item by item — the user can already see those "
+            "lists.\n"
             "Your value is in connecting them: what one implies for another, what "
             "needs preparing, what is likely to clash.\n"
             "If mood data is present, mention the general mood direction."
@@ -481,6 +523,109 @@ class DailySummaryPromptBuilder:
             parts.append(people)
 
         return f"- {' '.join(parts)}"
+
+    @classmethod
+    def _build_upcoming_dates(
+        cls, summary_input: DailySummaryInput, temporal_context: str
+    ) -> str:
+        """Whose important dates are coming up, on the current day and no other.
+
+        The third of the day's forward-looking groups, and the one the
+        specification names last: *"important contact dates falling in the next
+        seven days"*, over the same window the tasks section covers. The read is
+        the contacts domain's own — the dashboard's section and
+        ``list_upcoming_important_dates`` are answered by it too — so the
+        recurrence rule, the leap-day substitution and the ranking all arrive
+        with the answer and none of them is re-derived here.
+
+        **Two guards for one rule, as the three sections above.** The assembler
+        skips the read entirely unless the day is the user's today; this decides
+        the rendering. Each resolves the local date through the same pair
+        underneath, so the two cannot disagree, and having the rendering half
+        here is what makes "a past-day prompt carries no forward-looking
+        material" assertable without a database.
+
+        **The section says outright that these are not appointments**, because
+        the model is reading them a few lines below the day's agenda and would
+        otherwise describe a birthday as something on the calendar. A recurring
+        date is notice that a day is significant, not a commitment anybody made.
+
+        An empty week contributes nothing rather than an empty heading, the
+        stance the other three sections already take.
+        """
+        upcoming = summary_input.upcoming_dates
+        if temporal_context != "Today" or upcoming is None or not upcoming.dates:
+            return ""
+
+        shown = upcoming.dates[:MAX_DATE_ENTRIES]
+        omitted = len(upcoming.dates) - len(shown)
+
+        lines = [
+            "## Important Dates Coming Up",
+            "Important dates in the user's contacts, soonest first, falling "
+            f"between today and {upcoming.window.last_day:%d %b} — the next "
+            f"{upcoming.window.days_ahead} days.",
+            "These are recurring dates, not appointments: nobody has scheduled "
+            "anything for them.",
+        ]
+        lines.extend(
+            cls._date_line(entry, upcoming.window.first_day) for entry in shown
+        )
+        note = _overflow_note(
+            omitted, subject="contact dates in this window", cap=MAX_DATE_ENTRIES
+        )
+        if note:
+            lines.append(note)
+        return "\n".join(lines)
+
+    @classmethod
+    def _date_line(cls, entry: UpcomingContactDate, today: date) -> str:
+        """One coming-up date as a single line.
+
+        **No timezone is named and none is needed**, for the reason
+        :meth:`_task_line` gives: an occurrence is a ``date`` the contacts read
+        resolved against the acting user's today, not a clock time in some other
+        zone. The relative label is the same helper the week's tasks use, so the
+        whole prompt says "in 3 days" one way; ``occurrence.days_away`` is the
+        same arithmetic and is deliberately not a second source for it.
+
+        The derived years travel with the date so the model need not infer them,
+        which is what the phase asks for — and they are **worded by type**, the
+        split ``important_date_occurrence`` states when it explains why it
+        returns a bare count: "turns 35" is what one says about a birthday and
+        "35 years" about an anniversary.
+        """
+        occurrence = entry.occurrence
+        line = (
+            f"- {occurrence.occurs_on:%d %b} "
+            f"({cls._relative_day(occurrence.occurs_on, today)}): "
+            f"{entry.contact.display_name} — {cls._date_type_label(entry)}"
+        )
+        if occurrence.years is not None:
+            line += (
+                f", turns {occurrence.years}"
+                if occurrence.important_date.date_type is ImportantDateType.BIRTHDAY
+                else f", {occurrence.years} years"
+            )
+        if occurrence.observed_for_leap_day:
+            # The flag's whole reason for existing. Left unsaid, the model tells
+            # the user a 29 February birthday falls on the 28th.
+            line += " (29 February, observed on the 28th this year)"
+        return line
+
+    @staticmethod
+    def _date_type_label(entry: UpcomingContactDate) -> str:
+        """What to call this kind of date.
+
+        A custom type is named by the user, so the row's own name is the label —
+        and the fallback exists because ``custom_date_type_name`` is populated by
+        a ``LEFT JOIN``: a custom row whose type has been deleted would otherwise
+        render an empty phrase where a noun belongs.
+        """
+        stored = entry.occurrence.important_date
+        if stored.date_type is ImportantDateType.CUSTOM:
+            return stored.custom_date_type_name or "Important date"
+        return _DATE_TYPE_LABELS[stored.date_type]
 
     @classmethod
     def _build_past_day_tasks(

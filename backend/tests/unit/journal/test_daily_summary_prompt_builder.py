@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
+from core_shared.models.contacts.important_date_types import ImportantDateType
 from core_shared.models.tasks import (
     Task,
     TaskContactRef,
@@ -14,6 +15,7 @@ from core_shared.models.tasks import (
     upcoming_window,
 )
 
+from app.core.contacts.models.upcoming_dates import upcoming_dates_window
 from app.core.journal.models.agenda import AgendaEntry, AgendaParticipant
 from app.core.journal.services.daily_summary_models import (
     DailySummaryInput,
@@ -23,10 +25,17 @@ from app.core.journal.services.daily_summary_prompt_builder import (
     MAX_AGENDA_ENTRIES,
     MAX_AGENDA_PARTICIPANTS,
     MAX_CONTENT_LENGTH,
+    MAX_DATE_ENTRIES,
     MAX_TASK_CONTACTS,
     MAX_TASK_ENTRIES,
     MAX_TASK_TEXT_LENGTH,
     DailySummaryPromptBuilder,
+)
+from tests.unit.journal.upcoming_date_doubles import (
+    DEFAULT_DATE_WINDOW,
+    coming_up,
+    occurring,
+    stored_date,
 )
 
 # Both daily-summary suites are pure and mock-backed, but neither carried the
@@ -91,9 +100,10 @@ class TestDailySummaryPromptBuilder:
         prompt = builder.build(_make_input())
 
         assert (
-            "not present in the journals, the agenda, the tasks or the tool results"
-            in prompt
+            "not present in the journals, the agenda, the tasks, the upcoming "
+            "contact dates or the tool results" in prompt
         )
+        assert "the tasks or the tool results you were given" not in prompt
         assert "not present in the journals, the agenda or the tool" not in prompt
         assert "not present in the journals or tool results" not in prompt
 
@@ -912,10 +922,16 @@ class TestAQuietWeekAddsNoHeading:
         assert "## Tasks Due Soon" not in prompt
 
 
-class TestTheToneInstructionsCoverTasks:
-    """A new input group widens an existing rule; it never gets a second one."""
+class TestTheToneInstructionsCoverEveryInputGroup:
+    """A new input group widens an existing rule; it never gets a second one.
 
-    def test_the_grounding_rule_names_the_tasks(self) -> None:
+    Renamed from *…CoverTasks* by the contact-dates phase rather than joined by
+    a sibling class, for the reason the rule itself states: a second assertion
+    beside a narrower one leaves the narrow claim standing. The superseded forms
+    are asserted absent here too, so the next widening cannot half-happen.
+    """
+
+    def test_the_grounding_rule_names_every_group(self) -> None:
         """Two grounding sentences listing different sources contradict."""
         builder = DailySummaryPromptBuilder()
 
@@ -923,18 +939,22 @@ class TestTheToneInstructionsCoverTasks:
 
         assert (
             "Do not invent information not present in the journals, the agenda, "
-            "the tasks or the tool results you were given." in prompt
+            "the tasks, the upcoming contact dates or the tool results you were "
+            "given." in prompt
         )
+        assert "the tasks or the tool results you were given" not in prompt
 
-    def test_the_do_not_restate_rule_names_the_tasks(self) -> None:
+    def test_the_do_not_restate_rule_names_every_group(self) -> None:
         builder = DailySummaryPromptBuilder()
 
         prompt = builder.build(_make_input(summary_date=_TODAY), now=_NOW)
 
         assert (
-            "Do not restate the day's agenda, journals, tasks or other listed "
-            "material item by item" in prompt
+            "Do not restate the day's agenda, journals, tasks, upcoming dates or "
+            "other listed material item by item" in prompt
         )
+        assert "the day's agenda, journals, tasks or other listed" not in prompt
+        assert "the day's agenda, journals or other listed" not in prompt
 
 
 class TestAnUnboundedTaskTextIsCapped:
@@ -1331,14 +1351,16 @@ class TestThePastDaysBudget:
         assert "x" * (MAX_TASK_TEXT_LENGTH + 1) not in prompt
 
 
-class TestTheOverflowNoteIsSharedByAllThreeSections:
-    """One sentence, three subjects — the extraction a third copy justified.
+class TestTheOverflowNoteIsSharedByAllFourSections:
+    """One sentence, four subjects — the extraction a third copy justified.
 
     The upcoming-tasks phase deliberately left this duplicated between the
     agenda and the week's tasks, reasoning that parameterising the noun *and*
     the phrase would leave a template neither caller could read. With a third
-    caller the noun is the only thing that varies, and these three assertions
-    are what stop the shared sentence quietly renaming one section's subject.
+    caller the noun is the only thing that varies, and these assertions are what
+    stop the shared sentence quietly renaming one section's subject. The
+    contact-dates phase is the fourth caller and adds nothing but a noun, which
+    is the extraction paying off rather than being re-argued.
     """
 
     def test_the_agenda_counts_events_on_this_day(self) -> None:
@@ -1389,3 +1411,418 @@ class TestTheOverflowNoteIsSharedByAllThreeSections:
             f"(3 further tasks due on this day are not listed; the list above is "
             f"capped at {MAX_TASK_ENTRIES}.)"
         ) in prompt
+
+    def test_the_dates_count_contact_dates_in_this_window(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        dates = [
+            occurring(stored_date(i, month=4, day=29), name=f"Person-{i:02d}")
+            for i in range(MAX_DATE_ENTRIES + 2)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_dates=coming_up(*dates)),
+            now=_NOW,
+        )
+
+        assert (
+            f"(2 further contact dates in this window are not listed; the list "
+            f"above is capped at {MAX_DATE_ENTRIES}.)"
+        ) in prompt
+
+
+_DATE_WINDOW = DEFAULT_DATE_WINDOW
+
+# A window over a 28 February that is not itself a leap day, which is the only
+# shape in which the substitution can be observed.
+_LEAP_NOW = datetime(2026, 2, 25, 9, 0, tzinfo=UTC)
+_LEAP_TODAY = date(2026, 2, 25)
+_LEAP_WINDOW = upcoming_dates_window(_LEAP_TODAY)
+
+
+class TestUpcomingDatesSection:
+    """Whose dates are coming up, on the current day's prompt and no other."""
+
+    def test_todays_prompt_carries_the_date_and_whose_it_is(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "## Important Dates Coming Up" in prompt
+        assert "Ada Lovelace" in prompt
+        assert "29 Apr" in prompt
+
+    def test_the_line_carries_a_relative_label(self) -> None:
+        """A bare ``29 Apr`` makes the model do arithmetic to find the urgency."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "(in 2 days)" in prompt
+
+    def test_a_date_landing_today_reads_as_today(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=27, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "(today)" in prompt
+
+    def test_the_section_names_the_window_it_describes(self) -> None:
+        """An empty week has no rows to derive the span from, so it travels."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "04 May" in prompt
+        assert "the next 7 days" in prompt
+
+    def test_the_section_says_these_are_not_appointments(self) -> None:
+        """A recurring anniversary is not something anyone has scheduled.
+
+        Left unsaid, a model reading a date under a heading beside the day's
+        agenda will describe a birthday as a commitment on the calendar.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "recurring dates, not appointments" in prompt
+
+    def test_the_read_s_order_is_preserved(self) -> None:
+        """Date ascending then importance is the contacts read's, not ours."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=28), name="First Person"),
+                    occurring(stored_date(2, month=5, day=1), name="Second Person"),
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert prompt.index("First Person") < prompt.index("Second Person")
+
+
+class TestHowAnUpcomingDateReads:
+    """The type, and the derived years where the precision allows one."""
+
+    def test_a_birthday_with_a_stored_year_turns_an_age(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "Birthday, turns 35" in prompt
+
+    def test_an_anniversary_with_a_stored_year_counts_years(self) -> None:
+        """ "Turns 12" is what a person says about a child, not a marriage."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(
+                        stored_date(
+                            1,
+                            month=4,
+                            day=29,
+                            year=2014,
+                            date_type=ImportantDateType.MARRIAGE_ANNIVERSARY,
+                        )
+                    )
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "Marriage anniversary, 12 years" in prompt
+        assert "turns" not in prompt
+
+    def test_a_work_anniversary_reads_as_itself(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(
+                        stored_date(
+                            1,
+                            month=4,
+                            day=29,
+                            date_type=ImportantDateType.WORK_ANNIVERSARY,
+                        )
+                    )
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "Work anniversary" in prompt
+
+    def test_a_first_met_date_reads_as_itself(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(
+                        stored_date(
+                            1, month=4, day=29, date_type=ImportantDateType.FIRST_MET
+                        )
+                    )
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "First met" in prompt
+
+    def test_a_custom_type_reads_as_the_name_the_user_gave_it(self) -> None:
+        """The user is the only authority on what a custom date means."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(
+                        stored_date(
+                            1,
+                            month=4,
+                            day=29,
+                            date_type=ImportantDateType.CUSTOM,
+                            custom_date_type_id=7,
+                            custom_date_type_name="Sobriety",
+                        )
+                    )
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "Sobriety" in prompt
+        assert "Custom" not in prompt
+
+    def test_a_date_without_a_stored_year_carries_no_count(self) -> None:
+        """``DAY_MONTH`` precision has no year to count from; it degrades."""
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(occurring(stored_date(1, month=4, day=29))),
+            ),
+            now=_NOW,
+        )
+
+        assert "Birthday" in prompt
+        assert "turns" not in prompt
+        assert "years" not in prompt
+
+    def test_a_leap_day_says_where_it_is_being_observed(self) -> None:
+        """The substitution is the flag's whole reason for existing.
+
+        Unsaid, the model tells the user a 29 February birthday is on the 28th.
+        """
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_LEAP_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(
+                        stored_date(1, month=2, day=29, year=1992), window=_LEAP_WINDOW
+                    ),
+                    window=_LEAP_WINDOW,
+                ),
+            ),
+            now=_LEAP_NOW,
+        )
+
+        assert "28 Feb" in prompt
+        assert "29 February, observed on the 28th this year" in prompt
+
+    def test_an_ordinary_date_carries_no_leap_day_caveat(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "observed on the 28th" not in prompt
+
+
+class TestNoUpcomingDatesOnAnyOtherDay:
+    """Forward-looking material belongs to today; a past day describes itself."""
+
+    def test_a_past_day_carries_no_upcoming_date_material(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY - timedelta(days=1),
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "## Important Dates Coming Up" not in prompt
+        assert "Ada Lovelace" not in prompt
+
+    def test_a_future_day_carries_no_upcoming_date_material(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(
+                summary_date=_TODAY + timedelta(days=1),
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        assert "## Important Dates Coming Up" not in prompt
+        assert "Ada Lovelace" not in prompt
+
+
+class TestAQuietWeekOfDatesAddsNoHeading:
+    """An empty heading reads as a section the model must account for."""
+
+    def test_an_empty_window_adds_no_heading(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_dates=coming_up()), now=_NOW
+        )
+
+        assert "## Important Dates Coming Up" not in prompt
+
+    def test_a_day_that_gathered_nothing_adds_no_heading(self) -> None:
+        builder = DailySummaryPromptBuilder()
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_dates=None), now=_NOW
+        )
+
+        assert "## Important Dates Coming Up" not in prompt
+
+
+class TestTheUpcomingDatesBudget:
+    """The entry cap the other three groups take, and no text cap.
+
+    There is deliberately no ``MAX_DATE_TEXT_LENGTH``: every string this
+    section interpolates is bounded — ``custom_date_types.name`` is a
+    ``VARCHAR(100)`` and a display name is composed of at most three of them —
+    so unlike ``tasks.text`` no single row here can blow a request.
+    """
+
+    def test_the_entry_cap_states_the_overflow(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        dates = [
+            occurring(stored_date(i, month=4, day=29), name=f"Person-{i:02d}")
+            for i in range(MAX_DATE_ENTRIES + 3)
+        ]
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_dates=coming_up(*dates)),
+            now=_NOW,
+        )
+
+        assert f"Person-{MAX_DATE_ENTRIES - 1:02d}" in prompt
+        assert f"Person-{MAX_DATE_ENTRIES:02d}" not in prompt
+        assert "3 further contact dates" in prompt
+
+
+class TestTheCountersAreUnchangedByTheDatesSection:
+    """The phase's fourth criterion, asserted rather than assumed."""
+
+    def test_the_day_overview_is_byte_identical_with_and_without_dates(self) -> None:
+        builder = DailySummaryPromptBuilder()
+        without = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                journal_count=3,
+                event_count=2,
+                contact_names=["Ada Lovelace"],
+                mood_values=[4, 2],
+            ),
+            now=_NOW,
+        )
+        with_dates = builder.build(
+            _make_input(
+                summary_date=_TODAY,
+                journal_count=3,
+                event_count=2,
+                contact_names=["Ada Lovelace"],
+                mood_values=[4, 2],
+                upcoming_dates=coming_up(
+                    occurring(stored_date(1, month=4, day=29, year=1991))
+                ),
+            ),
+            now=_NOW,
+        )
+
+        overview = "## Day Overview: 2026-04-27 (Today)\n- Journal count: 3\n- Event count: 2\n- Contacts involved: Ada Lovelace\n- Average mood: 3.0"
+        assert overview in without
+        assert overview in with_dates
