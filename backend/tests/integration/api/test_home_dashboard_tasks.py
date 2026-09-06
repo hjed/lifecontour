@@ -25,12 +25,15 @@ instant read inside the test — the bracketing the agenda and upcoming-dates
 suites use. Membership cases sit mid-window, where a midnight crossing cannot
 change the answer. **Three cases are unavoidably clock-relative**: a task due
 today, one due on the window's last day, and one due the day after it. All three
-flip if UTC's date turns over between seeding the journal and the request, so
-each calls ``guard_no_rollover`` first — the anchor is compared against the day
-the fixture was built for, and a crossing fails *there*, naming itself, instead
-of surfacing as an inexplicable off-by-one in the assertion under test. The
-window's own edges are pinned against a frozen clock where one can be injected,
-in ``tests/integration/tasks/test_task_upcoming_listing_integration.py``.
+flip if UTC's date turns over between seeding the journal and the request — as
+do the ordering case's exact ``days_away`` values and the uncapped-total case,
+whose eight tasks start on day zero. Each captures ``utc_today()`` before
+seeding and calls ``guard_no_rollover`` after the response, so a crossing fails
+*there*, naming itself, instead of surfacing as an inexplicable off-by-one in
+the assertion under test. The guard reads **the clock**, never the response, so
+it never stands in for the thing a test is asserting. The window's own edges are
+pinned against a frozen clock where one can be injected, in
+``tests/integration/tasks/test_task_upcoming_listing_integration.py``.
 
 **The cancelled due journal is written as a ``journal_calendar_info`` row**
 rather than driven through the calendar sync processor. That seam — a real
@@ -88,11 +91,6 @@ def rows_of(response: Any) -> list[dict[str, Any]]:
     return list(section["data"]["tasks"])
 
 
-def anchor_of(response: Any) -> datetime.date:
-    """The day the whole page was read for, as the server resolved it."""
-    return datetime.date.fromisoformat(response.json()["meta"]["anchor"]["date"])
-
-
 async def due_journal(
     journal_repository: SqlJournalRepository,
     *,
@@ -105,19 +103,34 @@ async def due_journal(
     )
 
 
-def guard_no_rollover(response: Any, seeded_for: datetime.date) -> None:
+def utc_today() -> datetime.date:
+    """UTC's date now — the day this file's fixtures are seeded against.
+
+    The test user has no stored timezone, so the dashboard anchors on UTC's
+    today and a journal seeded at ``now + N days`` lands exactly ``N`` days
+    into the window.
+    """
+    return datetime.datetime.now(datetime.UTC).date()
+
+
+def guard_no_rollover(seeded_for: datetime.date) -> None:
     """Fail here, rather than in the assertion, if UTC's date turned over.
 
-    The three edge cases in this file seed a journal at ``now + N days`` and
-    then assert an exact ``days_away``. If midnight passes between the two, the
-    journal keeps the date it was given while the anchor moves on, and the
-    expected number is off by one — through no fault of the code. The test user
-    has no stored timezone, so the anchor is UTC's today and this comparison is
-    exact.
+    Several cases in this file seed a journal at ``now + N days`` and then
+    assert an exact ``days_away``, or assert on membership at a window edge. If
+    midnight passes between seeding and the request, the journal keeps the date
+    it was given while the anchor moves on, and the expected number is off by
+    one — through no fault of the code.
+
+    **The guard reads the clock, not the response.** An earlier version compared
+    the *page's anchor* against the seed day, which is a claim about the server
+    as well as about the timing — and for the test asserting the anchor **is**
+    UTC's today, using it would have been the assertion guarding itself. Asking
+    only whether this test's own clock moved keeps every response assertion
+    standing on its own, and serves all of them.
     """
-    assert anchor_of(response) == seeded_for, (
-        "UTC's date rolled over mid-test; the fixture was seeded for "
-        f"{seeded_for} and the page anchored on {anchor_of(response)}"
+    assert utc_today() == seeded_for, (
+        f"UTC's date rolled over mid-test: seeded for {seeded_for}, now {utc_today()}"
     )
 
 
@@ -131,7 +144,7 @@ class TestWhatReachesTheSection:
     ) -> None:
         """W23, W25, W26 and W27 in one row, and no follow-up request for any."""
         creating_id, _ = task_anchors
-        seeded_for = datetime.datetime.now(datetime.UTC).date()
+        seeded_for = utc_today()
         due_id = await due_journal(
             journal_repository, days_offset=3, title="Monday standup"
         )
@@ -145,7 +158,7 @@ class TestWhatReachesTheSection:
         await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
 
         response = await authenticated_client.get(URL)
-        guard_no_rollover(response, seeded_for)
+        guard_no_rollover(seeded_for)
         [row] = rows_of(response)
 
         assert row["task_id"] == task_id
@@ -177,18 +190,20 @@ class TestWhatReachesTheSection:
         window tomorrow would drop exactly the task a dashboard exists for.
         """
         creating_id, _ = task_anchors
-        seeded_for = datetime.datetime.now(datetime.UTC).date()
+        seeded_for = utc_today()
         due_id = await due_journal(journal_repository, days_offset=0, title="Today")
         await create_task(
             async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         response = await authenticated_client.get(URL)
-        guard_no_rollover(response, seeded_for)
+        guard_no_rollover(seeded_for)
         [row] = rows_of(response)
 
         assert row["days_away"] == 0
-        assert row["due_journal"]["date"] == anchor_of(response).isoformat()
+        # The seeded day, not the response's own anchor — comparing two fields
+        # of one response would hold however the server had computed either.
+        assert row["due_journal"]["date"] == seeded_for.isoformat()
 
     async def test_a_task_due_on_the_windows_last_day_is_included(
         self,
@@ -199,14 +214,14 @@ class TestWhatReachesTheSection:
     ) -> None:
         """ "Inclusive" is the word an off-by-one gets wrong at this end."""
         creating_id, _ = task_anchors
-        seeded_for = datetime.datetime.now(datetime.UTC).date()
+        seeded_for = utc_today()
         due_id = await due_journal(journal_repository, days_offset=7, title="Next week")
         task_id = await create_task(
             async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         response = await authenticated_client.get(URL)
-        guard_no_rollover(response, seeded_for)
+        guard_no_rollover(seeded_for)
         [row] = rows_of(response)
 
         assert row["task_id"] == task_id
@@ -221,14 +236,14 @@ class TestWhatReachesTheSection:
     ) -> None:
         """The far edge from the other side, so both are pinned rather than one."""
         creating_id, _ = task_anchors
-        seeded_for = datetime.datetime.now(datetime.UTC).date()
+        seeded_for = utc_today()
         due_id = await due_journal(journal_repository, days_offset=8, title="Later")
         await create_task(
             async_connection, creating_journal_id=creating_id, due_journal_id=due_id
         )
 
         response = await authenticated_client.get(URL)
-        guard_no_rollover(response, seeded_for)
+        guard_no_rollover(seeded_for)
 
         assert rows_of(response) == []
 
@@ -406,6 +421,7 @@ class TestTheOrder:
         the statement happened to produce them fails here.
         """
         creating_id, _ = task_anchors
+        seeded_for = utc_today()
         ids = []
         for offset in (5, 1, 3):
             due_id = await due_journal(
@@ -422,7 +438,9 @@ class TestTheOrder:
                 )
             )
 
-        rows = rows_of(await authenticated_client.get(URL))
+        response = await authenticated_client.get(URL)
+        guard_no_rollover(seeded_for)
+        rows = rows_of(response)
 
         expected = [task_id for _offset, task_id in sorted(ids)]
         assert [row["task_id"] for row in rows] == expected
@@ -453,6 +471,9 @@ class TestTheSectionsOwnAnswers:
         asking again, so a server-side cap would turn one round trip into two.
         """
         creating_id, _ = task_anchors
+        # Day 0 is the window's first day, so this fixture has an edge in it: a
+        # rollover would lapse that task and make the answer seven.
+        seeded_for = utc_today()
         for offset in range(8):
             due_id = await due_journal(
                 journal_repository, days_offset=offset, title=f"Day {offset}"
@@ -463,7 +484,9 @@ class TestTheSectionsOwnAnswers:
                 due_journal_id=due_id,
             )
 
-        section = section_of(await authenticated_client.get(URL))
+        response = await authenticated_client.get(URL)
+        guard_no_rollover(seeded_for)
+        section = section_of(response)
 
         assert section["data"]["total"] == 8
         assert len(section["data"]["tasks"]) == 8
@@ -522,12 +545,20 @@ class TestTheSectionsOwnAnswers:
     ) -> None:
         """The control for the case above: with no stored zone the anchor is
         UTC's day, so the Kiritimati assertion is about the zone rather than
-        about the window echoing whatever it was given."""
+        about the window echoing whatever it was given.
+
+        The day is captured **before** the request and the guard confirms the
+        clock did not move, rather than sampling a fresh one afterwards and
+        comparing two readings that a midnight between them makes unequal.
+        """
+        today = utc_today()
+
         response = await authenticated_client.get(URL)
+        guard_no_rollover(today)
 
         meta = response.json()["meta"]["anchor"]
         assert meta["timezone"] == "UTC"
-        assert meta["date"] == datetime.datetime.now(datetime.UTC).date().isoformat()
+        assert meta["date"] == today.isoformat()
         assert section_of(response)["data"]["window"]["start_date"] == meta["date"]
 
 

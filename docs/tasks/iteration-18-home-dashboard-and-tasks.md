@@ -11086,14 +11086,24 @@ half-done exclusion pairing, and the frontend mocks that decided the typing ques
   every possible answer and under every mutation in the table. It now asserts the **seeded** offset, `3`.
   That makes it clock-relative, which is the trade the next paragraph handles.
 
-**Three integration cases are unavoidably clock-relative, and they now say so and guard themselves.** A
-test cannot freeze the clock through HTTP, so a task due today, one due on the window's last day and one
-due the day after it all flip if UTC's date turns over between seeding the journal and the request. The
-file's docstring had claimed there was one such case and that it could not fail that way — wrong on both
-counts. Each now calls `guard_no_rollover` first, comparing the page's anchor against the day the fixture
-was built for, so a crossing fails **there**, naming itself, instead of surfacing as an inexplicable
-off-by-one in the assertion under test. The window's own edges stay pinned against a frozen clock where
-one can be injected, in the tasks integration suite.
+**Seven integration cases are unavoidably clock-relative, and they now say so and guard themselves.** A
+test cannot freeze the clock through HTTP, so any case whose expectation is a *date offset* flips if UTC
+turns over between seeding the journal and the request. The file's docstring had claimed there was one
+such case and that it could not fail that way — wrong on both counts, and the count went on being wrong
+after the first correction: the second PR review found two more the first pass had missed, and finding
+them made it seven. Each captures `utc_today()` before seeding and calls `guard_no_rollover` after the
+response, so a crossing fails **there**, naming itself, instead of as an inexplicable off-by-one in the
+assertion under test. The window's own edges stay pinned against a frozen clock where one can be
+injected, in the tasks integration suite.
+
+**The guard reads the clock, never the response** — which is the second review's more useful half. The
+first version compared the *page's anchor* against the seed day, and that is a claim about the server as
+well as about the timing: for the test asserting the anchor **is** UTC's today, using it would have been
+the assertion standing in as its own guard. Reading only whether this test's clock moved leaves every
+response assertion on its own feet and serves all seven. Two assertions were rewritten off the back of
+it — a row's due date and the UTC control's day now compare against the *seeded* day rather than against
+another field of the same response, which held however the server had computed either. Proved by
+mutation: moving the guard's own clock read forward a day fails exactly those seven and nothing else.
 
 **A unit test was renamed rather than kept under a claim it cannot verify.**
 `test_reading_it_costs_no_second_settings_read` sat in the tasks-section class asserting the *page's*
@@ -11122,6 +11132,15 @@ counts the real total. Same lesson as the gap above, applied to the test that wa
   something else can hide a card built on bounds the server never sends — and Phase 14 is the card. The
   general form is the one this phase keeps meeting: **a fixture copied from its neighbour inherits the
   neighbour's bug, and a comment claiming it is "the real shape" makes the copy look reviewed.**
+
+**And a second round of the same review, which found two cases the first had missed.** The uncapped-total
+fixture seeds eight tasks starting on **day zero** — the window's first day, so a rollover lapses that one
+and the asserted eight becomes seven — and the UTC control compared `meta.anchor.date` against a clock
+sampled *after* the response, two readings a midnight between them makes unequal. Both were the same class
+the round before had just been about, in cases that round had not enumerated. **The lesson is about the
+first fix rather than the second finding:** having identified a category, the pass that fixes it must
+enumerate every instance rather than the ones the reviewer named — a partial sweep leaves the remainder
+looking deliberate.
 
 **A deliberate divergence from the plan, recorded because it moves work between phases.** The plan said
 to seed the cancelled due journal through the calendar sync processor, following ITER18-001 Phase 14's
