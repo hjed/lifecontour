@@ -105,7 +105,8 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
    already grants the three columns independent heights, so it buys nothing the wireframe did not draw.
    The cap is applied by the card (Phase 12); the payload carries the **whole** window with its total, so
    the show-more reveals the remainder without a second request and can name a count larger than the rows
-   on screen.
+   on screen. **Applied in ITER18-004 Phase 12**, and the "no second request" half is
+   asserted against the request count rather than the DOM: a card that refetched would still look right.
 4. **No sidebar entry for the dashboard.** The wireframe's sidebar shows Contacts / Journals /
    Integrations only; "Home" is reachable solely from the header logo link (W1), which is today's
    behaviour. The specification asks for the home page to be reachable from the primary navigation as
@@ -200,3 +201,17 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     "when the stack overflows" and fixes no cap. Three keeps a row to one line at 375 px beside its tags,
     and the `+N` names the hidden participants in its accessible label so nothing is lost to assistive
     technology. Settled in ITER18-004 Phase 7.
+19. **The two anniversary types are named in full, not shortened to "Anniversary".** W31 writes the type
+    badge's derived form as *"Anniversary · 34 years"*, but the sample shows a single anniversary while
+    the model has two — `marriage_anniversary` and `work_anniversary` — and this section shows a week of
+    several contacts at once. A badge that could mean a wedding or a job says nothing, so ITER18-004
+    Phase 12 draws *"Marriage anniversary · 34 years"* and *"Work anniversary · 12 years"*. A **custom**
+    date is drawn under the name its owner gave it, never under the word "custom".
+20. **The occurrence date carries a comma: "Friday, 31 July".** W31 writes it without one. The app
+    already formats exactly this shape in `formatIsoWeekdayDate`, which the agenda's tomorrow disclosure
+    (W19) uses, and minting a second formatter differing from the first by one comma is not worth the
+    place it could drift. Settled in ITER18-004 Phase 12.
+21. **A leap-day occurrence says that it is standing in.** The payload flags a 29 February date observed
+    on the 28th (`observed_for_leap_day`) precisely so a surface can account for itself; the wireframe
+    could not have drawn a case its sample does not contain. ITER18-004 Phase 12 draws a muted aside
+    beside the date rather than letting it read as a quietly wrong day.

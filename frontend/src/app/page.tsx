@@ -13,8 +13,8 @@
  *
  * The page reads `useHomeDashboard()` for the header's day alone — the header
  * takes it as a prop, which keeps it a pure function of the anchor and testable
- * without a query. **The summary card calls the same hook itself**, and the
- * three section cards will as they are filled in.
+ * without a query. **The summary, agenda and upcoming-dates cards call the same
+ * hook themselves**, and the tasks card will as it is filled in.
  *
  * That is the arrangement rather than threading props down from here, and the
  * reason is per-section resilience: a card that owns its own read owns its own
@@ -23,8 +23,8 @@
  * every caller on the page dedupes into a single fetch — asserted here, with
  * the card mounted, and again in the hook's own tests.
  *
- * The summary card (**W5**–**W10**) sits above the grid; the sections' own
- * contents land in Phases 7, 12, 14 and 15.
+ * The summary card (**W5**–**W10**) sits above the grid; the tasks section's
+ * own contents land in Phases 14 and 15.
  */
 
 'use client';
