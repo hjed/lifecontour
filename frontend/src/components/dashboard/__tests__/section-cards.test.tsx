@@ -1,57 +1,47 @@
 /**
  * @jest-environment jsdom
  *
- * The evidence cards that are still shells: their wireframe headers (**W21**,
- * **W30**), the labelled list container each will fill in a later phase
- * (**W4**), and the single quiet line each shows while it holds nothing
- * (**W29** and the wireframe's gap 2).
+ * The evidence card that is still a shell: its wireframe header (**W21**), the
+ * labelled list container Phases 14 and 15 will fill (**W4**), and the single
+ * quiet line it shows while it holds nothing (**W29**).
  *
- * The agenda card left this table when it started reading the dashboard query;
- * its shell assertions live in `AgendaCard.test.tsx` beside its states.
+ * Two cards have now left this table, each when it started reading the
+ * dashboard query — the agenda in Phase 7, the upcoming dates in Phase 12 —
+ * because a card with states of its own is tested beside them rather than
+ * against a shared shell checklist. Their assertions live in `AgendaCard.
+ * test.tsx` and `UpcomingDatesCard.test.tsx`, and this file goes with the tasks
+ * card's own phase.
  */
 
 import { render, screen } from '@testing-library/react';
 import { TasksCard } from '../TasksCard';
-import { UpcomingDatesCard } from '../UpcomingDatesCard';
 
-describe.each([
-  {
-    name: 'TasksCard',
-    Card: TasksCard,
-    title: 'Tasks',
-    description:
-      'Due in the next seven days, soonest first. Tick them off here.',
-    listLabel: 'Tasks due in the next seven days',
-    empty: 'Nothing due in the next seven days.',
-  },
-  {
-    name: 'UpcomingDatesCard',
-    Card: UpcomingDatesCard,
-    title: 'Upcoming dates',
-    description: 'Important dates for your contacts over the next seven days.',
-    listLabel: 'Upcoming contact dates',
-    empty: 'No important dates in the next seven days.',
-  },
-])('$name', ({ Card, title, description, listLabel, empty }) => {
+const TITLE = 'Tasks';
+const DESCRIPTION =
+  'Due in the next seven days, soonest first. Tick them off here.';
+const LIST_LABEL = 'Tasks due in the next seven days';
+const EMPTY_LINE = 'Nothing due in the next seven days.';
+
+describe('TasksCard', () => {
   it('carries its wireframe title and description', () => {
-    render(<Card />);
+    render(<TasksCard />);
 
     expect(
-      screen.getByRole('heading', { level: 3, name: title })
+      screen.getByRole('heading', { level: 3, name: TITLE })
     ).toBeInTheDocument();
-    expect(screen.getByText(description)).toBeInTheDocument();
+    expect(screen.getByText(DESCRIPTION)).toBeInTheDocument();
   });
 
   it('renders the labelled list its entries will fill', () => {
-    render(<Card />);
+    render(<TasksCard />);
 
-    expect(screen.getByRole('list', { name: listLabel })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: LIST_LABEL })).toBeInTheDocument();
   });
 
   it('says in one line that it holds nothing, reading as a good outcome', () => {
-    render(<Card />);
+    render(<TasksCard />);
 
-    expect(screen.getByText(empty)).toBeInTheDocument();
+    expect(screen.getByText(EMPTY_LINE)).toBeInTheDocument();
     // No error styling, no retry: W29 is a quiet line, not a failure.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(
@@ -60,7 +50,7 @@ describe.each([
   });
 
   it('marks its decorative icons as hidden from assistive tech', () => {
-    const { container } = render(<Card />);
+    const { container } = render(<TasksCard />);
 
     const icons = container.querySelectorAll('svg');
     expect(icons.length).toBeGreaterThan(0);
