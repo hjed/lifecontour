@@ -113,7 +113,10 @@ function dashboardDocument(
         summary: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
         agenda,
         tasks: { status: DashboardSectionStatus.READY, data: {} },
-        upcoming_dates: { status: DashboardSectionStatus.READY, data: {} },
+        upcoming_dates: {
+          status: DashboardSectionStatus.UNAVAILABLE,
+          data: null,
+        },
       },
     },
     meta: { anchor: { date: '2026-07-31', timezone: 'Australia/Sydney' } },

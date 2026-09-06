@@ -113,7 +113,10 @@ function dashboardDocument(
           data: { entries: [], tomorrow: { date: '2026-07-30', entries: [] } },
         },
         tasks: { status: DashboardSectionStatus.READY, data: {} },
-        upcoming_dates: { status: DashboardSectionStatus.READY, data: {} },
+        upcoming_dates: {
+          status: DashboardSectionStatus.UNAVAILABLE,
+          data: null,
+        },
       },
     },
     meta: { anchor: { date: ANCHOR_DATE, timezone: ANCHOR_TIMEZONE } },

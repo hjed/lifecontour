@@ -20,6 +20,7 @@ import {
 import type {
   HomeDashboardAgendaEntry,
   HomeDashboardResponse,
+  HomeDashboardUpcomingDates,
 } from '@/lib/api/home-dashboard';
 
 // jest.setup.ts mocks @/lib/constants but omits the home-dashboard endpoint;
@@ -70,6 +71,19 @@ const ANCHOR_DATE = '2026-07-29';
 const TOMORROW_DATE = '2026-07-30';
 const ANCHOR_DISPLAY = 'Wednesday, 29 July 2026';
 
+/**
+ * A ready upcoming-dates section holding nothing.
+ *
+ * These tests are about the page's frame, not its dates, so the section is
+ * ready-and-empty rather than absent: that is a real answer, and it keeps the
+ * dates card in the one state the frame assertions expect.
+ */
+const EMPTY_UPCOMING_DATES: HomeDashboardUpcomingDates = {
+  window: { start_date: ANCHOR_DATE, end_date: '2026-08-04', days_ahead: 7 },
+  total: 0,
+  dates: [],
+};
+
 function dashboardDocument(): HomeDashboardResponse {
   return {
     data: {
@@ -92,7 +106,10 @@ function dashboardDocument(): HomeDashboardResponse {
           data: { entries: [], tomorrow: { date: TOMORROW_DATE, entries: [] } },
         },
         tasks: { status: DashboardSectionStatus.READY, data: {} },
-        upcoming_dates: { status: DashboardSectionStatus.READY, data: {} },
+        upcoming_dates: {
+          status: DashboardSectionStatus.READY,
+          data: EMPTY_UPCOMING_DATES,
+        },
       },
     },
     meta: { anchor: { date: ANCHOR_DATE, timezone: 'Australia/Sydney' } },
