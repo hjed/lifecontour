@@ -6,7 +6,7 @@ SearchIndexer for the search-indexer consumer group.
 """
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from core_shared.stream_client import StreamClient, StreamEvent
@@ -247,102 +247,35 @@ class TestSearchIndexerConsumerHandleEvent:
         assert call_args[0].event_id == "evt-test-123"
 
     @pytest.mark.asyncio
-    async def test_handle_event_invalidates_daily_summary_for_journal_events(
-        self,
-        consumer: SearchIndexerConsumer,
-        mock_db_engine: MagicMock,
-        mock_search_indexer: MagicMock,
-    ) -> None:
-        """Verify daily summary invalidation runs for journal events."""
-        event = _make_stream_event(
-            event_type="JournalUpdated",
-            event_data={"journal_id": 99},
-            aggregate_id=99,
-        )
-
-        with (
-            patch(
-                "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
-                return_value=mock_db_engine,
-            ),
-            patch(
-                "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
-                return_value=mock_search_indexer,
-            ),
-            patch.object(
-                consumer,
-                "_invalidate_daily_summary",
-                new_callable=AsyncMock,
-            ) as mock_invalidate,
-        ):
-            await consumer._handle_event(event)
-
-        mock_search_indexer.process_event.assert_called_once()
-        mock_invalidate.assert_called_once()
-        # Verify the outbox event passed to invalidation has the right type
-        invalidate_args = mock_invalidate.call_args[0]
-        assert invalidate_args[0].event_type == "JournalUpdated"
-
-    @pytest.mark.asyncio
-    async def test_handle_event_does_not_invalidate_for_non_journal_events(
-        self,
-        consumer: SearchIndexerConsumer,
-        mock_db_engine: MagicMock,
-        mock_search_indexer: MagicMock,
-    ) -> None:
-        """Verify daily summary invalidation does NOT run for contact events."""
-        event = _make_stream_event(
-            event_type="ContactCreated",
-            event_data={"contact_id": 42},
-        )
-
-        with (
-            patch(
-                "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
-                return_value=mock_db_engine,
-            ),
-            patch(
-                "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
-                return_value=mock_search_indexer,
-            ),
-            patch.object(
-                consumer,
-                "_invalidate_daily_summary",
-                new_callable=AsyncMock,
-            ) as mock_invalidate,
-        ):
-            await consumer._handle_event(event)
-
-        mock_search_indexer.process_event.assert_called_once()
-        mock_invalidate.assert_not_called()
-
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "event_type",
-        [
-            "JournalTagAssigned",
-            "JournalTagRemoved",
-            "JournalTagDeleted",
-            "JournalTagMerged",
-        ],
+        "event_type", ["JournalCreated", "JournalUpdated", "JournalDeleted"]
     )
-    async def test_handle_event_does_not_invalidate_for_journal_tag_events(
+    async def test_a_journal_event_is_indexed_and_nothing_else(
         self,
         consumer: SearchIndexerConsumer,
         mock_db_engine: MagicMock,
         mock_search_indexer: MagicMock,
         event_type: str,
     ) -> None:
-        """Journal tag events re-index but must not invalidate the daily summary.
+        """Daily summary invalidation is gone from here — ITER18-005 Phase 7.
 
-        The daily summary is assembled from journal content and never reads tags,
-        so invalidating on a tag change would discard a cached summary — and pay
-        to regenerate it — for a change that cannot alter it.
+        It ran in this handler until then, having landed in it by history rather
+        than by design, and four tests here asserted it did. They are this one
+        now: the consumer indexes and returns, and summary freshness belongs to
+        ``SummaryInvalidationConsumer``.
+
+        The move was forced rather than chosen. This consumer's contract is that
+        **task events are permanently ignored** (see ``TestTasksAreNeverIndexed``
+        below), and Phase 7's whole subject is that a task change makes a summary
+        stale — so the two could not live together whatever the tidiness
+        argument said.
+
+        Asserted as an **absence on the object**, not as a call that did not
+        happen: a patched-out method that no longer exists would let this pass
+        while the invalidation quietly ran somewhere else in the handler.
         """
         event = _make_stream_event(
-            event_type=event_type,
-            event_data={"journal_id": 1},
-            aggregate_id=1,
+            event_type=event_type, event_data={"journal_id": 99}, aggregate_id=99
         )
 
         with (
@@ -354,51 +287,21 @@ class TestSearchIndexerConsumerHandleEvent:
                 "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
                 return_value=mock_search_indexer,
             ),
-            patch.object(
-                consumer,
-                "_invalidate_daily_summary",
-                new_callable=AsyncMock,
-            ) as mock_invalidate,
         ):
             await consumer._handle_event(event)
 
         mock_search_indexer.process_event.assert_called_once()
-        mock_invalidate.assert_not_called()
+        assert not hasattr(consumer, "_invalidate_daily_summary")
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "event_type",
-        ["JournalCreated", "JournalUpdated", "JournalDeleted"],
-    )
-    async def test_invalidation_triggered_for_all_journal_crud_events(
-        self,
-        consumer: SearchIndexerConsumer,
-        mock_db_engine: MagicMock,
-        mock_search_indexer: MagicMock,
-        event_type: str,
-    ) -> None:
-        """Verify all three journal CRUD event types trigger invalidation."""
-        event = _make_stream_event(
-            event_type=event_type,
-            event_data={"journal_id": 1},
-            aggregate_id=1,
-        )
+    def test_the_module_no_longer_names_an_invalidation_event_set(self) -> None:
+        """``_JOURNAL_INVALIDATION_EVENTS`` moved out with the behaviour.
 
-        with (
-            patch(
-                "app.infrastructure.events.search_indexer_consumer.get_async_database_engine",
-                return_value=mock_db_engine,
-            ),
-            patch(
-                "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
-                return_value=mock_search_indexer,
-            ),
-            patch.object(
-                consumer,
-                "_invalidate_daily_summary",
-                new_callable=AsyncMock,
-            ) as mock_invalidate,
-        ):
-            await consumer._handle_event(event)
+        Iteration 17 recorded a decision against this constant — *"the summary
+        assembler references no tags, so tag events stay out of it"* — and that
+        reasoning now lives beside the consumer that owns the set. Two sets, one
+        of them stale, is how a subscription silently stops matching what it
+        describes.
+        """
+        from app.infrastructure.events import search_indexer_consumer
 
-        mock_invalidate.assert_called_once()
+        assert not hasattr(search_indexer_consumer, "_JOURNAL_INVALIDATION_EVENTS")

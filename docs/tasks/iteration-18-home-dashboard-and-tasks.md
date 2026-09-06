@@ -11002,8 +11002,14 @@ journals view consumes the same summary, so it stands alone.
    A new column would duplicate the marker; a new status would break the dashboard's exhaustive status
    table and the frontend enum for nothing.
 3. **Whether task and important-date invalidation stays in `SearchIndexerConsumer`** (where journal
-   invalidation lives today, incidentally) or moves to a consumer that owns summary freshness — settled in
-   **Phase 6**. Moving it is cleaner but touches existing behaviour.
+   invalidation lives today, incidentally) or moves to a consumer that owns summary freshness — **settled
+   in Phase 7: a consumer of its own.** *This entry read "settled in Phase 6" until Phase 7's planning
+   went looking for the reasoning; Phase 6's write-up discusses only open decision 4 and never mentions
+   placement, so the reference was mis-recorded.* It is not a judgement call in the end:
+   `integration-architecture.md` records — and tests at both the consumer and the indexer pin — that
+   `SearchIndexerConsumer` **permanently ignores task events**, so task invalidation cannot live there
+   without contradicting a documented contract. The journal invalidation moves across with it, because
+   summary freshness having two owners is what made it incidental in the first place.
 4. ~~**Prompt budget**~~ — **settled and closed across Phases 3–6, for all four input groups.** Every
    group carries a per-group constant beside `MAX_CONTENT_LENGTH` and states its overflow in the prompt
    rather than truncating: `MAX_AGENDA_ENTRIES`/`MAX_AGENDA_PARTICIPANTS` (Phase 3),
@@ -12025,7 +12031,38 @@ both halves of the day question travel.
 #### Phase 7: Input-Driven Lazy Invalidation
 
 **Prerequisites:** Phases 2, 4, 6 and ITER18-003 Phase 5.
-**Estimated diff:** ~150 production → **~600 tracked** (×4)
+**Estimated diff:** ~150 production → **~600 tracked** (×4) · **Overrun recorded before work started per
+delivery rule 3, and the phase split per rules 10 and 16: ~750 production → ~3,000 tracked, delivered as
+a stack of three.** Planning read the code rather than the criteria alone and found the estimate was
+sized against a phase that does not exist. Three things it missed, each verified before this note was
+written:
+
+1. **A journal occupies a *span* of days, not one.** `SqlJournalRepository.get_all` filters
+   `event_date_range_end >= :start AND event_date_range_start <= :end` — overlap — so a Friday-to-Sunday
+   journal is in three days' summaries and a change to it invalidates three. The estimate assumed the
+   one-day mapping the existing handler performs, which is itself the first of the defects below.
+2. **The race in criterion 7 opens at *assembly*, not at the claim.** The criterion's own scenario is a
+   request whose input was assembled before the change and still wins its claim, because
+   `claim_for_generation` compares `generated_at` and an invalidation does not move it. A status guard at
+   persist closes the wrong window, so this needs the `invalidated_at` column the criterion offers — and
+   therefore a migration the estimate did not carry.
+3. **ITER18-004 Phase 4f already handed four journal-invalidation defects to this phase** and they are in
+   scope here: the day a moved journal left, `JournalDeleted` invalidating nothing, a journal's contact
+   changes publishing an event that carries no `journal_id`, and journal tags — which that entry
+   predicted would matter and which, checked here, do not (`AgendaEntry` carries no tags and the prompt
+   builder renders none). Fixing them is journal-domain work the estimate treated as out of scope.
+
+**The split**, each part independently mergeable and independently useful:
+
+| PR | Scope | Est. tracked |
+|---|---|---:|
+| **7a** | Ownership and journal inputs: the `summary-invalidation` consumer group, the pure span rule, the mapping service, range invalidation, and the four Phase 4f defects discharged | ~1,100 |
+| **7b** | Task and important-date inputs: the due-journal span, the two-day retarget, `TaskDeleted`, important dates and the `ContactUpdated` count pair | ~1,000 |
+| **7c** | The generation race (`invalidated_at`) and the inbound agenda paths that publish nothing | ~900 |
+
+Keeping it whole would put one PR at roughly twice calibration rule 16's ~1,500 band, which is the case
+rule 10 reserves for a phase whose split would ship a dead end — and no part of this one is a dead end:
+7a alone fixes four recorded defects.
 
 **Acceptance Criteria:**
 
@@ -12064,6 +12101,88 @@ both halves of the day question travel.
       midnight regardless, so a missed invalidation is stale until then and no longer.
 - [ ] Placement per open decision 3, with the consumer table in
       `docs/architecture/integration-architecture.md` updated if subscriptions change.
+
+##### 7a — Ownership and journal inputs ✅ COMPLETE
+
+**Actual: 712 production, ~1,650 tests, 143 documentation → ~2,500 tracked** (3.5× its production),
+against the ~1,100 recorded above — so the split was right and the *size of each part* was still
+underestimated, by the same 2× the whole phase was. Where it went: three new production modules rather
+than the two the estimate imagined (the pure rule, the service, the consumer) at this repository's
+docstring density, and an integration suite of 468 lines for 9 tests because every case needs a real
+journal written through the real service before it can assert anything. **The lesson, and it is
+calibration rule 14's again:** a phase whose deliverable is a *rule* is priced by its distinguishable
+cases, and "which days does this event make stale" has a case per event type times a case per span
+shape. Counting event types (6) against span shapes (single day, multi-day, moved, deleted) predicts
+the test volume; counting production modules does not.
+
+**Summary freshness has an owner.** `SummaryInvalidationConsumer` (group `summary-invalidation`) and
+`DailySummaryInvalidationService` decide which days a change makes stale and mark them `PENDING`;
+`SearchIndexerConsumer` goes back to indexing and its `_JOURNAL_INVALIDATION_EVENTS` is gone. Both
+its unit and integration suites now assert the invalidation is **absent from the object**, not merely
+uncalled — a patched-out method that no longer exists would pass either way.
+
+**Decisions taken.**
+
+1. **A journal occupies a *span* of days, and this is the phase's central correction.**
+   `SqlJournalRepository.get_all` selects a day's journals by overlap, so a Friday-to-Sunday journal
+   is part of three days' summaries. The handler this replaces mapped every journal to
+   `event_date_range.start.date()`. The mapping is now a pure rule returning ranges, and invalidation
+   is one range `UPDATE` per span — which is also why an unbounded span needs no cap: the statement
+   touches only rows that exist and creates none.
+2. **The day is local.** That same `.date()` was UTC's, so a Sydney evening's journal invalidated
+   yesterday. `day_span_of` resolves through `local_date`, the pair every other day question in this
+   codebase uses. Its own mutation fails four tests.
+3. **All four defects ITER18-004 Phase 4f handed to this phase are discharged**, three as fixes and
+   one as a checked non-defect:
+   - the day a moved journal **left** — recovered from `JournalUpdated`'s own
+     `changed_fields["event_date_range"]`, which already carried the old range, so no payload changed;
+   - **`JournalDeleted` invalidating nothing** — that entry named the fix ("carry the date on
+     `JournalDeleted`") and it is done, with `format_event_date_range`/`parse_event_date_range` moved
+     beside the events so writer and reader cannot drift;
+   - **a contact added to or removed from a journal** — `JournalContactService` publishes only
+     `ContactSummaryRefreshRequested`, whose aggregate is the *contact*, so `journal_id` now travels
+     on that payload. A new event type would have cost a phase's budget under calibration rule 6 for
+     an announcement that already exists;
+   - **journal tags** — predicted to matter here because the dashboard's agenda card renders them
+     (**W15**). Checked: `AgendaEntry` carries no tags and the prompt builder renders none, so
+     subscribing would discard summaries a tag change cannot alter. Asserted as a negative in both
+     suites rather than left as an assumption.
+4. **`JournalTypeAdded`/`JournalTypeRemoved` join the set** — published and ignored until now, though
+   `event_count` is derived from types and removing the EVENT type takes a journal off the agenda
+   outright. Two strings, three tests.
+5. **The new group is created at the stream's latest id.** `StreamClient.ensure_consumer_group`
+   hardcoded `id="0"` and `pms:domain-events` is not trimmed, so a new group would replay the entire
+   history on the deploy that introduces it and mark stale every summary any of it touched. The
+   parameter defaults to `"0"`, so every existing consumer is unchanged and a test pins that.
+6. **The subscription is derived from the service, not restated.** The consumer's patterns are
+   `HANDLED_EVENT_TYPES`; a second list is a second thing to remember to extend, which is exactly how
+   the three-event set came to be wrong in four ways.
+7. **`projection_harness` was generalised rather than copied.** Its engine patch and outbox relay
+   moved to `consumer_harness`, and the projection's four existing suites (104 tests) pass unedited —
+   the proof the move changed nothing.
+
+**Tests: 43 unit and 15 integration.** The span matrix (22) covers multi-day spans, a span crossing
+today, both window edges and far-east and far-west zones; the service suite (21) covers each event
+type and every negative with `assert_not_awaited`; the consumer suite (21) covers the subscription,
+the group's start id and the delegation. The integration suite drives real writes through
+`JournalService` → outbox → relay → consumer and asserts against real rows, including that a
+`PENDING` row **keeps its text and its `generated_at`** — the observable form of "nothing was
+generated".
+
+**Mutation checks.** Six, each backed up per file and restored from that copy.
+
+| Mutation | Tests failed |
+|---|---|
+| Span collapses to the start day | 5 |
+| The day a journal left is dropped | 2 |
+| The day is read in UTC | 4 |
+| A deleted journal carries no days | 1 |
+| Type events leave the handled set | 3 |
+| Tag events join the handled set | 1 |
+
+**Not in 7a:** task events (7b), important dates (7b), the generation race and the inbound agenda
+paths (7c). The consumer's suite asserts task events are **not** subscribed yet, so 7b has a test to
+change rather than a gap to notice.
 
 **Required Test Coverage:** unit — the event → invalidated-day mapping for every event type, including the
 two-day retarget case and each agenda-changing path that publishes. Integration — publish → relay → invalidation marks stale without regenerating; a

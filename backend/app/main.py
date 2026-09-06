@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     summary_consumer_task = None
     inbound_consumer_task = None
     history_consumer_task = None
+    invalidation_consumer_task = None
     try:
         # Make sure the journals search index carries the current settings
         # before any request can search it; a Meili outage must not block the
@@ -202,6 +203,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             stream=settings.stream_name,
         )
 
+        # Start the stream consumer that owns daily summary freshness. Its
+        # group begins at the stream's latest id rather than replaying an
+        # untrimmed history; see the consumer's module docstring.
+        from app.infrastructure.events.summary_invalidation_consumer import (
+            SummaryInvalidationConsumer,
+        )
+
+        invalidation_consumer = SummaryInvalidationConsumer(
+            stream_client=stream_client,
+            stream_name=settings.stream_name,
+        )
+        invalidation_consumer_task = asyncio.create_task(invalidation_consumer.start())
+        logger.info(
+            "Summary invalidation consumer started",
+            group="summary-invalidation",
+            stream=settings.stream_name,
+        )
+
         # Repair task history the projection group skipped before its patterns
         # were widened, and fill in ownership on rows written before the column
         # existed. Awaited rather than backgrounded: it is bounded by an
@@ -217,6 +236,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # Collect all active background tasks for cleanup
         active_tasks: list[tuple[asyncio.Task[None], str]] = []
         for task, name in [
+            (invalidation_consumer_task, "Summary invalidation consumer"),
             (history_consumer_task, "History projection consumer"),
             (inbound_consumer_task, "Inbound event consumer"),
             (summary_consumer_task, "Summary generator consumer"),

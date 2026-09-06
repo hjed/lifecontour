@@ -97,8 +97,37 @@ class JournalDailySummaryRepository(ABC):
 
         This is a no-op if no summary exists for the date.
 
+        The single-day case of :meth:`invalidate_for_range`, kept as its own
+        name for the reason ``local_day_window`` is kept beside ``local_window``:
+        "this day's summary" is what most callers are asking for, and passing
+        the same date twice reads as a mistake.
+
         Args:
             user_id: The user ID
             summary_date: The date to invalidate
+        """
+        pass
+
+    @abstractmethod
+    async def invalidate_for_range(
+        self, user_id: str, first_day: date, last_day: date
+    ) -> None:
+        """Invalidate (set to PENDING) every summary in a span of days.
+
+        Both ends are **inclusive**, matching ``DaySpan`` and
+        ``UpcomingWindow`` — one convention across the phase rather than an
+        off-by-one at every boundary between them.
+
+        A span rather than a date because a journal occupies a span: the day
+        query selects by overlap, so a journal running Friday to Sunday is part
+        of three days' summaries and a change to it makes three stale. Doing
+        that as one statement is also what makes an unbounded span safe — it
+        touches only rows that already exist, and creates none, so the ``WHERE``
+        clause is the bound and no cap on the span's length is needed.
+
+        Args:
+            user_id: The user ID
+            first_day: The first day of the span, inclusive
+            last_day: The last day of the span, inclusive
         """
         pass

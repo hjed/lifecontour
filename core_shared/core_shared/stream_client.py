@@ -182,6 +182,7 @@ class StreamClient:
         self,
         stream_name: str,
         group_name: str,
+        start_id: str = "0",
     ) -> None:
         """Create a consumer group, ignoring if it already exists.
 
@@ -191,12 +192,22 @@ class StreamClient:
         Args:
             stream_name: Name of the Redis Stream
             group_name: Name of the consumer group
+            start_id: Where a **newly created** group begins reading. ``"0"``,
+                the default, delivers everything the stream still holds, which
+                is what a group wants when its work is a projection that must
+                not miss an event. ``"$"`` begins at the next event published.
+
+                It matters only on creation — an existing group keeps its own
+                position — and the choice is about what a *first* start costs.
+                This stream is not trimmed, so a group added to a running system
+                with ``"0"`` walks its entire history on the deploy that
+                introduces it.
         """
         try:
             await self._redis.xgroup_create(
                 stream_name,
                 group_name,
-                id="0",
+                id=start_id,
                 mkstream=True,
             )
             logger.info(

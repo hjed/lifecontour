@@ -563,11 +563,24 @@ class ContactSummaryRefreshRequested(DomainEvent):
     Buffered intent: the summary consumer records it as a rolling-debounce
     marker (and the search indexer reindexes the contact); actual generation
     is driven by ``ContactSummaryRefreshDue`` once the quiet period elapses.
+
+    **``journal_id`` says what caused it, when a journal did.** Attaching or
+    detaching a contact on a journal publishes this and nothing else, so it is
+    the only announcement that a day's people changed — and the daily summary
+    counts exactly those relationships. Without the journal on the payload that
+    is unanswerable: the aggregate here is the *contact*, and a subscriber
+    cannot get from a contact to the day whose summary went stale. It is the
+    third of the four defects ITER18-004 Phase 4f recorded.
+
+    It is ``None`` for every other publisher — a contact edit, a manual refresh
+    — and a subscriber reads the absence as "no journal to invalidate" rather
+    than searching for one.
     """
 
     def __init__(
         self,
         contact_id: int,
+        journal_id: int | None = None,
         transaction: AsyncConnection | None = None,
     ):
         super().__init__(
@@ -575,7 +588,7 @@ class ContactSummaryRefreshRequested(DomainEvent):
             occurred_at=datetime.now(tz=UTC),
             aggregate_id=contact_id,
             event_type="ContactSummaryRefreshRequested",
-            event_data={"contact_id": contact_id},
+            event_data={"contact_id": contact_id, "journal_id": journal_id},
             transaction=transaction,
         )
 

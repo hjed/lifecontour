@@ -6,7 +6,45 @@ from typing import Any
 from uuid import UUID
 
 from core_shared.models.history import Provenance
+from core_shared.models.journals import EventDateRange
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+def format_event_date_range(event_date_range: EventDateRange) -> str:
+    """Render an event date range as a compact, JSON-safe ISO string.
+
+    The wire form two payloads carry: ``JournalUpdated``'s
+    ``changed_fields["event_date_range"]`` pair, where the history projection
+    reads it, and ``JournalDeleted``'s own field, where the daily summary's
+    invalidation reads it — the deleted row being unreadable by then.
+
+    It lives beside the events rather than in the service that first needed it
+    because it is the **payload's** format: a subscriber parsing it back
+    (:func:`parse_event_date_range`) has to agree with whoever wrote it, and one
+    pair of functions in one module is how that stays true.
+    """
+    return f"{event_date_range.start.isoformat()}/{event_date_range.end.isoformat()}"
+
+
+def parse_event_date_range(value: Any) -> EventDateRange | None:
+    """Read back what :func:`format_event_date_range` wrote, or ``None``.
+
+    **Never raises.** The value reaches a subscriber as JSON through Redis, so
+    it is data rather than a call — a legacy entry published before a field
+    existed, a truncated string, a reversed range that
+    :class:`~core_shared.models.journals.EventDateRange` refuses — and a
+    consumer that raised on one would retry it to the dead-letter table instead
+    of doing the part of its work that is still possible.
+    """
+    if not isinstance(value, str) or value.count("/") != 1:
+        return None
+    first, _, last = value.partition("/")
+    try:
+        return EventDateRange(
+            start=datetime.fromisoformat(first), end=datetime.fromisoformat(last)
+        )
+    except ValueError, TypeError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -88,6 +126,7 @@ class JournalDeleted(DomainEvent):
         journal_id: int,
         user_id: str,
         external_identifiers: dict[str, list[dict[str, Any]]] | None = None,
+        event_date_range: EventDateRange | None = None,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
@@ -102,6 +141,24 @@ class JournalDeleted(DomainEvent):
                 "journal_id": journal_id,
                 "user_id": user_id,
                 "external_identifiers": external_identifiers or {},
+                # The days this journal occupied, carried because **nothing
+                # downstream can read them any more**: the row is gone by the
+                # time a consumer runs. Without it the daily summary for those
+                # days keeps its pre-delete counters indefinitely, which is the
+                # second of the four defects ITER18-004 Phase 4f recorded — and
+                # that entry names exactly this fix, "carry the date on
+                # ``JournalDeleted``".
+                #
+                # ``None`` stays possible for the same reason every other
+                # optional field here does: a caller that does not have the
+                # journal loaded should publish the deletion rather than not
+                # publish it, and the subscriber treats an absent range as
+                # nothing it can invalidate.
+                "event_date_range": (
+                    format_event_date_range(event_date_range)
+                    if event_date_range is not None
+                    else None
+                ),
                 "source": source.value,
                 "changed_by": changed_by,
             },

@@ -85,6 +85,7 @@ class StreamConsumer:
         max_delivery_count: int = 5,
         *,
         routes: Sequence[EventRoute] | None = None,
+        group_start_id: str = "0",
     ) -> None:
         """Initialize the consumer.
 
@@ -111,6 +112,13 @@ class StreamConsumer:
             retry_batch_size: Maximum pending entries to claim per retry cycle
             max_delivery_count: Maximum times an event can be delivered before dead-lettering
             routes: Declarative route table mapping patterns to handlers (keyword-only).
+            group_start_id: Where the consumer group begins reading **when it is
+                first created** (keyword-only). ``"0"`` replays everything the
+                stream still holds, which is what a projection wants; ``"$"``
+                starts at the next event published, which is what a group added
+                to a running system wants when replaying an untrimmed stream
+                would do more harm than missing a deploy window's events. It has
+                no effect once the group exists.
 
         Raises:
             ValueError: If neither ``routes`` nor ``event_type_patterns`` is given;
@@ -148,6 +156,7 @@ class StreamConsumer:
         self._stream_client = stream_client
         self._stream_name = stream_name
         self._group_name = group_name
+        self._group_start_id = group_start_id
         self._consumer_name = consumer_name
         self._event_type_patterns = event_type_patterns
         self._batch_size = batch_size
@@ -165,7 +174,7 @@ class StreamConsumer:
         is cancelled.
         """
         await self._stream_client.ensure_consumer_group(
-            self._stream_name, self._group_name
+            self._stream_name, self._group_name, start_id=self._group_start_id
         )
 
         logger.info(

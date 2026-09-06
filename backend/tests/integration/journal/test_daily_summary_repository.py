@@ -403,3 +403,135 @@ class TestClaimForGeneration:
         assert await daily_summary_repo.claim_for_generation(
             self._USER, self._DATE, seen_generated_at=None
         )
+
+
+class TestInvalidatingASpanOfDays:
+    """A journal occupies a span of days, so invalidation works in ranges.
+
+    ``get_all`` selects a day's journals by overlap, so a journal running Friday
+    to Sunday is part of three days' summaries. Doing that as one statement
+    rather than a loop over enumerated dates is what lets a span of any length
+    cost one round trip and touch only the rows that exist — an unbounded span
+    needs no cap when the ``WHERE`` clause is the bound.
+    """
+
+    _USER = "user_range_invalidate"
+    _OTHER_USER = "user_range_bystander"
+
+    async def _generated_on(self, repo, day, user=None):
+        await repo.upsert(
+            JournalDailySummary(
+                user_id=user or self._USER,
+                summary_date=day,
+                summary_text=f"Summary for {day.isoformat()}.",
+                status=SummaryStatus.GENERATED,
+                generated_at=datetime(2026, 4, 27, 7, 0, tzinfo=UTC),
+            )
+        )
+
+    async def _status_on(self, repo, day, user=None):
+        row = await repo.find_by_user_and_date(user or self._USER, day)
+        assert row is not None
+        return row.status
+
+    @pytest.mark.asyncio
+    async def test_every_day_of_the_span_is_marked_pending(self, daily_summary_repo):
+        for day in (date(2026, 4, 24), date(2026, 4, 25), date(2026, 4, 26)):
+            await self._generated_on(daily_summary_repo, day)
+
+        await daily_summary_repo.invalidate_for_range(
+            self._USER, date(2026, 4, 24), date(2026, 4, 26)
+        )
+
+        for day in (date(2026, 4, 24), date(2026, 4, 25), date(2026, 4, 26)):
+            assert await self._status_on(daily_summary_repo, day) == (
+                SummaryStatus.PENDING
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_days_either_side_are_untouched(self, daily_summary_repo):
+        """Both ends are inclusive, so the proof is the days just outside them."""
+        for day in (date(2026, 4, 23), date(2026, 4, 24), date(2026, 4, 27)):
+            await self._generated_on(daily_summary_repo, day)
+
+        await daily_summary_repo.invalidate_for_range(
+            self._USER, date(2026, 4, 24), date(2026, 4, 26)
+        )
+
+        assert await self._status_on(daily_summary_repo, date(2026, 4, 23)) == (
+            SummaryStatus.GENERATED
+        )
+        assert await self._status_on(daily_summary_repo, date(2026, 4, 24)) == (
+            SummaryStatus.PENDING
+        )
+        assert await self._status_on(daily_summary_repo, date(2026, 4, 27)) == (
+            SummaryStatus.GENERATED
+        )
+
+    @pytest.mark.asyncio
+    async def test_another_users_day_in_the_same_span_is_untouched(
+        self, daily_summary_repo
+    ):
+        await self._generated_on(daily_summary_repo, date(2026, 4, 25))
+        await self._generated_on(
+            daily_summary_repo, date(2026, 4, 25), user=self._OTHER_USER
+        )
+
+        await daily_summary_repo.invalidate_for_range(
+            self._USER, date(2026, 4, 24), date(2026, 4, 26)
+        )
+
+        assert (
+            await self._status_on(
+                daily_summary_repo, date(2026, 4, 25), user=self._OTHER_USER
+            )
+            == SummaryStatus.GENERATED
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_span_over_days_that_have_no_summary_is_a_no_op(
+        self, daily_summary_repo
+    ):
+        """Invalidation only ever affects rows that exist — it creates none."""
+        await daily_summary_repo.invalidate_for_range(
+            "user_with_nothing", date(2026, 4, 1), date(2026, 12, 31)
+        )
+
+        assert (
+            await daily_summary_repo.find_by_user_and_date(
+                "user_with_nothing", date(2026, 4, 27)
+            )
+            is None
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_generating_row_in_the_span_is_marked_pending(
+        self, daily_summary_repo
+    ):
+        """The mechanism the generation race relies on: a claim can be undone."""
+        await daily_summary_repo.upsert(
+            JournalDailySummary(
+                user_id=self._USER,
+                summary_date=date(2026, 4, 25),
+                status=SummaryStatus.GENERATING,
+            )
+        )
+
+        await daily_summary_repo.invalidate_for_range(
+            self._USER, date(2026, 4, 25), date(2026, 4, 25)
+        )
+
+        assert await self._status_on(daily_summary_repo, date(2026, 4, 25)) == (
+            SummaryStatus.PENDING
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_single_day_span_is_the_narrow_method(self, daily_summary_repo):
+        """``invalidate_for_date`` is this statement with both ends the same."""
+        await self._generated_on(daily_summary_repo, date(2026, 4, 25))
+
+        await daily_summary_repo.invalidate_for_date(self._USER, date(2026, 4, 25))
+
+        assert await self._status_on(daily_summary_repo, date(2026, 4, 25)) == (
+            SummaryStatus.PENDING
+        )

@@ -106,14 +106,19 @@ class TestSearchIndexerConsumerIntegration:
         assert outbox_event.event_data["contact_id"] == contact_id
 
     @pytest.mark.asyncio
-    async def test_consumer_processes_journal_event_with_daily_summary_invalidation(
+    async def test_consumer_processes_journal_event_and_only_indexes_it(
         self,
         test_stream_name: str,
         async_connection: AsyncConnection,
         stream_client: StreamClient,
         redis_client: Redis,
     ) -> None:
-        """Verify journal events trigger both SearchIndexer and daily summary invalidation."""
+        """A journal event is indexed here and invalidates no summary.
+
+        It did both until ITER18-005 Phase 7 moved summary freshness to
+        ``SummaryInvalidationConsumer``; this is the same test asserting the
+        half that remains, plus the absence of the half that left.
+        """
         journal_id = 8888
 
         await stream_client.publish(
@@ -153,11 +158,6 @@ class TestSearchIndexerConsumerIntegration:
                 "app.infrastructure.events.search_indexer_consumer.SearchIndexer",
                 return_value=mock_indexer,
             ),
-            patch.object(
-                consumer,
-                "_invalidate_daily_summary",
-                new_callable=AsyncMock,
-            ) as mock_invalidate,
         ):
             count = await consumer._process_batch()
 
@@ -166,8 +166,9 @@ class TestSearchIndexerConsumerIntegration:
         # SearchIndexer was called
         mock_indexer.process_event.assert_called_once()
 
-        # Daily summary invalidation was called for the journal event
-        mock_invalidate.assert_called_once()
+        # And nothing else: the invalidation this handler used to perform is
+        # gone from the object, not merely unexercised by this test.
+        assert not hasattr(consumer, "_invalidate_daily_summary")
 
         # Acknowledged
         pending_info = await redis_client.xpending(test_stream_name, GROUP_NAME)
