@@ -5,6 +5,7 @@ from typing import Any
 import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
+    EventDateRange,
     FitnessMergeMode,
     Journal,
     JournalNotFoundError,
@@ -20,6 +21,7 @@ from app.core.journal.adapters.sql.journal_repository import _JOURNAL_TYPE_TABLE
 from app.core.journal.models.events import (
     JournalDeleted,
     JournalUpdated,
+    format_event_date_range,
 )
 from app.core.journal.models.repositories import JournalRepository
 from app.core.journal.services.type_data_coercion import coerce_type_data_override
@@ -44,6 +46,33 @@ _FITNESS_SUMMED_COLUMNS = (
     "elevation_loss",
     "calories",
 )
+
+
+def _record_date_move(
+    target: Journal,
+    moved_to: EventDateRange,
+    *,
+    changed_fields: dict[str, Any],
+) -> None:
+    """Move the target's dates and record the move as an ``(old, new)`` pair.
+
+    **The pair is the point, and it used to be a mapping** of the new range
+    alone. Two things read this key and neither could use that shape: the
+    history projection skips any value that is not a two-element sequence, so a
+    merge's date change produced no history row at all; and the daily summary's
+    invalidation needs the range the journal *left* in order to mark the day it
+    is no longer on — without it, the day the merged journal moved off keeps a
+    summary that still counts it. Both now work, and the wire form is
+    ``format_event_date_range``'s, so writer and reader agree by construction.
+
+    Raised by review on ITER18-005 Phase 7a.
+    """
+    was = target.event_date_range
+    target.event_date_range = moved_to
+    changed_fields["event_date_range"] = (
+        format_event_date_range(was),
+        format_event_date_range(moved_to),
+    )
 
 
 class JournalMergeService:
@@ -371,11 +400,9 @@ class JournalMergeService:
                 new_event_date_range = new_date_range
 
             if target.event_date_range != new_event_date_range:
-                target.event_date_range = new_event_date_range
-                changed_fields["event_date_range"] = {
-                    "start": target.event_date_range.start.isoformat(),
-                    "end": target.event_date_range.end.isoformat(),
-                }
+                _record_date_move(
+                    target, new_event_date_range, changed_fields=changed_fields
+                )
         else:
             if (
                 source.event_date_range
@@ -383,22 +410,20 @@ class JournalMergeService:
                 and source.event_date_range != target.event_date_range
             ):
                 if target.event_date_range != default_survivor.event_date_range:
-                    target.event_date_range = default_survivor.event_date_range
-                    changed_fields["event_date_range"] = {
-                        "start": target.event_date_range.start.isoformat(),
-                        "end": target.event_date_range.end.isoformat(),
-                    }
+                    _record_date_move(
+                        target,
+                        default_survivor.event_date_range,
+                        changed_fields=changed_fields,
+                    )
                 logger.debug(
                     "Merge date conflict resolved",
                     kept=str(target.event_date_range),
                     discarded=str(default_loser.event_date_range),
                 )
             elif source.event_date_range and not target.event_date_range:
-                target.event_date_range = source.event_date_range
-                changed_fields["event_date_range"] = {
-                    "start": source.event_date_range.start.isoformat(),
-                    "end": source.event_date_range.end.isoformat(),
-                }
+                _record_date_move(
+                    target, source.event_date_range, changed_fields=changed_fields
+                )
 
     def _apply_content_override(
         self,
@@ -1009,6 +1034,11 @@ class JournalMergeService:
                 source_id,
                 user_id=source.user_id,
                 external_identifiers={},
+                # The days the absorbed journal occupied. Nothing can read them
+                # after this: the row is gone, and the summaries for those days
+                # would otherwise keep counting a journal that no longer exists.
+                # Raised by review on ITER18-005 Phase 7a.
+                event_date_range=source.event_date_range,
                 transaction=transaction,
             )
         )

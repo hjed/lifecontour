@@ -97,13 +97,19 @@ class TestStreamConsumer:
     async def test_consumer_creates_group_on_start(
         self, consumer: ConcreteConsumer, mock_stream_client: MagicMock
     ) -> None:
-        """Test ensure_consumer_group is called when consumer starts."""
+        """Test ensure_consumer_group is called when consumer starts.
+
+        The start id travels with it and defaults to ``"0"``: a group created
+        here reads everything the stream still holds, which is what a projection
+        needs. Only a group whose first start would replay an untrimmed history
+        to no purpose opts out — see ``SummaryInvalidationConsumer``.
+        """
         # Start and immediately stop
         consumer.stop()
         await consumer.start()
 
         mock_stream_client.ensure_consumer_group.assert_called_once_with(
-            "pms:domain-events", "test-group"
+            "pms:domain-events", "test-group", start_id="0"
         )
 
     @pytest.mark.asyncio

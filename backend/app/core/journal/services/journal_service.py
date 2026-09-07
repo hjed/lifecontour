@@ -8,7 +8,6 @@ import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     MAX_HIERARCHY_DEPTH,
-    EventDateRange,
     Journal,
     JournalCycleError,
     JournalHasAnchoredTasksError,
@@ -28,6 +27,7 @@ from app.core.journal.models.events import (
     JournalTypeAdded,
     JournalTypeRemoved,
     JournalUpdated,
+    format_event_date_range,
 )
 from app.core.journal.models.repositories import (
     JournalContactRelationshipRepository,
@@ -42,11 +42,6 @@ from app.infrastructure.unit_of_work import savepoint, transactional
 from app.shared.preconditions import enforce_etag_precondition
 
 logger = structlog.get_logger()
-
-
-def _format_event_date_range(event_date_range: EventDateRange) -> str:
-    """Render an event date range as a compact, JSON-safe ISO string for history."""
-    return f"{event_date_range.start.isoformat()}/{event_date_range.end.isoformat()}"
 
 
 class JournalService:
@@ -375,6 +370,9 @@ class JournalService:
             journal_id,
             user_id=journal.user_id,
             external_identifiers=external_identifiers,
+            # The journal was read above to validate it exists, so its days cost
+            # nothing to carry — and after this statement nothing can read them.
+            event_date_range=journal.event_date_range,
             source=source,
             changed_by=changed_by,
             transaction=transaction,
@@ -654,8 +652,8 @@ class JournalService:
 
         if existing_journal.event_date_range != updated_journal.event_date_range:
             changed_fields["event_date_range"] = (
-                _format_event_date_range(existing_journal.event_date_range),
-                _format_event_date_range(updated_journal.event_date_range),
+                format_event_date_range(existing_journal.event_date_range),
+                format_event_date_range(updated_journal.event_date_range),
             )
 
         return changed_fields

@@ -1229,6 +1229,34 @@ one prompt: `summary_date < today` reaches this listing, `summary_date == today`
 future day reaches neither. Both halves of "which day is it" are injectable here from the start rather
 than added by review, for the reason the paragraph above gives.
 
+### Daily summary invalidation (what makes a day stale)
+
+A day's summary is cached, so something has to say when it stops describing the day. That is
+`SummaryInvalidationConsumer` (group `summary-invalidation`) and
+`DailySummaryInvalidationService`, and the rule they apply is **lazy**: an event marks the row
+`PENDING` and never generates. The next read of that day pays for one regeneration, so four changes
+in a row cost one, and a user acting on the dashboard never has the prose change underneath them.
+
+**A journal is stale on every day it overlaps, not on its start date.** The day's journals are
+selected by overlap (above), so a Friday-to-Sunday trip is part of three summaries and a change to it
+makes three stale — expressed as a *span*, and applied as one range `UPDATE` that touches only rows
+that already exist. The days are local, resolved through `journal_date`/`local_date` in the user's
+configured timezone, never UTC's date.
+
+**What makes a day stale, and what deliberately does not:**
+
+| Change | Days | Why |
+|---|---|---|
+| `JournalCreated` / `JournalUpdated` | The journal's span, **plus the span it left** when its dates moved | The day a journal moved off keeps counters that still include it |
+| `JournalDeleted` | The span carried **on the event** | The row is gone by the time a consumer runs, so nothing else can answer |
+| `JournalTypeAdded` / `JournalTypeRemoved` | The journal's span | `event_count` is derived from types, and removing EVENT takes the journal off the agenda |
+| `ContactSummaryRefreshRequested` **with a `journal_id`** | That journal's span | Attaching or detaching a contact publishes only this, and the summary's contact names and count come from exactly those rows |
+| Journal **tag** events | None | `AgendaEntry` carries no tags and the prompt renders none — checked, and pinned by a negative test, because the dashboard's agenda *card* does show them (**W15**) |
+
+The first four rows are the four defects ITER18-004 Phase 4f recorded against the handler that used
+to do this inside `SearchIndexerConsumer`; the fifth is the one it predicted and which, checked,
+is not a defect.
+
 ### The journal delete guard
 
 A task can never exist without both of its journal anchors, so the

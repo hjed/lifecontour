@@ -4,15 +4,20 @@ Search Indexer consumer for Redis Streams.
 Processes domain events from the pms:domain-events stream and updates
 MeiliSearch indices via the existing SearchIndexer. Runs as the
 'search-indexer' consumer group.
+
+**Indexing, and nothing else.** Daily summary invalidation used to run here for
+journal events, having landed in the same handler by history rather than by
+design. ITER18-005 Phase 7 moved it to ``SummaryInvalidationConsumer``, which
+owns summary freshness for every input the summary has — journals, tasks and
+contact dates. It could not have stayed: this consumer permanently ignores task
+events, and a task change makes a summary stale.
 """
 
 import structlog
 from core_shared.stream_client import StreamClient, StreamEvent
-from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.database import get_async_database_engine
 from app.infrastructure.events.dead_letter_consumer_mixin import DeadLetterConsumerMixin
-from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.events.stream_consumer import StreamConsumer
 from app.infrastructure.events.stream_event_adapter import stream_event_to_outbox_event
 from app.infrastructure.search.search_indexer import SearchIndexer
@@ -52,11 +57,6 @@ _SEARCH_EVENT_TYPES: list[str] = [
     "JournalTagMerged",
 ]
 
-# Journal event types that also trigger daily summary invalidation
-_JOURNAL_INVALIDATION_EVENTS = frozenset(
-    {"JournalCreated", "JournalUpdated", "JournalDeleted"}
-)
-
 
 class SearchIndexerConsumer(DeadLetterConsumerMixin, StreamConsumer):
     """Stream consumer for MeiliSearch indexing.
@@ -66,8 +66,8 @@ class SearchIndexerConsumer(DeadLetterConsumerMixin, StreamConsumer):
     group. Delegates to the existing :class:`SearchIndexer` for actual
     MeiliSearch operations.
 
-    For journal events, also runs daily summary cache invalidation
-    (same behaviour as the legacy OutboxProcessor).
+    Daily summary invalidation is **not** here any more; see the module
+    docstring and ``SummaryInvalidationConsumer``.
     """
 
     def __init__(
@@ -101,8 +101,7 @@ class SearchIndexerConsumer(DeadLetterConsumerMixin, StreamConsumer):
         """Process a search-relevant event.
 
         Converts the stream event to an OutboxEvent and delegates to
-        SearchIndexer. For journal CRUD events, also invalidates the
-        daily summary cache.
+        SearchIndexer.
 
         Args:
             event: The stream event to process
@@ -114,82 +113,8 @@ class SearchIndexerConsumer(DeadLetterConsumerMixin, StreamConsumer):
             search_indexer = SearchIndexer(db_connection=conn)
             await search_indexer.process_event(outbox_event)
 
-            # Journal events also trigger daily summary cache invalidation
-            if event.event_type in _JOURNAL_INVALIDATION_EVENTS:
-                await self._invalidate_daily_summary(outbox_event, conn)
-
         logger.debug(
             "Search indexer consumer processed event",
             event_id=event.event_id,
             event_type=event.event_type,
-        )
-
-    async def _invalidate_daily_summary(
-        self, event: OutboxEvent, connection: AsyncConnection
-    ) -> None:
-        """Invalidate daily summary cache for journal events.
-
-        Replicates the logic from OutboxProcessor._invalidate_daily_summary_for_journal_event.
-
-        Args:
-            event: The outbox event (JournalCreated/Updated/Deleted)
-            connection: Database connection
-        """
-        from app.core.journal.adapters.sql.daily_summary_repository import (
-            SqlJournalDailySummaryRepository,
-        )
-        from app.core.journal.adapters.sql.journal_repository import (
-            SqlJournalRepository,
-        )
-
-        event_data = event.event_data or {}
-        journal_id = event_data.get("journal_id")
-
-        if not journal_id:
-            logger.debug(
-                "Cannot invalidate daily summary: missing journal_id",
-                event_id=event.event_id,
-                event_type=event.event_type,
-            )
-            return
-
-        journal_repo = SqlJournalRepository(connection)
-        journal = await journal_repo.find_by_id(int(journal_id))
-
-        if journal is None:
-            # Journal may have been deleted — try user_id from event data
-            user_id = event_data.get("user_id")
-            if not user_id:
-                logger.debug(
-                    "Cannot invalidate daily summary: journal not found and no user_id",
-                    event_id=event.event_id,
-                    journal_id=journal_id,
-                )
-                return
-            logger.debug(
-                "Journal deleted, cannot determine date for summary invalidation",
-                event_id=event.event_id,
-                journal_id=journal_id,
-            )
-            return
-
-        event_start = journal.event_date_range.start
-        if event_start is None:
-            logger.debug(
-                "Cannot invalidate daily summary: journal has no event_date_range_start",
-                event_id=event.event_id,
-                journal_id=journal_id,
-            )
-            return
-
-        summary_date = event_start.date()
-        summary_repo = SqlJournalDailySummaryRepository(connection)
-        await summary_repo.invalidate_for_date(journal.user_id, summary_date)
-
-        logger.info(
-            "Invalidated daily summary for journal event (stream consumer)",
-            event_id=event.event_id,
-            event_type=event.event_type,
-            user_id=journal.user_id,
-            summary_date=summary_date.isoformat(),
         )

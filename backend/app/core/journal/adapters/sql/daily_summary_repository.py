@@ -171,13 +171,38 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
         return result.fetchone() is not None
 
     async def invalidate_for_date(self, user_id: str, summary_date: date) -> None:
-        """Set an existing summary to PENDING. No-op if none exists."""
+        """Set an existing summary to PENDING. No-op if none exists.
+
+        The one-day span, delegated rather than written twice: two statements
+        that must agree about what "invalidate" means is one more than there
+        needs to be.
+        """
+        await self.invalidate_for_range(user_id, summary_date, summary_date)
+
+    async def invalidate_for_range(
+        self, user_id: str, first_day: date, last_day: date
+    ) -> None:
+        """Set every existing summary in the span to PENDING.
+
+        ``BETWEEN`` is inclusive at both ends, which is what makes the span's
+        last day part of it — the same convention ``DaySpan`` and
+        ``UpcomingWindow`` carry.
+
+        The statement creates nothing: a day with no summary row has nothing to
+        make stale, and inserting a ``PENDING`` marker for it would manufacture
+        a row for a day the user may never open. That is also why an unbounded
+        span is safe here and needs no cap.
+
+        ``status != :status`` keeps an already-``PENDING`` row untouched, so a
+        second invalidation of the same span moves no ``updated_at`` and the
+        four-mutations-one-regeneration property costs one write, not four.
+        """
         query = text(
             """
             UPDATE journal_daily_summaries
             SET status = :status, updated_at = NOW()
             WHERE user_id = :user_id
-              AND summary_date = :summary_date
+              AND summary_date BETWEEN :first_day AND :last_day
               AND status != :status
         """
         )
@@ -185,7 +210,8 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
             query,
             {
                 "user_id": user_id,
-                "summary_date": summary_date,
+                "first_day": first_day,
+                "last_day": last_day,
                 "status": SummaryStatus.PENDING.value,
             },
         )

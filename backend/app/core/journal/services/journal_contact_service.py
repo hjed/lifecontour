@@ -51,7 +51,11 @@ class JournalContactService:
         """
         created = await self.contact_relationship_repo.create(relationship)
         await self.event_publisher.publish(
-            ContactSummaryRefreshRequested(created.contact_id, transaction=transaction)
+            ContactSummaryRefreshRequested(
+                created.contact_id,
+                journal_id=created.journal_id,
+                transaction=transaction,
+            )
         )
         return created
 
@@ -74,7 +78,9 @@ class JournalContactService:
             relationship_type=relationship_type,
         )
         await self.event_publisher.publish(
-            ContactSummaryRefreshRequested(contact_id, transaction=transaction)
+            ContactSummaryRefreshRequested(
+                contact_id, journal_id=journal_id, transaction=transaction
+            )
         )
 
     @transactional
@@ -104,7 +110,9 @@ class JournalContactService:
         if updated:
             await self.event_publisher.publish(
                 ContactSummaryRefreshRequested(
-                    updated.contact_id, transaction=transaction
+                    updated.contact_id,
+                    journal_id=updated.journal_id,
+                    transaction=transaction,
                 )
             )
         return updated
