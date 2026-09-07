@@ -11402,6 +11402,31 @@ totals above were wrong — `it.each` cases counted once rather than per case �
 the `<time>` element above and these corrections, folded into the stack's two branches
 rather than left as a trailing commit.
 
+**Acted on from the PR review** (greptile on #1428). One finding, and it is the third instance of the
+same mistake this phase kept meeting.
+
+- **A rollback that reasons about a list which has moved under it.** The restored row was re-inserted at
+  *the index it was removed from*, and that index is captured against a list the other in-flight removal
+  has already shortened. Tick rows 1 and 2 together, have **both** fail, and restoring 1 before 2 turns
+  `[1, 2, 3]` into `[2, 1, 3]` — a section that says *soonest first* and is not, until the refetch
+  corrects it. The existing two-rows test could not catch it: only one row was ever put back, so any
+  insertion point looked right. The position now comes from the **section's own order** — soonest first,
+  ties broken by task id, read off the two fields every row carries — which is order-independent by
+  construction. Two tests cover it: both failing, and a row that belongs last going last.
+- **Worth recording as a category rather than a case.** This is the *third* time in one phase that a
+  rollback got the same thing wrong: ITER18-001 Phase 17's decision 2b (a snapshot coarser than the patch),
+  the resurrection case this phase wrote a test for, and now the index. **The general form: an optimistic
+  rollback must be expressible without reference to the state at removal time, because that state is not
+  the state it will be undone into.** The card's *"draws the list it is given and never re-sorts"* rule is
+  untouched — this decides only where a row the user did not really remove goes back.
+
+**And a duplication finding from SonarCloud, at 3.1% against a 3% gate.** Three suites had built the same
+thirty-line dashboard envelope, and `heldRequest` existed twice in one file. They are now one module,
+`src/test-utils/home-dashboard.ts` — which is worth more than the gate: **a fixture repeated per suite is a
+contract claim repeated per suite**, and this iteration has already corrected the same hand-written window
+twice for exactly that reason. Sections default to `unavailable` rather than to an empty ready payload, so
+a suite has to say which section it is about and cannot lean on a neighbour's shape by accident.
+
 **Docs:** `frontend-design.md` gained the card, the row, the action, the optimistic-removal path and the
 display module beside the agenda's and the dates' — and its *"writes that invalidate `homeDashboardKeys.all`"*
 rule, which said in terms that *"task and contact writes do not yet, and are owned by the phases whose

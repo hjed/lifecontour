@@ -34,6 +34,12 @@ import type {
   HomeDashboardTask,
 } from '../home-dashboard';
 import {
+  dashboardTaskFixture,
+  dashboardWithTasks,
+  homeDashboardDocument,
+  tasksIn,
+} from '@/test-utils/home-dashboard';
+import {
   JournalTasksResponse,
   LapseReason,
   TaskLinkRole,
@@ -235,6 +241,22 @@ function invalidatedKeys(
   return spy.mock.calls.map(
     call => (call[0] as { queryKey: readonly unknown[] }).queryKey
   );
+}
+
+/** A held-open `fetch`, plus the trigger that finally answers it. */
+function heldRequest(answer: () => Response): () => void {
+  let release: () => void = () => undefined;
+  mockFetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>(resolve => {
+        release = () => {
+          resolve(answer());
+        };
+      })
+  );
+  return () => {
+    release();
+  };
 }
 
 /** The single request body a spied `fetch` was called with. */
@@ -799,56 +821,14 @@ describe('Task API client', () => {
    * having a field of it changed.
    */
   describe('useUpdateTask and the home dashboard', () => {
-    const ANCHOR = '2026-07-31';
-
-    function dashboardTask(taskId: number): HomeDashboardTask {
-      return {
-        task_id: taskId,
-        text: `Commitment ${taskId}`,
-        due_journal: {
-          id: 40 + taskId,
-          title: `Journal ${taskId}`,
-          date: '2026-08-01',
-        },
-        days_away: 1,
-        contacts: [],
-      };
-    }
-
-    function dashboardDocument(
-      tasks: HomeDashboardTask[]
-    ): HomeDashboardResponse {
-      return {
-        data: {
-          type: 'home-dashboards',
-          id: 'user-1',
-          attributes: {
-            summary: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-            agenda: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-            tasks: {
-              status: DashboardSectionStatus.READY,
-              data: {
-                window: {
-                  start_date: ANCHOR,
-                  end_date: '2026-08-07',
-                  days_ahead: 7,
-                },
-                total: tasks.length,
-                tasks,
-              },
-            },
-            upcoming_dates: {
-              status: DashboardSectionStatus.UNAVAILABLE,
-              data: null,
-            },
-          },
-        },
-        meta: { anchor: { date: ANCHOR, timezone: 'Australia/Sydney' } },
-      };
-    }
+    const dashboardTask = (taskId: number) =>
+      dashboardTaskFixture({ task_id: taskId });
 
     function seedDashboard(tasks: HomeDashboardTask[]): void {
-      queryClient.setQueryData(homeDashboardKeys.all, dashboardDocument(tasks));
+      queryClient.setQueryData(
+        homeDashboardKeys.all,
+        dashboardWithTasks(tasks)
+      );
     }
 
     /** The tasks section as it currently sits in the cache. */
@@ -862,23 +842,9 @@ describe('Task API client', () => {
     }
 
     function cachedTaskIds(): number[] {
-      return (cachedSection()?.tasks ?? []).map(task => task.task_id);
-    }
-
-    /** A held-open `fetch`, plus the trigger that finally answers it. */
-    function heldRequest(answer: () => Response): () => void {
-      let release: () => void = () => undefined;
-      mockFetch.mockImplementationOnce(
-        () =>
-          new Promise<Response>(resolve => {
-            release = () => {
-              resolve(answer());
-            };
-          })
-      );
-      return () => {
-        release();
-      };
+      return tasksIn(
+        queryClient.getQueryData<HomeDashboardResponse>(homeDashboardKeys.all)
+      ).map(task => task.task_id);
     }
 
     function updateHook() {
@@ -1043,6 +1009,76 @@ describe('Task API client', () => {
       expect(cachedTaskIds()).toEqual([1, 3]);
     });
 
+    /**
+     * **The index a row was removed from is not where it belongs.**
+     *
+     * Two rows ticked while both are in flight are each removed from a list
+     * the other has already shortened, so a captured index describes a
+     * transient state rather than the server's order. Restore them in the
+     * other order and `[1, 2, 3]` comes back as `[2, 1, 3]` — a list that
+     * claims to be soonest-first and is not, until a refetch corrects it.
+     *
+     * The one-fails-one-succeeds case above does not catch this: only one row
+     * is ever put back, so any insertion point looks right. Found by the PR
+     * review, and it is the same class as the resurrection case beside it —
+     * a rollback reasoning about a list that has moved under it.
+     */
+    it('restores two failed rows in the server’s order, not the order they failed in', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2), dashboardTask(3)]);
+      const releaseFirst = heldRequest(() =>
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+      const releaseSecond = heldRequest(() =>
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const first = updateHook();
+      const firstSettled = first.current
+        .mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+        .catch(() => undefined);
+      await waitFor(() => {
+        expect(cachedTaskIds()).toEqual([2, 3]);
+      });
+
+      const second = updateHook();
+      const secondSettled = second.current
+        .mutateAsync({ taskId: '2', status: TaskStatus.DONE })
+        .catch(() => undefined);
+      await waitFor(() => {
+        expect(cachedTaskIds()).toEqual([3]);
+      });
+
+      // Row 1 comes back first, into a list its own index no longer describes.
+      releaseFirst();
+      await firstSettled;
+      releaseSecond();
+      await secondSettled;
+
+      expect(cachedTaskIds()).toEqual([1, 2, 3]);
+    });
+
+    /**
+     * The order the restored row is placed by is the server's own — due date
+     * ascending, ties broken by task id — so a row that belongs last goes
+     * last rather than at the index it happened to be removed from.
+     */
+    it('puts a restored row after the rows that fall due before it', async () => {
+      seedDashboard([
+        { ...dashboardTask(7), days_away: 0 },
+        { ...dashboardTask(8), days_away: 5 },
+      ]);
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const result = updateHook();
+      await expect(
+        result.current.mutateAsync({ taskId: '8', status: TaskStatus.DONE })
+      ).rejects.toThrow();
+
+      expect(cachedTaskIds()).toEqual([7, 8]);
+    });
+
     it('leaves the other sections of the payload untouched', async () => {
       seedDashboard([dashboardTask(1)]);
       const before = queryClient.getQueryData<HomeDashboardResponse>(
@@ -1127,12 +1163,7 @@ describe('Task API client', () => {
     });
 
     it('survives an unavailable section rather than throwing into the mutation', async () => {
-      const document = dashboardDocument([]);
-      document.data.attributes.tasks = {
-        status: DashboardSectionStatus.UNAVAILABLE,
-        data: null,
-      };
-      queryClient.setQueryData(homeDashboardKeys.all, document);
+      queryClient.setQueryData(homeDashboardKeys.all, homeDashboardDocument());
       mockFetch.mockResolvedValueOnce(
         jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
       );
@@ -1155,22 +1186,6 @@ describe('Task API client', () => {
    */
   describe('useUpdateTask optimistic status change', () => {
     const listKey = taskKeys.journalList('7');
-
-    /** A held-open `fetch`, plus the trigger that finally answers it. */
-    function heldRequest(answer: () => Response): () => void {
-      let release: () => void = () => undefined;
-      mockFetch.mockImplementationOnce(
-        () =>
-          new Promise<Response>(resolve => {
-            release = () => {
-              resolve(answer());
-            };
-          })
-      );
-      return () => {
-        release();
-      };
-    }
 
     /** The status a cached journal listing is showing for one task. */
     function cachedListStatus(taskId: string): TaskStatus | undefined {

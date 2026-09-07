@@ -26,12 +26,13 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { DashboardTaskActions } from '../DashboardTaskActions';
 import { createTestQueryClient } from '@/components/journals/test-helpers';
+import {
+  dashboardTaskFixture,
+  dashboardWithTasks,
+  tasksIn,
+} from '@/test-utils/home-dashboard';
 import { homeDashboardKeys } from '@/lib/api/home-dashboard';
-import { DashboardSectionStatus } from '@/lib/api/home-dashboard';
-import type {
-  HomeDashboardResponse,
-  HomeDashboardTask,
-} from '@/lib/api/home-dashboard';
+import type { HomeDashboardResponse } from '@/lib/api/home-dashboard';
 import { taskTextId } from '@/lib/dashboard-tasks-display';
 import { TaskStatus } from '@/types/tasks';
 
@@ -53,7 +54,6 @@ const { toast } = jest.requireMock('sonner') as {
 
 const TASK_ID = 12;
 const TASK_TEXT = 'Send Priya the deposit receipt';
-const ANCHOR = '2026-07-31';
 
 function okResponse(status: TaskStatus): Response {
   return {
@@ -75,49 +75,11 @@ function failureResponse(detail: string): Response {
   } as unknown as Response;
 }
 
-function dashboardTask(taskId: number): HomeDashboardTask {
-  return {
+const dashboardTask = (taskId: number) =>
+  dashboardTaskFixture({
     task_id: taskId,
-    text: taskId === TASK_ID ? TASK_TEXT : `Commitment ${taskId}`,
-    due_journal: {
-      id: 40 + taskId,
-      title: `Journal ${taskId}`,
-      date: '2026-08-01',
-    },
-    days_away: 1,
-    contacts: [],
-  };
-}
-
-function dashboardDocument(tasks: HomeDashboardTask[]): HomeDashboardResponse {
-  return {
-    data: {
-      type: 'home-dashboards',
-      id: 'user-1',
-      attributes: {
-        summary: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-        agenda: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-        tasks: {
-          status: DashboardSectionStatus.READY,
-          data: {
-            window: {
-              start_date: ANCHOR,
-              end_date: '2026-08-07',
-              days_ahead: 7,
-            },
-            total: tasks.length,
-            tasks,
-          },
-        },
-        upcoming_dates: {
-          status: DashboardSectionStatus.UNAVAILABLE,
-          data: null,
-        },
-      },
-    },
-    meta: { anchor: { date: ANCHOR, timezone: 'Australia/Sydney' } },
-  };
-}
+    ...(taskId === TASK_ID ? { text: TASK_TEXT } : {}),
+  });
 
 /**
  * Render the action beside the text it acts on, as the card mounts it.
@@ -130,7 +92,7 @@ function renderActions(taskId = TASK_ID) {
   const queryClient = createTestQueryClient();
   queryClient.setQueryData(
     homeDashboardKeys.all,
-    dashboardDocument([dashboardTask(TASK_ID), dashboardTask(99)])
+    dashboardWithTasks([dashboardTask(TASK_ID), dashboardTask(99)])
   );
 
   const view = render(
@@ -145,16 +107,10 @@ function renderActions(taskId = TASK_ID) {
     </QueryClientProvider>
   );
 
-  const cachedTaskIds = () => {
-    const section = queryClient.getQueryData<HomeDashboardResponse>(
-      homeDashboardKeys.all
-    )?.data.attributes.tasks;
-    const rows =
-      section?.status === DashboardSectionStatus.READY
-        ? section.data?.tasks
-        : undefined;
-    return (rows ?? []).map(task => task.task_id);
-  };
+  const cachedTaskIds = () =>
+    tasksIn(
+      queryClient.getQueryData<HomeDashboardResponse>(homeDashboardKeys.all)
+    ).map(task => task.task_id);
 
   return { ...view, queryClient, cachedTaskIds };
 }

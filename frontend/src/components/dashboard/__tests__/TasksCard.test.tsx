@@ -17,6 +17,12 @@
 
 import { screen, within } from '@testing-library/react';
 import { renderWithProviders } from '@/test-utils';
+import {
+  dashboardTaskFixture,
+  emptyUpcomingDatesFixture,
+  homeDashboardDocument,
+  tasksSectionFixture,
+} from '@/test-utils/home-dashboard';
 import { TasksCard } from '../TasksCard';
 import { DashboardSectionStatus } from '@/lib/api/home-dashboard';
 import type {
@@ -36,7 +42,6 @@ const DESCRIPTION =
   'Due in the next seven days, soonest first. Tick them off here.';
 const LIST_NAME = 'Tasks due in the next seven days';
 const EMPTY_LINE = 'Nothing due in the next seven days.';
-const ANCHOR_DATE = '2026-07-31';
 
 globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
@@ -46,66 +51,25 @@ const AUTHENTICATED_SESSION = {
   user: { id: '1', email: 'test@example.com', name: 'Test User' },
 };
 
-function dashboardTask(
-  overrides: Partial<HomeDashboardTask> & { task_id: number }
-): HomeDashboardTask {
-  return {
-    text: `Commitment ${overrides.task_id}`,
-    due_journal: {
-      id: 100 + overrides.task_id,
-      title: `Journal ${overrides.task_id}`,
-      date: '2026-08-01',
-    },
-    days_away: 1,
-    contacts: [],
-    ...overrides,
-  };
-}
+const dashboardTask = dashboardTaskFixture;
 
 /** Six tasks, in the order the server settled on — one past the cap. */
 const SIX_TASKS = [1, 2, 3, 4, 5, 6].map(id =>
   dashboardTask({ task_id: id, days_away: id - 1 })
 );
 
-function tasksSection(tasks: HomeDashboardTask[]): HomeDashboardTasks {
-  return {
-    // The window is `start_date` plus `days_ahead`; a fixture whose three
-    // fields disagree describes a week the endpoint cannot send.
-    window: { start_date: ANCHOR_DATE, end_date: '2026-08-07', days_ahead: 7 },
-    // Named on the wire and derived from the same list here, because the
-    // server does not cap: total is what Phase 15's show-more will display.
-    total: tasks.length,
-    tasks,
-  };
-}
+const tasksSection = tasksSectionFixture;
 
 function dashboardDocument(
   section: DashboardSection<HomeDashboardTasks>
 ): HomeDashboardResponse {
-  return {
-    data: {
-      type: 'home-dashboards',
-      id: 'user-1',
-      attributes: {
-        summary: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-        agenda: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-        tasks: section,
-        upcoming_dates: {
-          status: DashboardSectionStatus.READY,
-          data: {
-            window: {
-              start_date: ANCHOR_DATE,
-              end_date: '2026-08-07',
-              days_ahead: 7,
-            },
-            total: 0,
-            dates: [],
-          },
-        },
-      },
+  return homeDashboardDocument({
+    tasks: section,
+    upcoming_dates: {
+      status: DashboardSectionStatus.READY,
+      data: emptyUpcomingDatesFixture(),
     },
-    meta: { anchor: { date: ANCHOR_DATE, timezone: 'Australia/Sydney' } },
-  };
+  });
 }
 
 function routeFetch(dashboard: () => Promise<Response>) {

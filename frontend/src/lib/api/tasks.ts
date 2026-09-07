@@ -809,12 +809,8 @@ function snapshotTaskAttributes(
 // rows carry no `status` to change — Phase 13 left it off the wire deliberately,
 // since it is a constant for everything the section can hold.
 
-/** One removed row: which cache entry, where it sat, and what it was. */
-type RemovedDashboardTask = readonly [
-  readonly unknown[],
-  number,
-  HomeDashboardTask,
-];
+/** One removed row: which cache entry it came out of, and what it was. */
+type RemovedDashboardTask = readonly [readonly unknown[], HomeDashboardTask];
 
 /** The tasks a cached dashboard document is currently showing, if any. */
 function dashboardTasksOf(
@@ -857,13 +853,7 @@ function withDashboardTasks(
   };
 }
 
-/**
- * Takes a task out of every cached dashboard, reporting where each copy was.
- *
- * The index is captured, not just the row, because the section's order is the
- * server's — due-journal date ascending — and a restored row belongs where it
- * was rather than appended to the end.
- */
+/** Takes a task out of every cached dashboard, reporting what it removed. */
 function removeTaskFromDashboards(
   queryClient: QueryClient,
   taskId: string
@@ -882,7 +872,7 @@ function removeTaskFromDashboards(
     const index = tasks.findIndex(task => String(task.task_id) === taskId);
     if (index === -1) continue;
 
-    removed.push([queryKey, index, tasks[index] as HomeDashboardTask]);
+    removed.push([queryKey, tasks[index] as HomeDashboardTask]);
     queryClient.setQueryData(
       queryKey,
       withDashboardTasks(
@@ -896,7 +886,37 @@ function removeTaskFromDashboards(
 }
 
 /**
- * Puts one removed row back, in the place it held.
+ * Where a restored row belongs, by the order the server sent the list in.
+ *
+ * **Not the index it was removed from**, which is the correction the PR review
+ * found. Two rows ticked while both are in flight are each removed from a list
+ * the other has already shortened, so the index each captured describes a
+ * transient state; restore them in the other order and the list comes back
+ * misordered, claiming to be soonest-first when it is not.
+ *
+ * The comparison is the section's own documented rule — *"soonest first, ties
+ * broken by task id"* — read off the two fields every row carries. That is the
+ * one place this client is entitled to know the order: the card still draws
+ * what it is given and never re-sorts, and this only decides where a row the
+ * user did not really remove goes back. `days_away` stands in for the due date
+ * because it is a monotonic function of it within one window, and it is what
+ * the payload publishes.
+ */
+function restoredRowIndex(
+  tasks: readonly HomeDashboardTask[],
+  task: HomeDashboardTask
+): number {
+  const after = tasks.findIndex(
+    row =>
+      row.days_away > task.days_away ||
+      (row.days_away === task.days_away && row.task_id > task.task_id)
+  );
+
+  return after === -1 ? tasks.length : after;
+}
+
+/**
+ * Puts one removed row back, where the server's order says it belongs.
  *
  * **Per task, never a snapshot of the whole list**, which is ITER18-001 Phase
  * 17's decision 2b in a new shape. Two rows ticked one after the other share a
@@ -906,6 +926,10 @@ function removeTaskFromDashboards(
  * connecting the two. Re-inserting one row by id cannot reach a task the failed
  * write never touched.
  *
+ * The position comes from {@link restoredRowIndex} rather than from where the
+ * row was taken out, because the list may have moved under it in the meantime —
+ * the same mistake in a second direction, and the one the PR review caught.
+ *
  * A row already back — the refetch beat the rollback — is left alone rather
  * than duplicated.
  */
@@ -913,14 +937,14 @@ function restoreTasksToDashboards(
   queryClient: QueryClient,
   removed: readonly RemovedDashboardTask[]
 ): void {
-  for (const [queryKey, index, task] of removed) {
+  for (const [queryKey, task] of removed) {
     queryClient.setQueryData<HomeDashboardResponse>(queryKey, cached => {
       const tasks = dashboardTasksOf(cached);
       if (!cached || !tasks) return cached;
       if (tasks.some(row => row.task_id === task.task_id)) return cached;
 
       const restored = [...tasks];
-      restored.splice(Math.min(index, restored.length), 0, task);
+      restored.splice(restoredRowIndex(tasks, task), 0, task);
       return withDashboardTasks(cached, restored);
     });
   }
