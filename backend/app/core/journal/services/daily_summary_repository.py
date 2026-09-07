@@ -109,6 +109,68 @@ class JournalDailySummaryRepository(ABC):
         pass
 
     @abstractmethod
+    async def complete_generation(
+        self,
+        summary: JournalDailySummary,
+        *,
+        seen_invalidated_at: datetime | None,
+    ) -> JournalDailySummary | None:
+        """Write a finished summary, unless its inputs went stale while it ran.
+
+        The write that closes ITER18-005 Phase 7's race. ``get_or_generate``
+        reads the row, assembles the day's inputs and only then claims the row —
+        and ``claim_for_generation`` compares ``generated_at``, which an
+        invalidation does not move. So an input change landing in that window
+        leaves a ``PENDING`` marker that the finishing generation would
+        otherwise overwrite with a summary of the *old* inputs.
+
+        A status guard cannot catch it: by this point the row **is**
+        ``GENERATING``, because this caller claimed it. What catches it is
+        ``invalidated_at``, read with the row before assembly and compared here.
+
+        Args:
+            summary: The finished summary to write
+            seen_invalidated_at: The row's ``invalidated_at`` as the caller saw
+                it **before assembling its inputs**, or ``None`` if it saw no
+                row. Compared with ``IS NOT DISTINCT FROM``, so a never-
+                invalidated row matches a caller that saw none.
+
+        Returns:
+            The written summary, or ``None`` when the write was refused because
+            the row was invalidated in the meantime — in which case it is left
+            ``PENDING`` and the next read regenerates it.
+        """
+        pass
+
+    @abstractmethod
+    async def release_claim(self, user_id: str, summary_date: date) -> bool:
+        """Move a ``GENERATING`` row back to ``PENDING``, in one statement.
+
+        What a discarded generation does with the claim it is no longer going to
+        honour. ``GENERATING`` is not an inert status — ``get_or_generate``
+        returns early on it — so a claim left behind would strand the day behind
+        a marker nothing clears.
+
+        **One statement, guarded on the status**, rather than a read followed by
+        a write: the gap between the two is long enough for a concurrent run to
+        *finish* the day, and resetting a completed summary would discard a good
+        generation and pay for another. The guard makes that impossible.
+
+        What the guard cannot exclude is a concurrent run that has re-*claimed*
+        the row in the meantime, since one claim looks exactly like another with
+        no claim identity on the row. That case costs a regeneration and no
+        correctness: the row goes to ``PENDING``, the other run's write is
+        refused in its turn, and the next read generates from current inputs.
+        The alternative — leaving a claim nobody will honour — strands the day
+        indefinitely, which is the worse of the two by far.
+
+        Returns:
+            Whether a row was released, so a caller can tell "my claim" from
+            "somebody else's finished summary" without a second read.
+        """
+        pass
+
+    @abstractmethod
     async def user_ids_with_summaries(self) -> list[str]:
         """Every user that has at least one daily summary row.
 

@@ -172,6 +172,27 @@ class DailySummaryService:
             )
             return existing
 
+        # The change stamp as it stands **before** the inputs are gathered.
+        # Anything that invalidates this day from here on moves it, and the
+        # persist step below refuses to write over a summary of inputs that
+        # have since changed. Read here rather than at the claim because the
+        # window the defect lives in opens with the assembly: the claim
+        # compares ``generated_at``, which an invalidation does not move.
+        #
+        # **The guard is inert for a day that has no row yet**, and that is a
+        # known residual rather than an oversight (raised by review). An
+        # invalidation only ever marks rows that exist — it deliberately creates
+        # none, since a summary nobody has read should not be manufactured — so
+        # a change landing while the *first* summary for a day is being
+        # generated leaves no trace for this comparison to find. Closing it
+        # means either creating rows on invalidation, which trades this for a
+        # table of summaries for days no one opened, or claiming the row before
+        # assembling the inputs, which would hold a GENERATING marker across the
+        # eligibility decision and mark days that turn out to be ineligible.
+        # Both are behaviour changes beyond this phase; the case is recorded in
+        # ITER18-005 Phase 7's limitations instead.
+        seen_invalidated_at = existing.invalidated_at if existing else None
+
         # 2. Assemble input (scoped to the user's local day — reads only)
         summary_input = await self._input_assembler.assemble(
             user_id, summary_date, timezone, now=now
@@ -227,9 +248,16 @@ class DailySummaryService:
             )
             return await self._mark_failed(user_id, summary_date, transaction)
 
-        # 6. Persist the result as its own unit of work.
+        # 6. Persist the result as its own unit of work, refusing to write over
+        #    an invalidation that landed while this request was working. The
+        #    marker it left is what the next read acts on.
         return await self._persist_generated(
-            user_id, summary_date, summary_input, result, transaction
+            user_id,
+            summary_date,
+            summary_input,
+            result,
+            transaction,
+            seen_invalidated_at=seen_invalidated_at,
         )
 
     @transactional
@@ -282,11 +310,26 @@ class DailySummaryService:
         summary_input: DailySummaryInput,
         result: dict[str, Any],
         transaction: AsyncConnection,
+        *,
+        seen_invalidated_at: datetime | None = None,
     ) -> JournalDailySummary | None:
-        """Commit the GENERATED result, guarding against a concurrent overwrite.
+        """Commit the GENERATED result, unless the day changed while it ran.
 
-        Re-reads the row first: if a faster concurrent run already completed the
-        summary, return it instead of clobbering it (last-writer-wins).
+        Two things can have happened since this request claimed the row, and
+        they need different answers.
+
+        A **faster concurrent run** may have finished the same summary: return
+        its result rather than clobbering it (last-writer-wins), which is what
+        the re-read below is for.
+
+        An **input change** may have landed — a journal edited, a task ticked, a
+        date added — leaving a ``PENDING`` marker on the row. The summary in
+        hand describes the day as it was *before* that change, so writing it
+        would replace a marker that says "regenerate me" with prose that is
+        already wrong, and the day would look fresh until the next change or
+        local midnight. ``complete_generation`` refuses that write by comparing
+        ``invalidated_at`` against what this request saw before it assembled its
+        inputs; the row is left ``PENDING`` and the next read regenerates.
         """
         existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
         if existing and existing.status == SummaryStatus.GENERATED:
@@ -310,7 +353,42 @@ class DailySummaryService:
             status=SummaryStatus.GENERATED,
             generated_at=now,
         )
-        return await self._summary_repo.upsert(generated_summary)
+        written = await self._summary_repo.complete_generation(
+            generated_summary, seen_invalidated_at=seen_invalidated_at
+        )
+        if written is not None:
+            return written
+
+        logger.info(
+            "Daily summary for %s on %s was invalidated while generating; "
+            "discarding the result and leaving it to the next read",
+            user_id,
+            summary_date,
+        )
+        return await self._release_refused_claim(user_id, summary_date)
+
+    async def _release_refused_claim(
+        self, user_id: str, summary_date: date
+    ) -> JournalDailySummary | None:
+        """Hand a discarded generation's day back to the next read.
+
+        The refused write leaves the row exactly as the claim left it —
+        ``GENERATING`` — and that status is *not* inert: ``get_or_generate``
+        returns early on it, so leaving it there would strand the day behind a
+        marker nothing clears. Moving it back to ``PENDING`` is what the phase's
+        criterion asks for in as many words, and is what makes the next read
+        regenerate.
+
+        **Only a claim, and the check is the statement itself.** A refusal can
+        also mean a concurrent run *finished* the summary between the re-read
+        above and the write, and marking that fresh result stale would throw
+        away a good generation and pay for another. Reading the status here and
+        writing in a second statement would leave exactly that gap open, so the
+        release is one guarded ``UPDATE`` instead — raised by review on the
+        first cut, which did read-then-write.
+        """
+        await self._summary_repo.release_claim(user_id, summary_date)
+        return await self._summary_repo.find_by_user_and_date(user_id, summary_date)
 
     @transactional
     async def _mark_failed(

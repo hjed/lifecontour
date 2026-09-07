@@ -11331,15 +11331,15 @@ journals view consumes the same summary, so it stands alone.
 - [ ] **Freshness:** today's summary is regenerated on read if it was not generated **today in the user's
       timezone**. Otherwise caching is unchanged — a summary generated today is served from cache, and
       concurrent generation is still prevented.
-- [ ] **Invalidation follows inputs, not only journals:** a day's summary is invalidated by changes to that
+- [x] **Invalidation follows inputs, not only journals:** a day's summary is invalidated by changes to that
       day's journals (as today), by changes to the tasks feeding it (created, retargeted into or out of
       the window, status changed, contact links changed), and — for the current day — by changes to
       important contact dates falling in the window.
-- [ ] Invalidation is **lazy**: it marks the cached summary stale and the next read regenerates. Ticking
+- [x] Invalidation is **lazy**: it marks the cached summary stale and the next read regenerates. Ticking
       four tasks in a row costs one regeneration, not four, and a summary is never regenerated underneath
       a user acting on the dashboard — the sections beneath update in place and the summary refreshes on
       the next load.
-- [ ] Explicit user-requested regeneration continues to work.
+- [x] Explicit user-requested regeneration continues to work.
 - [x] **Tone and safety constraints are carried into the prompt**: short and practical; grounded only in
       the journals, agenda, tasks and dates it was given; descriptive rather than speculative; never
       inventing commitments; read-only; and it **must not restate the sections beneath it item by item** —
@@ -12409,7 +12409,7 @@ contents, so none changed.
 important dates*, whose forward reference to this phase became a delivered third caller with the reason
 both halves of the day question travel.
 
-#### Phase 7: Input-Driven Lazy Invalidation
+#### Phase 7: Input-Driven Lazy Invalidation ✅ COMPLETE
 
 **Prerequisites:** Phases 2, 4, 6 and ITER18-003 Phase 5.
 **Estimated diff:** ~150 production → **~600 tracked** (×4) · **Overrun recorded before work started per
@@ -12445,29 +12445,37 @@ Keeping it whole would put one PR at roughly twice calibration rule 16's ~1,500 
 rule 10 reserves for a phase whose split would ship a dead end — and no part of this one is a dead end:
 7a alone fixes four recorded defects.
 
+**Actual for the phase: 35 files, ~4,970 added lines** (7a ~2,500, 7b ~1,100, 7c ~1,050), against the
+~3,000 recorded here — **1.7× a figure that was itself 5× the original estimate**, and no frontend file
+touched. The recorded split was right about *shape* and wrong about *size*, in the direction rule 14
+already names: every part of this phase is a rule rather than a capability, and a rule is priced by its
+distinguishable cases. The number that would have predicted it is **event types × span shapes ×
+surfaces**, not modules — 7a's own overrun note works that arithmetic out, and 7b, estimated that way
+afterwards, came in within 10%.
+
 **Acceptance Criteria:**
 
-- [ ] Invalidation follows the summary's **inputs**: journal changes (as today), task changes (created,
+- [x] Invalidation follows the summary's **inputs**: journal changes (as today), task changes (created,
       retargeted into or out of the window, status changed, contact links changed) and — for the current
       day — important-date changes in the window.
-- [ ] A retarget invalidates **both** the day that lost the task and the day that gained it.
-- [ ] Invalidation is **lazy**: it marks the cached summary stale and the next read regenerates. Four task
+- [x] A retarget invalidates **both** the day that lost the task and the day that gained it.
+- [x] Invalidation is **lazy**: it marks the cached summary stale and the next read regenerates. Four task
       ticks in a row cost **one** regeneration, not four — asserted, not assumed.
-- [ ] A summary is never regenerated underneath a user acting on the dashboard; the sections update in place
+- [x] A summary is never regenerated underneath a user acting on the dashboard; the sections update in place
       and the summary refreshes on the next load (paired with ITER18-004 Phase 14's no-refetch criterion).
-- [ ] Explicit user-requested regeneration still works and bypasses the laziness.
-- [ ] **Important-date invalidation needs an event that does not exist today:** the contacts domain
+- [x] Explicit user-requested regeneration still works and bypasses the laziness.
+- [x] **Important-date invalidation needs an event that does not exist today:** the contacts domain
       publishes `ImportantDateAdded` and `ImportantDateDeleted` but no *updated* event, so editing a stored
       birthday currently publishes nothing. Either add the missing event (and count its cost against
       calibration rule 6) or record "an edited important date does not invalidate today's summary until the
       next journal or task change" as an accepted limitation, in this document.
-- [ ] **An invalidation that lands while a generation is in flight is not lost** (found in ITER18-005
+- [x] **An invalidation that lands while a generation is in flight is not lost** (found in ITER18-005
       Phase 2's review, recorded there): today `invalidate_for_date` leaves `generated_at` untouched, so a
       request whose input was assembled before the change still wins its claim and `_persist_generated`
       writes `GENERATED` over the `PENDING` marker with a pre-change summary. The persist step must be
       able to tell the row was invalidated after the claim (an `invalidated_at` column per open decision
       2, or an inputs version compared at persist) and leave it `PENDING` so the next read regenerates.
-- [ ] **The agenda is an input too, and only some of the ways it changes invalidate today** (found in
+- [x] **The agenda is an input too, and only some of the ways it changes invalidate today** (found in
       ITER18-005 Phase 3's review). `SearchIndexerConsumer._JOURNAL_INVALIDATION_EVENTS` is
       `{JournalCreated, JournalUpdated, JournalDeleted}`, and since Phase 3 the current day's summary is
       grounded in that day's event journals — their times, locations, participants and cancellation. An
@@ -12480,7 +12488,7 @@ rule 10 reserves for a phase whose split would ship a dead end — and no part o
       limitation here rather than leaving it undiscovered. **Note the blast radius is one day, not
       unbounded:** Phase 2's freshness rule regenerates today's summary on the first read after local
       midnight regardless, so a missed invalidation is stale until then and no longer.
-- [ ] Placement per open decision 3, with the consumer table in
+- [x] Placement per open decision 3, with the consumer table in
       `docs/architecture/integration-architecture.md` updated if subscriptions change.
 
 ##### 7a — Ownership and journal inputs ✅ COMPLETE
@@ -12650,6 +12658,118 @@ means something.
 | A deleted task marks nothing | 1 |
 | Task events leave the handled set | 11 |
 | The users with summaries are not consulted | 6 |
+
+##### 7c — The generation race and the inbound agenda ✅ COMPLETE
+
+**Actual: 331 production, ~600 tests, ~120 documentation → ~1,050 tracked**, against ~900 recorded.
+
+**The race the criterion describes opens at *assembly*, not at the claim — and the first fix was
+wrong.** `claim_for_generation` compares `generated_at`, which an invalidation does not move, so an
+input change landing between the read and the claim still lets the claim through; by persist time the
+row *is* `GENERATING`, because this request claimed it. A status guard therefore closes nothing.
+Migration **0110** adds `invalidated_at`: read with the row **before** its inputs are assembled and
+compared again by `complete_generation`, which refuses the write and leaves the row `PENDING`. This
+does not reopen open decision 2 — that settled how *staleness* is represented, and this column is
+never read to decide it; it answers one question, "was this row invalidated after these inputs were
+gathered".
+
+**Writing the tests found two further holes, both in the fix rather than in the code it fixes.**
+
+1. **An invalidation landing on an already-`PENDING` row did not move the stamp.** The invalidating
+   `UPDATE` carried `AND status != 'pending'`, kept from before as a way to make a repeated
+   invalidation free. But the window this race lives in *starts* with a stale row — that is what the
+   reader is regenerating — so the one invalidation that most needed to be seen was the one skipped.
+   The predicate is gone; the four-ticks-one-*regeneration* property never depended on it, since none
+   of these writes generates anything.
+2. **A refused write left the row `GENERATING`, which is worse than the defect.** That status is not
+   inert: `get_or_generate` returns early on it, so the day would have been stranded behind a marker
+   nothing clears. `_release_refused_claim` moves it back to `PENDING` — and **only a claim**, because
+   a refusal can also mean a faster concurrent run finished the summary, and marking that stale would
+   throw away a good generation and pay for another.
+
+   *Review found the first cut of this did read-then-write*, which leaves exactly the gap it was
+   guarding against: the concurrent run can finish between the read and the write. It is now one
+   guarded statement, `release_claim`, which can never touch a completed summary. What a single
+   statement still cannot exclude is a run that has **re-claimed** the row, since one claim looks like
+   another with no claim identity on the row — that costs a regeneration and no correctness, and the
+   alternative, leaving a claim nobody will honour, strands the day indefinitely.
+
+**`clock_timestamp()` rather than `NOW()`**, which is the kind of detail that is invisible until it
+is load-bearing. `NOW()` is the *transaction's* start time, so two invalidations inside one
+transaction stamp identically and the guard compares equal. It is also the only form under which the
+guard is testable at all: the integration fixture runs a whole test in one transaction.
+
+**`_mark_failed` is left unguarded, deliberately.** It writes `FAILED` over a `PENDING` marker, but
+`get_or_generate` treats both alike — neither is served from cache — so the next read regenerates
+either way and a guard would buy nothing.
+
+**Which inbound paths announce an agenda change: established, not assumed.**
+
+| Path | Publishes? | Covered how |
+|---|---|---|
+| App-side event edit | **Yes** — `JournalWriteService` publishes `JournalUpdated` with `changed_fields={"calendar_info": True}` | Nothing to add |
+| Inbound sync where the journal's own fields moved | **Yes** — `journal_service.update_journal` | Nothing to add |
+| Inbound sync where only the **calendar info** moved (time, location, all-day) | **No** — `fields_changed` is false, so `update_journal` is never called | Invalidates the journal's days directly |
+| Inbound sync where only the **attendees** moved | **No** — `_sync_contact_relationships` writes raw SQL | Same call, same handler |
+| **Upstream cancellation** | **No** — `_mark_journal_cancelled` writes `event_state` in raw SQL | Invalidates directly; the agenda shows a cancelled event *marked* rather than dropped (**W18**), so the day's prose is wrong until it regenerates |
+| Inbound **deletion** of a cancelled instance | **Yes** — goes through `journal_service.delete_journal` | Nothing to add |
+
+**Publishing `JournalUpdated` from the inbound paths would have been tidier and is deliberately not
+done**: the Google worker consumes that event to sync a journal *out*, so announcing an inbound change
+would echo it straight back upstream. The direct invalidation swallows its own failures, because a
+stale summary is a worse day's prose while a raised exception would fail the sync and leave the
+journal unwritten.
+
+**The cancellation test is seeded to take the branch that writes.** `_mark_journal_cancelled` always
+marks the *link* but marks the journal only once no calendar still holds the event, so a test with a
+second live link would have passed while asserting nothing.
+
+**Tests: 6 unit and 7 integration.** The unit half is what the phase asks for by name — *each
+agenda-changing path that publishes* — and it asserts the publish decision per path rather than the
+write, since a mocked connection cannot prove raw SQL landed. The integration half proves the writes
+against real rows.
+
+**Mutation checks.** Six, per file and reverted.
+
+| Mutation | Tests failed |
+|---|---|
+| The persist guard ignores the change stamp | 2 |
+| Invalidation uses the transaction clock (`NOW()`) | 2 |
+| An already-`PENDING` row is skipped | 2 |
+| A refused write leaves the row `GENERATING` | 3 |
+| The inbound no-op update invalidates nothing | 3 |
+| An upstream cancellation invalidates nothing | 1 |
+| The inbound invalidation drops its `SAVEPOINT` | 1 |
+
+**Review found one more defect after the phase entry was first written, and it was real.** The
+best-effort invalidation in the inbound processor caught its exceptions **without a savepoint**. A
+failed statement poisons its transaction in PostgreSQL, so the catch would have left the enclosing
+unit of work aborted and taken the inbound journal and calendar writes down with it — the exact harm
+the helper exists to avoid. It now runs inside `savepoint(self.connection)`, the same guard
+`JournalService.delete_journal` uses, and an integration test fails a real statement inside the
+helper and asserts the journal survives.
+
+##### Accepted limitations across Phase 7
+
+Recorded here rather than in a docstring, with their real bounds. **The freshness backstop is
+current-day only** — `DailySummaryFreshnessChecker.is_stale` fires only when `summary_date == today`
+— so "stale until local midnight" is true of current-day gaps and **false of past-day ones**: a past
+day's summary, once `GENERATED`, is served indefinitely unless an event lands on its date.
+
+| Case | Why it is not covered | Bound |
+|---|---|---|
+| An important date edited **out of** the window | The event carries no before-image, so a window test on the new value cannot see a date that left it | Current day — one day |
+| A due journal's **title** edited inside the window | The task line renders it, but a journal change is mapped to the journal's own days | One day |
+| A **contact renamed** | Names appear in three sections. *In practice invalidated anyway*, because `update_contact` re-adds every important date and republishes `ImportantDateAdded` | One day |
+| `TaskDeleted` on a **past** day | The payload is deliberately minimal and the row is gone | **Unbounded** |
+| Journal **series** membership | `Series:` renders in the prompt but `JournalSeriesService` publishes nothing at all | **Unbounded** |
+| A **timezone change** | No event type exists anywhere for it, and it moves every day boundary | **Unbounded on past days** |
+| A journal **moved and then deleted** before either event is consumed | `JournalUpdated` carries the day it left but no `user_id`, unlike its two siblings, and the row that would have answered is gone | The vacated day |
+| An input change during the **first-ever** generation for a day | Invalidation marks only rows that exist and deliberately creates none, so there is no stamp for the persist guard to compare. Closing it means creating rows on invalidation, or claiming before assembly — both behaviour changes beyond this phase | Current day: one day. Past day: **unbounded** |
+
+The last three are follow-ups rather than omissions: each needs a new publisher or a new event type,
+which is a phase of its own under calibration rule 6, and none is a regression — every one of them is
+as true before this phase as after it.
 
 **Required Test Coverage:** unit — the event → invalidated-day mapping for every event type, including the
 two-day retarget case and each agenda-changing path that publishes. Integration — publish → relay → invalidation marks stale without regenerating; a
