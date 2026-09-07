@@ -10901,29 +10901,287 @@ that the cap was applied and how the "no second request" half is asserted.
   (`TaskContactRef`, `UpcomingDateContact`, and this card's row). The threshold Phase 11 named has been
   reached; the extraction belongs to whichever phase next touches two of the three.
 
-#### Phase 13: Tasks Section — Backend Assembly
+#### Phase 13: Tasks Section — Backend Assembly ✅ COMPLETE
 
 **Prerequisites:** Phase 1 and ITER18-001 Phase 14.
-**Estimated diff:** ~110 production → **~440 tracked** (×4)
+**Estimated diff:** ~110 production → **~440 tracked** (×4) · **Overrun recorded before work started
+(delivery rule 3): ~340 production → ~1,150–1,350 tracked**, counted by artefact per calibration
+rule 17 rather than from the phase's title. · **Actual:** 484 production → **~2,280 tracked**
+(409 backend production, 75 frontend interfaces, 1,529 tests, 270 documentation counting this entry).
 
-**Acceptance Criteria:**
+**5.2× the tracked estimate, 1.7× the pre-recorded one, and 3.2× tests against its own production.**
+The multiplier was not the problem and neither was the artefact count — the file list was right and the
+per-file sizes were close. What the pre-record missed is that **an exclusion is two assertions, not
+one**: every "absent from the section" case is paired with "present on its journal", because *hidden,
+not lost* is the promise, and the pair costs a second request and a second set of assertions per case.
+19 integration tests came to ~590 lines. The generalisable form: **when a phase's subject is what a
+surface does *not* show, price each exclusion as a pair.**
 
-- [ ] The tasks section reuses ITER18-001 Phase 14's upcoming-window listing rather than a second query
-      implementation.
-- [ ] **Settled here:** the payload carries the **whole seven-day window** with its total count, and the
-      five-item cap is applied by the UI. Capping server-side would make the show-more a second request,
-      contradicting the one-round-trip criterion; the window is small by construction. If the window is
-      instead capped server-side, the show-more's second call is named and costed in Phase 14. The same
-      choice applies to upcoming dates (Phase 11) and is recorded once here.
-- [ ] Done, cancelled and **lapsed** tasks are absent — with the cancelled-due-journal fixture that makes
-      the lapsed exclusion non-vacuous — while the same tasks remain present on their journals, asserted
-      explicitly.
-- [ ] Each entry carries text, due-journal id/title, the relative-date material the chip needs (**W25**),
-      and linked contacts, with no per-row follow-up request.
+*And the local review found that this very sentence had been written before it was true* — the
+done/cancelled cases asserted only the absence, so the pairing was two-thirds done while the write-up
+claimed it whole and used it to explain the overrun. Both halves are now asserted for all four
+exclusions. Recorded because the failure is the interesting one: **a retrospective written from the
+design rather than from the tests describes the phase you meant to ship.**
 
-**Required Test Coverage:** unit — cap/remainder arithmetic, ordering, exclusion rules. Integration —
-payload against real tasks in every status plus a boundary-day task and a cancelled-due-journal task;
-window anchoring for a non-UTC user; no N+1. No e2e.
+**Acceptance criteria, ticked:**
+
+- [x] The tasks section reuses ITER18-001 Phase 14's upcoming-window listing rather than a second query
+      implementation. — `HomeDashboardService._load_tasks` calls
+      `read_models_for_upcoming_window(user_id, now=moment, timezone=tz)`. **No new SQL, no new
+      repository, no new rule, and no new entry point.** A unit test asserts the whole surface the
+      section touches on that service is one method, so a second query added later fails it rather than
+      passing quietly beside the first.
+- [x] **Settled here:** the payload carries the **whole seven-day window** with its total count, and the
+      five-item cap is applied by the UI. — `TasksSectionData(window, tasks)` and `total = len(tasks)`,
+      with the choice already implemented for the dates section by Phase 11. Capping the payload at five
+      fails three tests, one of them the round-trip count. The alternative in the original wording — cap
+      server-side and cost the show-more's second call in Phase 14 — was not taken, so Phase 14 owes no
+      second request.
+- [x] Done, cancelled and **lapsed** tasks are absent, with the cancelled-due-journal fixture, while the
+      same tasks remain present on their journals. — Inherited whole from `select_upcoming_tasks`, and
+      the exclusion is shown to **bite**: deleting `and not model.lapsed` fails four tests across three
+      levels and the cancelled-due-journal cases are the only ones that fail. The dashboard test asserts
+      the task absent from the section and present on `GET /api/journals/{id}/tasks` with
+      `lapse_reason: due_journal_cancelled` **in the same test**, and a confirmed-event control sits
+      beside it so the rule cannot degrade into "is an event".
+- [x] Each entry carries text, due-journal id/title, the relative-date material the chip needs (**W25**),
+      and linked contacts, with no per-row follow-up request. — `DashboardTask` carries `task_id`,
+      `text`, `due_journal {id, title, date}`, `days_away` and `contacts`. The round-trip count for the
+      whole request is asserted equal at one task and at six, each with a contact, since the contact
+      read is where a fan-out would appear.
+
+**Decisions taken (Phase 13):**
+
+- **The section's rows are the dashboard's own type, not a task read model on the wire.** The agenda and
+  upcoming-dates sections carry other domains' row types because those rows *are* what the section is
+  about. This one is different in both directions: it needs a field no read model has — `days_away` —
+  and publishes about a third of the model. `DashboardTask` therefore lives in the dashboard's own
+  models, built over the tasks domain's `TaskJournalRef` and `TaskContactRef` rather than parallel
+  copies of them (delivery rule 7).
+- **`status`, `lapsed`, `lapse_reason`, the creating journal, the intermediate journals and
+  `due_journal.cancelled` are deliberately absent from the wire.** Every one is either a constant for
+  every row this section can hold — those are the section's entry conditions — or material no dashboard
+  row draws. A constant on the wire invites a surface to branch on it. Pinned by a test over a row's
+  exact key set, so a later phase adding one has to mean it.
+- **`days_away` is counted from the window's first day, and published rather than derived.** The
+  window's first day *is* `meta.anchor.date`, so the chip's `Today` and the page header cannot disagree;
+  a browser subtracting the due date from its own today lands a day out near midnight in any zone away
+  from the configured one. The same ruling the upcoming-dates row already carries. Counting it from the
+  machine's `date.today()` instead fails six unit tests.
+- **The arithmetic lives in a pure projection, not in the renderer.** `tasks_section_for`
+  (`app/core/dashboard/services/tasks_section.py`) is the shape `summary_section_for` already
+  established: one pure function, unit-testable without a database or a Pydantic model, leaving the
+  renderers in `schemas.py` as the transcriptions they claim to be.
+- **One window model now serves both evidence sections.** `UpcomingDatesWindowSchema` became
+  `DashboardWindowSchema`; the two sections were about to carry byte-identical models, and the
+  specification says they cover the *same* seven days. An integration test asserts the two sections'
+  `window` objects are equal through the endpoint, so "matching" is structural rather than coincidental.
+- **The zone and the instant are handed down; the listing takes no `today`.** It derives the day from
+  that pair, which is the pair the anchor came from, so the page pays for **one** `user_settings` read
+  and reads every section as at one moment. Dropping either argument fails tests — see the mutation
+  table, and the gap one of them found.
+- **No MCP work, and that is parity rather than an omission** (delivery rule 5). This phase adds no
+  capability: `list_upcoming_tasks` already exposes this listing over this service, and Phase 1 recorded
+  the deliberate absence of a composite dashboard tool. Nothing here is UI-only.
+- **The frontend contract is typed here, reversing the plan's "no frontend change".** The plan followed
+  Phase 11 (the read) / Phase 12a (the card, which typed the payload) and left `HomeDashboardTasks` as
+  `Record<string, never>` for Phase 14. The local review showed that is not available *this* time: **seven
+  mocks across the frontend encoded `tasks: {status: 'ready', data: {}}`**, and the moment this payload
+  shipped every one of them asserted a shape the endpoint cannot produce — the defect the e2e dates mock
+  had already been corrected for once (its comment says so). Phase 12a could defer because the dates
+  section's mocks were corrected *in the same breath* as the card. So the interfaces land here and the
+  seven mocks send a real empty window; **nothing renders them** — no component, no hook change, no
+  card — which is still Phase 14's. Typing it also earned its keep immediately: `tsc` named three
+  component-test mocks the review had not found.
+- **No container changed.** `DashboardProvider` gained a `TaskReadService` parameter, and the
+  application container and both integration-test containers already registered `TaskProvider` — checked
+  rather than assumed, since Dishka validates the whole graph at construction.
+
+**Tests: 38 unit and 19 integration**, every unit one inside CI's marker selection — checked per file
+with `pytest -m unit --collect-only` rather than trusted.
+
+- `backend/tests/unit/dashboard/test_tasks_section.py` (**15**, new) — the pure projection: every field
+  transcribed, `days_away` at 0/1/2/7, a window not anchored on the machine's today, the order
+  preserved, nothing capped, nothing dropped, the window travelling when empty, and the refusal to build
+  a row for an unpersisted task.
+- `backend/tests/unit/dashboard/test_home_dashboard_service.py` (**+11**) — the wiring: one method
+  touched on the read service, the projection's **same instant object** handed down (compared by `is`,
+  because two `datetime.now()` results compare equal and equality would pass against exactly this bug),
+  the resolved zone handed down, the pair deriving the page's own anchor through the real `today_in`,
+  the shared seven-day default not overridden, the rows reaching the payload, an empty window ready
+  rather than unavailable, and a failure staying local.
+- `backend/tests/unit/api/test_home_dashboard_serialisation.py` (**+12**) — the wire: the window, the
+  total equalling the rows, a row's **exact key set**, the nested due journal, `days_away`, contacts
+  with names and avatars, the order preserved, the empty list, and `unavailable` rendering `data: null`.
+  Its `STILL_EMPTY` constant is gone: every section now carries fields, which is the assertion that
+  replaced it.
+- `backend/tests/unit/dashboard/test_dashboard_sections.py` (**2 edited**) — the envelope tests used
+  `TasksSectionData()` as a convenient empty payload and now name a window, which is the point of the
+  type: a ready section that found nothing can still say *what* was empty.
+- `backend/tests/integration/api/test_home_dashboard_api.py` (**1 edited**) — the four-section envelope
+  pinned `tasks` as `{}`, the literal "ready and holding nothing" this phase replaces. It now compares
+  against an `empty_tasks(document)` helper built from the document's own anchor, beside the agenda's and
+  the dates', so the three empty sections are asserted the same way.
+- `backend/tests/integration/api/test_home_dashboard_tasks.py` (**19**, new) — the section through the
+  endpoint against real rows: a whole row, today at zero days away, the window's last day and the day
+  after it, both terminal statuses, the cancelled due journal with its confirmed-event control, a passed
+  due journal, another user's task, the order, an uncapped total of eight, the window matching the
+  anchor and matching the dates section's, a Kiritimati user with its UTC control, one `user_settings`
+  read for the whole page, and a round-trip count invariant between one task and six.
+
+**Where the required coverage was met differently, and why.** The line asks for unit coverage of
+"cap/remainder arithmetic, ordering, exclusion rules".
+
+- **There is no cap arithmetic on the server** — the phase's own second criterion settles that — so what
+  stands in its place is the opposite assertion: twelve in-window tasks yield twelve, and a mutation
+  capping at five fails three tests. The same substitution Phase 11 recorded for the dates section.
+- **Ordering and the three exclusions are pinned against the function this phase reuses**,
+  `tests/unit/tasks/test_task_upcoming_window.py`'s 25 tests. Re-asserting them here through a mocked
+  read service would test the mock. This is ITER18-005 Phase 4's decision 4, taken again for the same
+  reuse. What is asserted at unit level here is only that the projection **preserves** what it was
+  given; the exclusions are proved end to end in the integration suite, which is where reuse can
+  actually break.
+
+**Mutation checks.** Six distinct mutations, plus one re-run of the fifth after the gap below was closed
+— each reverted after, the harness backing up **only** the file it mutated and refusing a mutation that
+turned out to be a no-op.
+
+| Mutation | Tests failed |
+|---|---|
+| Cap the payload server-side at five | 3 |
+| Re-sort the rows in the projection | 2 |
+| Drop the lapsed exclusion from `select_upcoming_tasks` | **4, and only the cancelled-due-journal cases** |
+| Count `days_away` from the machine's `date.today()` | 6 |
+| Let the section resolve its own timezone | 2 → **3 after the gap below was closed** |
+| Let the section sample its own clock | 3 |
+
+**One mutation found a gap rather than confirming a test, and the gap is a general one.** Dropping
+`timezone=tz` — so the listing resolves its own zone, a second `user_settings` read per request —
+failed only *unit* tests, and `test_reading_it_costs_no_second_settings_read` was **not** among them.
+It could not be: at unit level the read service is a double, so it makes no settings call to count, and
+the test was asserting the dashboard's own read rather than the page's total. Only a real container can
+see the second statement. `test_the_whole_page_reads_user_settings_exactly_once` was added, counting
+`SELECT`s against `user_settings` through the endpoint, and re-running the mutation now fails it.
+**The lesson generalises past this phase:** a claim about *how many* times a collaborator reads
+something is unassertable at the level where the collaborator is a mock, and a test named for that
+claim there is a test that cannot fail.
+
+**Acted on from the local review, which found four things worth the pass.** Two are recorded above (the
+half-done exclusion pairing, and the frontend mocks that decided the typing question). The other two:
+
+- **A field description on the wire was false, and it was the kind that is worst.**
+  `DashboardTaskContactSchema.name` claimed the contact's *"nickname where they have one, by the same
+  rule the rest of the app displays a contact under"* — wording copied from the upcoming-date row beside
+  it, where it is accurate. It is not accurate here: `TaskReadService` builds this name in SQL from
+  `first_name`/`last_name` and never reads `nick_name`, so **one contact really can read two different
+  ways in two cards on the same page**. The description now says so and names the divergence as the tasks
+  read's rather than this section's. **The behaviour was left alone deliberately** — aligning it would
+  change `GET /api/tasks/{id}`, the journal listing and the upcoming listing, which is a tasks-domain
+  change and not this phase's; it joins the follow-ups below. What this phase owed was a wire that does
+  not lie about itself. **The general shape: a description copied from a neighbouring field inherits a
+  claim about a code path it does not share.**
+- **A test that could not fail, in the assertion whose docstring claimed W25.** The whole-row integration
+  test asserted `days_away == (due_journal.date - meta.anchor.date).days` — both sides read off the same
+  response, and the server computes `days_away` as exactly that difference, so the identity holds for
+  every possible answer and under every mutation in the table. It now asserts the **seeded** offset, `3`.
+  That makes it clock-relative, which is the trade the next paragraph handles.
+
+**Seven integration cases are unavoidably clock-relative, and they now say so and guard themselves.** A
+test cannot freeze the clock through HTTP, so any case whose expectation is a *date offset* flips if UTC
+turns over between seeding the journal and the request. The file's docstring had claimed there was one
+such case and that it could not fail that way — wrong on both counts, and the count went on being wrong
+after the first correction: the second PR review found two more the first pass had missed, and finding
+them made it seven. Each captures `utc_today()` before seeding and calls `guard_no_rollover` after the
+response, so a crossing fails **there**, naming itself, instead of as an inexplicable off-by-one in the
+assertion under test. The window's own edges stay pinned against a frozen clock where one can be
+injected, in the tasks integration suite.
+
+**The guard reads the clock, never the response** — which is the second review's more useful half. The
+first version compared the *page's anchor* against the seed day, and that is a claim about the server as
+well as about the timing: for the test asserting the anchor **is** UTC's today, using it would have been
+the assertion standing in as its own guard. Reading only whether this test's clock moved leaves every
+response assertion on its own feet and serves all seven. Two assertions were rewritten off the back of
+it — a row's due date and the UTC control's day now compare against the *seeded* day rather than against
+another field of the same response, which held however the server had computed either. Proved by
+mutation: moving the guard's own clock read forward a day fails exactly those seven and nothing else.
+
+**A unit test was renamed rather than kept under a claim it cannot verify.**
+`test_reading_it_costs_no_second_settings_read` sat in the tasks-section class asserting the *page's*
+total settings reads — which, at a level where the read service is a double, is unobservable. It is now
+`test_the_dashboard_itself_resolves_the_zone_once`, and its docstring points at the integration test that
+counts the real total. Same lesson as the gap above, applied to the test that was left behind by it.
+
+**Acted on from the PR review** (`auggie review` on #1416). One finding, low severity, and it was right
+— and it is the same defect this phase had just corrected, reintroduced in the correction itself.
+
+- **A mock window whose three fields could not describe any real week.** The new e2e tasks fixture paired
+  `days_ahead: 7` with `end_date: MOCK_TOMORROW` — a *fixed* 2026-09-30 — against a `start_date` that is
+  the real today. The end was neither seven days after the start nor related to it. It was copied
+  verbatim from the dates mock beside it, which had carried the same fault since Phase 12. The window is
+  now derived, `daysAfter(SUMMARY_ANCHOR, 7)`, and **both sections share one constant**, because the API
+  sends them one window.
+- **The category, not the case.** Two more hand-written windows were wrong the same way, both
+  pre-existing: `page.test.tsx` had 2026-07-29 → 08-04 (six days) in the dates mock *and*, by the same
+  copy, in the tasks mock this phase added; `UpcomingDatesCard.test.tsx` had 2026-07-31 → 08-06. All
+  three are corrected, and where two sections sit in one fixture they now share a single window object
+  rather than repeating one. Nothing on the server needed changing: the integration suite already
+  asserts `end_date == anchor + days_ahead` through the endpoint, which is why the drift could only
+  survive in mocks.
+- **Why it is worth more than its severity.** Nothing renders these bounds yet, so nothing failed. But
+  the reason these mocks were rewritten at all is that a mock stating the endpoint's shape while sending
+  something else can hide a card built on bounds the server never sends — and Phase 14 is the card. The
+  general form is the one this phase keeps meeting: **a fixture copied from its neighbour inherits the
+  neighbour's bug, and a comment claiming it is "the real shape" makes the copy look reviewed.**
+
+**And a second round of the same review, which found two cases the first had missed.** The uncapped-total
+fixture seeds eight tasks starting on **day zero** — the window's first day, so a rollover lapses that one
+and the asserted eight becomes seven — and the UTC control compared `meta.anchor.date` against a clock
+sampled *after* the response, two readings a midnight between them makes unequal. Both were the same class
+the round before had just been about, in cases that round had not enumerated. **The lesson is about the
+first fix rather than the second finding:** having identified a category, the pass that fixes it must
+enumerate every instance rather than the ones the reviewer named — a partial sweep leaves the remainder
+looking deliberate.
+
+**A deliberate divergence from the plan, recorded because it moves work between phases.** The plan said
+to seed the cancelled due journal through the calendar sync processor, following ITER18-001 Phase 14's
+ruling that a test seeding an operation's post-condition has assumed one side of a seam. It is written
+here as a `journal_calendar_info` row instead. That seam has its own suite —
+`tests/integration/tasks/test_journal_cancellation_lapse_integration.py`, across all three production
+paths that write `EventState.CANCELLED` — and the API-level test for the same listing in
+`test_task_endpoints.py` already makes the same call. What this file needs from the fixture is a task
+the exclusion must drop, not a third proof that cancelling works.
+
+**And one honest limit on the mutation table.** The `days_away` mutation fails six unit tests and **no**
+integration test, because the integration user has no stored timezone and so anchors on UTC — where the
+machine's today and the window's first day are the same date. The Kiritimati case asserts the window's
+start rather than a row's `days_away`, so the zone-sensitive half of that number is proved at unit level
+only. Recorded rather than papered over.
+
+**E2E:** none — the deferral this phase states. No file under `frontend/` changes and no user-visible
+surface ships; the card is Phase 14 and the dashboard's wireframe-conformance e2e is Phase 17, so the
+*Phase Completion Requirements* deferral for a phase with no user-visible surface applies. The
+day-boundary requirement is met where it can bite: a Kiritimati user at both the unit and integration
+layers, each with its UTC control.
+
+**Docs:** `api-design.md` gained the `tasks` section's shape and its rule table beside the
+`upcoming_dates` one — which window, what a row is, what is absent and why, where the relative chip's
+number comes from, the absent cap, and the fields deliberately not published.
+`domain-architecture.md`'s *The upcoming window* now records that the listing has four callers, why the
+dashboard is the one that shaped its signature, and that what the dashboard adds is a projection rather
+than a rule. `mcp-tools.md` was deliberately **not** touched: this phase adds no tool, and a tool's
+contract lives in its docstring and schema.
+
+**Follow-ups (not done here):**
+
+- **A contact reads under a different name in the two evidence cards.** The tasks read concatenates
+  `first_name`/`last_name` in SQL; the contacts read applies `Contact.get_display_name`, which prefers
+  the nickname. Aligning them is a tasks-domain change touching three shipped surfaces, so it belongs to
+  a phase that owns that read rather than to the section that noticed. Documented on the wire in the
+  meantime, on both the schema and the frontend interface, so no surface is misled about which it gets.
+- `persisted_task_id` now exists twice — in `app/api/tasks/schemas.py` and,
+as `_persisted_task_id`, in the dashboard's projection. The dashboard is core code and that one is an
+API module, so importing it would invert the layering; extract the pair to the tasks domain at a third
+caller, not before (delivery rule 7 — duplicate and record rather than bloat the phase that noticed).
 
 #### Phase 14: Tasks Section — Card with Inline Done
 

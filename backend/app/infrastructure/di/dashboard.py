@@ -12,6 +12,7 @@ from app.core.journal.services.daily_summary_repository import (
     JournalDailySummaryRepository,
 )
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.tasks.services.task_read_service import TaskReadService
 
 
 class DashboardProvider(Provider):
@@ -32,7 +33,12 @@ class DashboardProvider(Provider):
     ``UpcomingImportantDatesService`` comes from ``ContactProvider`` for the same
     reason and with a third caller ahead of it: an agent reaches the same answer
     through ``list_upcoming_important_dates``, and ITER18-005 Phase 6 will reach
-    it again from the daily summary's inputs.
+    it again from the daily summary's inputs. ``TaskReadService`` comes from
+    ``TaskProvider`` on the same terms, and is the most-shared of the four —
+    ``GET /api/tasks/upcoming``, ``list_upcoming_tasks`` and the daily summary's
+    input assembler all reach the same listing, which is why the tasks section
+    adds no query of its own. Every container that registers this provider
+    already registered ``TaskProvider``, so nothing needed widening.
 
     The **repository** rather than ``DailySummaryService`` is deliberate: the
     service's read path generates, and a dashboard load must not write.
@@ -44,6 +50,7 @@ class DashboardProvider(Provider):
         date_resolver: JournalDateResolver,
         summary_repo: JournalDailySummaryRepository,
         agenda_repo: AgendaRepository,
+        task_read_service: TaskReadService,
         upcoming_dates_service: UpcomingImportantDatesService,
         connection: AsyncConnection,
     ) -> HomeDashboardService:
@@ -52,6 +59,7 @@ class DashboardProvider(Provider):
             date_resolver=date_resolver,
             summary_repo=summary_repo,
             agenda_repo=agenda_repo,
+            task_read_service=task_read_service,
             upcoming_dates_service=upcoming_dates_service,
             connection=connection,
         )

@@ -152,8 +152,81 @@ export interface HomeDashboardAgenda {
   tomorrow: HomeDashboardAgendaDay;
 }
 
-/** Not-done tasks due in the next seven days. Fields land in Phase 13. */
-export type HomeDashboardTasks = Record<string, never>;
+/** One person a task references, as a row shows them (W27). */
+export interface HomeDashboardTaskContact {
+  contact_id: number;
+  /**
+   * Their given and family names, or `Contact {id}` when the record has
+   * neither. **Not** the nickname rule `HomeDashboardUpcomingDate` follows: the
+   * tasks read builds this name in SQL from two columns and never sees
+   * `nick_name`, so one contact can read differently in the two cards. A known
+   * divergence in the tasks read, not this section's choice.
+   */
+  name: string;
+  photo_url: string | null;
+}
+
+/** The journal a task is due in — the row's link and its date (W26). */
+export interface HomeDashboardTaskJournal {
+  id: number;
+  title: string;
+  /** `YYYY-MM-DD` in `meta.anchor.timezone`, already resolved server-side. */
+  date: string;
+}
+
+/**
+ * One task due this week, as a row renders it (W22–W27).
+ *
+ * **Less than the task resource `GET /api/tasks/{id}` returns, deliberately.**
+ * Every task here is not done, has not lapsed and is due in a journal that was
+ * not cancelled — those are the section's entry conditions — so there is no
+ * `status`, no `lapsed` and no cancelled marker to branch on, and no creating
+ * or intermediate journals, which no row draws.
+ *
+ * **`days_away` is authoritative and must not be re-derived**, the same trap
+ * `HomeDashboardUpcomingDate` carries: it counts from the window's first day,
+ * which is `meta.anchor.date` in the user's configured zone, so the chip and
+ * the page header agree. Subtracting `due_journal.date` from the browser's
+ * today can land a day out near midnight in any other zone.
+ */
+export interface HomeDashboardTask {
+  /** The task itself — what the inline done action patches. */
+  task_id: number;
+  text: string;
+  due_journal: HomeDashboardTaskJournal;
+  /** Days from the window's first day; `0` is today. See the note above. */
+  days_away: number;
+  /** In link order. Empty is ordinary — most tasks name nobody. */
+  contacts: HomeDashboardTaskContact[];
+}
+
+/** The span the tasks were read for, in the acting user's timezone. */
+export interface HomeDashboardTasksWindow {
+  /** Today in the user's zone — the window includes it. */
+  start_date: string;
+  /** The last day, also included. */
+  end_date: string;
+  /** How far ahead the section looked, echoed so no arithmetic is needed. */
+  days_ahead: number;
+}
+
+/**
+ * Not-done tasks due between today and seven days ahead, soonest first.
+ *
+ * **The whole window travels and `total` equals `tasks.length`**: the server
+ * caps nothing, so the card's show-more reveals the remainder from data it
+ * already holds rather than making a second request. `total` is named anyway
+ * because it is the number the show-more displays.
+ *
+ * Done, cancelled and **lapsed** tasks are absent, and they stay on their own
+ * journals — there is no overdue list, counter or badge on this page. An
+ * **empty list is a real answer** and reads as a good outcome, not an error.
+ */
+export interface HomeDashboardTasks {
+  window: HomeDashboardTasksWindow;
+  total: number;
+  tasks: HomeDashboardTask[];
+}
 
 /**
  * One important contact date coming up, as a row renders it (W31).

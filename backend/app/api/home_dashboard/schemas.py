@@ -46,9 +46,11 @@ from app.core.dashboard.models.sections import (
     AgendaSectionData,
     DashboardSection,
     DashboardSummaryState,
+    DashboardTask,
     HomeDashboard,
     SectionStatus,
     SummarySectionData,
+    TasksSectionData,
     UpcomingDatesSectionData,
 )
 from app.core.journal.models.agenda import AgendaEntry
@@ -286,8 +288,148 @@ class AgendaSectionSchema(BaseModel):
     )
 
 
+class DashboardWindowSchema(BaseModel):
+    """The span an evidence section covers, in the acting user's timezone.
+
+    One model for both windowed sections rather than one apiece, because it is
+    literally one window: the specification says the upcoming dates cover "the
+    next seven days, **matching the tasks window**", and both sections are built
+    from the same ``UpcomingWindow``. Two identical models would be two places
+    for that agreement to quietly lapse.
+
+    Dates rather than instants, for the reason a task's journal ref carries one:
+    the window was decided in the user's zone, and a client re-deriving it in
+    the browser's could disagree with the rows it was sent.
+    """
+
+    start_date: date_type = Field(
+        ..., description="Today in your timezone — the window includes it"
+    )
+    end_date: date_type = Field(
+        ..., description="The last day in the window, which is also included"
+    )
+    days_ahead: int = Field(
+        ...,
+        description=(
+            "How far ahead this section looked. Echoed rather than left to be "
+            "derived by subtracting the two dates, so a surface can label "
+            "itself without doing calendar arithmetic."
+        ),
+    )
+
+
+class DashboardTaskContactSchema(BaseModel):
+    """One person a task references, as a row shows them (**W27**)."""
+
+    contact_id: int = Field(..., description="The contact, for linking to them")
+    name: str = Field(
+        ...,
+        description=(
+            "The name to show: their given and family names, or `Contact {id}` "
+            "when the record has neither. **Not** the nickname rule the "
+            "`upcoming_dates` section applies — the tasks domain builds this "
+            "name in SQL from two columns and never reads `nick_name`, so a "
+            "contact with one can read differently in the two cards. A known "
+            "divergence in the tasks read rather than this section's choice."
+        ),
+    )
+    photo_url: str | None = Field(
+        default=None, description="Their avatar, or null when they have none"
+    )
+
+
+class DashboardTaskJournalSchema(BaseModel):
+    """The journal a task is due in, as the row's link renders it (**W26**)."""
+
+    id: int = Field(..., description="The journal, for linking to it")
+    title: str = Field(..., description="Its title, which is the link's text")
+    date: calendar_date = Field(
+        ...,
+        description=(
+            "The day it falls on, `YYYY-MM-DD` in `meta.anchor.timezone` — "
+            "already resolved server-side, so no surface can re-derive it in "
+            "the browser's zone and disagree with the window that selected it."
+        ),
+    )
+
+
+class DashboardTaskSchema(BaseModel):
+    """One task due this week, as a row renders it (**W22**–**W27**).
+
+    Less than the task resource `GET /api/tasks/{id}` returns, deliberately.
+    Every task here is not done, has not lapsed and is due in a journal that was
+    not cancelled — those are the section's entry conditions — so a `status`, a
+    `lapsed` flag or a cancelled marker would be a constant on the wire inviting
+    a surface to branch on it. The creating and intermediate journals are left
+    out for the plainer reason that no row draws them.
+    """
+
+    task_id: int = Field(
+        ...,
+        description=(
+            "The task itself. Named rather than left as the row's identity "
+            "because this section is a list of tasks inside a dashboard "
+            "resource, not a task collection — and it is what the inline done "
+            "action patches."
+        ),
+    )
+    text: str = Field(..., description="The commitment, as the user wrote it")
+    due_journal: DashboardTaskJournalSchema = Field(
+        ..., description="The journal it is due in — the row's link and its date"
+    )
+    days_away: int = Field(
+        ...,
+        description=(
+            "How many days from the window's first day the task is due, `0` "
+            "meaning today. The window's first day is `meta.anchor.date`, so a "
+            "chip reading `Today` and the page's own header cannot disagree. "
+            "Sent rather than left to be derived, because subtracting dates in "
+            "the browser's zone can land a day out near midnight."
+        ),
+    )
+    contacts: list[DashboardTaskContactSchema] = Field(
+        default_factory=list,
+        description=(
+            "The people this task references, in link order. An empty list is "
+            "ordinary — most tasks name nobody — and renders as nothing."
+        ),
+    )
+
+
 class TasksSectionSchema(BaseModel):
-    """Not-done tasks due in the next seven days. Fields land in Phase 13."""
+    """Not-done tasks due between today and seven days ahead, soonest first."""
+
+    window: DashboardWindowSchema = Field(
+        ...,
+        description=(
+            "The span these tasks were read for. Present even when `tasks` is "
+            "empty, which is the case a section cannot describe without it: "
+            '"nothing due between today and next Friday" needs a window no row '
+            "can supply."
+        ),
+    )
+    total: int = Field(
+        ...,
+        description=(
+            "How many tasks fall in the window. The same as `tasks.length`, "
+            "because the window is **not capped** — the whole of it travels so "
+            "the show-more reveals the remainder without a second request — and "
+            "named because that is the number the show-more displays."
+        ),
+    )
+    tasks: list[DashboardTaskSchema] = Field(
+        default_factory=list,
+        description=(
+            "The tasks due in the window, soonest first, ties broken by task "
+            "id. Done, cancelled and **lapsed** tasks are absent — a lapsed "
+            "task inside a forward window is one whose due journal was "
+            "cancelled — and they remain on their own journals, where a lapsed "
+            "task is meant to be found again. There is no overdue list here. "
+            "An **empty list is a real answer** — nothing is due this week — "
+            "and is not the same as the section being unavailable, where "
+            "`data` is null instead."
+        ),
+    )
 
 
 class UpcomingDateSchema(BaseModel):
@@ -359,29 +501,10 @@ class UpcomingDateSchema(BaseModel):
     )
 
 
-class UpcomingDatesWindowSchema(BaseModel):
-    """The span the dates were read for, in the acting user's timezone."""
-
-    start_date: date_type = Field(
-        ..., description="Today in your timezone — the window includes it"
-    )
-    end_date: date_type = Field(
-        ..., description="The last day in the window, which is also included"
-    )
-    days_ahead: int = Field(
-        ...,
-        description=(
-            "How far ahead this section looked. Echoed rather than left to be "
-            "derived by subtracting the two dates, so a surface can label "
-            "itself without doing calendar arithmetic."
-        ),
-    )
-
-
 class UpcomingDatesSectionSchema(BaseModel):
     """Important contact dates falling in the same seven days the tasks cover."""
 
-    window: UpcomingDatesWindowSchema = Field(
+    window: DashboardWindowSchema = Field(
         ...,
         description=(
             "The span these dates were read for. Present even when `dates` is "
@@ -566,6 +689,53 @@ def _agenda(data: AgendaSectionData) -> AgendaSectionSchema:
     )
 
 
+def _dashboard_task(task: DashboardTask) -> DashboardTaskSchema:
+    """One task on the wire — a transcription, deciding nothing.
+
+    Which tasks are in the window, what order they are in and how far away each
+    one is were all settled before this is reached, so nothing here re-sorts,
+    re-filters or recomputes. What it does do is *drop*: the row it is handed
+    already carries only what a dashboard row draws, and this narrows nothing
+    further.
+    """
+    return DashboardTaskSchema(
+        task_id=task.task_id,
+        text=task.text,
+        due_journal=DashboardTaskJournalSchema(
+            id=task.due_journal.id,
+            title=task.due_journal.title,
+            date=task.due_journal.date,
+        ),
+        days_away=task.days_away,
+        contacts=[
+            DashboardTaskContactSchema(
+                contact_id=contact.id,
+                name=contact.display_name,
+                photo_url=contact.photo_url,
+            )
+            for contact in task.contacts
+        ],
+    )
+
+
+def _tasks(data: TasksSectionData) -> TasksSectionSchema:
+    """The tasks payload, preserving the order the listing settled on.
+
+    ``total`` is derived from the same tuple the rows come from, so the count
+    and the list cannot drift apart on the wire — and it is a count of the
+    *whole* window, because nothing here caps anything.
+    """
+    return TasksSectionSchema(
+        window=DashboardWindowSchema(
+            start_date=data.window.first_day,
+            end_date=data.window.last_day,
+            days_ahead=data.window.days_ahead,
+        ),
+        total=len(data.tasks),
+        tasks=[_dashboard_task(task) for task in data.tasks],
+    )
+
+
 def _upcoming_date(date: UpcomingContactDate) -> UpcomingDateSchema:
     """One occurrence on the wire — a transcription, deciding nothing.
 
@@ -593,7 +763,7 @@ def _upcoming_dates(data: UpcomingDatesSectionData) -> UpcomingDatesSectionSchem
     and the list cannot drift apart on the wire.
     """
     return UpcomingDatesSectionSchema(
-        window=UpcomingDatesWindowSchema(
+        window=DashboardWindowSchema(
             start_date=data.window.first_day,
             end_date=data.window.last_day,
             days_ahead=data.window.days_ahead,
@@ -653,7 +823,7 @@ def to_home_dashboard_response(
                 tasks=_rendered(
                     dashboard.tasks,
                     DashboardSectionSchema[TasksSectionSchema],
-                    lambda _data: TasksSectionSchema(),
+                    _tasks,
                 ),
                 upcoming_dates=_rendered(
                     dashboard.upcoming_dates,

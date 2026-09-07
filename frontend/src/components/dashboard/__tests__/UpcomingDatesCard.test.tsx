@@ -72,7 +72,9 @@ function upcomingDates(
   dates: HomeDashboardUpcomingDate[]
 ): HomeDashboardUpcomingDates {
   return {
-    window: { start_date: ANCHOR_DATE, end_date: '2026-08-06', days_ahead: 7 },
+    // `end_date` is `ANCHOR_DATE` plus `days_ahead`; it read 08-06 and the
+    // three fields disagreed, which is a window the endpoint cannot send.
+    window: { start_date: ANCHOR_DATE, end_date: '2026-08-07', days_ahead: 7 },
     // Named on the wire and derived from the same list here, because the
     // server does not cap: total is what the show-more displays.
     total: dates.length,
@@ -90,7 +92,21 @@ function dashboardDocument(
       attributes: {
         summary: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
         agenda: { status: DashboardSectionStatus.UNAVAILABLE, data: null },
-        tasks: { status: DashboardSectionStatus.READY, data: {} },
+        // Ready and empty in the shape the endpoint sends since Phase 13.
+        // These suites are about the card beside it, so the section stays a
+        // real answer holding nothing rather than an unavailable one.
+        tasks: {
+          status: DashboardSectionStatus.READY,
+          data: {
+            window: {
+              start_date: '2026-07-31',
+              end_date: '2026-08-07',
+              days_ahead: 7,
+            },
+            total: 0,
+            tasks: [],
+          },
+        },
         upcoming_dates: section,
       },
     },

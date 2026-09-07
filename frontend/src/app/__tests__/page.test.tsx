@@ -20,6 +20,7 @@ import {
 import type {
   HomeDashboardAgendaEntry,
   HomeDashboardResponse,
+  HomeDashboardTasks,
   HomeDashboardUpcomingDates,
 } from '@/lib/api/home-dashboard';
 
@@ -72,6 +73,22 @@ const TOMORROW_DATE = '2026-07-30';
 const ANCHOR_DISPLAY = 'Wednesday, 29 July 2026';
 
 /**
+ * The seven-day window both evidence sections are read for.
+ *
+ * Spelled out rather than derived, like the anchor above — but `end_date` is
+ * genuinely `ANCHOR_DATE` plus `days_ahead`, which the first version of these
+ * mocks got wrong by a day in both sections. A window whose three fields
+ * disagree is a payload the endpoint cannot produce, and a mock that sends one
+ * can hide a card relying on bounds the server never sends. Shared, because
+ * the API sends the two sections one window: they cover the same week.
+ */
+const EMPTY_WINDOW = {
+  start_date: ANCHOR_DATE,
+  end_date: '2026-08-05',
+  days_ahead: 7,
+};
+
+/**
  * A ready upcoming-dates section holding nothing.
  *
  * These tests are about the page's frame, not its dates, so the section is
@@ -79,9 +96,22 @@ const ANCHOR_DISPLAY = 'Wednesday, 29 July 2026';
  * dates card in the one state the frame assertions expect.
  */
 const EMPTY_UPCOMING_DATES: HomeDashboardUpcomingDates = {
-  window: { start_date: ANCHOR_DATE, end_date: '2026-08-04', days_ahead: 7 },
+  window: EMPTY_WINDOW,
   total: 0,
   dates: [],
+};
+
+/**
+ * Nothing due this week, in the shape the endpoint really sends.
+ *
+ * Since ITER18-004 Phase 13 the section carries a window and a total, so a
+ * ready one holding `{}` is a broken contract rather than a quiet week. The
+ * card that reads it lands in Phase 14; the shape is right from now.
+ */
+const EMPTY_TASKS: HomeDashboardTasks = {
+  window: EMPTY_WINDOW,
+  total: 0,
+  tasks: [],
 };
 
 function dashboardDocument(): HomeDashboardResponse {
@@ -105,7 +135,7 @@ function dashboardDocument(): HomeDashboardResponse {
           status: DashboardSectionStatus.READY,
           data: { entries: [], tomorrow: { date: TOMORROW_DATE, entries: [] } },
         },
-        tasks: { status: DashboardSectionStatus.READY, data: {} },
+        tasks: { status: DashboardSectionStatus.READY, data: EMPTY_TASKS },
         upcoming_dates: {
           status: DashboardSectionStatus.READY,
           data: EMPTY_UPCOMING_DATES,

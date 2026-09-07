@@ -1082,6 +1082,16 @@ dashboard section — not-done tasks whose due journal falls between **today and
 inclusive**, soonest first. It is the only task listing that reaches across journals, and it is the
 query ITER18-004's tasks section consumes, which is why its shape is settled here rather than there.
 
+**It now has four callers, and none of them re-queries.** `GET /api/tasks/upcoming`, MCP
+`list_upcoming_tasks`, `DailySummaryInputAssembler` and the home dashboard's tasks section all reach
+this one method. The dashboard is the one that gives the signature its shape: it resolves a zone and an
+instant once for the whole page, so it passes **both** down rather than letting the listing sample
+either, and the listing derives today from that pair. Hence `timezone` and `now` as parameters and no
+`today` — a caller that pinned one half and left the other to a fresh clock read is the two-clocks
+defect this iteration hit four times. What the dashboard adds on top is only a projection
+(`app/core/dashboard/services/tasks_section.py`): the subset of a read model a row draws, plus a
+`days_away` counted from the window's first day. No filtering, no ordering, no cap.
+
 **The window is arithmetic, and it is pure.** `upcoming_window` and `select_upcoming_tasks`
 (`core_shared/models/tasks/upcoming.py`) take a date the caller resolved and the models the caller
 assembled, and hold the whole rule: where the window starts and ends, which tasks it drops, and what

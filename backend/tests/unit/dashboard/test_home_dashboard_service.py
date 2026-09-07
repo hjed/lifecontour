@@ -28,6 +28,14 @@ from core_shared.models.contacts.important_date_types import (
 )
 from core_shared.models.date_window import upcoming_window
 from core_shared.models.journals.daily_summary import JournalDailySummary
+from core_shared.models.tasks import (
+    Task,
+    TaskContactRef,
+    TaskJournalRef,
+    TaskReadModel,
+    UpcomingTasks,
+    build_task_read_model,
+)
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.importance import ContactImportance
@@ -46,7 +54,10 @@ from app.core.dashboard.models.sections import (
 )
 from app.core.dashboard.services.home_dashboard_service import HomeDashboardService
 from app.core.journal.models.agenda import AgendaEntry
-from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.journal.services.journal_date_resolver import (
+    JournalDateResolver,
+    today_in,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -192,11 +203,63 @@ def mock_upcoming_dates_service() -> AsyncMock:
     return service
 
 
+def upcoming_task(
+    task_id: int,
+    *,
+    due_date: datetime.date,
+    text: str = "book the venue",
+    title: str = "Monday standup",
+) -> TaskReadModel:
+    """One assembled read model, as the tasks listing hands them over.
+
+    Through ``build_task_read_model`` so the lapse verdict the section carries
+    is the one production derives, not a hand-set flag.
+    """
+    due_journal = TaskJournalRef(
+        id=900 + task_id, title=title, date=due_date, cancelled=False
+    )
+    return build_task_read_model(
+        task=Task(
+            id=task_id,
+            user_id=USER_ID,
+            text=text,
+            creating_journal_id=700,
+            due_journal_id=due_journal.id,
+        ),
+        creating_journal=TaskJournalRef(
+            id=700, title="where it arose", date=ANCHOR, cancelled=False
+        ),
+        due_journal=due_journal,
+        intermediate_journals=[],
+        contacts=[TaskContactRef(id=5, display_name="Ada Lovelace", photo_url=None)],
+        today=ANCHOR,
+    )
+
+
+@pytest.fixture
+def mock_task_read_service() -> AsyncMock:
+    """The tasks read, answering with an empty window by default.
+
+    Mocked rather than built from repositories for the reason the contacts one
+    is: what this suite asserts about it is the *wiring* — that the section is
+    asked, with the projection's own instant and zone, and that its failure
+    stays local. Which tasks come back, in what order and with which exclusions
+    applied is ITER18-001 Phase 14's business and is tested against its own pure
+    rule in ``tests/unit/tasks/test_task_upcoming_window.py``.
+    """
+    service = AsyncMock()
+    service.read_models_for_upcoming_window.return_value = UpcomingTasks(
+        window=upcoming_window(ANCHOR), tasks=()
+    )
+    return service
+
+
 @pytest.fixture
 def service(
     date_resolver: JournalDateResolver,
     mock_summary_repo: AsyncMock,
     mock_agenda_repo: AsyncMock,
+    mock_task_read_service: AsyncMock,
     mock_upcoming_dates_service: AsyncMock,
     connection: MagicMock,
 ) -> HomeDashboardService:
@@ -204,6 +267,7 @@ def service(
         date_resolver=date_resolver,
         summary_repo=mock_summary_repo,
         agenda_repo=mock_agenda_repo,
+        task_read_service=mock_task_read_service,
         upcoming_dates_service=mock_upcoming_dates_service,
         connection=connection,
     )
@@ -354,6 +418,7 @@ class TestPerSectionIsolation:
         date_resolver: JournalDateResolver,
         mock_summary_repo: AsyncMock,
         mock_agenda_repo: AsyncMock,
+        mock_task_read_service: AsyncMock,
         mock_upcoming_dates_service: AsyncMock,
     ) -> None:
         """``savepoint(None)`` no-ops, so the guard is still the guard."""
@@ -361,6 +426,7 @@ class TestPerSectionIsolation:
             date_resolver=date_resolver,
             summary_repo=mock_summary_repo,
             agenda_repo=mock_agenda_repo,
+            task_read_service=mock_task_read_service,
             upcoming_dates_service=mock_upcoming_dates_service,
             connection=None,
         )
@@ -983,4 +1049,203 @@ class TestTheUpcomingDatesSection:
         assert dashboard.upcoming_dates.status is SectionStatus.UNAVAILABLE
         assert dashboard.upcoming_dates.data is None
         for name in ("summary", "agenda", "tasks"):
+            assert getattr(dashboard, name).status is SectionStatus.READY, name
+
+
+class TestTheTasksSection:
+    """The section is read through the tasks domain's own listing, not a query.
+
+    ITER18-001 Phase 14 already answers "what is due between today and seven
+    days ahead", with the ordering and all three exclusions inside it, and its
+    docstring names this dashboard as the caller it was shaped for. So what is
+    asserted here is the *wiring* — which listing is asked, on whose day, as at
+    which instant — and never the listing's own rules, which have their own
+    tests against the pure function that decides them.
+    """
+
+    async def test_it_reuses_the_upcoming_window_listing(
+        self, service: HomeDashboardService, mock_task_read_service: AsyncMock
+    ) -> None:
+        """One method, and nothing else on the read service is touched.
+
+        A second query implementation would be right the day it was written and
+        wrong the first time this one changed, so the assertion is over the
+        whole surface the section uses rather than over one call.
+        """
+        await service.dashboard(USER_ID)
+
+        touched = {name for name, _args, _kwargs in mock_task_read_service.mock_calls}
+        assert touched == {"read_models_for_upcoming_window"}
+
+    async def test_it_asks_only_about_the_acting_user(
+        self, service: HomeDashboardService, mock_task_read_service: AsyncMock
+    ) -> None:
+        await service.dashboard(USER_ID)
+
+        call = mock_task_read_service.read_models_for_upcoming_window.await_args
+        assert call.args == (USER_ID,)
+
+    async def test_the_whole_page_is_read_as_at_one_instant(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """The projection's own instant reaches the listing, not a fresh one.
+
+        Compared with ``is`` rather than ``==`` on purpose: two ``now()`` calls
+        microseconds apart make distinct objects that can still compare equal,
+        so equality would pass against exactly the bug this pins. The listing
+        derives today from the instant it is handed, so a second sample here
+        could put the tasks section on a different day from the header above it
+        for any request crossing local midnight.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        call = mock_task_read_service.read_models_for_upcoming_window.await_args
+        assert call.kwargs["now"] is JUST_PAST_SYDNEY_MIDNIGHT
+
+    async def test_an_unpinned_page_still_shares_one_instant(
+        self,
+        service: HomeDashboardService,
+        mock_task_read_service: AsyncMock,
+        mock_upcoming_dates_service: AsyncMock,
+    ) -> None:
+        """The ordinary request: one clock sample, handed to both windowed reads.
+
+        Nobody supplies an instant, so the service samples one — and the two
+        sections that window on time must get the **same object**, not two
+        readings taken a few statements apart.
+        """
+        await service.dashboard(USER_ID)
+
+        tasks_call = mock_task_read_service.read_models_for_upcoming_window.await_args
+        dates_call = mock_upcoming_dates_service.upcoming_dates.await_args
+        moment = tasks_call.kwargs["now"]
+        assert moment is not None
+        assert moment.tzinfo is not None
+        assert moment is dates_call.kwargs["now"]
+
+    async def test_it_is_handed_the_zone_the_page_already_resolved(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """Without this the listing resolves its own, and the page pays twice.
+
+        Two reads of ``user_settings`` in one request are two statements under
+        READ COMMITTED: a zone changed between them would leave this section
+        windowed in the new zone beneath a header dated in the old one.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        call = mock_task_read_service.read_models_for_upcoming_window.await_args
+        assert call.kwargs["timezone"] == ZoneInfo("Australia/Sydney")
+
+    async def test_the_dashboard_itself_resolves_the_zone_once(
+        self, service: HomeDashboardService, mock_settings_repo: AsyncMock
+    ) -> None:
+        """All four sections window on one resolution, not four.
+
+        Deliberately **not** named "costs no second settings read": the read
+        service here is a double, so a second read *inside it* is unobservable
+        at this level, and a test claiming to count the page's total would be a
+        test that cannot fail. What this pins is the dashboard's own behaviour;
+        the page's total is counted through the endpoint in
+        ``tests/integration/api/test_home_dashboard_tasks.py``.
+        """
+        await service.dashboard(USER_ID)
+
+        mock_settings_repo.get_timezone.assert_awaited_once_with(USER_ID)
+
+    async def test_the_zone_and_instant_it_gets_derive_the_pages_own_day(
+        self,
+        service: HomeDashboardService,
+        mock_settings_repo: AsyncMock,
+        mock_task_read_service: AsyncMock,
+    ) -> None:
+        """The listing resolves today itself, from what it is handed.
+
+        It takes no ``today`` parameter, so the guarantee that its window starts
+        on the day the page is labelled with rests on the pair it is given being
+        the pair the anchor came from. Asserted through the real ``today_in``
+        rather than by eye, so a mutation swapping either argument fails here.
+        """
+        mock_settings_repo.get_timezone.return_value = "Australia/Sydney"
+
+        dashboard = await service.dashboard(USER_ID, now=JUST_PAST_SYDNEY_MIDNIGHT)
+
+        call = mock_task_read_service.read_models_for_upcoming_window.await_args
+        assert (
+            today_in(call.kwargs["timezone"], call.kwargs["now"])
+            == dashboard.anchor_date
+        )
+
+    async def test_it_takes_the_same_seven_day_default_as_the_dates_beside_it(
+        self, service: HomeDashboardService, mock_task_read_service: AsyncMock
+    ) -> None:
+        """The two evidence columns are one week, not two that agree today.
+
+        Neither section names a span, so both inherit the shared
+        ``DEFAULT_UPCOMING_DAYS_AHEAD``; overriding it here is how they would
+        come to describe different weeks.
+        """
+        await service.dashboard(USER_ID)
+
+        call = mock_task_read_service.read_models_for_upcoming_window.await_args
+        assert "days_ahead" not in call.kwargs
+
+    async def test_the_window_and_the_rows_reach_the_payload(
+        self, service: HomeDashboardService, mock_task_read_service: AsyncMock
+    ) -> None:
+        window = upcoming_window(ANCHOR)
+        mock_task_read_service.read_models_for_upcoming_window.return_value = (
+            UpcomingTasks(
+                window=window,
+                tasks=(
+                    upcoming_task(12, due_date=ANCHOR + datetime.timedelta(days=1)),
+                ),
+            )
+        )
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.tasks.data is not None
+        assert dashboard.tasks.data.window == window
+        (row,) = dashboard.tasks.data.tasks
+        assert row.task_id == 12
+        assert row.text == "book the venue"
+        assert row.due_journal.title == "Monday standup"
+        assert row.days_away == 1
+        assert [contact.display_name for contact in row.contacts] == ["Ada Lovelace"]
+
+    async def test_an_empty_window_is_ready_rather_than_unavailable(
+        self, service: HomeDashboardService
+    ) -> None:
+        """ "Nothing due this week" is an answer, and a good one — it must not
+        arrive looking like the section that could not answer at all."""
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.tasks.status is SectionStatus.READY
+        assert dashboard.tasks.data is not None
+        assert dashboard.tasks.data.tasks == ()
+        assert dashboard.tasks.data.window.first_day == ANCHOR
+
+    async def test_a_failure_reading_it_leaves_the_other_three_alone(
+        self, service: HomeDashboardService, mock_task_read_service: AsyncMock
+    ) -> None:
+        mock_task_read_service.read_models_for_upcoming_window.side_effect = (
+            RuntimeError("tasks query blew up")
+        )
+
+        dashboard = await service.dashboard(USER_ID)
+
+        assert dashboard.tasks.status is SectionStatus.UNAVAILABLE
+        assert dashboard.tasks.data is None
+        for name in ("summary", "agenda", "upcoming_dates"):
             assert getattr(dashboard, name).status is SectionStatus.READY, name

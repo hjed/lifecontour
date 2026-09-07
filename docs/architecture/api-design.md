@@ -506,6 +506,30 @@ rather than this API's taste:
   Tags and participants are aggregated in `LATERAL` sub-selects so each day is
   **one statement whatever it holds** — two for the section; an integration test
   counts them for both days, because an N+1 is functionally invisible.
+- **The `tasks` section reuses the upcoming-window listing; it has no query of
+  its own.** Its payload is `{window: {start_date, end_date, days_ahead}, total,
+  tasks: [...]}` — the same three-part shape the upcoming dates carry, over the
+  same `UpcomingWindow` — and an **empty list is a real answer**: nothing is due
+  this week, which the card renders as a good outcome rather than an error. A row
+  is `{task_id, text, due_journal: {id, title, date}, days_away, contacts: [...]}`,
+  and a contact is `{contact_id, name, photo_url}`.
+
+  | Rule | What it means on the wire |
+  |---|---|
+  | Which tasks | Exactly what `GET /api/tasks/upcoming` returns for the default window: not-done tasks whose due journal falls between today and seven days ahead, both ends inclusive. One listing serves the endpoint, MCP `list_upcoming_tasks`, the daily summary's inputs and this section, so four surfaces cannot disagree about what is coming up. |
+  | Which window | Today to seven days ahead, anchored on `meta.anchor.date`. The same `UpcomingWindow` the `upcoming_dates` section is built from — the specification requires the two evidence columns to cover the same week, and one window type is what makes that structural rather than coincidental. |
+  | What is absent | Done, cancelled and **lapsed** tasks — and there is no overdue list, counter or badge anywhere on this page. Inside a *forward* window the only lapse that can bite is a **cancelled due journal**; a date-passed one is behind the window by construction. The excluded task is still on its own journals, where a lapsed task is meant to be found again: hidden here, not lost. |
+  | The relative chip | `days_away` counts from the window's first day, `0` meaning today, and the window's first day *is* `meta.anchor.date` — so the chip's `Today` and the page's own header cannot disagree. Sent rather than derived, because subtracting dates in the browser's zone can land a day out near midnight. |
+  | The due journal | Nested, not flattened: `id` and `title` for the "Due in *journal*" link, and `date` already resolved in the user's zone. No `cancelled` flag, because a cancelled due journal lapses its task and a lapsed task is not here. |
+  | What a row does *not* carry | No `status`, `lapsed`, `lapse_reason`, creating journal or intermediate journals. The first three are constant for every row this section can hold — those are its entry conditions — and a constant on the wire invites a surface to branch on it; the journals are material no dashboard row draws. The single read and the journal listing carry all of them, and this is deliberately less than `TaskReadResource` rather than a subset that drifted. |
+  | The cap | **None on the server.** The whole window travels with `total`, and the card renders five of it, so the show-more reveals the remainder without a second request and can name a count larger than the rows on screen. `total` equals `tasks.length` and is named because that is what the show-more displays. |
+  | Round trips | The listing's own — one statement for the tasks and a batched read per link collection — invariant in the number of tasks. An integration test counts the whole request at one task and at six. |
+
+  The section is handed the zone and the instant the projection already
+  resolved, so the page reads `user_settings` **once** for all four sections and
+  every window is as at one moment. `TaskReadService` takes no `today`: it
+  derives the day from that pair, which is the pair the anchor came from.
+
 - **The `upcoming_dates` section is the same seven days the tasks cover, ranked
   by inferred contact importance.** Its payload is
   `{window: {start_date, end_date, days_ahead}, total, dates: [...]}`, and an

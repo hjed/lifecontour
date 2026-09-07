@@ -50,6 +50,7 @@ from app.core.dashboard.models.sections import (
     UpcomingDatesSectionData,
 )
 from app.core.dashboard.services.summary_section import summary_section_for
+from app.core.dashboard.services.tasks_section import tasks_section_for
 from app.core.journal.services.agenda import agenda_for_day
 from app.core.journal.services.daily_summary_freshness import was_generated_on
 from app.core.journal.services.journal_date_resolver import today_in
@@ -69,6 +70,7 @@ if TYPE_CHECKING:
         JournalDailySummaryRepository,
     )
     from app.core.journal.services.journal_date_resolver import JournalDateResolver
+    from app.core.tasks.services.task_read_service import TaskReadService
 
 logger = structlog.get_logger()
 
@@ -81,12 +83,14 @@ class HomeDashboardService:
         date_resolver: JournalDateResolver,
         summary_repo: JournalDailySummaryRepository,
         agenda_repo: AgendaRepository,
+        task_read_service: TaskReadService,
         upcoming_dates_service: UpcomingImportantDatesService,
         connection: AsyncConnection | None = None,
     ) -> None:
         self.date_resolver = date_resolver
         self.summary_repo = summary_repo
         self.agenda_repo = agenda_repo
+        self.task_read_service = task_read_service
         self.upcoming_dates_service = upcoming_dates_service
         # Held for the per-section SAVEPOINTs, not for querying: the sections
         # read through their own repositories. ``savepoint`` no-ops without a
@@ -124,7 +128,7 @@ class HomeDashboardService:
                 "agenda", lambda: self._load_agenda(user_id, anchor, tz)
             ),
             tasks=await self._section(
-                "tasks", lambda: self._load_tasks(user_id, anchor, tz)
+                "tasks", lambda: self._load_tasks(user_id, tz, moment)
             ),
             upcoming_dates=await self._section(
                 "upcoming_dates",
@@ -231,10 +235,43 @@ class HomeDashboardService:
         return await agenda_for_day(self.agenda_repo, user_id, day, tz)
 
     async def _load_tasks(
-        self, user_id: str, anchor: datetime.date, tz: ZoneInfo
+        self, user_id: str, tz: ZoneInfo, moment: datetime.datetime
     ) -> TasksSectionData:
-        """Not-done tasks due in the next seven days. Filled by Phase 13."""
-        return TasksSectionData()
+        """Not-done tasks due between today and seven days ahead, soonest first.
+
+        Read through the tasks domain's own upcoming-window listing rather than
+        a query of the dashboard's: it is the same answer ``GET
+        /api/tasks/upcoming`` returns, the same one an agent gets from
+        ``list_upcoming_tasks``, and the same one ``DailySummaryInputAssembler``
+        gathers for the prompt. Four callers assembling the window themselves
+        would be four chances to disagree about which week it is, and the
+        listing's docstring names this section as the caller it was shaped for.
+
+        The window's span is left at the shared default that section and the
+        upcoming dates beside it both inherit, because the specification says
+        the two evidence columns cover the *same* seven days.
+
+        **The zone and the instant are handed down, not re-resolved.** The
+        listing resolves its own only when nobody gives it either, so passing
+        both means the page still pays for exactly one ``user_settings`` read
+        and reads every section as at one moment. It takes no ``today``: it
+        derives the day from this pair, which is the pair the anchor above came
+        from, so the section cannot land on a different day from the header.
+
+        Done, cancelled and lapsed tasks are absent, and none of that is decided
+        here — ``select_upcoming_tasks`` applies all three inside the listing.
+        The one that genuinely bites in a *forward* window is the cancelled due
+        journal: a date-passed lapse cannot fall inside a window that starts
+        today.
+
+        An empty week returns an **empty payload**, not ``None``: "nothing due
+        in the next seven days" is an answer this section gives, and the card
+        renders it as a good outcome rather than as a section that failed.
+        """
+        upcoming = await self.task_read_service.read_models_for_upcoming_window(
+            user_id, now=moment, timezone=tz
+        )
+        return tasks_section_for(upcoming)
 
     async def _load_upcoming_dates(
         self,
