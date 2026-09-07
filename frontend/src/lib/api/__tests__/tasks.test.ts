@@ -39,6 +39,7 @@ import {
   homeDashboardDocument,
   tasksIn,
 } from '@/test-utils/home-dashboard';
+import { useHomeDashboard } from '../home-dashboard';
 import {
   JournalTasksResponse,
   LapseReason,
@@ -59,6 +60,9 @@ jest.mock('sonner', () => ({
 
 jest.mock('@/lib/constants', () => ({
   API_ENDPOINTS: {
+    // Named so an invalidated dashboard query actually refetches in this
+    // suite: the overlapping-writes test counts those refetches.
+    HOME_DASHBOARD: '/api/home-dashboard',
     TASKS: {
       BY_ID: (id: string) => `/api/tasks/${id}`,
       FOR_JOURNAL: (journalId: string) => `/api/journals/${journalId}/tasks`,
@@ -279,6 +283,10 @@ describe('Task API client', () => {
       },
     });
     jest.clearAllMocks();
+    // Not just `clearAllMocks`: one test below installs a routing
+    // implementation, and leaving it in place would swallow the next test's
+    // `mockResolvedValueOnce`.
+    mockFetch.mockReset();
   });
 
   describe('taskKeys', () => {
@@ -852,6 +860,15 @@ describe('Task API client', () => {
         .result;
     }
 
+    const DASHBOARD_URL = '/api/home-dashboard';
+
+    /** How many times the dashboard endpoint itself was asked. */
+    function dashboardRequestCount(): number {
+      return mockFetch.mock.calls.filter(
+        ([input]) => String(input) === DASHBOARD_URL
+      ).length;
+    }
+
     it('takes a ticked task out of the section before the response lands', async () => {
       seedDashboard([dashboardTask(1), dashboardTask(2)]);
       const release = heldRequest(() =>
@@ -1077,6 +1094,88 @@ describe('Task API client', () => {
       ).rejects.toThrow();
 
       expect(cachedTaskIds()).toEqual([7, 8]);
+    });
+
+    /**
+     * **A refetch issued while another write is in flight answers about a task
+     * that write has not finished changing.**
+     *
+     * Tick two rows; the first settles and invalidates; the dashboard refetch
+     * it triggers is computed while the second task is still not-done, so it
+     * comes back *carrying* that row and overwrites its optimistic removal.
+     * The row reappears until the second write settles and refetches — a
+     * commitment the user ticked off coming back on screen for no reason they
+     * can see.
+     *
+     * The rule is React Query's own for overlapping mutations: **only the last
+     * write standing refetches.** Found by the PR review, and it is the same
+     * category as the two rollback findings beside it — an optimistic patch
+     * undone by state that moved after it was made.
+     *
+     * **Asserted by counting the dashboard's own requests**, against a live
+     * observer, rather than against an `invalidateQueries` spy: the refresh is
+     * fire-and-forget from `onSettled`, so a spy assertion made straight after
+     * `mutateAsync` resolves races it and passes whatever the hook does. The
+     * first draft of this test did exactly that and passed before the fix
+     * existed.
+     */
+    it('refetches once for two overlapping writes, not once each', async () => {
+      // The dashboard answers with both tasks still not-done, because the
+      // server has not seen either write: that is exactly the stale answer a
+      // premature refetch would write over the optimistic removals.
+      const releases: Array<() => void> = [];
+      mockFetch.mockImplementation((input: RequestInfo | URL) => {
+        if (String(input) === DASHBOARD_URL) {
+          return Promise.resolve(
+            jsonResponse(
+              dashboardWithTasks([dashboardTask(1), dashboardTask(2)])
+            )
+          );
+        }
+        return new Promise<Response>(resolve => {
+          releases.push(() =>
+            resolve(
+              jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+            )
+          );
+        });
+      });
+
+      const dashboard = renderHook(() => useHomeDashboard(), {
+        wrapper: createWrapper,
+      });
+      await waitFor(() => {
+        expect(dashboard.result.current.isSuccess).toBe(true);
+      });
+      expect(dashboardRequestCount()).toBe(1);
+
+      const first = updateHook();
+      const firstSettled = first.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+      const second = updateHook();
+      const secondSettled = second.current.mutateAsync({
+        taskId: '2',
+        status: TaskStatus.DONE,
+      });
+      await waitFor(() => {
+        expect(releases).toHaveLength(2);
+      });
+
+      releases[0]!();
+      await firstSettled;
+      releases[1]!();
+      await secondSettled;
+
+      // One refetch, by the write that settled last. A second would be the
+      // first write's response — which still carries task 2 — written over the
+      // second's optimistic removal, putting a ticked-off row back on screen.
+      await waitFor(() => {
+        expect(dashboardRequestCount()).toBe(2);
+      });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(dashboardRequestCount()).toBe(2);
     });
 
     it('leaves the other sections of the payload untouched', async () => {

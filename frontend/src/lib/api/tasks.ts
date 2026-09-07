@@ -970,6 +970,33 @@ function leavesDashboardSection(status: TaskStatus | undefined): boolean {
 }
 
 /**
+ * Is this the last task write still standing?
+ *
+ * React Query's own rule for overlapping mutations, and this surface needs it:
+ * a refresh fired while another write is in flight refetches the section from a
+ * server that has not processed that write yet, so the response **carries the
+ * row the other write optimistically removed** and puts it back on screen. The
+ * user ticks two things off, one settles, and the other reappears for as long
+ * as its own request takes.
+ *
+ * `onSettled` runs while the settling mutation is still `pending`, so it counts
+ * itself: `1` means nothing else is outstanding and this write owns the
+ * refresh. The predicate is `mutatingTaskId`'s, so only *task* writes hold the
+ * refresh back — an unrelated contact or journal mutation should not.
+ *
+ * Nothing is lost when a write skips: whichever settles last refetches, and it
+ * refetches on the failure path too.
+ */
+function isLastTaskWrite(queryClient: QueryClient): boolean {
+  return (
+    queryClient.isMutating({
+      predicate: mutation =>
+        mutatingTaskId(mutation.state.variables) !== undefined,
+    }) <= 1
+  );
+}
+
+/**
  * Task mutations do not retry.
  *
  * The app-wide default (`lib/providers.tsx`) retries a failed mutation once
@@ -1191,6 +1218,11 @@ export function useUpdateTask() {
     // applied from a snapshot that may itself be stale, so the refetch is worth
     // as much on that path as on the happy one.
     onSettled: (_data, _error, { taskId }) => {
+      // Only the last task write standing refetches — see `isLastTaskWrite`.
+      // Refreshing while another is in flight would answer from a server that
+      // has not processed it, undoing its optimistic removal on screen.
+      if (!isLastTaskWrite(queryClient)) return;
+
       // The due counts go in the same call because a PATCH may carry a status,
       // and a status change is exactly what adds a commitment to a journal's
       // badge or takes it away. A text-only edit over-invalidates the journal

@@ -1344,9 +1344,16 @@ elements are numbered **W1**–**W33**.
     section for the same reason and this hook is shared with the journal
     surface; **not done adds nothing**, because whether a reopened task falls in
     the window is a question only the server's zone can answer. The rollback
-    re-inserts **one row at the index it held**, never a snapshot of the whole
-    array: two rows ticked in succession share a cache entry, and restoring the
-    pre-first-write list would silently resurrect the second.
+    re-inserts **one row, in the position the section's own order gives it** —
+    soonest first, ties broken by task id — and never a snapshot of the whole
+    array. Two rows ticked in succession share a cache entry, so restoring the
+    pre-first-write list would silently resurrect the second; and the index a
+    row was *removed* from is no better, because the other in-flight removal
+    has already shortened the list it was measured against. Both were found by
+    review, in that order. **Only the last task write standing refetches**
+    (`isLastTaskWrite`), for the third instance of the same problem: a refresh
+    fired while another write is in flight answers from a server that has not
+    processed it, and puts the row that write removed back on screen.
   - **The wording and colour rules live in `src/lib/dashboard-tasks-display.ts`**,
     beside `agenda-display` and `upcoming-dates-display`. `dueChipLabel` reads
     `Today`, `Tomorrow`, then `formatIsoShortWeekdayDate` (**W25**) — it stops

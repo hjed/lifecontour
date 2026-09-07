@@ -104,7 +104,8 @@ the commitment, a due chip that is relative first and absolute after, the journa
 people it names (**W21**–**W27**) — each with an inline **Done** that marks it off without leaving the
 page. `useUpdateTask` learns the dashboard in both directions: `homeDashboardKeys.all` joins the reachable
 set of every task write that can stale the section (and only those), and a status change out of *not done*
-takes the row out of the cached section at once, restoring it at the index it held if the write fails. The
+takes the row out of the cached section at once, putting it back in the order the section is sent in if
+the write fails. The
 first dashboard data a write can stale, and therefore the first that could assert it.
 **ITER18-005 Phase 6 complete: the current day's prompt says whose important dates are coming up.**
 `DailySummaryInputAssembler` calls `UpcomingImportantDatesService.upcoming_dates` — the read the
@@ -11277,10 +11278,11 @@ separated by *reachability* — the layer nothing calls yet is always a safe bot
   is `status !== NOT_DONE`, the same one `optimisticPatch` uses to clear the lapse marker. The reverse is
   refused deliberately: whether a reopened task falls in this window depends on its due journal's date in
   the user's configured zone, which is not knowable in the browser.
-- **The rollback re-inserts one row at the index it held, never a snapshot of the array.** ITER18-001
-  Phase 17's decision 2b in a new shape: two rows ticked in succession share a cache entry, so restoring
-  the pre-first-write list on the first one's failure would silently resurrect the second. The index is
-  captured because the section's order is the server's and a restored row belongs where it was.
+- **The rollback re-inserts one row, never a snapshot of the array** — ITER18-001 Phase 17's decision 2b
+  in a new shape: two rows ticked in succession share a cache entry, so restoring the pre-first-write list
+  on the first one's failure would silently resurrect the second. **Where** it goes back is the section's
+  own order rather than the index it came out of; see the review findings below for why the index is
+  wrong, which is a correction to this decision rather than a separate one.
 - **`useUpdateTask` is the home, not a dashboard-only hook.** A `useCompleteDashboardTask` beside it would
   leave a mounted dashboard stale whenever a task is ticked from a journal — the divergence the hook's own
   docstring argues against for the three task namespaces — and would break the criterion's pairing of the
@@ -11419,6 +11421,35 @@ same mistake this phase kept meeting.
   rollback must be expressible without reference to the state at removal time, because that state is not
   the state it will be undone into.** The card's *"draws the list it is given and never re-sorts"* rule is
   untouched — this decides only where a row the user did not really remove goes back.
+
+**A second round from the same reviewer found two more, and the first of them completes the set.**
+
+- **A refetch fired while another write is in flight undoes that write's optimistic removal.** Tick two
+  rows; the first settles and invalidates; the dashboard refetch it triggers is computed by a server that
+  has not processed the *second* write, so the response carries the row that write removed and puts it back
+  on screen until its own request settles. `isLastTaskWrite` applies React Query's own rule for overlapping
+  mutations — only the last write standing refreshes — counting task writes by the predicate
+  `useTaskWriteInFlight` already uses, so an unrelated contact or journal write does not hold the refresh
+  back. Nothing is lost when a write skips, on either the success or the failure path.
+- **The first version of that test could not fail.** It asserted against an `invalidateQueries` spy
+  immediately after `mutateAsync` resolved — but `onSettled` fires the refresh with `void`, so the
+  assertion raced it and passed before the fix existed. It now counts the **dashboard endpoint's own
+  requests** against a live observer: one refetch for two overlapping writes, two if the bug is present.
+  The same lesson as Phase 13's, in a new place: *a claim about how many times something happens is
+  unassertable where the thing is fire-and-forget, and a test named for it there cannot fail.*
+- **The documentation had gone stale in the same breath as the fix.** `frontend-design.md` and two lines
+  of this entry still said the rollback re-inserts "at the index it held" — the behaviour the round before
+  had just replaced, and the reviewer pointed out that the architecture record therefore described the
+  concurrency bug rather than the code. Corrected. **Worth recording because the failure is systematic:
+  a fix written after the prose is written leaves the prose asserting the defect**, and nothing type-checks
+  a document.
+
+**And this is the fourth instance of one category.** ITER18-001 Phase 17's decision 2b (a snapshot coarser
+than the patch), this phase's resurrection case, the index measured against a list that had moved, and now a
+refetch answering about a write it does not know has happened. Stated once, so the next optimistic surface
+can start from it: **every part of an optimistic update — the patch, the rollback and the refresh that ends
+it — has to be expressible without reference to the state at the moment it was made, because that is not
+the state it will be applied into.**
 
 **And a duplication finding from SonarCloud, at 3.1% against a 3% gate.** Three suites had built the same
 thirty-line dashboard envelope, and `heldRequest` existed twice in one file. They are now one module,
