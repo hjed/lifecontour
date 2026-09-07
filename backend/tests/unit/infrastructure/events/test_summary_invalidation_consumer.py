@@ -87,32 +87,61 @@ class TestWhatThisConsumerListensFor:
         """
         assert consumer._matches_event_type(event_type) is False
 
-    @pytest.mark.parametrize(
-        "event_type",
-        ["ContactCreated", "ContactUpdated", "ContactDeleted", "TagAssigned"],
-    )
+    @pytest.mark.parametrize("event_type", ["ContactCreated", "TagAssigned"])
     def test_unrelated_contact_events_are_not_subscribed(
         self, consumer: SummaryInvalidationConsumer, event_type: str
     ) -> None:
         assert consumer._matches_event_type(event_type) is False
 
+    def test_contact_deleted_is_subscribed(
+        self, consumer: SummaryInvalidationConsumer
+    ) -> None:
+        """Deleting a contact takes its important dates with it, by cascade.
+
+        Only ``ContactDeleted`` is published for that, so a summary listing one
+        of those dates would otherwise go on naming a contact that has gone.
+        """
+        assert consumer._matches_event_type("ContactDeleted") is True
+
+    def test_contact_updated_is_subscribed_for_one_field_only(
+        self, consumer: SummaryInvalidationConsumer
+    ) -> None:
+        """Subscribed at the stream, filtered in the service.
+
+        ``ContactUpdated`` is the only announcement that an important date was
+        removed, and the only one that a **merge** re-pointed a contact's dates
+        onto a survivor whose name is different: ``update_contact`` deletes a contact's dates and re-adds
+        them, so the one that went leaves no event of its own and the survivors'
+        say nothing about it. Every other ``ContactUpdated`` — a rename, a new
+        phone number — reaches the service and is discarded there, because that
+        is where the ``changed_fields`` key can be read.
+        """
+        assert consumer._matches_event_type("ContactUpdated") is True
+
     def test_the_group_is_its_own(self, consumer: SummaryInvalidationConsumer) -> None:
         """A group of its own is what lets it read events the indexer refuses."""
         assert consumer._group_name == "summary-invalidation"
 
-    def test_task_events_are_not_yet_subscribed(
+    def test_the_task_events_that_change_a_prompt_are_subscribed(
         self, consumer: SummaryInvalidationConsumer
     ) -> None:
-        """They arrive with the next PR in this phase's stack, not this one.
+        """Read out of the tasks module, so a new event type fails here.
 
-        Asserted rather than left unsaid so that "tasks do not invalidate yet"
-        is a statement this suite makes, and the PR that adds them has a test to
-        change rather than a gap to notice.
+        The set is deliberately not every task event: a task's *intermediate*
+        journal links are populated on the read model and never rendered, so
+        attaching one cannot change a prompt and invalidating on it would buy a
+        regeneration that produces the same prose.
         """
-        assert not any(
-            consumer._matches_event_type(event_type)
+        subscribed = {
+            event_type
             for event_type in task_event_types()
-        )
+            if consumer._matches_event_type(event_type)
+        }
+
+        assert subscribed == task_event_types() - {
+            "TaskJournalLinked",
+            "TaskJournalUnlinked",
+        }
 
 
 class TestTheGroupDoesNotReplayTheStreamsHistory:

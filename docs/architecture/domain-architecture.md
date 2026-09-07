@@ -1262,10 +1262,20 @@ configured timezone, never UTC's date.
 | `JournalTypeAdded` / `JournalTypeRemoved` | The journal's span | `event_count` is derived from types, and removing EVENT takes the journal off the agenda |
 | `ContactSummaryRefreshRequested` **with a `journal_id`** | That journal's span | Attaching or detaching a contact publishes only this, and the summary's contact names and count come from exactly those rows |
 | Journal **tag** events | None | `AgendaEntry` carries no tags and the prompt renders none — checked, and pinned by a negative test, because the dashboard's agenda *card* does show them (**W15**) |
+| `TaskCreated` / `TaskUpdated` / `TaskDueJournalRetargeted` / `TaskJournalLinksRepointed` | The **due** journal's span if it is behind the user, else **today** if that journal starts inside the week ahead | The current day's prompt lists the week's tasks; a past day's lists what was due in *its* journals. A retarget names two journals and so marks both days |
+| `TaskDeleted` | **Today** | The payload is deliberately minimal and the row is gone, so no day can be resolved. A past day that named the task keeps doing so — a recorded limitation |
+| `TaskJournalLinked` / `TaskJournalUnlinked` | None | A task's intermediate journals are on the read model and never rendered |
+| `ImportantDateAdded` | **Today**, for each user whose week the date falls in | `update_contact` re-adds every date on every contact save, so without the window test a phone-number edit would cost an AI call for a birthday six months away |
+| `ImportantDateDeleted`, or `ContactUpdated` carrying an `important_dates` count pair | **Today**, unconditionally | No row is left to test the window against. The count pair is the *only* announcement that a date was removed |
 
 The first four rows are the four defects ITER18-004 Phase 4f recorded against the handler that used
 to do this inside `SearchIndexerConsumer`; the fifth is the one it predicted and which, checked,
 is not a defect.
+
+**Whose today?** `contacts` carries no owner column, so an important-date event names no user. The
+users are read from `journal_daily_summaries` itself — invalidation only ever touches rows that
+exist, so the users who *can* be affected are exactly the users who already have a summary — and
+each one's today is resolved in their own timezone from a single clock reading.
 
 ### The journal delete guard
 

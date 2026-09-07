@@ -12579,6 +12579,78 @@ generated".
 paths (7c). The consumer's suite asserts task events are **not** subscribed yet, so 7b has a test to
 change rather than a gap to notice.
 
+##### 7b — Task and important-date inputs ✅ COMPLETE
+
+**Actual: 356 production, ~700 tests, ~40 documentation → ~1,100 tracked**, against ~1,000 recorded.
+Close, because 7a's overrun taught the shape: this part was budgeted from its *cases* rather than
+its modules, and it adds no new module at all.
+
+**Decisions taken.**
+
+1. **A task's days are its due journal's, and the two halves are different questions.** The current
+   day's prompt lists tasks whose due journal *starts* inside `[today, today+7]`; a past day's lists
+   what was due in that day's journals, by overlap. So a change behind the user marks that span and
+   one ahead marks **today** — never both, since a span starting before today cannot start inside a
+   window that opens on it.
+2. **A retarget marks both days**, from the `(previous, new)` pair the event already carries. A
+   journal *merge* carries the same pair conditionally — only some merges move the anchor — and its
+   absorbed journal is **deleted by the merge**, so that half resolves to nothing; the day it was on
+   is covered by its own `JournalDeleted`, which since 7a carries the days it occupied. Recorded
+   because "invalidate both journals" reads like it should always find two.
+3. **`TaskUpdated` names no journal**, by that event's own design — it carries only what changed,
+   never an anchor it kept — so the task is read for it. `TaskCreated` carries the anchor outright
+   and costs no read.
+4. **`TaskDeleted` marks today and that is a gap, not a claim.** Its payload is deliberately minimal
+   (the tasks domain's standing decision: a delete reads nothing) and the row is gone, so no day can
+   be resolved. Today is marked because a deleted task still named in today's prose is the visible
+   harm; **a past day that named it goes on doing so**, and that is in the limitations table rather
+   than hidden in a docstring.
+5. **Criterion 6 is answered with evidence, and no event type was added.** The criterion assumed
+   editing a stored birthday publishes nothing. It does: no surface calls
+   `add_contact_important_date` or `delete_contact_important_date` at all — every add, edit and
+   delete goes through `update_contact`, which deletes a contact's dates and re-adds them,
+   publishing `ImportantDateAdded` per survivor plus a `ContactUpdated` `("count:2", "count:1")`
+   pair when the count moved. So the phase subscribes to what fires. Adding an event nothing
+   publishes would have spent calibration rule 6's budget on an announcement that already exists.
+6. **The window is tested where a row can be read, and not where it cannot.** An add resolves the
+   stored date against each user's week; a deletion and the count pair mark today unconditionally,
+   because there is no before-image. The consequence — **a date edited *out of* the window does not
+   invalidate** — is in the limitations table. Without the window test the common case would be
+   ruinous: every contact save re-adds every date, so editing a phone number would cost an AI call
+   for a birthday six months away.
+7. **Two more contact events joined the set after review, and both are deletions in disguise.**
+   `ContactService.delete_contact` publishes only `ContactDeleted` — the important-date rows go by
+   cascade — so a summary listing one of those dates would have gone on naming a contact that no
+   longer exists. And `ContactMergeService` re-points the absorbed contact's dates onto the survivor
+   and deletes the absorbed row, publishing `ContactUpdated` with `merged_from` and never
+   `important_dates`, because the count did not move: the dates survive, but the **name** rendered
+   beside them does not, and a date line renders `entry.contact.display_name`. Both mark today
+   unconditionally, for the reason a deletion does — there is no before-image to test a window
+   against.
+8. **Whose today, given `contacts` has no owner column.** The users come from
+   `journal_daily_summaries` itself. Invalidation only ever touches rows that exist, so the users
+   who *can* be affected are exactly the users who already have a summary — a bound rather than a
+   scan, and one that cannot drift from what invalidation actually does. Each user's today is
+   resolved in their own zone from **one** clock reading, and a test with a UTC user and a Sydney
+   user asserts the two get different days.
+
+**Tests: 22 unit and 8 integration.** The integration half is where the two criteria that cannot be
+argued live: four ticks in a row leave one `PENDING` row and the generator **not awaited**, then one
+read regenerates **once** (counted on the input assembler, which is awaited once per generation);
+and an explicit `regenerate` still forces one over a fresh row, so the Regenerate control still
+means something.
+
+**Mutation checks.** Six more, per file and reverted.
+
+| Mutation | Tests failed |
+|---|---|
+| A retarget keeps only the new journal | 1 |
+| An important date skips the window test | 2 |
+| Any contact update invalidates today | 1 |
+| A deleted task marks nothing | 1 |
+| Task events leave the handled set | 11 |
+| The users with summaries are not consulted | 6 |
+
 **Required Test Coverage:** unit — the event → invalidated-day mapping for every event type, including the
 two-day retarget case and each agenda-changing path that publishes. Integration — publish → relay → invalidation marks stale without regenerating; a
 subsequent read regenerates once; four rapid mutations produce one regeneration; an important-date change

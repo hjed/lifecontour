@@ -84,6 +84,9 @@ class SummaryInvalidationConsumer(DeadLetterConsumerMixin, StreamConsumer):
         consumer module that imports them at load time drags that graph into
         every process that merely mentions the consumer.
         """
+        from app.core.contacts.adapters.sql.contact_repository import (
+            SqlContactRepository,
+        )
         from app.core.journal.adapters.sql.daily_summary_repository import (
             SqlJournalDailySummaryRepository,
         )
@@ -94,11 +97,14 @@ class SummaryInvalidationConsumer(DeadLetterConsumerMixin, StreamConsumer):
         from app.core.settings.adapters.sql.user_settings_repository import (
             SqlUserSettingsRepository,
         )
+        from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 
         return DailySummaryInvalidationService(
             journal_repo=SqlJournalRepository(connection),
             date_resolver=JournalDateResolver(SqlUserSettingsRepository(connection)),
             summary_repo=SqlJournalDailySummaryRepository(connection),
+            task_repo=SqlTaskRepository(connection),
+            contact_repo=SqlContactRepository(connection),
         )
 
     async def _handle_event(self, event: StreamEvent) -> None:
