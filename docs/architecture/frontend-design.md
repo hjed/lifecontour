@@ -1146,8 +1146,14 @@ elements are numbered **W1**–**W33**.
     participants. It is every writer rather than a chosen few because deciding
     per mutation which payload fields it touches would need redoing each time a
     section lands, and the list is enumerated by a table-driven test so the
-    contract cannot quietly lose one. Task and contact writes do not yet, and
-    are owned by the phases whose sections read them.
+    contract cannot quietly lose one. **Task writes do too, since ITER18-004
+    Phase 14**, which is the phase whose section reads them: the tasks section
+    embeds a task's text, its due journal and its contacts, and is filtered by
+    its status, so every task refresh in `lib/api/tasks.ts` carries
+    `REFRESH_HOME_DASHBOARD` — **except `refreshTaskJournalLinks`**, because the
+    section lists tasks by their *due* journal and draws no intermediate ones.
+    The same narrowness `journalKeys.lists()` is named with. Contact writes do
+    not yet, and are owned by the phase whose section reads them.
   - **What that invalidation does not fix.** The backend marks a summary stale
     *asynchronously*, through the outbox and `SearchIndexerConsumer`. The
     dashboard is not mounted while a journal is edited, so its query is
@@ -1284,6 +1290,73 @@ elements are numbered **W1**–**W33**.
     anniversaries are named in full rather than both shortened to
     *"Anniversary"*, and the occurrence reuses `formatIsoWeekdayDate` rather
     than a formatter differing from it by one comma.
+- **Tasks card**: `TasksCard` (**W21**–**W27**) reads `useHomeDashboard()`
+  itself and maps `tasks.data.tasks` to one `DashboardTaskRow` each, **in the
+  server's order** — due-journal date ascending, ties broken by task id, is the
+  backend's rule (ITER18-001 Phase 14's listing, reused whole by ITER18-004
+  Phase 13), so the card does not re-sort. **The cap of five lives here and
+  nowhere else**: the server sends the whole seven-day window with its `total`
+  and caps nothing, so Phase 15's show-more can reveal the remainder in place
+  from data already held. Ready-and-empty draws the **W29** line the wireframe
+  does draw for this section; pending and unavailable each draw a quiet line of
+  their own in **W9**'s idiom (`tasks-loading`, `tasks-unavailable`) as
+  placeholders until Phase 16's skeletons, so the three cannot be confused. The
+  `tasks` array is guarded with `Array.isArray` for the same reason the agenda
+  guards its `tomorrow`, and with the same limit.
+  - **`DashboardTaskRow`** is a pure function of one payload row, with **no
+    clock and no query**, for the reason `UpcomingDateRow` is: `days_away`
+    counts from the window's first day and `due_journal.date` is a calendar
+    day, both resolved by the server in the user's configured zone, so both are
+    rendered as given — pinned in `DashboardTaskRow.timezone.test.tsx` under
+    the repo's pinned-zone jest environment. It draws the row idiom
+    `AgendaEntryRow` and `JournalTaskRow` share (**W22**), the commitment as a
+    prominent **non-link** line (**W23** — a task has no detail route), the
+    colour-coded due chip (**W25**, a `<time>` whose `dateTime` carries
+    `due_journal.date` even where the words read `Today`, so the
+    specification's *"shows the due journal's date"* and W25's relative label
+    are both satisfied), the *"Due in ‹journal›"* link (**W26**)
+    and each linked contact as a `ContactAvatar` beside their `name` (**W27**;
+    note `name`, not the journal surface's `display_name` — a known divergence
+    recorded on the wire). Zero contacts renders nothing at all.
+  - **The action arrives as a slot**, mounted by the card rather than by the
+    row. It is the one thing here that writes, so keeping it outside is what
+    lets the row stay pure and be asserted without a query client;
+    `taskTextId(taskId)` in `lib/dashboard-tasks-display` is how the two ends
+    agree on the id the action group is described by without either handing it
+    to the other.
+  - **`DashboardTaskActions`** (**W24**) is the one control on the dashboard
+    that mutates anything besides the summary's Regenerate: an `outline`
+    `size="sm"` **Done** with a check icon, wired to `useUpdateTask` and
+    guarded by `useTaskWriteInFlight`, with `aria-busy` on the group rather
+    than the pressed button (ITER18-001 Phase 17's decision 8b). Its wording is
+    `MARK_DONE` from `lib/task-display`, shared with the journal row so the two
+    surfaces cannot name the same button two ways. Delete and retarget are
+    journal-only (wireframe gaps 8 and 10).
+  - **The optimistic update is a *removal*, in a path of its own.** The
+    section's entry condition is *not done* and its rows carry no `status`, so
+    a status change out of not-done takes the row out of the **list** and drops
+    `total` with it. `useUpdateTask` cannot reuse `patchCachedTask` for this —
+    that machinery is written for JSON:API payloads whose task resources sit at
+    `data` or `data[]`, where the dashboard's rows are nested at
+    `data.attributes.tasks.data.tasks` under a different key — so
+    `removeTaskFromDashboards` / `restoreTasksToDashboards` are a separate pair.
+    **Done and cancelled both remove**, because both are absent from the
+    section for the same reason and this hook is shared with the journal
+    surface; **not done adds nothing**, because whether a reopened task falls in
+    the window is a question only the server's zone can answer. The rollback
+    re-inserts **one row at the index it held**, never a snapshot of the whole
+    array: two rows ticked in succession share a cache entry, and restoring the
+    pre-first-write list would silently resurrect the second.
+  - **The wording and colour rules live in `src/lib/dashboard-tasks-display.ts`**,
+    beside `agenda-display` and `upcoming-dates-display`. `dueChipLabel` reads
+    `Today`, `Tomorrow`, then `formatIsoShortWeekdayDate` (**W25**) — it stops
+    at tomorrow where the dates chip counts on, because a task is due on a day
+    the user has a journal for and past tomorrow the day itself is the more
+    useful thing to be told. `dueAccentClassName` and `dueChipClassName` take
+    the same index off `due_journal.id` over five **literal** `bg-chart-*` /
+    `border-chart-* text-chart-*` strings, because Tailwind emits only what it
+    can see in the source and a composed `bg-chart-${n}` draws no bar at all —
+    wireframe gap 22 records why the id is what they are keyed to.
 - **Navigation**: the sidebar carries a top-level **Home** link to `/`
   (`nav-link-home`), a deliberate addition to the wireframe, which shows only
   the header logo link (wireframe gap 4). It is a plain link rather than a

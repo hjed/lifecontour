@@ -207,6 +207,38 @@ describe('TasksCard', () => {
     });
 
     /**
+     * **W24** is *"an inline Done button on every row"*, and "every" is the
+     * assertion: a card that mounted the action on the first row only would
+     * look right in a screenshot and leave four commitments unactionable.
+     */
+    it('mounts an inline done action on every row (W24)', async () => {
+      serveReady(SIX_TASKS);
+
+      renderWithProviders(<TasksCard />);
+
+      const rows =
+        await within(tasksList()).findAllByTestId(/^dashboard-task-\d+$/);
+      rows.forEach(row => {
+        expect(
+          within(row).getByTestId('dashboard-task-action-done')
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('describes each row’s action by the commitment it acts on', async () => {
+      serveReady([SIX_TASKS[0]!]);
+
+      renderWithProviders(<TasksCard />);
+
+      const group = await screen.findByRole('group', { name: 'Task actions' });
+      const describedBy = group.getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)).toHaveTextContent(
+        'Commitment 1'
+      );
+    });
+
+    /**
      * **AC5**, at the level where a section could grow one: no overdue
      * section, counter or badge anywhere. The payload cannot express one —
      * lapsed tasks are excluded server-side and no row carries a status — and

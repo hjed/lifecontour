@@ -24,18 +24,25 @@
  * false claim about either. The proper loading skeleton and unavailable
  * treatment are Phase 16's (wireframe gap 9); these are the placeholders until
  * then, as the agenda's and the dates' are.
+ *
+ * **The card mounts each row's inline done action** (**W24**) rather than the
+ * row doing it: the action is the one thing here that writes, and keeping it
+ * out of the row is what lets the row be a pure function of the payload with
+ * no query behind it.
  */
 
 'use client';
 
 import { CheckCircle2, ClipboardList } from 'lucide-react';
 import { DashboardSectionCard } from './DashboardSectionCard';
+import { DashboardTaskActions } from './DashboardTaskActions';
 import { DashboardTaskRow } from './DashboardTaskRow';
 import {
   DashboardSectionStatus,
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
 import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
+import { taskTextId } from '@/lib/dashboard-tasks-display';
 
 /** The section's wireframe copy, in one place so the page and its tests agree. */
 export const TASKS_SECTION = {
@@ -89,7 +96,19 @@ export function TasksCard() {
       placeholder={tasks ? undefined : <TasksPlaceholder pending={isPending} />}
     >
       {shown?.map(task => (
-        <DashboardTaskRow key={task.task_id} task={task} />
+        <DashboardTaskRow
+          key={task.task_id}
+          task={task}
+          // Mounted by the card rather than by the row so the row stays a pure
+          // rendering of the payload; `taskTextId` is how the two ends agree
+          // on the id the action group is described by.
+          actions={
+            <DashboardTaskActions
+              taskId={task.task_id}
+              describedById={taskTextId(task.task_id)}
+            />
+          }
+        />
       ))}
     </DashboardSectionCard>
   );
