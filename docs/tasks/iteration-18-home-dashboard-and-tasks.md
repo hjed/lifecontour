@@ -12764,6 +12764,8 @@ day's summary, once `GENERATED`, is served indefinitely unless an event lands on
 | `TaskDeleted` on a **past** day | The payload is deliberately minimal and the row is gone | **Unbounded** |
 | Journal **series** membership | `Series:` renders in the prompt but `JournalSeriesService` publishes nothing at all | **Unbounded** |
 | A **timezone change** | No event type exists anywhere for it, and it moves every day boundary | **Unbounded on past days** |
+| A journal **moved and then deleted** before either event is consumed | `JournalUpdated` carries the day it left but no `user_id`, unlike its two siblings, and the row that would have answered is gone | The vacated day |
+| An input change during the **first-ever** generation for a day | Invalidation marks only rows that exist and deliberately creates none, so there is no stamp for the persist guard to compare. Closing it means creating rows on invalidation, or claiming before assembly — both behaviour changes beyond this phase | Current day: one day. Past day: **unbounded** |
 
 The last three are follow-ups rather than omissions: each needs a new publisher or a new event type,
 which is a phase of its own under calibration rule 6, and none is a regression — every one of them is

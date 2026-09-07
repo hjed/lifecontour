@@ -178,6 +178,19 @@ class DailySummaryService:
         # have since changed. Read here rather than at the claim because the
         # window the defect lives in opens with the assembly: the claim
         # compares ``generated_at``, which an invalidation does not move.
+        #
+        # **The guard is inert for a day that has no row yet**, and that is a
+        # known residual rather than an oversight (raised by review). An
+        # invalidation only ever marks rows that exist — it deliberately creates
+        # none, since a summary nobody has read should not be manufactured — so
+        # a change landing while the *first* summary for a day is being
+        # generated leaves no trace for this comparison to find. Closing it
+        # means either creating rows on invalidation, which trades this for a
+        # table of summaries for days no one opened, or claiming the row before
+        # assembling the inputs, which would hold a GENERATING marker across the
+        # eligibility decision and mark days that turn out to be ineligible.
+        # Both are behaviour changes beyond this phase; the case is recorded in
+        # ITER18-005 Phase 7's limitations instead.
         seen_invalidated_at = existing.invalidated_at if existing else None
 
         # 2. Assemble input (scoped to the user's local day — reads only)
