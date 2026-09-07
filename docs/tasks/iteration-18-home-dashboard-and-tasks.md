@@ -11427,6 +11427,17 @@ contract claim repeated per suite**, and this iteration has already corrected th
 twice for exactly that reason. Sections default to `unavailable` rather than to an empty ready payload, so
 a suite has to say which section it is about and cannot lean on a neighbour's shape by accident.
 
+**And one from the second reviewer** (`auggie review` on #1427, after greptile came back clean).
+
+- **A contact was announced twice.** `ContactAvatar` carries `role="img"` with the contact's name as its
+  accessible name, and **W27** puts that same name in text beside it — so a screen reader reading a task's
+  contacts hears *"Priya Raman, image, Priya Raman"*. The avatar is the decorative half of that pair, since
+  the text is what a sighted reader is reading too, so it is hidden from the accessibility tree rather than
+  the name being dropped. **The category is larger than the instance**: the identical pairing exists in
+  `JournalTaskRow` (ITER18-001 Phase 16) and `UpcomingDateRow` (ITER18-004 Phase 12), both pre-existing and
+  both on surfaces this phase does not own. Named as a follow-up below rather than swept up, so the sweep
+  is a decision rather than an untested change to screens this stack is not about.
+
 **Docs:** `frontend-design.md` gained the card, the row, the action, the optimistic-removal path and the
 display module beside the agenda's and the dates' — and its *"writes that invalidate `homeDashboardKeys.all`"*
 rule, which said in terms that *"task and contact writes do not yet, and are owned by the phases whose
@@ -11435,8 +11446,12 @@ out. The wireframe gained gaps 22 (the chip colour) and 23 (the single action an
 lives). `api-design.md` and `mcp-tools.md` were deliberately **not** touched: this phase adds no endpoint and
 no tool.
 
-**Follow-up (not done here):**
+**Follow-ups (not done here):**
 
+- **An avatar and the name beside it are announced twice, on two other surfaces.** `JournalTaskRow` and
+  `UpcomingDateRow` pair a named `ContactAvatar` with the same name in text, exactly as this row did before
+  the review found it. Both are pre-existing and belong to phases that own those screens; the fix is two
+  lines and a test apiece, and it should be taken by whichever phase next touches either row.
 - **ITER18-005 Phase 7b will invalidate the summary server-side on a task status change**, and the refetch
   this phase triggers would then return a summary marked stale — flipping the card to *generating*
   underneath the user, which is the very thing 7b's own criterion forbids. It is 7b's to resolve (its
