@@ -215,3 +215,15 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     on the 28th (`observed_for_leap_day`) precisely so a surface can account for itself; the wireframe
     could not have drawn a case its sample does not contain. ITER18-004 Phase 12 draws a muted aside
     beside the date rather than letting it read as a quietly wrong day.
+
+22. **The due chip's colour is keyed to the due journal's *id*, because no colour travels.** **W25** says
+    the chip's colour tracks the row's accent bar, *i.e.* the due journal, and rules out a proximity scale
+    in terms — in the sample, `Tomorrow` and `Wed 5 Aug` share a colour while the nearer `Sat 1 Aug`
+    differs. But the tasks section's `due_journal` carries id, title and date and **no colour**: unlike the
+    agenda, whose rows are keyed to a real `calendar_color` (**W17**), there is nothing here to key to.
+    ITER18-004 Phase 14 derives both the accent bar and the chip from `due_journal.id` over the theme's five
+    chart colours, so two tasks due in the same journal read as a pair and tasks due in different journals
+    differ — which is what "keyed to the due journal" can mean with the data this section has. *Which*
+    colour a journal takes is arbitrary, as W25's own note about row 5 allows; that the same journal keeps
+    it is not. The classes are a literal tuple rather than a composed `bg-chart-${n}`, because Tailwind
+    emits only the utilities it can find in the source and a composed one draws no bar at all.

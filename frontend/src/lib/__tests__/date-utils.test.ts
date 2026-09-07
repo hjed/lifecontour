@@ -7,6 +7,7 @@ import {
   formatDateRange,
   formatIsoDate,
   formatIsoDateLong,
+  formatIsoShortWeekdayDate,
   formatIsoWeekdayDate,
   isIsoCalendarDate,
   localDateIn,
@@ -160,6 +161,38 @@ describe('formatIsoWeekdayDate', () => {
 
   it('handles a leap day', () => {
     expect(formatIsoWeekdayDate('2024-02-29')).toBe('Thursday, 29 February');
+  });
+});
+
+describe('formatIsoShortWeekdayDate', () => {
+  it('writes the short absolute form the due chip falls back to', () => {
+    // W25's third case: `Today`, `Tomorrow`, then a short absolute form —
+    // "Sat 1 Aug". A chip sits at the end of a row that already carries the
+    // task's text, so it is abbreviated where the tomorrow disclosure's label
+    // (W19) is written out in full.
+    expect(formatIsoShortWeekdayDate('2026-08-01')).toBe('Sat 1 Aug');
+  });
+
+  it('does not carry a year', () => {
+    // The whole window is seven days from the anchor the page header already
+    // names in full, so a year on a chip would be noise in every case it
+    // could appear.
+    expect(formatIsoShortWeekdayDate('2026-08-05')).toBe('Wed 5 Aug');
+  });
+
+  /**
+   * The same contract as {@link formatIsoWeekdayDate}, and load-bearing for
+   * the same reason: `due_journal.date` is a calendar day the *server*
+   * resolved in the user's configured zone. Parsed as an instant it would
+   * shift back a day in any zone behind UTC and name the wrong weekday.
+   */
+  it('does not shift a date that has already been resolved', () => {
+    expect(formatIsoShortWeekdayDate('2026-01-01')).toBe('Thu 1 Jan');
+    expect(formatIsoShortWeekdayDate('2026-12-31')).toBe('Thu 31 Dec');
+  });
+
+  it('handles a leap day', () => {
+    expect(formatIsoShortWeekdayDate('2024-02-29')).toBe('Thu 29 Feb');
   });
 });
 

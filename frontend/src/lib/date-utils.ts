@@ -298,6 +298,29 @@ export function formatIsoWeekdayDate(date: string): string {
   return format(parseISO(date), 'EEEE, d MMMM', { locale: enAU });
 }
 
+/**
+ * Format an ISO **calendar date** (`YYYY-MM-DD`) as `EEE d MMM` — abbreviated,
+ * no year.
+ *
+ * The short absolute form the dashboard's due chip falls back to once a task
+ * is further off than tomorrow (**W25**) — *"Sat 1 Aug"*. Abbreviated where
+ * {@link formatIsoWeekdayDate} writes the same day out in full, because this
+ * one sits in a chip at the end of a row that is already carrying the task's
+ * text; and no year, because the whole window is seven days from an anchor the
+ * page header names in full.
+ *
+ * Parsed as a local calendar date for the same reason as
+ * {@link formatIsoWeekdayDate}: `due_journal.date` was resolved server-side in
+ * the user's configured zone, and re-parsing it as an instant would shift it
+ * back a day in any zone behind UTC — naming the wrong weekday on the one
+ * surface whose whole job is saying which day something falls on.
+ *
+ * @example formatIsoShortWeekdayDate('2026-08-01') // "Sat 1 Aug"
+ */
+export function formatIsoShortWeekdayDate(date: string): string {
+  return format(parseISO(date), 'EEE d MMM', { locale: enAU });
+}
+
 /** `YYYY-MM-DD` and nothing else — not an instant, not a partial date. */
 const ISO_CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
