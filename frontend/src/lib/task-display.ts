@@ -84,7 +84,15 @@ export interface TaskStatusAction {
   readonly accessibleName: string;
 }
 
-const MARK_DONE: TaskStatusAction = {
+/**
+ * Exported because the **dashboard** offers this and only this (**W24**).
+ *
+ * Everything on the dashboard is not-done, so completion is the only move a
+ * row there can make — and the two surfaces must not word the same button two
+ * ways. The offer table below still reaches it through this constant, so there
+ * is one definition rather than a copy per surface.
+ */
+export const MARK_DONE: TaskStatusAction = {
   key: 'done',
   target: TaskStatus.DONE,
   label: 'Done',

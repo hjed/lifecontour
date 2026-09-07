@@ -98,6 +98,15 @@ including the two guards, and the two guards are **exclusive** — a past day fo
 — so no task can appear in two sections of one prompt. The day arrives as the journal ids `assemble`
 already fetched rather than as a second date window, because those journals were matched by *overlap* and
 a window over due-journal starts would describe a different day than the prompt does.
+**ITER18-004 Phase 14 complete: the dashboard's tasks section is a surface, not a payload.** `TasksCard`
+reads the section the page already fetched and draws up to five rows in the server's order —
+the commitment, a due chip that is relative first and absolute after, the journal it is due in and the
+people it names (**W21**–**W27**) — each with an inline **Done** that marks it off without leaving the
+page. `useUpdateTask` learns the dashboard in both directions: `homeDashboardKeys.all` joins the reachable
+set of every task write that can stale the section (and only those), and a status change out of *not done*
+takes the row out of the cached section at once, putting it back in the order the section is sent in if
+the write fails. The
+first dashboard data a write can stale, and therefore the first that could assert it.
 **ITER18-005 Phase 6 complete: the current day's prompt says whose important dates are coming up.**
 `DailySummaryInputAssembler` calls `UpcomingImportantDatesService.upcoming_dates` — the read the
 dashboard's section and `list_upcoming_important_dates` already share — so the recurrence rule, the
@@ -11183,7 +11192,7 @@ as `_persisted_task_id`, in the dashboard's projection. The dashboard is core co
 API module, so importing it would invert the layering; extract the pair to the tasks domain at a third
 caller, not before (delivery rule 7 — duplicate and record rather than bloat the phase that noticed).
 
-#### Phase 14: Tasks Section — Card with Inline Done
+#### Phase 14: Tasks Section — Card with Inline Done ✅ COMPLETE
 
 **Prerequisites:** Phases 3 and 13, ITER18-001 Phases 6 and 15.
 **Estimated diff:** ~170 production → **~680 tracked** (×4) — **deliberately over the standard**
@@ -11191,28 +11200,294 @@ caller, not before (delivery rule 7 — duplicate and record rather than bloat t
 an incoherent split, so the card and its action ship in one PR, as **two commits**: (A) the card,
 (B) the inline action and in-place update.
 
-**Acceptance Criteria:**
+**Actual:** 717 production → **~2,700 tracked** (717 production, 1,895 tests, ~110 documentation counting
+this entry). **4.2× the tracked estimate and 4.2× the production one**, with tests at 2.6× production.
 
-- [ ] Card header and description per **W21**; up to five rows, soonest first, in the shared row idiom
-      (**W22**).
-- [ ] Each row shows the task text (**W23**), the relative due chip — `Today`, `Tomorrow`, then a short
-      absolute form (**W25**) — the "Due in *journal*" link (**W26**) and any linked contacts with names
-      (**W27**).
-- [ ] An inline **Done** button on every row (**W24**) marks the task done **without leaving the page**,
-      after which the section updates in place and the row disappears.
-- [ ] The mutation routes through `invalidateAfterMutation` (cancel before invalidate) — the discipline
-      iteration 17 established across all 77 mutation handlers after two flake fixes — and the keys it
-      invalidates **include `homeDashboardKeys.all`**. *Inherited from Phase 3:* nothing invalidates that
-      key today, and the app-wide `staleTime` is five minutes, so without this the section would serve the
-      pre-mutation projection to a user who returns to the dashboard after ticking something off. This is
-      the first phase with dashboard data a write can stale, and therefore the first that can assert it.
-- [ ] No overdue section, counter or badge appears anywhere on the page, and lapsed tasks never render here.
-- [ ] The summary card is **not** regenerated underneath the user when a task is ticked — the section
-      updates, the summary refreshes on next load (the contract ITER18-005 Phase 7 relies on).
+**The estimate was rewritten before work started, and it was still 1.2× low.** Planning counted artefacts
+per calibration rule 17 rather than the title — display module ~70, row ~130, action ~90, card ~120, the
+`tasks.ts` dashboard-optimism block ~150, the formatter ~25 → ~585 — and recorded ~1,900–2,400 tracked as
+the phase's own over-standard overrun (delivery rule 3). Every file was identified; two came in bigger than
+priced. The generalisable part is *which* two: **the optimistic path (193 lines against ~150) and the
+tests for it (378 lines in `tasks.test.ts` alone)**, because an optimistic *removal* needs a rollback that
+is correct under concurrency and every concurrency case is its own test. **Price a cache patch by the
+number of ways two of them can overlap, not by the size of the patch.**
 
-**Required Test Coverage:** unit (RTL) — row rendering; each relative-chip case **including a near-midnight
-non-UTC boundary**; the done action's optimistic update and rollback; cancel-before-invalidate ordering; and
-that ticking a task triggers no summary refetch. E2E in Phase 17.
+**Shipped as a two-PR stack, and the seam is not the one this entry originally named.** The entry said one
+PR in two commits — (A) the card and its row, (B) the action — because the specification calls "a dashboard
+tasks section without the inline done action" an incoherent split. That reasoning holds and the card and
+action still land together, in the **top** PR. What it missed is that a *different* seam is available and
+safe: the wording module, the date formatter and `DashboardTaskRow` go in the **bottom** PR, where nothing
+renders them — no component imports the row — so it breaks nothing on merge. Delivery rule 9 is satisfied
+either way, and rule 3's ~500-line cap is honoured for the layer that can honour it. This is exactly the
+split Phase 12 recorded ("PR 1 adds a row nobody renders, so it breaks nothing"), and the generalisable
+form is worth keeping: **a phase whose two halves cannot be separated by capability can often still be
+separated by *reachability* — the layer nothing calls yet is always a safe bottom.**
+
+**Acceptance criteria, ticked:**
+
+- [x] Card header and description per **W21**; up to five rows, soonest first, in the shared row idiom
+      (**W22**). — `TasksCard` reads `useHomeDashboard()` itself, the arrangement the other three cards
+      established, and maps `tasks.data.tasks` to one `DashboardTaskRow` each **in the server's order**.
+      **The cap of five lives here and nowhere else**: the server sends the whole window with its `total`
+      and caps nothing (Phase 13's settled shape), so Phase 15's show-more reveals the remainder without a
+      second request. A mutation capping at ten fails two tests.
+- [x] Each row shows the task text (**W23**), the relative due chip (**W25**), the "Due in *journal*" link
+      (**W26**) and any linked contacts with names (**W27**). — `DashboardTaskRow`, a pure function of one
+      payload row with **no query and no clock**. Zero contacts renders nothing at all, as W27 draws it;
+      the text is asserted *not* to be a link, because a task has no detail route.
+- [x] An inline **Done** button on every row (**W24**) marks the task done without leaving the page, after
+      which the section updates in place and the row disappears. — `DashboardTaskActions`, and "every row"
+      is the assertion: a card mounting the action on the first row only would look right in a screenshot
+      and leave four commitments unactionable. Proved end to end on both e2e projects.
+- [x] The mutation routes through `invalidateAfterMutation` and the keys it invalidates **include
+      `homeDashboardKeys.all`**. — `REFRESH_HOME_DASHBOARD` joins `taskFilters` and
+      `refreshTaskCollections`, so create, update, retarget, delete and contact link/unlink all carry it
+      and **`refreshTaskJournalLinks` does not** — a mention link cannot move a section that lists tasks by
+      their *due* journal. Six exhaustive invalidation assertions gained the key and one negative one
+      excludes it; dropping it fails five tests.
+- [x] No overdue section, counter or badge appears anywhere on the page, and lapsed tasks never render
+      here. — Inherited from the server (Phase 13's exclusions, unchanged), and asserted negatively at
+      both the row and the card, because the way this criterion would break is a later phase copying the
+      journal row, which draws a status badge and a lapse marker.
+- [x] The summary card is **not** regenerated underneath the user when a task is ticked. — Asserted at
+      unit level as *no request to any `daily-summary` endpoint and no regenerate `POST`*, and again in the
+      e2e against the real request stream. The dashboard's own read regenerates nothing server-side
+      (Phase 2), so the refetch this phase triggers cannot produce a summary the user did not ask for.
+
+**Decisions taken (Phase 14):**
+
+- **The chip's colour is keyed to the due journal's *id*, because no colour travels** (wireframe gap 22).
+  **W25** says the chip tracks the accent bar, *i.e.* the due journal, and rules out a proximity scale in
+  terms — yet `due_journal` carries id, title and date and no colour, where the agenda's rows key to a real
+  `calendar_color`. Both the bar and the chip take the same index off `due_journal.id` over the theme's five
+  chart colours, so two tasks due in the same journal read as a pair. *Which* colour a journal takes is
+  arbitrary, as W25's own note about row 5 allows; that the same journal keeps it is not.
+- **The classes are a literal tuple, never composed — and that claim needed a source-level test.** Tailwind
+  emits only the utilities it can find in the source, so a `bg-chart-${n}` built at runtime yields no CSS
+  and the bar draws as nothing. See the mutation table: this is the one that found a gap.
+- **The optimistic update is a *removal*, in a path of its own.** The section's entry condition is *not
+  done* and its rows carry no `status` — Phase 13 left it off the wire deliberately — so a status change
+  out of not-done takes the row out of the **list** and drops `total` with it. It cannot reuse
+  `patchCachedTask`: that machinery is written for JSON:API payloads whose task resources sit at `data` or
+  `data[]`, where these are nested at `data.attributes.tasks.data.tasks` under a different key. Branching
+  it on shape would make one function serve two unrelated contracts, so `removeTaskFromDashboards` /
+  `restoreTasksToDashboards` are a separate pair.
+- **Done *and* cancelled remove; not done adds nothing.** Cancelled is absent from the section for the same
+  reason done is, and `useUpdateTask` is shared with the journal surface where cancel is offered — removing
+  only on done would leave a mounted dashboard showing a commitment just cancelled elsewhere. The predicate
+  is `status !== NOT_DONE`, the same one `optimisticPatch` uses to clear the lapse marker. The reverse is
+  refused deliberately: whether a reopened task falls in this window depends on its due journal's date in
+  the user's configured zone, which is not knowable in the browser.
+- **The rollback re-inserts one row, never a snapshot of the array** — ITER18-001 Phase 17's decision 2b
+  in a new shape: two rows ticked in succession share a cache entry, so restoring the pre-first-write list
+  on the first one's failure would silently resurrect the second. **Where** it goes back is the section's
+  own order rather than the index it came out of; see the review findings below for why the index is
+  wrong, which is a correction to this decision rather than a separate one.
+- **`useUpdateTask` is the home, not a dashboard-only hook.** A `useCompleteDashboardTask` beside it would
+  leave a mounted dashboard stale whenever a task is ticked from a journal — the divergence the hook's own
+  docstring argues against for the three task namespaces — and would break the criterion's pairing of the
+  optimism with `invalidateAfterMutation`, which is the hook's responsibility.
+- **The action arrives at the row as a slot, mounted by the card.** It is the one thing on this row that
+  writes, and keeping it outside is what lets the row stay a pure function of the payload, assertable with
+  no query client. `taskTextId(taskId)` — composed from the task id rather than `useId` — is how the two
+  ends agree on the id the action group is described by without either handing it to the other.
+- **The button's wording is `MARK_DONE`, exported from `lib/task-display` rather than written again.** It
+  is the same action in the same idiom on a second surface, and two copies is how the two surfaces come to
+  name one button two ways.
+- **The accessible name is the action; the *group* is described by the commitment** (wireframe gap 23).
+  Every row's button is named the same thing, so a label long enough to identify one would be read out five
+  times over. `aria-busy` sits on the group for the reason Phase 17 recorded: the optimistic update rewrites
+  the row before the request settles, so the pressed control does not survive its own click.
+- **The chip is relative *and* carries the date, because the two authorities ask for different things.**
+  The specification says a row shows "the task text, the due journal's title and date"; **W25** makes the
+  visible label `Today` / `Tomorrow` for the first two days, where an absolute date would only repeat the
+  page header (**W2**), which names today in full. Rather than pick one, the chip is a `<time>` element:
+  the words follow the wireframe and `dateTime` carries `due_journal.date` on every row, so a row reading
+  *Today* still says which day it means. Delivery rule 4 asks for the specification to win where the two
+  genuinely disagree; here they can both be satisfied, and it is worth recording that this was checked
+  rather than assumed. Found in this phase's own verification pass, not by a reviewer.
+- **Loading and unavailable placeholders ship here, though no criterion asks for them.** The moment the card
+  reads the query, *"Nothing due in the next seven days."* becomes a false claim about a section that has
+  not answered. The same ruling Phase 12 recorded for the dates card; Phase 16 replaces both (gap 9).
+- **No backend change, and the backend suite is the gate proving it.** Phase 13 shipped the whole payload
+  and its 19 integration tests; `test_home_dashboard_tasks.py` is re-run unchanged rather than extended.
+
+**Tests: 73 unit/RTL added, plus 2 e2e** — across five new files and two existing ones, against four
+removed with `section-cards.test.tsx`.
+
+- `frontend/src/lib/__tests__/dashboard-tasks-display.test.ts` (**16**, new) — the chip at 0/1/2/7, the
+  refusal to derive it from a clock, the accent stable per journal and differing across journals, the two
+  literal tuples, the chip and bar sharing an index, `taskTextId`, and the source-level guard below.
+- `frontend/src/components/dashboard/__tests__/DashboardTaskRow.test.tsx` (**15**, new) — **W23** as a
+  non-link, each chip case, the colour keyed to the journal rather than to proximity, **W26**'s target,
+  **W27** with contacts and with none, the action slot, decorative icons hidden, and **AC5**'s three
+  negatives.
+- `frontend/src/components/dashboard/__tests__/DashboardTaskRow.timezone.test.tsx` (**3**, new) — the
+  near-midnight non-UTC case, with its UTC control.
+- `frontend/src/components/dashboard/__tests__/TasksCard.test.tsx` (**13**, new, replacing
+  `section-cards.test.tsx`) — the header, the cap, the server's order, an action on **every** row, the group
+  described by its own commitment, the three no-rows states kept apart, a malformed section surviving, the
+  **W4** label in every state, and no overdue affordance.
+- `frontend/src/components/dashboard/__tests__/DashboardTaskActions.test.tsx` (**13**, new) — one button and
+  only one, the **W24** idiom, no navigation, the removal and its rollback through the button, **AC6**'s
+  request assertion, the in-flight lock and its `aria-busy`, and `Enter`/`Space`.
+- `frontend/src/lib/api/__tests__/tasks.test.ts` (**+11**, and six invalidation lists edited) — the removal
+  before the response, the count dropping with it, cancelled removing and not-done not adding, a text edit
+  leaving the rows alone, the row restored at its index, **the two-rows-in-flight case**, the other sections
+  untouched, an unavailable section surviving, and the dashboard cancelled before it is invalidated.
+- `frontend/src/app/__tests__/page.test.tsx` (**+2**) — the rows reaching the page *inside their own
+  section*, and the page still costing one request with the card reading it.
+- `frontend/tests/e2e/home-dashboard.spec.ts` (**2**, new) — below.
+
+**Mutation checks.** Six, each reverted after and each verified clean.
+
+| Mutation | Tests failed |
+|---|---|
+| Cap the card at ten | 2 |
+| Derive the chip from the browser clock | 6 |
+| Drop `homeDashboardKeys.all` from the reachable set | 5 |
+| Patch the dashboard without cancelling its in-flight read first | 1 |
+| Append the restored row instead of re-inserting it at its index | 2 |
+| Compose the accent class as `` `bg-chart-${n}` `` | **0 → 1 after the gap below was closed** |
+
+**One mutation found a gap, and the gap is a general one about what a runtime test can see.** Replacing the
+tuple lookup with a template literal passed the **entire suite** — including the test named
+*"is built from literal class names Tailwind can see"*, which asserts the tuple's contents and not the
+function's use of it. It could not fail: the composed string is byte-identical to the literal one, and the
+difference exists only at build time, in what Tailwind's scanner can find in the source. The consequence is
+the worst kind — no CSS is emitted, so the accent bar and the chip border simply draw as nothing, with no
+error anywhere. A source-level assertion was added, the technique `tasks.test.ts` already uses for
+*"never calls `invalidateQueries` directly"*, and re-running the mutation now fails it. Two details worth
+keeping: the guard **strips comments first**, because the module's own docstring names the forbidden form in
+order to warn against it and the guard fired on the explanation; and it carries **a test of its own regex**
+against a known-bad string, since a guard that matched nothing would pass for ever. **The general shape: an
+invariant that only holds at build time is unassertable at runtime, and a runtime test named for it is a
+test that cannot fail** — the same lesson Phase 13 recorded for a claim about a collaborator that is a mock.
+
+**The fourth mutation is honest rather than impressive, and worth reading.** Removing the explicit
+`cancelQueries` before the optimistic patch fails exactly one test — the table-driven cancel count in
+`cancel-before-invalidate` — and **not** the test named *"cancels the dashboard before it invalidates it"*.
+That is correct: `invalidateAfterMutation` cancels its own filters before invalidating them, so the
+*ordering* claim still holds with the explicit cancel gone. What the explicit cancel protects is different
+and earlier — an in-flight dashboard read settling *after* the patch and putting the removed row back — and
+the count is the assertion that catches it. Recorded rather than papered over with a stronger-sounding test.
+
+**E2E: 2 tests, and the phase's own line said there would be none.** *Phase Completion Requirements* allow
+deferring e2e only **for a phase with no user-visible surface**, and this phase is the surface; Phase 17's
+second criterion — *"ticking a task off removes it from the section without navigation and without the
+summary changing"* — is therefore **discharged here**, marked below as Phase 3 discharged its fourth. The
+structural sweep (five rows, the show-more, section order, every **W33** state) stays Phase 17's, so nothing
+is duplicated across layers. Both tests seed their own anchors from the day the *server* reports and step
+them in UTC, because the e2e user has no configured timezone. Green on `firefox` and `Mobile Chrome`,
+`--repeat-each 2`.
+
+**The first e2e run failed three ways and both causes were real.** Neither was flake, and the second is the
+more useful.
+
+- **An empty `<ul>` is not "visible".** After the last row goes the card keeps its labelled list in the DOM
+  deliberately — a `display:none` list is out of the accessibility tree, and **W4** asks for a labelled list
+  per section regardless — but an empty one has no box, so Playwright reports it hidden. `toBeAttached` is
+  the assertion that matches what the card actually promises.
+- **An optimistic UI makes the DOM a useless wait condition for a write.** The read-back test asserted the
+  stored status straight after the row disappeared, and the row disappears *because the patch is optimistic*
+  — so the assertion raced the `PATCH`. It read `not_done` on Mobile Chrome and **passed on Firefox by
+  timing alone**, which is the shape of this failure worth remembering: the surface that reports the bug is
+  not the surface that has it. Both tests now await the `PATCH` response itself. Safe to wait on because it
+  is a *mutation*: the mounted-observer trap that makes `waitForResponse` unreliable for queries does not
+  apply to a write the button issues directly. **The general form: wherever a phase adds optimism, every
+  existing "wait for the UI to change" becomes a wait for something that has already happened.**
+
+**The independent review found nothing but an arithmetic error, which is recorded because the error was in
+this entry.** It checked every acceptance criterion, the spec's *Tasks* section, **W21**–**W27**, the
+optimistic path's concurrency cases and the test rules, and reported no finding in any category; the test
+totals above were wrong — `it.each` cases counted once rather than per case — and are corrected. Shipped as
+the `<time>` element above and these corrections, folded into the stack's two branches
+rather than left as a trailing commit.
+
+**Acted on from the PR review** (greptile on #1428). One finding, and it is the third instance of the
+same mistake this phase kept meeting.
+
+- **A rollback that reasons about a list which has moved under it.** The restored row was re-inserted at
+  *the index it was removed from*, and that index is captured against a list the other in-flight removal
+  has already shortened. Tick rows 1 and 2 together, have **both** fail, and restoring 1 before 2 turns
+  `[1, 2, 3]` into `[2, 1, 3]` — a section that says *soonest first* and is not, until the refetch
+  corrects it. The existing two-rows test could not catch it: only one row was ever put back, so any
+  insertion point looked right. The position now comes from the **section's own order** — soonest first,
+  ties broken by task id, read off the two fields every row carries — which is order-independent by
+  construction. Two tests cover it: both failing, and a row that belongs last going last.
+- **Worth recording as a category rather than a case.** This is the *third* time in one phase that a
+  rollback got the same thing wrong: ITER18-001 Phase 17's decision 2b (a snapshot coarser than the patch),
+  the resurrection case this phase wrote a test for, and now the index. **The general form: an optimistic
+  rollback must be expressible without reference to the state at removal time, because that state is not
+  the state it will be undone into.** The card's *"draws the list it is given and never re-sorts"* rule is
+  untouched — this decides only where a row the user did not really remove goes back.
+
+**A second round from the same reviewer found two more, and the first of them completes the set.**
+
+- **A refetch fired while another write is in flight undoes that write's optimistic removal.** Tick two
+  rows; the first settles and invalidates; the dashboard refetch it triggers is computed by a server that
+  has not processed the *second* write, so the response carries the row that write removed and puts it back
+  on screen until its own request settles. `isLastTaskWrite` applies React Query's own rule for overlapping
+  mutations — only the last write standing refreshes — counting task writes by the predicate
+  `useTaskWriteInFlight` already uses, so an unrelated contact or journal write does not hold the refresh
+  back. Nothing is lost when a write skips, on either the success or the failure path.
+- **The first version of that test could not fail.** It asserted against an `invalidateQueries` spy
+  immediately after `mutateAsync` resolved — but `onSettled` fires the refresh with `void`, so the
+  assertion raced it and passed before the fix existed. It now counts the **dashboard endpoint's own
+  requests** against a live observer: one refetch for two overlapping writes, two if the bug is present.
+  The same lesson as Phase 13's, in a new place: *a claim about how many times something happens is
+  unassertable where the thing is fire-and-forget, and a test named for it there cannot fail.*
+- **The documentation had gone stale in the same breath as the fix.** `frontend-design.md` and two lines
+  of this entry still said the rollback re-inserts "at the index it held" — the behaviour the round before
+  had just replaced, and the reviewer pointed out that the architecture record therefore described the
+  concurrency bug rather than the code. Corrected. **Worth recording because the failure is systematic:
+  a fix written after the prose is written leaves the prose asserting the defect**, and nothing type-checks
+  a document.
+
+**And this is the fourth instance of one category.** ITER18-001 Phase 17's decision 2b (a snapshot coarser
+than the patch), this phase's resurrection case, the index measured against a list that had moved, and now a
+refetch answering about a write it does not know has happened. Stated once, so the next optimistic surface
+can start from it: **every part of an optimistic update — the patch, the rollback and the refresh that ends
+it — has to be expressible without reference to the state at the moment it was made, because that is not
+the state it will be applied into.**
+
+**And a duplication finding from SonarCloud, at 3.1% against a 3% gate.** Three suites had built the same
+thirty-line dashboard envelope, and `heldRequest` existed twice in one file. They are now one module,
+`src/test-utils/home-dashboard.ts` — which is worth more than the gate: **a fixture repeated per suite is a
+contract claim repeated per suite**, and this iteration has already corrected the same hand-written window
+twice for exactly that reason. Sections default to `unavailable` rather than to an empty ready payload, so
+a suite has to say which section it is about and cannot lean on a neighbour's shape by accident.
+
+**And one from the second reviewer** (`auggie review` on #1427, after greptile came back clean).
+
+- **A contact was announced twice.** `ContactAvatar` carries `role="img"` with the contact's name as its
+  accessible name, and **W27** puts that same name in text beside it — so a screen reader reading a task's
+  contacts hears *"Priya Raman, image, Priya Raman"*. The avatar is the decorative half of that pair, since
+  the text is what a sighted reader is reading too, so it is hidden from the accessibility tree rather than
+  the name being dropped. **The category is larger than the instance**: the identical pairing exists in
+  `JournalTaskRow` (ITER18-001 Phase 16) and `UpcomingDateRow` (ITER18-004 Phase 12), both pre-existing and
+  both on surfaces this phase does not own. Named as a follow-up below rather than swept up, so the sweep
+  is a decision rather than an untested change to screens this stack is not about.
+
+**Docs:** `frontend-design.md` gained the card, the row, the action, the optimistic-removal path and the
+display module beside the agenda's and the dates' — and its *"writes that invalidate `homeDashboardKeys.all`"*
+rule, which said in terms that *"task and contact writes do not yet, and are owned by the phases whose
+sections read them"*, now records the task half as owned here and names the one refresh deliberately left
+out. The wireframe gained gaps 22 (the chip colour) and 23 (the single action and where its accessible name
+lives). `api-design.md` and `mcp-tools.md` were deliberately **not** touched: this phase adds no endpoint and
+no tool.
+
+**Follow-ups (not done here):**
+
+- **An avatar and the name beside it are announced twice, on two other surfaces.** `JournalTaskRow` and
+  `UpcomingDateRow` pair a named `ContactAvatar` with the same name in text, exactly as this row did before
+  the review found it. Both are pre-existing and belong to phases that own those screens; the fix is two
+  lines and a test apiece, and it should be taken by whichever phase next touches either row.
+- **ITER18-005 Phase 7b will invalidate the summary server-side on a task status change**, and the refetch
+  this phase triggers would then return a summary marked stale — flipping the card to *generating*
+  underneath the user, which is the very thing 7b's own criterion forbids. It is 7b's to resolve (its
+  criterion is written as the pair of this one's), and it is recorded here so the interaction is met by
+  design rather than rediscovered. Nothing about it is wrong today: the dashboard read regenerates nothing.
 
 #### Phase 15: Tasks Section — Show More and Empty State
 
@@ -11278,8 +11553,10 @@ transition**. E2E in Phase 17 covers the mobile project.
       wireframe order with their headings; all-day entries above timed ones; a cancelled event carrying its
       marker; exactly five task rows with a show-more naming the full count; the collapsed-by-default
       tomorrow disclosure expanding in place; upcoming dates ascending with their "in N days" chips.
-- [ ] Ticking a task off removes it from the section **without navigation** and without the summary
-      changing.
+- [x] ~~Ticking a task off removes it from the section **without navigation** and without the summary
+      changing.~~ — **discharged in Phase 14**, which brought two e2e tests of its own rather than deferring
+      them: *Phase Completion Requirements* permit deferral only for a phase with no user-visible surface,
+      and that phase is the surface. This phase inherits them and adds the structural sweep around them.
 - [ ] Each declared state (**W33**) has its own test with its own fixtures: summary generated, generating and
       unavailable; tasks populated and empty; and the agenda and upcoming-dates empty states.
 - [x] ~~The placeholder cards are gone and the navigation entry reaches the dashboard.~~ — **discharged in

@@ -227,3 +227,12 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     colour a journal takes is arbitrary, as W25's own note about row 5 allows; that the same journal keeps
     it is not. The classes are a literal tuple rather than a composed `bg-chart-${n}`, because Tailwind
     emits only the utilities it can find in the source and a composed one draws no bar at all.
+23. **The dashboard row offers Done and nothing else, and its accessible name is not the commitment.**
+    **W24** draws one button, which ITER18-004 Phase 14 ships as an `outline` `size="sm"` **Done** with a
+    check icon, top-right of the text row. Every row's button is therefore named the same thing, so the
+    *group* carries `aria-describedby` pointing at the task's text rather than each button being given a
+    label long enough to identify it — the arrangement ITER18-001 Phase 17 established on the journal row,
+    and the one that keeps a five-row list from reading five sentences aloud. `aria-busy` sits on the group
+    for the reason that phase recorded: the optimistic update rewrites the row before the request settles,
+    so the pressed control does not survive its own click.
+

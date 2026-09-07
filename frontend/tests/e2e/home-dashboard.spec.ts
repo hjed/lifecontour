@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import { TestDataManager } from './data-management';
-import { test, expect, type TestJournal } from './fixtures';
+import { test, expect, type TestJournal, type TestTask } from './fixtures';
 
 /**
  * Home Dashboard — page shell (ITER18-004 Phase 3)
@@ -1345,5 +1345,193 @@ test.describe('Home Dashboard — the agenda card', () => {
       }));
       expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
     });
+  });
+});
+
+/**
+ * The tasks card's one behaviour that only a real stack can prove
+ * (ITER18-004 Phase 14, **W24**).
+ *
+ * Everything else about this card — the five-row cap, each chip case, the
+ * order, the empty and unavailable states — is asserted in RTL against the
+ * payload, and Phase 17 owns the structural wireframe sweep. What is left for
+ * this level is the round trip: a real task, ticked through the real endpoint,
+ * leaving the section **without navigating** and **without the summary
+ * changing**. That is Phase 17's own second criterion, discharged here because
+ * the *Phase Completion Requirements* allow deferring e2e only for a phase
+ * with no user-visible surface, and this phase is the surface.
+ *
+ * Fixtures are anchored on the day the **server** says it is and stepped in
+ * UTC, because the e2e user has no configured timezone: a journal seeded at
+ * local noon can land on tomorrow's dashboard, which is the Phase 17 fixture
+ * rule.
+ */
+
+const TASKS_LIST_NAME = 'Tasks due in the next seven days';
+
+/** The tasks card's list, by the accessible name the card gives it (W4). */
+function tasksList(page: Page) {
+  return page.getByRole('list', { name: TASKS_LIST_NAME });
+}
+
+/**
+ * A task due two days out, with both its anchors, on the anchor day.
+ *
+ * Two days rather than the shared helper's seven: the window's last day is its
+ * edge, and a UTC midnight passing between seeding and the page's own read
+ * would push a task seeded there out of the window and fail the test for a
+ * reason that has nothing to do with the card.
+ */
+async function createDashboardTask(
+  dataManager: TestDataManager,
+  day: string,
+  text: string
+): Promise<{ task: TestTask; dueJournal: TestJournal }> {
+  const dueDay = daysAfter(day, 2);
+
+  const creating = await dataManager.createJournal({
+    title: 'Tasks card journal it came from',
+    content: 'Task anchor seeded for the dashboard tasks card',
+    event_date_range: {
+      start: atUtc(day, '09:00:00'),
+      end: atUtc(day, '10:00:00'),
+    },
+  });
+  const dueJournal = await dataManager.createJournal({
+    title: 'Tasks card journal it is due in',
+    content: 'Task anchor seeded for the dashboard tasks card',
+    event_date_range: {
+      start: atUtc(dueDay, '09:00:00'),
+      end: atUtc(dueDay, '10:00:00'),
+    },
+  });
+
+  const task = await dataManager.createTask({
+    creatingJournalId: creating.id,
+    dueJournalId: dueJournal.id,
+    text,
+  });
+
+  return { task, dueJournal };
+}
+
+/**
+ * The `PATCH` the done button sends, awaited rather than inferred.
+ *
+ * A mutation, so it is safe to wait on: the observer trap that makes
+ * `waitForResponse` unreliable for *queries* — a mounted observer silencing the
+ * refetch — does not apply to a write the button issues directly.
+ */
+function writeFor(page: Page, task: TestTask) {
+  return page.waitForResponse(
+    response =>
+      response.url().includes(`/api/tasks/${task.id}`) &&
+      response.request().method() === 'PATCH'
+  );
+}
+
+test.describe('Home Dashboard — the tasks card', () => {
+  test('ticks a task off in place, without leaving the page (W24)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    const { task, dueJournal } = await createDashboardTask(
+      dataManager,
+      day,
+      'Tasks card send the deposit receipt'
+    );
+
+    await openDashboard(page);
+
+    const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
+    await expect(row).toBeVisible();
+    await expect(
+      row.getByText('Tasks card send the deposit receipt')
+    ).toBeVisible();
+    // W26: the row names the journal it is due in, and links to it.
+    await expect(
+      row.getByRole('link', { name: dueJournal.title })
+    ).toHaveAttribute('href', `/journals/${dueJournal.id}`);
+
+    const urlBefore = page.url();
+
+    // AC6: the summary is not regenerated underneath the user — it refreshes
+    // on the next load, which is the contract ITER18-005 Phase 7 relies on.
+    // Asserted against the *requests* rather than against the card's text: the
+    // e2e account has no AI configured, so the card reads the same either way
+    // and comparing its words would pass however the page behaved.
+    const summaryRequests: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('daily-summary')) {
+        summaryRequests.push(request.url());
+      }
+    });
+
+    const write = writeFor(page, task);
+    await row.getByRole('button', { name: 'Mark done' }).click();
+
+    // The section updates in place: the row goes, and the page does not.
+    await expect(row).toHaveCount(0);
+    expect(page.url()).toBe(urlBefore);
+    // `toBeAttached`, not `toBeVisible`: the card keeps its labelled list in
+    // the DOM whether or not it holds entries (**W4**) — a `display:none` list
+    // is out of the accessibility tree — and an empty `<ul>` has no box, so
+    // "visible" is the wrong question to ask of it.
+    await expect(tasksList(page)).toBeAttached();
+    await expect(summaryCard(page)).toBeVisible();
+
+    // Only now: the row went optimistically, so the write is still in flight
+    // and a request assertion made here would be about the wrong moment.
+    await write;
+    expect(summaryRequests).toEqual([]);
+  });
+
+  test('leaves the task on its journal, where it is worked with', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    const { task, dueJournal } = await createDashboardTask(
+      dataManager,
+      day,
+      'Tasks card confirm the caterer'
+    );
+
+    await openDashboard(page);
+
+    const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
+    await expect(row).toBeVisible();
+
+    // **Waited on before the read below, and the row leaving is not a
+    // substitute for it.** The removal is optimistic, so the row is gone the
+    // instant the button is pressed and the DOM says nothing about whether the
+    // server has answered — asserting the record straight after `toHaveCount`
+    // read `not_done` on Mobile Chrome and passed on Firefox by timing alone.
+    const write = writeFor(page, task);
+    await row.getByRole('button', { name: 'Mark done' }).click();
+    await expect(row).toHaveCount(0);
+    await write;
+
+    // Hidden from the dashboard, not lost: the specification's stance on
+    // everything this section drops. Read back through the API rather than a
+    // second page, because what is being asserted is the record, not a second
+    // surface's rendering of it.
+    const response = await page.request.get(
+      `/api/journals/${dueJournal.id}/tasks`
+    );
+    expect(response.ok()).toBe(true);
+    const body = await response.json();
+    const stored = body.data.find(
+      (resource: { id: string }) => resource.id === task.id
+    );
+    expect(stored.attributes.status).toBe('done');
+    expect(stored.attributes.text).toBe('Tasks card confirm the caterer');
   });
 });

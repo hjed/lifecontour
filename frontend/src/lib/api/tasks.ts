@@ -58,6 +58,14 @@ import { invalidateAfterMutation } from './invalidate-after-mutation';
 // the journal client, so reaching back into it would close a runtime cycle that
 // breaks partial-mock tests — see the header of `journal-keys.ts`.
 import { journalKeys } from './journal-keys';
+// Safe to import whole, unlike the journal client above: `home-dashboard.ts`
+// is a leaf — it imports the shared types and constants and nothing from this
+// layer — so there is no cycle to close.
+import { DashboardSectionStatus, homeDashboardKeys } from './home-dashboard';
+import type {
+  HomeDashboardResponse,
+  HomeDashboardTask,
+} from './home-dashboard';
 
 /**
  * The refusal a *done* task's retarget draws when the reopen was not confirmed.
@@ -498,8 +506,32 @@ function taskFilters(taskId: string) {
     { queryKey: taskKeys.journalLists() },
     { queryKey: taskKeys.upcoming() },
     { queryKey: taskHistoryKeys.forTask(taskId) },
+    REFRESH_HOME_DASHBOARD,
   ];
 }
+
+/**
+ * The home dashboard, whose tasks section is a read of this very task.
+ *
+ * Named here rather than only where the dashboard's own card lives, for the
+ * reason `journalKeys.lists()` is: **a mutation names the namespaces its change
+ * can reach**, and the section embeds a task's text, its due journal and its
+ * contacts, and is filtered by its status. Until now *nothing* invalidated this
+ * key on a task write, and with the app-wide five-minute `staleTime` that means
+ * a user who ticks something off and comes back to the dashboard is served the
+ * pre-mutation projection.
+ *
+ * Every task refresh carries it **except {@link refreshTaskJournalLinks}**: the
+ * section lists tasks by their *due* journal and draws no intermediate ones, so
+ * a mention link cannot change what it would answer. The same narrowness the
+ * journal lists are named with, applied to the same rule.
+ *
+ * The dashboard's *summary* is deliberately not a second concern here. The
+ * dashboard read regenerates nothing server-side (ITER18-004 Phase 2), so this
+ * refetch cannot produce a summary the user did not ask for — which is the
+ * client half of the contract ITER18-005 Phase 7 relies on.
+ */
+const REFRESH_HOME_DASHBOARD = { queryKey: homeDashboardKeys.all };
 
 function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
   return invalidateAfterMutation(queryClient, ...taskFilters(taskId));
@@ -558,6 +590,7 @@ function refreshTaskCollections(queryClient: QueryClient): Promise<void> {
     queryClient,
     { queryKey: taskKeys.journalLists() },
     { queryKey: taskKeys.upcoming() },
+    REFRESH_HOME_DASHBOARD,
     { queryKey: journalKeys.lists() }
   );
 }
@@ -763,6 +796,206 @@ function snapshotTaskAttributes(
   return snapshots;
 }
 
+// The home dashboard's tasks section, which a status change empties a row out of
+//
+// A third cached shape, and one the machinery above cannot describe. The task
+// resources it patches sit at `data` or `data[]`; the dashboard's rows are
+// nested at `data.attributes.tasks.data.tasks`, beside a `total`, under a
+// different query key. Branching `patchCachedTask` on that would make one
+// function serve two unrelated contracts, so this is a pair of its own.
+//
+// The patch is a **removal** rather than a field write, because the section's
+// entry condition is *not done*: a row leaving that status leaves the list. Its
+// rows carry no `status` to change — Phase 13 left it off the wire deliberately,
+// since it is a constant for everything the section can hold.
+
+/** One removed row: which cache entry it came out of, and what it was. */
+type RemovedDashboardTask = readonly [readonly unknown[], HomeDashboardTask];
+
+/** The tasks a cached dashboard document is currently showing, if any. */
+function dashboardTasksOf(
+  document: HomeDashboardResponse | undefined
+): HomeDashboardTask[] | undefined {
+  const section = document?.data.attributes.tasks;
+  if (section?.status !== DashboardSectionStatus.READY) return undefined;
+
+  const rows = section.data?.tasks;
+  return Array.isArray(rows) ? rows : undefined;
+}
+
+/**
+ * A cached dashboard document with its tasks section replaced.
+ *
+ * `total` is set from the list's own length rather than adjusted by one,
+ * because the wire says in terms that the two are equal — the server caps
+ * nothing, so the whole window travels and `total` is simply what the
+ * show-more displays. Everything else in the document is carried by reference,
+ * so the other three sections keep their identity and do not re-render.
+ */
+function withDashboardTasks(
+  document: HomeDashboardResponse,
+  tasks: HomeDashboardTask[]
+): HomeDashboardResponse {
+  const section = document.data.attributes.tasks;
+
+  return {
+    ...document,
+    data: {
+      ...document.data,
+      attributes: {
+        ...document.data.attributes,
+        tasks: {
+          ...section,
+          data: { ...section.data!, total: tasks.length, tasks },
+        },
+      },
+    },
+  };
+}
+
+/** Takes a task out of every cached dashboard, reporting what it removed. */
+function removeTaskFromDashboards(
+  queryClient: QueryClient,
+  taskId: string
+): readonly RemovedDashboardTask[] {
+  const removed: RemovedDashboardTask[] = [];
+
+  for (const [
+    queryKey,
+    cached,
+  ] of queryClient.getQueriesData<HomeDashboardResponse>({
+    queryKey: homeDashboardKeys.all,
+  })) {
+    const tasks = dashboardTasksOf(cached);
+    if (!cached || !tasks) continue;
+
+    const index = tasks.findIndex(task => String(task.task_id) === taskId);
+    if (index === -1) continue;
+
+    removed.push([queryKey, tasks[index] as HomeDashboardTask]);
+    queryClient.setQueryData(
+      queryKey,
+      withDashboardTasks(
+        cached,
+        tasks.filter((_, position) => position !== index)
+      )
+    );
+  }
+
+  return removed;
+}
+
+/**
+ * Where a restored row belongs, by the order the server sent the list in.
+ *
+ * **Not the index it was removed from**, which is the correction the PR review
+ * found. Two rows ticked while both are in flight are each removed from a list
+ * the other has already shortened, so the index each captured describes a
+ * transient state; restore them in the other order and the list comes back
+ * misordered, claiming to be soonest-first when it is not.
+ *
+ * The comparison is the section's own documented rule — *"soonest first, ties
+ * broken by task id"* — read off the two fields every row carries. That is the
+ * one place this client is entitled to know the order: the card still draws
+ * what it is given and never re-sorts, and this only decides where a row the
+ * user did not really remove goes back. `days_away` stands in for the due date
+ * because it is a monotonic function of it within one window, and it is what
+ * the payload publishes.
+ */
+function restoredRowIndex(
+  tasks: readonly HomeDashboardTask[],
+  task: HomeDashboardTask
+): number {
+  const after = tasks.findIndex(
+    row =>
+      row.days_away > task.days_away ||
+      (row.days_away === task.days_away && row.task_id > task.task_id)
+  );
+
+  return after === -1 ? tasks.length : after;
+}
+
+/**
+ * Puts one removed row back, where the server's order says it belongs.
+ *
+ * **Per task, never a snapshot of the whole list**, which is ITER18-001 Phase
+ * 17's decision 2b in a new shape. Two rows ticked one after the other share a
+ * cache entry, so restoring the array as it stood before the first write would
+ * silently resurrect the second — a commitment the user had just ticked off
+ * reappearing because an unrelated row failed, with nothing on screen
+ * connecting the two. Re-inserting one row by id cannot reach a task the failed
+ * write never touched.
+ *
+ * The position comes from {@link restoredRowIndex} rather than from where the
+ * row was taken out, because the list may have moved under it in the meantime —
+ * the same mistake in a second direction, and the one the PR review caught.
+ *
+ * A row already back — the refetch beat the rollback — is left alone rather
+ * than duplicated.
+ */
+function restoreTasksToDashboards(
+  queryClient: QueryClient,
+  removed: readonly RemovedDashboardTask[]
+): void {
+  for (const [queryKey, task] of removed) {
+    queryClient.setQueryData<HomeDashboardResponse>(queryKey, cached => {
+      const tasks = dashboardTasksOf(cached);
+      if (!cached || !tasks) return cached;
+      if (tasks.some(row => row.task_id === task.task_id)) return cached;
+
+      const restored = [...tasks];
+      restored.splice(restoredRowIndex(tasks, task), 0, task);
+      return withDashboardTasks(cached, restored);
+    });
+  }
+}
+
+/**
+ * Does this status change take the task out of the dashboard's section?
+ *
+ * Done **and** cancelled, because both are absent from it for the same reason
+ * and this hook is shared with the journal surface, where cancel is offered —
+ * removing only on `done` would leave a mounted dashboard showing a commitment
+ * the user had just cancelled elsewhere. The same predicate
+ * {@link optimisticPatch} uses to clear the lapse marker, for the same reason:
+ * *not done* is what the section and the marker are both about.
+ *
+ * The reverse is deliberately **not** done. Whether a task returned to not done
+ * belongs in this window depends on its due journal's date in the user's
+ * configured zone, which is not knowable here, so that row arrives with the
+ * refetch.
+ */
+function leavesDashboardSection(status: TaskStatus | undefined): boolean {
+  return status !== undefined && status !== TaskStatus.NOT_DONE;
+}
+
+/**
+ * Is this the last task write still standing?
+ *
+ * React Query's own rule for overlapping mutations, and this surface needs it:
+ * a refresh fired while another write is in flight refetches the section from a
+ * server that has not processed that write yet, so the response **carries the
+ * row the other write optimistically removed** and puts it back on screen. The
+ * user ticks two things off, one settles, and the other reappears for as long
+ * as its own request takes.
+ *
+ * `onSettled` runs while the settling mutation is still `pending`, so it counts
+ * itself: `1` means nothing else is outstanding and this write owns the
+ * refresh. The predicate is `mutatingTaskId`'s, so only *task* writes hold the
+ * refresh back — an unrelated contact or journal mutation should not.
+ *
+ * Nothing is lost when a write skips: whichever settles last refetches, and it
+ * refetches on the failure path too.
+ */
+function isLastTaskWrite(queryClient: QueryClient): boolean {
+  return (
+    queryClient.isMutating({
+      predicate: mutation =>
+        mutatingTaskId(mutation.state.variables) !== undefined,
+    }) <= 1
+  );
+}
+
 /**
  * Task mutations do not retry.
  *
@@ -956,7 +1189,16 @@ export function useUpdateTask() {
         cached => patchCachedTask(cached, taskId, patch)
       );
 
-      return { previous };
+      // A separate key and a separate shape, so a second cancel rather than a
+      // wider filter — and only when the status change actually empties the
+      // row out of the section, since nothing else here removes a row.
+      let removed: readonly RemovedDashboardTask[] = [];
+      if (leavesDashboardSection(status)) {
+        await queryClient.cancelQueries({ queryKey: homeDashboardKeys.all });
+        removed = removeTaskFromDashboards(queryClient, taskId);
+      }
+
+      return { previous, removed };
     },
     onError: (error: Error, { taskId }, context) => {
       context?.previous.forEach(([queryKey, attributes]) => {
@@ -964,6 +1206,7 @@ export function useUpdateTask() {
           patchCachedTask(cached, taskId, attributes)
         );
       });
+      restoreTasksToDashboards(queryClient, context?.removed ?? []);
       reportFailure(error);
     },
     onSuccess: (_, { status }) => {
@@ -975,6 +1218,11 @@ export function useUpdateTask() {
     // applied from a snapshot that may itself be stale, so the refetch is worth
     // as much on that path as on the happy one.
     onSettled: (_data, _error, { taskId }) => {
+      // Only the last task write standing refetches — see `isLastTaskWrite`.
+      // Refreshing while another is in flight would answer from a server that
+      // has not processed it, undoing its optimistic removal on screen.
+      if (!isLastTaskWrite(queryClient)) return;
+
       // The due counts go in the same call because a PATCH may carry a status,
       // and a status change is exactly what adds a commitment to a journal's
       // badge or takes it away. A text-only edit over-invalidates the journal

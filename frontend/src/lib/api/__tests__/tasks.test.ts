@@ -28,6 +28,18 @@ import {
   useUpdateTask,
 } from '../tasks';
 import { journalKeys } from '../journals';
+import { DashboardSectionStatus, homeDashboardKeys } from '../home-dashboard';
+import type {
+  HomeDashboardResponse,
+  HomeDashboardTask,
+} from '../home-dashboard';
+import {
+  dashboardTaskFixture,
+  dashboardWithTasks,
+  homeDashboardDocument,
+  tasksIn,
+} from '@/test-utils/home-dashboard';
+import { useHomeDashboard } from '../home-dashboard';
 import {
   JournalTasksResponse,
   LapseReason,
@@ -48,6 +60,9 @@ jest.mock('sonner', () => ({
 
 jest.mock('@/lib/constants', () => ({
   API_ENDPOINTS: {
+    // Named so an invalidated dashboard query actually refetches in this
+    // suite: the overlapping-writes test counts those refetches.
+    HOME_DASHBOARD: '/api/home-dashboard',
     TASKS: {
       BY_ID: (id: string) => `/api/tasks/${id}`,
       FOR_JOURNAL: (journalId: string) => `/api/journals/${journalId}/tasks`,
@@ -232,6 +247,22 @@ function invalidatedKeys(
   );
 }
 
+/** A held-open `fetch`, plus the trigger that finally answers it. */
+function heldRequest(answer: () => Response): () => void {
+  let release: () => void = () => undefined;
+  mockFetch.mockImplementationOnce(
+    () =>
+      new Promise<Response>(resolve => {
+        release = () => {
+          resolve(answer());
+        };
+      })
+  );
+  return () => {
+    release();
+  };
+}
+
 /** The single request body a spied `fetch` was called with. */
 function requestBody(): unknown {
   const init = mockFetch.mock.calls[0][1] as RequestInit;
@@ -252,6 +283,10 @@ describe('Task API client', () => {
       },
     });
     jest.clearAllMocks();
+    // Not just `clearAllMocks`: one test below installs a routing
+    // implementation, and leaving it in place would swallow the next test's
+    // `mockResolvedValueOnce`.
+    mockFetch.mockReset();
   });
 
   describe('taskKeys', () => {
@@ -630,6 +665,7 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          homeDashboardKeys.all,
           journalKeys.lists(),
         ]);
       });
@@ -752,6 +788,7 @@ describe('Task API client', () => {
           taskKeys.journalLists(),
           taskKeys.upcoming(),
           taskHistoryKeys.forTask('1'),
+          homeDashboardKeys.all,
           journalKeys.lists(),
         ]);
       });
@@ -782,6 +819,462 @@ describe('Task API client', () => {
   });
 
   /**
+   * The dashboard's tasks section, which a task write can stale (ITER18-004
+   * Phase 14).
+   *
+   * A different key from `taskKeys.all`, a different cached shape — the rows
+   * are nested at `data.attributes.tasks.data.tasks` rather than sitting at
+   * `data` — and a different kind of patch: the section's entry condition is
+   * *not done*, so a row leaving that status leaves the **list** rather than
+   * having a field of it changed.
+   */
+  describe('useUpdateTask and the home dashboard', () => {
+    const dashboardTask = (taskId: number) =>
+      dashboardTaskFixture({ task_id: taskId });
+
+    function seedDashboard(tasks: HomeDashboardTask[]): void {
+      queryClient.setQueryData(
+        homeDashboardKeys.all,
+        dashboardWithTasks(tasks)
+      );
+    }
+
+    /** The tasks section as it currently sits in the cache. */
+    function cachedSection() {
+      const section = queryClient.getQueryData<HomeDashboardResponse>(
+        homeDashboardKeys.all
+      )?.data.attributes.tasks;
+      return section?.status === DashboardSectionStatus.READY
+        ? section.data
+        : null;
+    }
+
+    function cachedTaskIds(): number[] {
+      return tasksIn(
+        queryClient.getQueryData<HomeDashboardResponse>(homeDashboardKeys.all)
+      ).map(task => task.task_id);
+    }
+
+    function updateHook() {
+      return renderHook(() => useUpdateTask(), { wrapper: createWrapper })
+        .result;
+    }
+
+    const DASHBOARD_URL = '/api/home-dashboard';
+
+    /** How many times the dashboard endpoint itself was asked. */
+    function dashboardRequestCount(): number {
+      return mockFetch.mock.calls.filter(
+        ([input]) => String(input) === DASHBOARD_URL
+      ).length;
+    }
+
+    it('takes a ticked task out of the section before the response lands', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2)]);
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const result = updateHook();
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      await waitFor(() => {
+        expect(cachedTaskIds()).toEqual([2]);
+      });
+
+      release();
+      await settled;
+    });
+
+    it('drops the count with the row, because the show-more names it', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2)]);
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const result = updateHook();
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      await waitFor(() => {
+        expect(cachedSection()?.total).toBe(1);
+      });
+
+      release();
+      await settled;
+    });
+
+    /**
+     * A cancelled task is absent from the section for the same reason a done
+     * one is — those are the section's entry conditions — and this hook is
+     * shared with the journal surface, where cancel is offered. Removing only
+     * on `done` would leave a mounted dashboard showing a commitment the user
+     * had just cancelled elsewhere.
+     */
+    it('takes a cancelled task out too, not only a completed one', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2)]);
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.CANCELLED }))
+      );
+
+      const result = updateHook();
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.CANCELLED,
+      });
+
+      await waitFor(() => {
+        expect(cachedTaskIds()).toEqual([2]);
+      });
+
+      release();
+      await settled;
+    });
+
+    /**
+     * The reverse is deliberately not done. Whether a task returned to *not
+     * done* belongs in this window is a question only the server can answer —
+     * it depends on the due journal's date in the user's configured zone — so
+     * the row arrives with the refetch rather than being guessed at here.
+     */
+    it('adds no row when a task is returned to not done', async () => {
+      seedDashboard([dashboardTask(2)]);
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status: TaskStatus.NOT_DONE }))
+      );
+
+      const result = updateHook();
+      await result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.NOT_DONE,
+      });
+
+      expect(cachedTaskIds()).toEqual([2]);
+    });
+
+    it('leaves a text-only edit’s rows where they are', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2)]);
+      mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
+
+      const result = updateHook();
+      await result.current.mutateAsync({ taskId: '1', text: 'Reworded' });
+
+      expect(cachedTaskIds()).toEqual([1, 2]);
+    });
+
+    it('puts the row back, in its place, when the write fails', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2), dashboardTask(3)]);
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const result = updateHook();
+      await expect(
+        result.current.mutateAsync({ taskId: '2', status: TaskStatus.DONE })
+      ).rejects.toThrow();
+
+      // Back where it was, not appended: the server's order is due-date
+      // ascending and a restored row belongs at the index it held.
+      expect(cachedTaskIds()).toEqual([1, 2, 3]);
+      expect(cachedSection()?.total).toBe(3);
+    });
+
+    /**
+     * **The rollback is per task, never a snapshot of the whole list.**
+     *
+     * Tick row 1, tick row 2 while the first is still in flight, and putting
+     * back the array as it was before the first write would silently resurrect
+     * row 2 — a commitment the user had just ticked off reappearing because an
+     * unrelated row failed, with nothing on screen connecting the two. This is
+     * ITER18-001 Phase 17's decision 2b in a new shape, and it is the case
+     * that decides the implementation.
+     */
+    it('does not resurrect a second row when the first one’s write fails', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2), dashboardTask(3)]);
+      const releaseFirst = heldRequest(() =>
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const first = updateHook();
+      const firstSettled = first.current
+        .mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+        .catch(() => undefined);
+      await waitFor(() => {
+        expect(cachedTaskIds()).toEqual([2, 3]);
+      });
+
+      const second = updateHook();
+      await second.current.mutateAsync({
+        taskId: '2',
+        status: TaskStatus.DONE,
+      });
+      expect(cachedTaskIds()).toEqual([3]);
+
+      releaseFirst();
+      await firstSettled;
+
+      // Row 1 is back because its own write failed. Row 2 stays gone, because
+      // its write succeeded and row 1's failure has nothing to say about it.
+      expect(cachedTaskIds()).toEqual([1, 3]);
+    });
+
+    /**
+     * **The index a row was removed from is not where it belongs.**
+     *
+     * Two rows ticked while both are in flight are each removed from a list
+     * the other has already shortened, so a captured index describes a
+     * transient state rather than the server's order. Restore them in the
+     * other order and `[1, 2, 3]` comes back as `[2, 1, 3]` — a list that
+     * claims to be soonest-first and is not, until a refetch corrects it.
+     *
+     * The one-fails-one-succeeds case above does not catch this: only one row
+     * is ever put back, so any insertion point looks right. Found by the PR
+     * review, and it is the same class as the resurrection case beside it —
+     * a rollback reasoning about a list that has moved under it.
+     */
+    it('restores two failed rows in the server’s order, not the order they failed in', async () => {
+      seedDashboard([dashboardTask(1), dashboardTask(2), dashboardTask(3)]);
+      const releaseFirst = heldRequest(() =>
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+      const releaseSecond = heldRequest(() =>
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const first = updateHook();
+      const firstSettled = first.current
+        .mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+        .catch(() => undefined);
+      await waitFor(() => {
+        expect(cachedTaskIds()).toEqual([2, 3]);
+      });
+
+      const second = updateHook();
+      const secondSettled = second.current
+        .mutateAsync({ taskId: '2', status: TaskStatus.DONE })
+        .catch(() => undefined);
+      await waitFor(() => {
+        expect(cachedTaskIds()).toEqual([3]);
+      });
+
+      // Row 1 comes back first, into a list its own index no longer describes.
+      releaseFirst();
+      await firstSettled;
+      releaseSecond();
+      await secondSettled;
+
+      expect(cachedTaskIds()).toEqual([1, 2, 3]);
+    });
+
+    /**
+     * The order the restored row is placed by is the server's own — due date
+     * ascending, ties broken by task id — so a row that belongs last goes
+     * last rather than at the index it happened to be removed from.
+     */
+    it('puts a restored row after the rows that fall due before it', async () => {
+      seedDashboard([
+        { ...dashboardTask(7), days_away: 0 },
+        { ...dashboardTask(8), days_away: 5 },
+      ]);
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const result = updateHook();
+      await expect(
+        result.current.mutateAsync({ taskId: '8', status: TaskStatus.DONE })
+      ).rejects.toThrow();
+
+      expect(cachedTaskIds()).toEqual([7, 8]);
+    });
+
+    /**
+     * **A refetch issued while another write is in flight answers about a task
+     * that write has not finished changing.**
+     *
+     * Tick two rows; the first settles and invalidates; the dashboard refetch
+     * it triggers is computed while the second task is still not-done, so it
+     * comes back *carrying* that row and overwrites its optimistic removal.
+     * The row reappears until the second write settles and refetches — a
+     * commitment the user ticked off coming back on screen for no reason they
+     * can see.
+     *
+     * The rule is React Query's own for overlapping mutations: **only the last
+     * write standing refetches.** Found by the PR review, and it is the same
+     * category as the two rollback findings beside it — an optimistic patch
+     * undone by state that moved after it was made.
+     *
+     * **Asserted by counting the dashboard's own requests**, against a live
+     * observer, rather than against an `invalidateQueries` spy: the refresh is
+     * fire-and-forget from `onSettled`, so a spy assertion made straight after
+     * `mutateAsync` resolves races it and passes whatever the hook does. The
+     * first draft of this test did exactly that and passed before the fix
+     * existed.
+     */
+    it('refetches once for two overlapping writes, not once each', async () => {
+      // The dashboard answers with both tasks still not-done, because the
+      // server has not seen either write: that is exactly the stale answer a
+      // premature refetch would write over the optimistic removals.
+      const releases: Array<() => void> = [];
+      mockFetch.mockImplementation((input: RequestInfo | URL) => {
+        if (String(input) === DASHBOARD_URL) {
+          return Promise.resolve(
+            jsonResponse(
+              dashboardWithTasks([dashboardTask(1), dashboardTask(2)])
+            )
+          );
+        }
+        return new Promise<Response>(resolve => {
+          releases.push(() =>
+            resolve(
+              jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+            )
+          );
+        });
+      });
+
+      const dashboard = renderHook(() => useHomeDashboard(), {
+        wrapper: createWrapper,
+      });
+      await waitFor(() => {
+        expect(dashboard.result.current.isSuccess).toBe(true);
+      });
+      expect(dashboardRequestCount()).toBe(1);
+
+      const first = updateHook();
+      const firstSettled = first.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+      const second = updateHook();
+      const secondSettled = second.current.mutateAsync({
+        taskId: '2',
+        status: TaskStatus.DONE,
+      });
+      await waitFor(() => {
+        expect(releases).toHaveLength(2);
+      });
+
+      releases[0]!();
+      await firstSettled;
+      releases[1]!();
+      await secondSettled;
+
+      // One refetch, by the write that settled last. A second would be the
+      // first write's response — which still carries task 2 — written over the
+      // second's optimistic removal, putting a ticked-off row back on screen.
+      await waitFor(() => {
+        expect(dashboardRequestCount()).toBe(2);
+      });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(dashboardRequestCount()).toBe(2);
+    });
+
+    it('leaves the other sections of the payload untouched', async () => {
+      seedDashboard([dashboardTask(1)]);
+      const before = queryClient.getQueryData<HomeDashboardResponse>(
+        homeDashboardKeys.all
+      );
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const result = updateHook();
+      await result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      const after = queryClient.getQueryData<HomeDashboardResponse>(
+        homeDashboardKeys.all
+      );
+      expect(after?.data.attributes.summary).toBe(
+        before?.data.attributes.summary
+      );
+      expect(after?.data.attributes.agenda).toBe(
+        before?.data.attributes.agenda
+      );
+      expect(after?.meta).toBe(before?.meta);
+    });
+
+    it('does nothing to a dashboard that is not holding this task', async () => {
+      seedDashboard([dashboardTask(2)]);
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const result = updateHook();
+      await result.current.mutateAsync({
+        taskId: '9',
+        status: TaskStatus.DONE,
+      });
+
+      expect(cachedTaskIds()).toEqual([2]);
+    });
+
+    /**
+     * The dashboard's fetch is cancelled *before* it is invalidated, like
+     * every other namespace on this client (#1203). Named rather than left to
+     * the table in `cancel-before-invalidate`, which counts cancels without
+     * saying which keys they were for — a hook that cancelled `taskKeys.all`
+     * twice would satisfy the count and leave this one racing.
+     */
+    it('cancels the dashboard before it invalidates it', async () => {
+      seedDashboard([dashboardTask(1)]);
+      const cancelSpy = jest.spyOn(queryClient, 'cancelQueries');
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const result = updateHook();
+      await result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      await waitFor(() => {
+        expect(invalidatedKeys(invalidateSpy)).toContainEqual(
+          homeDashboardKeys.all
+        );
+      });
+      const cancelledDashboardAt = cancelSpy.mock.calls
+        .map((call, index) => ({ call, index }))
+        .filter(
+          ({ call }) =>
+            (call[0] as { queryKey: readonly unknown[] }).queryKey ===
+            homeDashboardKeys.all
+        )
+        .map(({ index }) => cancelSpy.mock.invocationCallOrder[index]!);
+
+      expect(cancelledDashboardAt.length).toBeGreaterThan(0);
+      expect(Math.min(...cancelledDashboardAt)).toBeLessThan(
+        firstCallOrder(invalidateSpy)
+      );
+    });
+
+    it('survives an unavailable section rather than throwing into the mutation', async () => {
+      queryClient.setQueryData(homeDashboardKeys.all, homeDashboardDocument());
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+      );
+
+      const result = updateHook();
+      await expect(
+        result.current.mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+      ).resolves.toBeDefined();
+    });
+  });
+
+  /**
    * The optimistic half of the inline status actions (ITER18-001 Phase 17).
    *
    * A row must read as done the instant it is ticked, and read as it did
@@ -792,22 +1285,6 @@ describe('Task API client', () => {
    */
   describe('useUpdateTask optimistic status change', () => {
     const listKey = taskKeys.journalList('7');
-
-    /** A held-open `fetch`, plus the trigger that finally answers it. */
-    function heldRequest(answer: () => Response): () => void {
-      let release: () => void = () => undefined;
-      mockFetch.mockImplementationOnce(
-        () =>
-          new Promise<Response>(resolve => {
-            release = () => {
-              resolve(answer());
-            };
-          })
-      );
-      return () => {
-        release();
-      };
-    }
 
     /** The status a cached journal listing is showing for one task. */
     function cachedListStatus(taskId: string): TaskStatus | undefined {
@@ -1175,6 +1652,7 @@ describe('Task API client', () => {
           taskKeys.journalLists(),
           taskKeys.upcoming(),
           taskHistoryKeys.forTask('1'),
+          homeDashboardKeys.all,
           journalKeys.lists(),
         ]);
       });
@@ -1261,6 +1739,7 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          homeDashboardKeys.all,
           journalKeys.lists(),
         ]);
       });
@@ -1334,6 +1813,7 @@ describe('Task API client', () => {
           taskKeys.journalLists(),
           taskKeys.upcoming(),
           taskHistoryKeys.forTask('1'),
+          homeDashboardKeys.all,
         ]);
       });
       // Named rather than left to the exhaustive match above: `tasks_due_count`
@@ -1362,6 +1842,7 @@ describe('Task API client', () => {
           taskKeys.journalLists(),
           taskKeys.upcoming(),
           taskHistoryKeys.forTask('1'),
+          homeDashboardKeys.all,
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith(
@@ -1425,6 +1906,12 @@ describe('Task API client', () => {
       // reads the due anchor only, so a mention moves no badge either.
       expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
         journalKeys.lists()
+      );
+      // And the home dashboard, for the third instance of that rule: its tasks
+      // section draws the text, the due journal and the contacts, and none of
+      // those is an intermediate link.
+      expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
+        homeDashboardKeys.all
       );
       expect(toast.success).toHaveBeenCalledWith('Journal linked successfully');
     });
@@ -1644,7 +2131,11 @@ describe('Task API client', () => {
       {
         name: 'useUpdateTask',
         response: () => jsonResponse(taskWriteResponse()),
-        optimisticCancels: 1,
+        // Two: the task namespaces, and — because this status leaves *not
+        // done* — the home dashboard, whose tasks section the row is about to
+        // be taken out of. A different key and a different cached shape, so a
+        // second cancel rather than a wider filter.
+        optimisticCancels: 2,
         run: async () => {
           const { result } = renderHook(() => useUpdateTask(), {
             wrapper: createWrapper,

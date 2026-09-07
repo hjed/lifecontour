@@ -20,6 +20,7 @@ import {
 import type {
   HomeDashboardAgendaEntry,
   HomeDashboardResponse,
+  HomeDashboardTask,
   HomeDashboardTasks,
   HomeDashboardUpcomingDates,
 } from '@/lib/api/home-dashboard';
@@ -105,8 +106,9 @@ const EMPTY_UPCOMING_DATES: HomeDashboardUpcomingDates = {
  * Nothing due this week, in the shape the endpoint really sends.
  *
  * Since ITER18-004 Phase 13 the section carries a window and a total, so a
- * ready one holding `{}` is a broken contract rather than a quiet week. The
- * card that reads it lands in Phase 14; the shape is right from now.
+ * ready one holding `{}` is a broken contract rather than a quiet week, and
+ * since Phase 14 the card reads it — a section that under-described itself
+ * would now draw the wrong thing rather than nothing.
  */
 const EMPTY_TASKS: HomeDashboardTasks = {
   window: EMPTY_WINDOW,
@@ -517,6 +519,68 @@ describe('HomePage — the dashboard shell', () => {
 
       await renderHomePage();
       await screen.findByRole('link', { name: 'Standup' });
+      await screen.findByTestId('dashboard-summary-text');
+
+      const dashboardCalls = mockFetch.mock.calls.filter(
+        ([input]) => String(input) === DASHBOARD_URL
+      );
+      expect(dashboardCalls).toHaveLength(1);
+    });
+  });
+
+  describe('Tasks section (W22)', () => {
+    /**
+     * The rows are the tasks card's own subject and are asserted in
+     * `TasksCard.test.tsx`. What belongs here is that they reach the page
+     * *inside their own section* — the three columns are independent, and a
+     * row rendering into the wrong one is a layout failure no card test can
+     * see — and that reading them still costs the page one request.
+     */
+    const DUE_TASK: HomeDashboardTask = {
+      task_id: 31,
+      text: 'Send the deposit receipt',
+      due_journal: { id: 44, title: 'Friday planning', date: '2026-08-01' },
+      days_away: 3,
+      contacts: [],
+    };
+
+    function respondWithTasks() {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.tasks = {
+              status: DashboardSectionStatus.READY,
+              data: { ...EMPTY_TASKS, total: 1, tasks: [DUE_TASK] },
+            };
+            return document;
+          },
+        } as Response)
+      );
+    }
+
+    it('draws the week\u2019s tasks inside the tasks section', async () => {
+      respondWithTasks();
+
+      await renderHomePage();
+
+      const [, tasks] = within(
+        screen.getByTestId('dashboard-sections')
+      ).getAllByRole('region');
+      expect(
+        await within(tasks).findByText('Send the deposit receipt')
+      ).toBeInTheDocument();
+      expect(
+        within(tasks).getByRole('link', { name: 'Friday planning' })
+      ).toHaveAttribute('href', '/journals/44');
+    });
+
+    it('still costs one dashboard request with the tasks card reading it', async () => {
+      respondWithTasks();
+
+      await renderHomePage();
+      await screen.findByText('Send the deposit receipt');
       await screen.findByTestId('dashboard-summary-text');
 
       const dashboardCalls = mockFetch.mock.calls.filter(
