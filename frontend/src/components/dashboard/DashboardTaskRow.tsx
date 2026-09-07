@@ -130,15 +130,23 @@ export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
                 key={contact.contact_id}
                 className='flex min-w-0 items-center gap-1.5'
               >
-                <ContactAvatar
-                  firstName={first}
-                  lastName={last}
-                  {...(contact.photo_url
-                    ? { imageUrl: contact.photo_url }
-                    : {})}
-                  size='sm'
-                  className='h-6 w-6 shrink-0 text-[10px]'
-                />
+                {/* Hidden from assistive tech, because the name it is
+                    labelled with is *already* beside it in text (W27).
+                    `ContactAvatar` carries `role="img"` with the contact's
+                    name, so without this a screen reader reads every contact
+                    twice. The avatar is the decorative half of the pair here;
+                    the text is what a sighted reader is reading too. */}
+                <span aria-hidden='true' className='flex shrink-0'>
+                  <ContactAvatar
+                    firstName={first}
+                    lastName={last}
+                    {...(contact.photo_url
+                      ? { imageUrl: contact.photo_url }
+                      : {})}
+                    size='sm'
+                    className='h-6 w-6 text-[10px]'
+                  />
+                </span>
                 <span className='text-muted-foreground min-w-0 text-sm'>
                   {contact.name}
                 </span>

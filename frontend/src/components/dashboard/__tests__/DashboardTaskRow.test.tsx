@@ -172,6 +172,34 @@ describe('DashboardTaskRow', () => {
     expect(within(contacts).getAllByRole('listitem')).toHaveLength(2);
   });
 
+  /**
+   * `ContactAvatar` carries `role="img"` with the contact's name as its
+   * accessible name, and **W27** puts that same name in text right beside it —
+   * so without this a screen reader reads every contact twice ("Priya Raman,
+   * image, Priya Raman"). The avatar is the decorative half of the pair here,
+   * because the text is the thing the sighted reader is reading too.
+   *
+   * Found by the PR review. Two more instances of the same pairing exist on
+   * other phases' surfaces and are recorded as a follow-up rather than swept
+   * up here.
+   */
+  it('announces each contact once, not once per avatar (W27)', () => {
+    render(
+      <DashboardTaskRow
+        task={dashboardTask({
+          contacts: [{ contact_id: 3, name: 'Priya Raman', photo_url: null }],
+        })}
+      />
+    );
+
+    expect(screen.getAllByText('Priya Raman')).toHaveLength(1);
+    expect(
+      screen.queryByRole('img', { name: 'Priya Raman' })
+    ).not.toBeInTheDocument();
+    // The avatar is still drawn — hidden from assistive tech, not removed.
+    expect(screen.getByTestId('avatar-contact')).toBeInTheDocument();
+  });
+
   it('renders nothing at all where a task names nobody (W27)', () => {
     render(<DashboardTaskRow task={dashboardTask({ contacts: [] })} />);
 
