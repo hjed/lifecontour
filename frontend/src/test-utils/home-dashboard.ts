@@ -139,3 +139,33 @@ export function tasksIn(
       : undefined;
   return Array.isArray(tasks) ? tasks : [];
 }
+
+/**
+ * The endpoint every dashboard card's fetch mock has to route.
+ *
+ * A literal rather than `API_ENDPOINTS.HOME_DASHBOARD`, deliberately.
+ * `jest.setup.ts` mocks `@/lib/constants` with a subset that **omits** this
+ * endpoint, so reading it here would resolve to `undefined` in every suite
+ * that has not opted back into the real constants — and an `undefined` URL
+ * fails no assertion, it just makes {@link dashboardRequestCount} return zero
+ * for ever. A literal cannot go quiet that way.
+ */
+export const DASHBOARD_URL = '/api/home-dashboard';
+
+/**
+ * How many times the dashboard endpoint itself was asked.
+ *
+ * Here rather than per suite because it asserts a **shared** property of both
+ * capped sections: the whole window travels in one payload precisely so a
+ * show-more reveals the remainder without a second round trip, and a card that
+ * refetched would still look right on screen. Counting the endpoint's own
+ * calls is what makes that assertable — the session request the auth provider
+ * makes goes through the same mock and must not be counted.
+ */
+export function dashboardRequestCount(
+  mockFetch: jest.MockedFunction<typeof fetch>
+): number {
+  return mockFetch.mock.calls.filter(
+    ([input]) => String(input) === DASHBOARD_URL
+  ).length;
+}

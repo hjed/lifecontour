@@ -14,6 +14,7 @@ import {
   dueAccentClassName,
   dueChipClassName,
   dueChipLabel,
+  showAllDueLabel,
   taskTextId,
 } from '@/lib/dashboard-tasks-display';
 import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
@@ -194,5 +195,21 @@ describe('taskTextId', () => {
   it('is derivable from the task id alone, and unique per task', () => {
     expect(taskTextId(7)).toBe(taskTextId(7));
     expect(taskTextId(7)).not.toBe(taskTextId(8));
+  });
+});
+
+describe('showAllDueLabel', () => {
+  /**
+   * **W28** writes the button out in full — *"Show all 7 due this week"* —
+   * and it is a different sentence from the upcoming-dates section's
+   * *"Show all 5 this week"* (**W32**). Two sections, two wordings, asserted
+   * separately so neither can be quietly rewritten into the other's.
+   *
+   * The count names the **whole window** rather than the number hidden behind
+   * the cap: the useful question is how much there is, not how much is
+   * missing.
+   */
+  it('names the whole window in W28’s own words', () => {
+    expect(showAllDueLabel(7)).toBe('Show all 7 due this week');
   });
 });

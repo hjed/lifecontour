@@ -1296,13 +1296,36 @@ elements are numbered **W1**–**W33**.
   backend's rule (ITER18-001 Phase 14's listing, reused whole by ITER18-004
   Phase 13), so the card does not re-sort. **The cap of five lives here and
   nowhere else**: the server sends the whole seven-day window with its `total`
-  and caps nothing, so Phase 15's show-more can reveal the remainder in place
-  from data already held. Ready-and-empty draws the **W29** line the wireframe
-  does draw for this section; pending and unavailable each draw a quiet line of
-  their own in **W9**'s idiom (`tasks-loading`, `tasks-unavailable`) as
-  placeholders until Phase 16's skeletons, so the three cannot be confused. The
-  `tasks` array is guarded with `Array.isArray` for the same reason the agenda
-  guards its `tomorrow`, and with the same limit.
+  and caps nothing, so the centred `link`-variant show-more (**W28**,
+  ITER18-004 Phase 15) reveals the remainder **in place** from data already
+  held — asserted against the dashboard endpoint's request count, not only the
+  DOM, because a card that refetched would still look right on screen. The
+  button names the count **off the list itself** rather than off the section's
+  `total`: the wire says the two are equal, `useUpdateTask`'s optimistic
+  removal already re-derives `total` from the list's length for that reason,
+  and the button should name what pressing it reveals. (`UpcomingDatesCard`
+  answers the same question the other way — `total` with the length as
+  fallback — which is invisible for any conforming payload; recorded as a
+  follow-up rather than changed outside its phase.) **Expansion is component
+  state**, neither persisted nor in the URL, which is what makes the next load
+  five rows again rather than something to clean up; and the button
+  **withdraws** once everything is shown rather than becoming a *Show less*,
+  as **W28** describes one control. Ready-and-empty draws the **W29** state the
+  wireframe does draw for this section — a decorative `lucide-circle-check`
+  over one muted line, reading as a good outcome — while pending and
+  unavailable each draw a quiet line of their own in **W9**'s idiom
+  (`tasks-loading`, `tasks-unavailable`) as placeholders until Phase 16's
+  skeletons, so the three cannot be confused. The `tasks` array is guarded with
+  `Array.isArray` for the same reason the agenda guards its `tomorrow`, and
+  with the same limit.
+  - **The cap and the inline write meet at the show-more.** Ticking a row
+    changes the very list the cap is measured against: six rows collapsed
+    become five and the button withdraws, promoting the sixth into view; an
+    expanded list stays expanded and the button does not return to offer rows
+    already on screen. Neither follows from either phase alone, so both are
+    pinned in `TasksCard.test.tsx` against a fetch mock that applies the tick
+    too — a mock that kept serving the original list would put the row back and
+    the test would be about the fixture rather than the card.
   - **`DashboardTaskRow`** is a pure function of one payload row, with **no
     clock and no query**, for the reason `UpcomingDateRow` is: `days_away`
     counts from the window's first day and `due_journal.date` is a calendar
@@ -1355,8 +1378,12 @@ elements are numbered **W1**–**W33**.
     fired while another write is in flight answers from a server that has not
     processed it, and puts the row that write removed back on screen.
   - **The wording and colour rules live in `src/lib/dashboard-tasks-display.ts`**,
-    beside `agenda-display` and `upcoming-dates-display`. `dueChipLabel` reads
-    `Today`, `Tomorrow`, then `formatIsoShortWeekdayDate` (**W25**) — it stops
+    beside `agenda-display` and `upcoming-dates-display`. `showAllDueLabel`
+    writes the show-more out as **W28** does (*"Show all 7 due this week"*) and
+    is its own function rather than `showAllLabel` parameterised, because
+    **W28** and **W32** are two sentences rather than one with a slot.
+    `dueChipLabel` reads `Today`, `Tomorrow`, then
+    `formatIsoShortWeekdayDate` (**W25**) — it stops
     at tomorrow where the dates chip counts on, because a task is due on a day
     the user has a journal for and past tomorrow the day itself is the more
     useful thing to be told. `dueAccentClassName` and `dueChipClassName` take
