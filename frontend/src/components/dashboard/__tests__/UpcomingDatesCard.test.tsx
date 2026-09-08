@@ -20,6 +20,10 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test-utils';
+import {
+  DASHBOARD_URL,
+  dashboardRequestCount,
+} from '@/test-utils/home-dashboard';
 import { UpcomingDatesCard } from '../UpcomingDatesCard';
 import { DashboardSectionStatus } from '@/lib/api/home-dashboard';
 import type {
@@ -34,7 +38,6 @@ import { ImportantDateTypeEnum } from '@/types/contacts';
 // use the real constants rather than re-declaring the whole mock.
 jest.mock('@/lib/constants', () => jest.requireActual('@/lib/constants'));
 
-const DASHBOARD_URL = '/api/home-dashboard';
 const LIST_NAME = 'Upcoming contact dates';
 const EMPTY_LINE = 'No important dates in the next seven days.';
 const ANCHOR_DATE = '2026-07-31';
@@ -112,13 +115,6 @@ function dashboardDocument(
     },
     meta: { anchor: { date: ANCHOR_DATE, timezone: 'Australia/Sydney' } },
   };
-}
-
-/** How many times the dashboard endpoint itself was asked. */
-function dashboardRequestCount(): number {
-  return mockFetch.mock.calls.filter(
-    ([input]) => String(input) === DASHBOARD_URL
-  ).length;
 }
 
 function routeFetch(dashboard: () => Promise<Response>) {
@@ -220,7 +216,7 @@ describe('UpcomingDatesCard', () => {
       );
       await within(datesList()).findAllByRole('listitem');
 
-      expect(dashboardRequestCount()).toBe(1);
+      expect(dashboardRequestCount(mockFetch)).toBe(1);
     });
 
     it('withdraws the show-more once everything is shown', async () => {

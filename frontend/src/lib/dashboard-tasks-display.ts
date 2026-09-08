@@ -132,3 +132,19 @@ export function dueChipLabel(task: HomeDashboardTask): string {
   if (task.days_away === 1) return 'Tomorrow';
   return formatIsoShortWeekdayDate(task.due_journal.date);
 }
+
+/**
+ * The show-more's text (**W28**): *"Show all 7 due this week"*.
+ *
+ * Names the **whole window** rather than the number hidden behind the cap,
+ * which is how the wireframe writes it — the useful question is how much there
+ * is, not how much is missing.
+ *
+ * Its own function rather than `upcoming-dates-display`'s `showAllLabel`
+ * parameterised: **W28** and **W32** are two sentences, not one sentence with
+ * a slot, and a helper taking the differing fragment would be one function
+ * serving two sections' wording.
+ */
+export function showAllDueLabel(count: number): string {
+  return `Show all ${count} due this week`;
+}

@@ -107,6 +107,18 @@ set of every task write that can stale the section (and only those), and a statu
 takes the row out of the cached section at once, putting it back in the order the section is sent in if
 the write fails. The
 first dashboard data a write can stale, and therefore the first that could assert it.
+**ITER18-004 Phase 15 complete: the rest of the week is one press away, and an empty week reads as a good
+one.** The tasks section's show-more (**W28**) reveals the remainder of the seven-day window **in place**
+and names the whole of it — *"Show all 7 due this week"* — from the payload the page already holds, so the
+reveal costs no request; that is asserted against the dashboard endpoint's own call count rather than the
+DOM, because a card that refetched would look identical on screen. Expansion is component state, so the
+next load opens on five rows again, and the button withdraws rather than becoming a *Show less*. The
+**W29** empty state needed no production line — Phase 14's shared card shell already drew the check icon
+over *"Nothing due in the next seven days."* — so the criterion was discharged by asserting the half
+nothing tested, which is the lesson worth keeping: **a criterion a shared shell satisfies is satisfied
+accidentally until the phase that owns it says which icon and which sentence.** The cap and Phase 14's
+inline write meet here too, in both directions, against a fetch mock that applies the tick rather than one
+that keeps serving the list the tick removed from.
 **ITER18-005 Phase 6 complete: the current day's prompt says whose important dates are coming up.**
 `DailySummaryInputAssembler` calls `UpcomingImportantDatesService.upcoming_dates` — the read the
 dashboard's section and `list_upcoming_important_dates` already share — so the recurrence rule, the
@@ -11489,21 +11501,103 @@ no tool.
   criterion is written as the pair of this one's), and it is recorded here so the interaction is met by
   design rather than rediscovered. Nothing about it is wrong today: the dashboard read regenerates nothing.
 
-#### Phase 15: Tasks Section — Show More and Empty State
+#### Phase 15: Tasks Section — Show More and Empty State ✅ COMPLETE
 
 **Prerequisites:** Phase 14.
 **Estimated diff:** ~90 production → **~360 tracked** (×4)
 
-**Acceptance Criteria:**
+**Actual:** 57 production → **~500 tracked** (57 production, 344 tests, ~100 documentation counting this
+entry). **Production came in at 0.6× the estimate and tracked at 1.4× it**, and the split is the whole
+story: the estimate priced a show-more, and a show-more *is* about fifty lines. What it did not price is
+that **one of the two acceptance criteria needed no production line at all** — see the decision below — so
+this phase's output is overwhelmingly tests, at 6× production. **The generalisable form: a phase whose
+criteria are partly already satisfied by an earlier phase's shared shell does not get cheaper, it gets
+test-shaped**, because discharging a criterion still means proving it.
 
-- [ ] Show-more reveals the remainder of the seven-day window from the already-fetched payload and names the
-      full count (**W28**).
-- [ ] The empty window renders the check icon and one line, reading as a good outcome rather than an error
-      (**W29**).
-- [ ] Revealing the remainder does not refetch and does not change the five-row default on next load.
+**Acceptance criteria, ticked:**
+
+- [x] Show-more reveals the remainder of the seven-day window from the already-fetched payload and names the
+      full count (**W28**). — A centred muted `link`-variant button in `TasksCard`'s footer slot, reading
+      *"Show all 7 due this week"*, revealing every row in place. The whole window was already in the
+      payload (Phase 13 caps nothing), so the reveal is a slice, not a request.
+- [x] The empty window renders the check icon and one line, reading as a good outcome rather than an error
+      (**W29**). — **Shipped in Phase 14 and discharged here without a production change**; see the
+      decision below.
+- [x] Revealing the remainder does not refetch and does not change the five-row default on next load. —
+      The first half is asserted against the **dashboard endpoint's own request count**, not the DOM,
+      because a card that refetched would look identical on screen. The second falls out of expansion
+      being component state: a test expands, unmounts and renders again, and gets five rows and an
+      un-pressed button.
+
+**Decisions taken (Phase 15):**
+
+- **The empty state needed no production line, and that is a finding rather than a shortcut.** **W29** was
+  already on screen: Phase 14 passed `emptyIcon: CheckCircle2` and *"Nothing due in the next seven days."*
+  through `DashboardSectionCard`, which renders `WidgetEmptyState`. But the existing test asserted only the
+  **sentence** — and the wireframe specifies an icon *and* a line, because the icon is half of what makes
+  the state read as a good outcome rather than an absence. So the criterion was discharged by asserting the
+  half nothing tested (a decorative `lucide-circle-check`, plus that no show-more appears in the empty
+  state), and both cases passed on first run. **Worth recording as a category: a criterion satisfied by a
+  shared shell is satisfied *accidentally* until something asserts it** — the shell's own suite tests that
+  it renders *an* icon, not that this section renders *the* icon, and the phase that owns the criterion is
+  the one that has to say which.
+- **The button names the count off the list, not off the section's `total`.** The wire says the two are
+  equal — the server caps nothing, so the whole window travels — and `useUpdateTask`'s optimistic removal
+  already re-derives `total` from the list's length for exactly that reason. The button names what pressing
+  it reveals, so it is read off the thing it acts on; where the two disagreed, `total` would be the half
+  that is not true. **This diverges from `UpcomingDatesCard`**, which names `total` with the length as a
+  fallback while gating on the length — the same question answered the other way, invisible for any
+  conforming payload. Named as a follow-up below rather than changed, so a card belonging to Phase 11 is
+  not altered by a phase that is not about it.
+- **Expansion is component state, and there is no way back.** Not persisted and not in the URL, which is
+  what makes *"five rows on next load"* true by construction rather than by cleanup; and the button
+  **withdraws** once everything is shown rather than becoming a *Show less*, because **W28** describes one
+  control and Phase 11's show-more settled the same way. A section holding at most a week of tasks does not
+  need re-collapsing.
+- **`showAllDueLabel` is its own function, not `showAllLabel` parameterised.** **W28** reads *"Show all 7
+  **due** this week"* and **W32** reads *"Show all 5 this week"*: two sections, two sentences. A helper
+  taking the differing fragment would be one function serving two wordings, which is the thing the
+  per-section display modules exist to avoid.
+- **The phase owns the seam where its cap meets Phase 14's writes, and that seam needed a *stateful*
+  mock.** Ticking a row changes the very list the cap is measured against — six rows collapsed become five
+  and the button withdraws, promoting the sixth into view; an expanded list stays expanded and the button
+  does not return. Neither follows from either phase alone. Neither could be asserted against a **static**
+  payload either: ticking refetches the dashboard, and a mock that kept serving the original list puts the
+  row straight back, so the test would be about the fixture rather than the card. The mock applies the tick
+  too, which is what the real backend does. **The general form, and it is the fourth time this stack has
+  met it: a test of what happens *after* a write cannot be built on a fixture that does not know the write
+  happened.**
+- **A shared `dashboardRequestCount`, and the reason it takes a literal URL.** The counter existed only in
+  `UpcomingDatesCard.test.tsx`; copying it into a third suite is what tipped SonarCloud's duplication gate
+  on Phase 14, so it moved to `src/test-utils/home-dashboard.ts` with `DASHBOARD_URL` beside it. That
+  constant is a **literal** rather than `API_ENDPOINTS.HOME_DASHBOARD` on purpose: `jest.setup.ts` mocks
+  `@/lib/constants` with a subset that omits this endpoint, so reading it there resolves to `undefined` in
+  any suite that has not opted back into the real constants — and an `undefined` URL fails no assertion, it
+  just makes the counter return zero for ever. **This is Phase 14's "a test that cannot fail" in a new
+  place**: the *"costs no second request"* assertion would have passed whatever the card did.
+
+**Docs:** `frontend-design.md`'s tasks-card bullet said the cap existed *"so Phase 15's show-more **can**
+reveal the remainder"*; it now describes what shipped — the button, the count read off the list, the
+request-count assertion, the local expansion state, the **W29** icon, and the sub-bullet on the seam with
+the inline write. Written that way because of the failure Phase 14 recorded twice: **a document written
+before the code settles ends up asserting the behaviour the code no longer has**, and nothing type-checks
+prose. `api-design.md`, `mcp-tools.md` and `home-dashboard-wireframe.md` were deliberately **not** touched:
+no endpoint, no tool, and **W28** is drawn — the wireframe's *"no state prop demonstrates a show-more in its
+expanded form"* divergence is already recorded there and this phase does not change it.
+
+**Follow-ups (not done here):**
+
+- **`UpcomingDatesCard` names its show-more off `total` and gates on the list's length.** The same question
+  this phase answered the other way. It cannot misreport for any payload the endpoint can send, so it is
+  not a defect; it is two idioms for one button, and it belongs to whichever phase next touches that card.
 
 **Required Test Coverage:** unit (RTL) — show-more label and reveal, no refetch on expand, and the empty
 state. E2E in Phase 17.
+
+**Test totals:** 13 new cases — 1 in `dashboard-tasks-display.test.ts` (**W28**'s wording), 7 in
+`TasksCard.test.tsx` for the show-more (label, reveal, request count, an action on every revealed row,
+withdrawal, exact-fit, and the collapsed next load), 2 for the empty state's icon and absent button, and 2
+for the seam with the inline done action.
 
 #### Phase 16: Section Resilience, Loading and Accessibility
 

@@ -13,8 +13,17 @@
  *
  * **The cap lives here, and only here** (**W22**): the server sends the *whole*
  * seven-day window with its `total` — it caps nothing — so five rows are drawn
- * and Phase 15's show-more reveals the remainder **in place** from data already
- * held, without a second request.
+ * and the show-more (**W28**) reveals the remainder **in place** from data
+ * already held, without a second request. That is what makes the reveal free,
+ * and it is asserted against the request count rather than only the DOM,
+ * because a card that refetched would still look right on screen.
+ *
+ * **Expansion is component state, and there is deliberately no way back.** It
+ * is neither persisted nor put in the URL, which is what makes the next load
+ * five rows again rather than something to be cleaned up; and the button
+ * withdraws once everything is shown rather than becoming a *Show less*, as
+ * **W28** describes one control and the upcoming-dates show-more settled the
+ * same way.
  *
  * Three things the list can hold nothing for, kept apart on purpose: **nothing
  * due this week** is a real answer and gets the single **W29** line the
@@ -33,7 +42,9 @@
 
 'use client';
 
+import { useState } from 'react';
 import { CheckCircle2, ClipboardList } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { DashboardSectionCard } from './DashboardSectionCard';
 import { DashboardTaskActions } from './DashboardTaskActions';
 import { DashboardTaskRow } from './DashboardTaskRow';
@@ -42,7 +53,7 @@ import {
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
 import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
-import { taskTextId } from '@/lib/dashboard-tasks-display';
+import { showAllDueLabel, taskTextId } from '@/lib/dashboard-tasks-display';
 
 /** The section's wireframe copy, in one place so the page and its tests agree. */
 export const TASKS_SECTION = {
@@ -62,7 +73,7 @@ const TASKS_PLACEHOLDER_COPY = {
 } as const;
 
 /**
- * How many tasks are drawn before Phase 15's show-more (**W22**).
+ * How many tasks are drawn before the show-more (**W22**).
  *
  * Five, which the specification fixes rather than leaves open: *"If the user
  * has more than five things due in the next week, the dashboard's job is to
@@ -72,6 +83,7 @@ export const VISIBLE_TASKS = 5;
 
 export function TasksCard() {
   const { data, isPending } = useHomeDashboard();
+  const [expanded, setExpanded] = useState(false);
 
   const section = data?.data.attributes.tasks;
   const ready =
@@ -87,13 +99,37 @@ export function TasksCard() {
     ? ready.tasks
     : null;
 
-  const shown = tasks?.slice(0, VISIBLE_TASKS);
+  const shown = expanded ? tasks : tasks?.slice(0, VISIBLE_TASKS);
+
+  // Counted off the **list** rather than read from the section's `total`. The
+  // wire says the two are equal — the server caps nothing, so the whole window
+  // travels — and the optimistic removal in `useUpdateTask` already re-derives
+  // `total` from the list's length for that same reason. The button names what
+  // pressing it reveals, so it is read off the thing it acts on: were the two
+  // ever to disagree, `total` is the half that is not true here.
+  const total = tasks?.length ?? 0;
+  const hasMore = !expanded && total > VISIBLE_TASKS;
 
   return (
     <DashboardSectionCard
       {...TASKS_SECTION}
       testId='tasks-card'
       placeholder={tasks ? undefined : <TasksPlaceholder pending={isPending} />}
+      footer={
+        hasMore ? (
+          <div className='mt-3 flex justify-center'>
+            <Button
+              variant='link'
+              size='sm'
+              className='text-muted-foreground'
+              data-testid='tasks-show-more'
+              onClick={() => setExpanded(true)}
+            >
+              {showAllDueLabel(total)}
+            </Button>
+          </div>
+        ) : undefined
+      }
     >
       {shown?.map(task => (
         <DashboardTaskRow
