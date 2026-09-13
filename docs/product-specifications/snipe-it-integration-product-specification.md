@@ -87,6 +87,11 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
   - An update that arrives while another worker is recording the same journal's checkout or check-in is retried once that finishes, so a newer date is never dropped. A lock left by a worker that crashed is retaken after five minutes, and the event is still being retried at that point.
   - Not re-recorded: a change to only the check-in date of an already checked-in journal; a checkout recorded before dates were stored; and a checkout whose check-in failed terminally (403/404), since the asset may still be checked out.
   - A checkout date changed while the asset is still checked out is re-recorded once the asset is checked in, whether by that update, a later one or the periodic sweep. Snipe-IT refuses to check out an asset that is already out, so the corrected pair follows the return.
+- **Existing Snipe-IT History**: History already in Snipe-IT (for example checkouts entered by hand before a logbook import) is linked rather than recorded twice.
+  - Before recording a checkout, the asset's Snipe-IT activity log is searched for a checkout to the mapped user on the same date (Snipe-IT's server date). A match is linked on the checkout `SyncMetadata` row (`snipeit_log_id`) and nothing is posted.
+  - When the checkout was linked, a check-in on the journal's check-in date that was logged after that checkout is linked the same way; otherwise the check-in is posted.
+  - A log entry already linked to another journal is never reused, so two journals using the same asset on the same day each get their own record.
+  - The search reads the newest 500 entries per asset and action type.
 - **Buffer Dates**:
   - Users can specify a separate start and end date for the gear checkout to allow for buffer (e.g., packing the day before).
   - **Default**: The buffer dates explicitly default to the journal's event dates if not modified by the user.

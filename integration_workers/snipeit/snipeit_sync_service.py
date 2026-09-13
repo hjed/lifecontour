@@ -32,6 +32,9 @@ logger = structlog.get_logger(__name__)
 # Maximum assets per Snipe-IT API page
 _PAGE_SIZE = 50
 
+# Most activity-report pages searched for an existing checkout or check-in
+_ACTIVITY_MAX_PAGES = 10
+
 
 def _resolve_zone(*candidates: object) -> str | None:
     """Return the first candidate naming a zone ``ZoneInfo`` can load, else ``None``.
@@ -1337,7 +1340,9 @@ class SnipeItSyncService:
         if journal_row.title:
             payload["note"] = journal_row.title
 
-        # POST to Snipe-IT
+        # Link a checkout already in Snipe-IT (e.g. entered by hand before an
+        # import) instead of recording it twice; otherwise POST a new one.
+        linked_log_id: int | None = None
         try:
             if previous_asset_id not in (None, snipeit_asset_id):
                 await self._return_previous_asset(
@@ -1348,10 +1353,19 @@ class SnipeItSyncService:
                 # Only now may the row forget the previous asset: had the return
                 # failed, the retry must still derive it from the row.
                 await self._rekey_checkout(journal_id, external_id, session_factory)
-            await self._api_client.checkout_asset(
+            linked_log_id = await self._find_unlinked_activity(
                 asset_id=snipeit_asset_id,
-                payload=payload,
+                action_type="checkout",
+                day=checkout_at,
+                source="snipeit_checkout",
+                journal_id=journal_id,
+                session_factory=session_factory,
             )
+            if linked_log_id is None:
+                await self._api_client.checkout_asset(
+                    asset_id=snipeit_asset_id,
+                    payload=payload,
+                )
         except SnipeItAPIError as exc:
             # Handle 403/404 specific errors gracefully
             if exc.status_code in (403, 404):
@@ -1379,6 +1393,13 @@ class SnipeItSyncService:
             )
             raise
 
+        checkout_reference: dict[str, Any] = {
+            "checkout_at": checkout_at,
+            "expected_checkin": expected_checkin,
+        }
+        if linked_log_id is not None:
+            checkout_reference["snipeit_log_id"] = linked_log_id
+
         # Save sync metadata: journal_id → snipeit_checkout
         # Note: Snipe-IT does not support an idempotency key on checkouts.
         # By using a pending lock beforehand, we mitigate concurrent processing double-POSTs.
@@ -1404,12 +1425,7 @@ class SnipeItSyncService:
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "version_hash": version_hash,
-                        "reference_data": json.dumps(
-                            {
-                                "checkout_at": checkout_at,
-                                "expected_checkin": expected_checkin,
-                            }
-                        ),
+                        "reference_data": json.dumps(checkout_reference),
                     },
                 )
 
@@ -1417,6 +1433,7 @@ class SnipeItSyncService:
             "Successfully pushed checkout to Snipe-IT",
             journal_id=journal_id,
             snipeit_asset_id=snipeit_asset_id,
+            linked_snipeit_log_id=linked_log_id,
         )
 
         # If the usage period is already over (e.g. logging a past trip), the
@@ -1508,6 +1525,74 @@ class SnipeItSyncService:
                     {"internal_uuid": str(journal_id), "external_id": external_id},
                 )
 
+    async def _find_unlinked_activity(
+        self,
+        *,
+        asset_id: int,
+        action_type: str,
+        day: str | None,
+        source: str,
+        journal_id: int,
+        session_factory: Any,
+        after_log_id: int | None = None,
+    ) -> int | None:
+        """Return the id of an existing Snipe-IT log entry this journal can link to.
+
+        Pages through the asset's ``action_type`` activity, newest first, for an
+        entry dated ``day`` (Snipe-IT's server date) that involves the mapped
+        Snipe-IT user and, when ``after_log_id`` is given, was logged after it.
+        An entry already linked to another journal's ``source`` row is skipped,
+        so two journals using the same asset on the same day each get a record.
+        """
+        if not day or not self._snipeit_user_id:
+            return None
+        candidates: list[int] = []
+        for page in range(1, _ACTIVITY_MAX_PAGES + 1):
+            response = await self._api_client.list_asset_activity(
+                asset_id, action_type=action_type, page=page, per_page=_PAGE_SIZE
+            )
+            candidates.extend(
+                activity.id
+                for activity in response.rows
+                if activity.action_day == day
+                and activity.item is not None
+                and activity.item.id == asset_id
+                and activity.target is not None
+                and activity.target.type == "user"
+                and str(activity.target.id) == str(self._snipeit_user_id)
+                and (after_log_id is None or activity.id > after_log_id)
+            )
+            if len(response.rows) < _PAGE_SIZE:
+                break
+        else:
+            logger.warning(
+                "Stopped searching Snipe-IT activity at the page limit",
+                snipeit_asset_id=asset_id,
+                action_type=action_type,
+            )
+        if not candidates:
+            return None
+
+        async with session_factory() as session:
+            result = await session.execute(
+                text("""
+                    SELECT reference_data::jsonb ->> 'snipeit_log_id' AS log_id
+                    FROM sync_metadata
+                    WHERE integration_source = :source
+                      AND internal_uuid <> :journal_id
+                      AND reference_data LIKE :linked_pattern
+                """),
+                {
+                    "source": source,
+                    "journal_id": str(journal_id),
+                    "linked_pattern": '%"snipeit_log_id"%',
+                },
+            )
+            linked = {row.log_id for row in result.fetchall()}
+        return next(
+            (log_id for log_id in candidates if str(log_id) not in linked), None
+        )
+
     async def _unlock_pending_checkout(
         self,
         journal_id: int,
@@ -1585,7 +1670,7 @@ class SnipeItSyncService:
         async with session_factory() as session:
             checkout_result = await session.execute(
                 text("""
-                    SELECT external_id, sync_status
+                    SELECT external_id, sync_status, reference_data
                     FROM sync_metadata
                     WHERE integration_source = 'snipeit_checkout'
                       AND internal_uuid = :journal_id
@@ -1682,11 +1767,26 @@ class SnipeItSyncService:
         if checkin_at:
             payload["checkin_at"] = checkin_at.isoformat()
 
+        # A checkout linked to existing Snipe-IT history may already have been
+        # returned there too; link that check-in rather than POST another.
+        checkout_log_id = self._recorded_log_id(checkout_row.reference_data)
+        linked_log_id: int | None = None
         try:
-            await self._api_client.checkin_asset(
-                asset_id=snipeit_asset_id,
-                payload=payload,
-            )
+            if checkin_at and checkout_log_id is not None:
+                linked_log_id = await self._find_unlinked_activity(
+                    asset_id=snipeit_asset_id,
+                    action_type="checkin from",
+                    day=checkin_at.isoformat(),
+                    source="snipeit_checkin",
+                    journal_id=journal_id,
+                    session_factory=session_factory,
+                    after_log_id=checkout_log_id,
+                )
+            if linked_log_id is None:
+                await self._api_client.checkin_asset(
+                    asset_id=snipeit_asset_id,
+                    payload=payload,
+                )
         except SnipeItAPIError as exc:
             # 403/404 is non-retryable: the asset is already returned / gone (404)
             # or we are not permitted to return it (403). Record a terminal
@@ -1720,8 +1820,21 @@ class SnipeItSyncService:
 
         # 4. Record the checkin as successful.
         await self._finalize_checkin(
-            journal_id, external_id, session_factory, checkin_at=checkin_at
+            journal_id,
+            external_id,
+            session_factory,
+            checkin_at=checkin_at,
+            snipeit_log_id=linked_log_id,
         )
+
+        if linked_log_id is not None:
+            logger.info(
+                "Linked existing Snipe-IT check-in",
+                journal_id=journal_id,
+                snipeit_asset_id=snipeit_asset_id,
+                snipeit_log_id=linked_log_id,
+            )
+            return False
 
         logger.info(
             "Successfully checked in asset to Snipe-IT",
@@ -1737,6 +1850,7 @@ class SnipeItSyncService:
         session_factory: Any,
         error_message: str | None = None,
         checkin_at: date | None = None,
+        snipeit_log_id: int | None = None,
     ) -> None:
         """Mark a checkin sync row terminal (``success``) so it is not retried.
 
@@ -1744,6 +1858,11 @@ class SnipeItSyncService:
         (which carry an ``error_message`` for diagnostics). A terminal ``success``
         row removes the journal from the periodic sweep's selection.
         """
+        reference: dict[str, Any] = {
+            "checkin_at": checkin_at.isoformat() if checkin_at else None
+        }
+        if snipeit_log_id is not None:
+            reference["snipeit_log_id"] = snipeit_log_id
         async with session_factory() as session:
             async with session.begin():
                 await session.execute(
@@ -1763,13 +1882,7 @@ class SnipeItSyncService:
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "error_message": error_message,
-                        "reference_data": json.dumps(
-                            {
-                                "checkin_at": checkin_at.isoformat()
-                                if checkin_at
-                                else None
-                            }
-                        ),
+                        "reference_data": json.dumps(reference),
                     },
                 )
 
@@ -1965,16 +2078,27 @@ class SnipeItSyncService:
         return True
 
     @staticmethod
-    def _recorded_checkout_at(reference_data: object) -> str | None:
-        """Return the ``checkout_at`` a checkout sync row recorded, if any."""
+    def _recorded_reference(reference_data: object) -> dict[str, Any]:
+        """Decode a sync row's ``reference_data``, or ``{}`` when it holds none."""
         if not isinstance(reference_data, str):
-            return None
+            return {}
         try:
             recorded = json.loads(reference_data)
         except ValueError:
-            return None
-        value = recorded.get("checkout_at") if isinstance(recorded, dict) else None
+            return {}
+        return recorded if isinstance(recorded, dict) else {}
+
+    @classmethod
+    def _recorded_checkout_at(cls, reference_data: object) -> str | None:
+        """Return the ``checkout_at`` a checkout sync row recorded, if any."""
+        value = cls._recorded_reference(reference_data).get("checkout_at")
         return value if isinstance(value, str) else None
+
+    @classmethod
+    def _recorded_log_id(cls, reference_data: object) -> int | None:
+        """Return the Snipe-IT log id a sync row was linked to, if any."""
+        value = cls._recorded_reference(reference_data).get("snipeit_log_id")
+        return value if isinstance(value, int) else None
 
 
 @dataclass(frozen=True)
