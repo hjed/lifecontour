@@ -855,9 +855,16 @@ const AGENDA_EMPTY_LINE = 'Nothing scheduled today.';
  * fixture in a test is placed on it rather than on a `new Date()` read at
  * seeding time: a date read per fixture can straddle 00:00 UTC and split one
  * test's events across two days. Reading the anchor also documents where
- * "today" comes from — the server, as the page-shell test above insists. The
- * residual window (midnight passing between seeding and the page's own read)
- * is inherent to a page that is always about today, and is not closed here.
+ * "today" comes from — the server, as the page-shell test above insists.
+ *
+ * **The page reads the anchor again for itself**, so UTC midnight can pass
+ * between this read and the one the page renders. A test whose *expectation*
+ * depends on the day must therefore not take it from here: the tasks and
+ * upcoming-dates conformance tests assert labels that read the same on either
+ * side of midnight, or compute them from `captureServedAnchor`. The agenda tests
+ * that seed events on *today* keep a residual window — an event seeded for
+ * today is yesterday's after midnight, and no expectation can follow that
+ * without a server clock the suite controls.
  */
 async function anchorDay(page: Page): Promise<string> {
   const response = await page.request.get('/api/home-dashboard');
@@ -1757,18 +1764,23 @@ test.describe('Home Dashboard — the tasks card', () => {
       testCleanup(() => dataManager.cleanup());
       const day = await anchorDay(page);
 
-      // Seeded latest first, so creation order cannot pass for the rule.
+      // Seeded latest first, so creation order cannot pass for the rule. Three
+      // and five days out, so both chips take W25's absolute short form and
+      // keep it if UTC midnight passes before the page reads its own anchor:
+      // a task seeded for tomorrow would then correctly read `Today`. The
+      // relative labels are pinned in `dashboard-tasks-display.test.ts` and
+      // `DashboardTaskRow.test.tsx`, where the day is not a race.
       const later = await createDashboardTask(
         dataManager,
         day,
         'Tasks card book the venue',
-        4
+        5
       );
       const sooner = await createDashboardTask(
         dataManager,
         day,
         'Tasks card post the invitations',
-        1
+        3
       );
 
       await page.setViewportSize(DESKTOP);
@@ -1786,12 +1798,12 @@ test.describe('Home Dashboard — the tasks card', () => {
         (await boxOf(laterRow)).y
       );
 
-      // W25: relative for tomorrow, the absolute short form beyond it.
+      // W25: the absolute short form, named by the due journal's own date.
       await expect(soonerRow.getByTestId('dashboard-task-chip')).toHaveText(
-        'Tomorrow'
+        expectedShortDueLabel(daysAfter(day, 3))
       );
       await expect(laterRow.getByTestId('dashboard-task-chip')).toHaveText(
-        expectedShortDueLabel(daysAfter(day, 4))
+        expectedShortDueLabel(daysAfter(day, 5))
       );
       // W26: each row names the journal it is due in, and links to it.
       await expect(
@@ -1831,8 +1843,12 @@ test.describe('Home Dashboard — the tasks card', () => {
  *
  * **The e2e user has no configured timezone**, so the window is the UTC week
  * starting on the anchor the server reports, and each birthday's month and day
- * are taken from that anchor stepped in UTC. Neither sits on the window's last
- * day, for the reason `createDashboardTask` gives.
+ * are taken from that anchor stepped in UTC. They sit three and five days out:
+ * clear of the window's last day for the reason `createDashboardTask` gives,
+ * and still "in N days" rather than "Tomorrow" if midnight passes before the
+ * page reads — when N itself moves, which is why the chips are checked against
+ * the anchor the page was served rather than the one the fixtures were seeded
+ * from.
  */
 
 const UPCOMING_LIST_NAME = 'Upcoming contact dates';
@@ -1881,6 +1897,40 @@ function monthAndDay(day: string): { month: number; day: number } {
   return { month: Number(day.slice(5, 7)), day: Number(day.slice(8, 10)) };
 }
 
+/** Whole calendar days from `from` to `to`, both `YYYY-MM-DD`. */
+function daysBetween(from: string, to: string): number {
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / dayMs
+  );
+}
+
+/**
+ * The anchor day the page was actually **served**, for an expectation that
+ * counts from it.
+ *
+ * `anchorDay` is read before seeding and the page reads again for itself, so
+ * midnight can fall between the two; a chip counted from the seeding anchor
+ * would then expect `in 3 days` of a dashboard correctly saying `in 2 days`.
+ * The route passes the real response through untouched and only notes the
+ * anchor it carried. `page.request` bypasses page routes, so `anchorDay`'s own
+ * read is not among them. Install before navigating; read after the page has
+ * settled, when the last anchor served is the one on screen.
+ */
+async function captureServedAnchor(page: Page): Promise<() => string> {
+  const served: string[] = [];
+  await page.route('**/api/home-dashboard', async route => {
+    const response = await route.fetch();
+    const body = (await response.json()) as HomeDashboardResponse;
+    served.push(body.meta.anchor.date);
+    await route.fulfill({ response, json: body });
+  });
+  return () => {
+    expect(served.length).toBeGreaterThan(0);
+    return served[served.length - 1];
+  };
+}
+
 test.describe('Home Dashboard — the upcoming dates card', () => {
   test('orders its own dates soonest first, each with its in-N-days chip (W31)', async ({
     authenticatedPage: page,
@@ -1889,8 +1939,9 @@ test.describe('Home Dashboard — the upcoming dates card', () => {
     const dataManager = new TestDataManager(page);
     testCleanup(() => dataManager.cleanup());
     const anchor = await anchorDay(page);
-    const laterDay = daysAfter(anchor, 4);
-    const soonerDay = daysAfter(anchor, 2);
+    const laterDay = daysAfter(anchor, 5);
+    const soonerDay = daysAfter(anchor, 3);
+    const servedAnchor = await captureServedAnchor(page);
 
     // Seeded latest first, so creation order cannot pass for the rule. The
     // later one has a year, so it carries an age; the sooner one does not, so
@@ -1932,11 +1983,12 @@ test.describe('Home Dashboard — the upcoming dates card', () => {
     await expect(laterRow).toBeVisible();
     expect((await boxOf(soonerRow)).y).toBeLessThan((await boxOf(laterRow)).y);
 
+    // Counted from the anchor the page rendered, not the one seeded from.
     await expect(soonerRow.getByTestId('upcoming-date-chip')).toHaveText(
-      'in 2 days'
+      `in ${daysBetween(servedAnchor(), soonerDay)} days`
     );
     await expect(laterRow.getByTestId('upcoming-date-chip')).toHaveText(
-      'in 4 days'
+      `in ${daysBetween(servedAnchor(), laterDay)} days`
     );
 
     await expect(soonerRow.getByTestId('upcoming-date-badge')).toHaveText(

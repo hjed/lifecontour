@@ -11879,6 +11879,15 @@ discharged.
 8. **Contact importance as the same-day tie-break is not re-asserted end to end.** It is the backend's rule,
    pinned by Phase 11's integration suite, and the payload publishes none of the signals it ranks by — an
    e2e could only restate the server's order, not check it.
+9. **No new expectation changes across a UTC midnight** — found by Greptile on PR #1444. The seeded tests
+   read the anchor once to seed and the page reads it again to render, so a midnight between the two
+   turned `Tomorrow` into `Today` and `in 2 days` into `in 1 day` on a correct dashboard. The tasks test
+   now seeds at +3 and +5, where the chip is the absolute short form on either side of midnight, leaving
+   the relative labels to `dashboard-tasks-display.test.ts` and `DashboardTaskRow.test.tsx`; the
+   upcoming-dates test counts its `in N days` from the anchor the page was actually **served**, captured
+   by a pass-through route (`captureServedAnchor`). The agenda tests that seed events on *today* keep the
+   residual window `anchorDay` records: an event seeded for today is yesterday's after midnight, and no
+   expectation can follow that without a server clock the suite controls.
 
 **Docs:** this entry, and the pointer under *Phase Completion Requirements*. The wireframe document is
 unchanged — no divergence was found — as are `frontend-design.md` and `testing-strategy.md`, since no
