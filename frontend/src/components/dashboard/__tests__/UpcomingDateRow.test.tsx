@@ -16,6 +16,7 @@ import { render, screen } from '@testing-library/react';
 import { UpcomingDateRow } from '../UpcomingDateRow';
 import type { HomeDashboardUpcomingDate } from '@/lib/api/home-dashboard';
 import { ImportantDateTypeEnum } from '@/types/contacts';
+import { expectWrapsLongWords } from '@/test-utils/home-dashboard';
 
 function upcomingDate(
   overrides: Partial<HomeDashboardUpcomingDate> = {}
@@ -215,6 +216,33 @@ describe('UpcomingDateRow', () => {
 
     container.querySelectorAll('svg').forEach(icon => {
       expect(icon).toHaveAttribute('aria-hidden', 'true');
+    });
+  });
+
+  /** See `expectWrapsLongWords`; the real measurement is in the e2e (W3). */
+  describe('long unbroken content (W3)', () => {
+    const UNBROKEN = 'Supercalifragilistic' + 'x'.repeat(120);
+
+    it('lets a long contact name break rather than widen the column', () => {
+      render(
+        <UpcomingDateRow date={upcomingDate({ contact_name: UNBROKEN })} />
+      );
+
+      expectWrapsLongWords(screen.getByRole('link', { name: UNBROKEN }));
+    });
+
+    it('lets a long custom date type break', () => {
+      render(
+        <UpcomingDateRow
+          date={upcomingDate({
+            date_type: ImportantDateTypeEnum.CUSTOM,
+            custom_date_type_name: UNBROKEN,
+            years: null,
+          })}
+        />
+      );
+
+      expectWrapsLongWords(screen.getByTestId('upcoming-date-badge'));
     });
   });
 });

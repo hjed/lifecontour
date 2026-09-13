@@ -64,7 +64,7 @@ export function UpcomingDateRow({ date }: UpcomingDateRowProps) {
         <div className='min-w-0 flex-1'>
           <Link
             href={`/contacts/${date.contact_id}` as Route}
-            className='min-w-0 font-medium underline-offset-4 hover:underline'
+            className='min-w-0 font-medium break-words underline-offset-4 hover:underline'
           >
             {date.contact_name}
           </Link>
@@ -73,7 +73,11 @@ export function UpcomingDateRow({ date }: UpcomingDateRowProps) {
             <Badge
               variant='outline'
               data-testid='upcoming-date-badge'
-              className={dateTypeBadgeClassName(date.date_type)}
+              // A custom date type is free text and can be one unbroken token.
+              className={cn(
+                'break-words',
+                dateTypeBadgeClassName(date.date_type)
+              )}
             >
               {dateBadgeLabel(date)}
             </Badge>

@@ -31,7 +31,7 @@ import {
   homeDashboardDocument,
   tasksSectionFixture,
 } from '@/test-utils/home-dashboard';
-import { TasksCard } from '../TasksCard';
+import { TasksCard, VISIBLE_TASKS } from '../TasksCard';
 import { DashboardSectionStatus } from '@/lib/api/home-dashboard';
 import { TaskStatus } from '@/types/tasks';
 import type {
@@ -386,6 +386,31 @@ describe('TasksCard', () => {
           within(row).getByTestId('dashboard-task-action-done')
         ).toBeInTheDocument();
       });
+    });
+
+    /**
+     * The button unmounts the moment it is pressed (**W28** describes one
+     * control, not a toggle), and an unmounted focused element drops focus to
+     * `<body>` — so a keyboard user who revealed the remainder was returned to
+     * the top of the document and had to traverse the whole page to reach the
+     * rows they had just asked for. Focus goes to the first revealed row's own
+     * action instead: the nearest thing to where the user was, and something
+     * they can act on.
+     */
+    it('hands focus to the first revealed row rather than dropping it', async () => {
+      serveReady(SEVEN_TASKS);
+      const user = userEvent.setup();
+
+      renderWithProviders(<TasksCard />);
+      await user.click(
+        await screen.findByRole('button', { name: /show all/i })
+      );
+
+      const revealed = taskRows()[VISIBLE_TASKS];
+      await waitFor(() =>
+        expect(revealed).toContainElement(document.activeElement as HTMLElement)
+      );
+      expect(document.activeElement).not.toBe(document.body);
     });
 
     it('withdraws the show-more once everything is shown', async () => {

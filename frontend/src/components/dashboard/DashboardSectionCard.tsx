@@ -59,6 +59,13 @@ interface DashboardSectionCardProps {
   readonly footer?: React.ReactNode;
   readonly children?: React.ReactNode;
   readonly testId?: string;
+  /**
+   * The entries list itself, for a card that has to move focus into it. The
+   * shell owns the `<ul>` (**W4** asks for one labelled list per section), so a
+   * card whose show-more hands the keyboard to a revealed row cannot reach it
+   * any other way.
+   */
+  readonly listRef?: React.Ref<HTMLUListElement>;
 }
 
 /**
@@ -89,6 +96,7 @@ export function DashboardSectionCard({
   footer,
   children,
   testId,
+  listRef,
 }: DashboardSectionCardProps) {
   // Counted rather than tested for truthiness: a section renders its rows as
   // `entries.map(...)`, and an empty list is `[]` — which is truthy. `!children`
@@ -118,7 +126,7 @@ export function DashboardSectionCard({
             Deliberately not `empty:hidden`: a display:none list is out of the
             accessibility tree, and W4 asks for a labelled list per section
             whether or not it has entries yet. Empty, it draws nothing. */}
-        <ul aria-label={listLabel} className='min-w-0 space-y-3'>
+        <ul ref={listRef} aria-label={listLabel} className='min-w-0 space-y-3'>
           {children}
         </ul>
         {isEmpty &&

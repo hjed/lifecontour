@@ -1191,6 +1191,35 @@ elements are numbered **W1**–**W33**.
   an entry, and it has to survive an empty section, because "nothing scheduled
   today" says nothing about what a footer is for. The agenda's tomorrow
   disclosure is its only user so far.
+- **Keyboard and long content** (**ITER18-004 Phase 16**):
+  - **Tab order is document order**, asserted across the whole assembled page
+    rather than per card: Regenerate, then each agenda entry and the tomorrow
+    disclosure, then each task row's action and its due-journal link, then each
+    contact date. No element carries a positive `tabIndex`, which is the thing
+    four independently-authored sections get wrong one at a time.
+  - **A withdrawing show-more hands focus on** (`focusRevealedRow` in
+    `src/lib/dashboard-focus.ts`). **W28** and **W32** describe one control, so
+    the button unmounts when pressed — and an unmounted focused element drops
+    focus to `<body>`, returning a keyboard user to the top of the document to
+    re-traverse the page for the rows they just revealed. Focus goes to the
+    first revealed row's own first control instead. It reads the list rather
+    than holding a ref per row because the shell owns the `<ul>`, which is why
+    `DashboardSectionCard` takes an optional `listRef`.
+  - **Free text carries `break-words`** — agenda title, location and tag names;
+    task text, due-journal link and contact names; contact name and custom date
+    type; the summary's paragraphs. `min-w-0` is on nearly every element in
+    these rows and does **nothing** here: it lets a flex item shrink below its
+    content, and an unbreakable word is not shrinkable. Without it a single
+    50-character unbroken token took the page to 613px at a 375px viewport,
+    measured by the e2e that now guards it. The RTL suites pin the *contract*
+    (a wrapping utility is present, via `expectWrapsLongWords`) because jsdom
+    computes no layout; the e2e measures the outcome.
+  - **Exactly two things on the page write**, and the page suite asserts it
+    rather than assuming it: no non-`GET` request on load, one `PATCH` when a
+    row is ticked, one `POST` when Regenerate is pressed. The summary card is
+    one plausible-looking edit away from firing the regenerate endpoint the
+    moment it sees `generating`, on the page every sign-in lands on.
+
 - **The read expires at the anchor day's end** (**ITER18-004 Phase 16**,
   inherited from Phase 3): the page calls `useAnchorDayRefresh(data?.meta.anchor)`
   once, which schedules `invalidateQueries(homeDashboardKeys.all)` for the next

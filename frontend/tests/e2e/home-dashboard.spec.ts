@@ -1560,3 +1560,96 @@ test.describe('Home Dashboard — the tasks card', () => {
     expect(stored.attributes.text).toBe('Tasks card confirm the caterer');
   });
 });
+
+/**
+ * Nothing pushes the page sideways at mobile width (ITER18-004 Phase 16,
+ * **W3**).
+ *
+ * The agenda already has a test of this shape for its own row; this covers the
+ * other two sections, and specifically the case a unit test **cannot** reach.
+ * Overflow is a layout property and jsdom computes none, so RTL can only pin
+ * that a wrapping utility is on the element — this measures the outcome. The
+ * content is deliberately one long *unbroken* token rather than a long
+ * sentence: `min-w-0` is on almost every element in these rows and does nothing
+ * for an unbreakable word, which is why this is the case that finds the defect.
+ */
+test.describe('Home Dashboard — mobile layout (W3)', () => {
+  /**
+   * Long, and with nowhere to break — what a pasted identifier looks like.
+   *
+   * Fifty-odd characters rather than a hundred, because the contacts domain
+   * caps a name at 100 and `createContacts` appends a uniqueness suffix of its
+   * own. Still four times the width of the column it sits in at 375px, which is
+   * all this needs.
+   */
+  const UNBROKEN = `Zzz${'x'.repeat(50)}`;
+
+  test('overflows nothing with a long task, journal, contact and date', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+    const dueDay = daysAfter(day, 2);
+
+    const [contact] = await dataManager.createContacts([
+      {
+        firstName: UNBROKEN,
+        lastName: UNBROKEN,
+        importantDates: [
+          {
+            date_type: 'birthday',
+            precision: 'full',
+            year: 1990,
+            month: Number(dueDay.slice(5, 7)),
+            day: Number(dueDay.slice(8, 10)),
+          },
+        ],
+      },
+    ]);
+
+    const creating = await dataManager.createJournal({
+      title: 'Mobile overflow journal it came from',
+      content: 'Task anchor seeded for the mobile overflow check',
+      event_date_range: {
+        start: atUtc(day, '09:00:00'),
+        end: atUtc(day, '10:00:00'),
+      },
+    });
+    const dueJournal = await dataManager.createJournal({
+      title: `Mobile overflow ${UNBROKEN}`,
+      content: 'Task anchor seeded for the mobile overflow check',
+      event_date_range: {
+        start: atUtc(dueDay, '09:00:00'),
+        end: atUtc(dueDay, '10:00:00'),
+      },
+    });
+    await dataManager.createTask({
+      creatingJournalId: creating.id,
+      dueJournalId: dueJournal.id,
+      text: `Mobile overflow ${UNBROKEN}`,
+      contactIds: [contact.id],
+    });
+
+    await page.setViewportSize(MOBILE);
+    await openDashboard(page);
+
+    // Both sections have to be on screen, or the measurement proves nothing.
+    await expect(
+      tasksList(page).getByText(UNBROKEN, { exact: false }).first()
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole('list', { name: 'Upcoming contact dates' })
+        .getByText(UNBROKEN, { exact: false })
+        .first()
+    ).toBeVisible();
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+});

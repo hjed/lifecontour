@@ -11,8 +11,10 @@
  */
 
 import { act, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test-utils';
 import HomePage from '@/app/page';
+import { ImportantDateTypeEnum } from '@/types/contacts';
 import {
   DashboardSectionStatus,
   DashboardSummaryState,
@@ -148,6 +150,56 @@ function dashboardDocument(): HomeDashboardResponse {
   };
 }
 
+/** One of everything, so a traversal test has something to traverse. */
+const A_CONTACT_DATE = {
+  contact_id: 7,
+  contact_name: 'Ada Lovelace',
+  photo_url: null,
+  date_type: ImportantDateTypeEnum.BIRTHDAY,
+  custom_date_type_name: null,
+  occurs_on: '2026-08-02',
+  days_away: 4,
+  years: 35,
+  observed_for_leap_day: false,
+};
+
+const A_TASK: HomeDashboardTask = {
+  task_id: 31,
+  text: 'Send the deposit receipt',
+  due_journal: { id: 44, title: 'Friday planning', date: '2026-08-01' },
+  days_away: 3,
+  contacts: [],
+};
+
+function populatedDashboard(): HomeDashboardResponse {
+  const document = dashboardDocument();
+  document.data.attributes.agenda = {
+    status: DashboardSectionStatus.READY,
+    data: {
+      entries: [STANDUP],
+      tomorrow: { date: TOMORROW_DATE, entries: [] },
+    },
+  };
+  document.data.attributes.tasks = {
+    status: DashboardSectionStatus.READY,
+    data: { ...EMPTY_TASKS, total: 1, tasks: [A_TASK] },
+  };
+  document.data.attributes.upcoming_dates = {
+    status: DashboardSectionStatus.READY,
+    data: { ...EMPTY_UPCOMING_DATES, total: 1, dates: [A_CONTACT_DATE] },
+  };
+  return document;
+}
+
+function respondWithPopulatedDashboard() {
+  routeFetch(() =>
+    Promise.resolve({
+      ok: true,
+      json: async () => populatedDashboard(),
+    } as Response)
+  );
+}
+
 const AUTHENTICATED_SESSION = {
   authenticated: true,
   user: {
@@ -198,6 +250,12 @@ function respondWithDashboard() {
 function freezeOnTheAnchorDay() {
   jest.useFakeTimers();
   jest.setSystemTime(new Date(`${ANCHOR_DATE}T03:00:00Z`));
+}
+
+/** `userEvent` waits on timers, so it has to drive the frozen clock itself. */
+function userOnTheAnchorDay() {
+  freezeOnTheAnchorDay();
+  return userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
 }
 
 /** Render the page and wait for the shell to be on screen. */
@@ -870,6 +928,157 @@ describe('HomePage — the dashboard shell', () => {
         ([input]) => String(input) === DASHBOARD_URL
       );
       expect(dashboardCalls).toHaveLength(1);
+    });
+  });
+
+  /**
+   * ITER18-004 Phase 16. The page is a read surface with exactly two things on
+   * it that write, and it is assembled from four independently-mounted cards —
+   * so the properties worth asserting here are the ones no card can see about
+   * itself: what order the keyboard meets the whole page in, and what the page
+   * does on load when nobody has touched it.
+   */
+  describe('The keyboard (W4)', () => {
+    /** Every element Tab stops at, in the order it stops there. */
+    async function tabThrough(
+      user: ReturnType<typeof userEvent.setup>,
+      steps: number
+    ): Promise<string[]> {
+      const visited: string[] = [];
+      for (let step = 0; step < steps; step += 1) {
+        await user.tab();
+        const active = document.activeElement;
+        if (!active || active === document.body) {
+          break;
+        }
+        visited.push(
+          (active.getAttribute('aria-label') ?? active.textContent ?? '').trim()
+        );
+      }
+      return visited;
+    }
+
+    it('meets every action in the order the page reads', async () => {
+      respondWithPopulatedDashboard();
+      // On the anchor day, because Regenerate is **disabled** on a stale one
+      // (it would rewrite yesterday's summary) and a disabled control is not
+      // in the tab order at all — so an unfrozen clock would quietly assert
+      // the traversal of a page missing its only headline action.
+      const user = userOnTheAnchorDay();
+
+      await renderHomePage();
+      await screen.findByRole('link', { name: 'Standup' });
+
+      expect(await tabThrough(user, 8)).toEqual([
+        // The headline and its one control first (W5, W6).
+        'Regenerate',
+        // Then the agenda: the entry, then the disclosure beneath it (W19).
+        'Standup',
+        'Tomorrow — Thursday, 30 July, 0 events',
+        // Then the tasks section: each row's action, then where it came from.
+        'Mark done',
+        'Friday planning',
+        // Then the upcoming dates.
+        'Ada Lovelace',
+      ]);
+    });
+
+    /**
+     * A positive `tabIndex` pulls an element out of document order for the
+     * whole page, not just its own card — which is precisely the kind of thing
+     * four independently-authored sections get wrong one at a time.
+     */
+    it('lets document order decide, with no element jumping the queue', async () => {
+      respondWithPopulatedDashboard();
+
+      const { container } = renderWithProviders(<HomePage />);
+      await screen.findByRole('link', { name: 'Standup' });
+
+      const jumpers = [...container.querySelectorAll('[tabindex]')].filter(
+        element => Number(element.getAttribute('tabindex')) > 0
+      );
+      expect(jumpers).toEqual([]);
+    });
+
+    it('keeps every section and list named once the layout is assembled', async () => {
+      respondWithPopulatedDashboard();
+
+      await renderHomePage();
+      await screen.findByRole('link', { name: 'Standup' });
+
+      expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+      for (const name of [
+        "Today's agenda",
+        'Tasks due in the next seven days',
+        'Upcoming contact dates',
+      ]) {
+        expect(screen.getByRole('list', { name })).toBeInTheDocument();
+      }
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    });
+  });
+
+  /**
+   * *"Nothing on the page mutates data except the inline task action and the
+   * user-requested summary regeneration."* Worth asserting rather than
+   * assuming: the summary card is one plausible-looking edit away from firing
+   * the regenerate endpoint when it sees `generating`, and this page is the
+   * one every sign-in lands on.
+   */
+  describe('What the page writes', () => {
+    function methodsUsed(): string[] {
+      return mockFetch.mock.calls.map(([, init]) =>
+        ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase()
+      );
+    }
+
+    it('writes nothing at all on load', async () => {
+      respondWithPopulatedDashboard();
+
+      await renderHomePage();
+      await screen.findByRole('link', { name: 'Standup' });
+      await screen.findByTestId('dashboard-summary-text');
+
+      expect(methodsUsed().filter(method => method !== 'GET')).toEqual([]);
+    });
+
+    it('writes once, and only a task, when a row is ticked off', async () => {
+      respondWithPopulatedDashboard();
+      const user = userEvent.setup();
+
+      await renderHomePage();
+      await user.click(await screen.findByTestId('dashboard-task-action-done'));
+
+      await waitFor(() =>
+        expect(methodsUsed().filter(method => method !== 'GET')).toEqual([
+          'PATCH',
+        ])
+      );
+      const [write] = mockFetch.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH'
+      );
+      expect(String(write[0])).toBe('/api/tasks/31');
+    });
+
+    it('writes once, and only the summary, when Regenerate is pressed', async () => {
+      respondWithPopulatedDashboard();
+      // The control is deliberately disabled on a stale anchor; the day the
+      // payload names is the day it can act on.
+      const user = userOnTheAnchorDay();
+
+      await renderHomePage();
+      await screen.findByTestId('dashboard-summary-text');
+      await user.click(screen.getByTestId('dashboard-summary-regenerate'));
+
+      await waitFor(() =>
+        expect(methodsUsed().filter(method => method !== 'GET')).toEqual([
+          'POST',
+        ])
+      );
+      const [write] = mockFetch.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'POST'
+      );
+      expect(String(write[0])).toContain('/regenerate');
     });
   });
 

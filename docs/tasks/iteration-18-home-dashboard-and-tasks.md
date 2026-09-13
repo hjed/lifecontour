@@ -11599,41 +11599,186 @@ state. E2E in Phase 17.
 withdrawal, exact-fit, and the collapsed next load), 2 for the empty state's icon and absent button, and 2
 for the seam with the inline done action.
 
-#### Phase 16: Section Resilience, Loading and Accessibility
+#### Phase 16: Section Resilience, Loading and Accessibility ✅ COMPLETE
 
 **Prerequisites:** Phases 4, 7, 12, 15.
 **Estimated diff:** ~130 production → **~520 tracked** (×4) · **revise upward**: the anchor-boundary
 refresh inherited from Phase 3 is rule-defining logic with DST cases, so budget that criterion at ×6 on
 top — roughly **~180 production → ~700 tracked** for the phase.
 
+**Actual: ~2,550 tracked across five PRs** — 3.6× the revised estimate and 4.9× the original. The
+estimate was not wrong about any one criterion; it was wrong about **how many separate things "section
+resilience" names**. Six criteria, and five of them turned out to want their own artefact: a backend
+sort key, a shared placeholder pair, an error boundary, a scheduler with its own pure helper, and a
+focus rule. **The generalisable form: an estimate priced per criterion undercounts a phase whose
+criteria do not share a seam** — Phases 4 and 7 were each one surface enumerated several ways and came
+in at ×4–4.5; this is six unrelated surfaces, and the multiplier compounds per artefact rather than
+per criterion.
+
+| PR | Slice | Changed |
+|---|---|---:|
+| **16a** | Backend: break agenda ties on `start_time` | 163 |
+| **16b** | Per-section skeleton and unavailable state | 753 |
+| **16c** | The section error boundary | 671 |
+| **16d** | The anchor-day refresh | 590 |
+| **16e** | Keyboard order, focus on reveal, long-content overflow, the no-mutation rule | ~590 |
+
+**Split before work started, per delivery rule 3**: the revised estimate alone put the phase above the
+~500-line PR standard, and the five slices are independently reviewable — 16a touches no frontend file
+and 16e touches no backend one.
+
 **Acceptance Criteria:**
 
-- [ ] Each section renders its own loading skeleton and its own unavailable state; one section failing never
+- [x] Each section renders its own loading skeleton and its own unavailable state; one section failing never
       blanks the others (the contract asserted server-side in Phase 1, proven here through the UI).
-      Neither state is depicted in the wireframe — see wireframe gap 8 — so both are built in the idiom of
-      **W9** and **W29**.
-- [ ] Nothing on the page mutates data except the inline task action and the user-requested summary
-      regeneration.
-- [ ] Keyboard traversal reaches every action in a sensible order; the sections' labelled headings and lists
-      survive the final layout (**W4**).
-- [ ] No horizontal overflow at mobile widths with long journal titles, long contact names and long tag
-      sets — the wide-content cases most likely to break the grid (**W3**).
-- [ ] **Inherited from Phase 3:** the dashboard query is refreshed at the **anchor-day boundary**, so a
+      Neither state is depicted in the wireframe — see wireframe gap 9 — so both are built in the idiom of
+      **W9** and **W29**. — `DashboardSectionPlaceholder` owns both for all three evidence cards and the
+      summary: pending is a run of three pulsing rows in the shape the section really draws, unavailable
+      is one shared `CloudOff` icon over the section's own sentence. The page suite now puts **real data
+      on the surviving side for every one of the four sections** in turn, where Phases 4 and 7 had left
+      only two of those directions falsifiable. **And it covers the case no `status` on the wire can
+      express**: 16c's error boundary, so a section that *throws* falls back to the same unavailable card
+      rather than blanking the page.
+- [x] Nothing on the page mutates data except the inline task action and the user-requested summary
+      regeneration. — Asserted rather than assumed: no non-`GET` request on load with every section
+      populated, exactly one `PATCH` (to `/api/tasks/{id}`) when a row is ticked, exactly one `POST` (to
+      the regenerate endpoint) when Regenerate is pressed.
+- [x] Keyboard traversal reaches every action in a sensible order; the sections' labelled headings and lists
+      survive the final layout (**W4**). — A `userEvent.tab()` sweep over the whole assembled page pins
+      the sequence *Regenerate → agenda entry → tomorrow disclosure → task action → due-journal link →
+      contact link*, plus no positive `tabIndex` anywhere and the section/list names after layout. The
+      sweep **found a defect the criteria did not name** — see the show-more decision below.
+- [x] No horizontal overflow at mobile widths with long journal titles, long contact names and long tag
+      sets — the wide-content cases most likely to break the grid (**W3**). — And this one was **broken**:
+      a single 50-character unbroken token took the page to **613px at a 375px viewport**. `break-words`
+      on every free-text element fixes it; see the decision on why `min-w-0` was never going to.
+- [x] **Inherited from Phase 3:** the dashboard query is refreshed at the **anchor-day boundary**, so a
       dashboard left open across local midnight stops showing yesterday's anchor and yesterday's **W2**
       date. Schedule it for the next midnight in `meta.anchor.timezone` — the zone the payload echoes —
-      not on a fixed interval. Rule-defining logic with DST boundaries: budget ×6 (calibration rule 14).
-- [ ] **Inherited from Phase 7:** app-created timed events on one day all carry the day's midnight as
+      not on a fixed interval. Rule-defining logic with DST boundaries: budget ×6 (calibration rule 14). —
+      `useAnchorDayRefresh`, called once by the page, over the pure `msUntilNextAnchorDay`. The DST
+      arithmetic is **`zonedMidnight`'s**, not a second copy of it.
+- [x] **Inherited from Phase 7:** app-created timed events on one day all carry the day's midnight as
       their start instant, so the agenda's ascending-by-instant order (wireframe gap 12) degenerates to
       creation order for them. Break ties on `start_time` in `order_agenda_entries` (backend, with a
       unit test seeding equal instants and different clocks), or derive the instant at the write path;
       see *Follow-up found by the e2e* under Phase 7. Replace Phase 7's placeholder loading and
       unavailable lines (`agenda-loading`, `agenda-unavailable`) with this phase's skeleton and
-      unavailable treatment at the same time.
+      unavailable treatment at the same time. — Both halves done: the tie-break in 16a (the smaller of
+      the two options, as Phase 7 predicted), the placeholders in 16b. The **test ids survived** —
+      Phase 16 replaced the rendering, not the handle.
+
+**Decisions taken (Phase 16):**
+
+- **The clock is a tie-break beneath the instant, never in place of it.** `agenda.py`'s module docstring
+  argues at length that ordering timed entries *by* `start_time` would interleave a multi-day journal at
+  an hour that never happened today. That argument is correct and survives untouched: the clock only
+  separates entries that already share an instant, which is exactly the app-created case Phase 7 found
+  and never the synced one. An entry with no clock reads as `time.min`. The endpoint gets an integration
+  test seeded in the shape the app really writes — one instant, two clocks — for which the seeder learned
+  to hold a clock apart from its instant; **verified to fail without the tie-break** rather than assumed.
+- **Both states live in one component, but their *sentences* stay with the cards.** Three cards faced the
+  same three-way choice; the wording differs per section and the shape does not. The unavailable icon is
+  **shared across all three** on purpose — it makes *unavailable* one recognisable state rather than
+  three, and the sentence beside it already names which section is missing.
+- **The skeleton is `aria-busy`, not `role="status"`.** Four mount at once on the page every sign-in
+  lands on, and announcing four loading sentences to a reader who asked for none is the noise Phase 4
+  refused `aria-live` on the summary body to avoid. The sentence the old quiet line showed is kept as
+  `sr-only` text — there to be found, not read out — and the bars are `aria-hidden`. **No precedent in
+  this codebase**, which uses `aria-busy` only on buttons; recorded here because it is a deliberate
+  choice rather than an oversight.
+- **`ListSkeleton` was declined, and the reason generalises.** `ui/loading.tsx` already has one, and it
+  is avatar-led: it describes the upcoming-dates rows and mis-describes the other two. **A skeleton is a
+  promise about what is arriving**, so reusing the wrong shape is not reuse, it is a wrong promise.
+- **The error boundary is inside each card, and the field guards stay in front of it.** Inside, because
+  the fallback has to be a whole card — a broken section that dropped its header reads as a *missing*
+  section rather than an unavailable one — and because a card that owns its own read should own its own
+  failure. The guards stay because they are cheaper and quieter: **React reports every error a boundary
+  catches**, and a payload shape already known and handled should not be reported as a defect. So the
+  boundary is for what the guards could not foresee, which is the case all three cards had recorded and
+  none could reach: a malformed entry *inside* the list.
+- **The boundary does not latch**, and this is the half that is easy to leave out. One held for the life
+  of the page would make one bad payload permanent, when the window-focus refetch and this phase's own
+  midnight refresh both exist to bring a better one. `resetKey` carries the query's update stamps and is
+  consulted **only while an error is held**, so the ordinary path never remounts and the cards' expansion
+  state survives every refetch. No new dependency: `react-error-boundary` buys resets and retry callbacks
+  a page **W9** forbids a retry control on cannot use.
+- **The refresh is scheduled for a boundary and composed from `zonedMidnight`.** An interval refetches a
+  page nobody is watching all day and still arrives late at the one moment that matters. Adding
+  twenty-four hours to the anchor day's own midnight is the tempting version and is wrong twice a year —
+  an hour late into DST, an hour early out of it — which is what the Sydney cases pin. Reusing the
+  existing helper means there is **one** piece of zone arithmetic in the frontend rather than two that
+  can disagree.
+- **Two edges of that scheduler are load-bearing and neither is obvious.** An anchor already in the past
+  is due **at once**, and it terminates only because the effect is keyed on the anchor: a refetch
+  returning the same day does not re-run it, so a browser clock that disagrees with the server costs one
+  request rather than a loop. And a **malformed** anchor schedules nothing at all — the arithmetic would
+  be `NaN` and `setTimeout(NaN)` fires *immediately*, so the helper answers `number | null` rather than a
+  bare number.
+- **The refresh made four existing tests dishonest, which is a finding about fixtures.** `page.test.tsx`
+  anchors on a fixed day in the past so that a shell deriving its date from the browser clock cannot
+  pass — and a past anchor is now a **stale** one, so mounting costs a second request. The four
+  request-counting tests freeze the clock on their fixture's anchor day; the rest keep the real clock,
+  since the extra read changes nothing they assert. **The general form: a fixture that lies about the
+  clock starts costing something the moment the code begins reading the clock.**
+- **The tab sweep found a defect the criteria did not name.** Pressing a show-more unmounts the focused
+  button (**W28** and **W32** describe one control, not a toggle), and an unmounted focused element drops
+  focus to `<body>` — so a keyboard user who asked for the rest of the week was returned to the top of
+  the document and had to traverse the whole page to reach the rows they had just revealed. Focus now
+  goes to the first revealed row's own first control. **This alters cards owned by Phases 12 and 15**,
+  which this iteration's convention normally forbids; it is done here because this is the phase that owns
+  accessibility, so it is the phase that owns this.
+- **`min-w-0` was never going to satisfy W3, and the rows were full of it.** It lets a flex item shrink
+  below its content; an unbreakable word is not shrinkable. Every free-text element now carries
+  `break-words`. The RTL suites pin the *contract* through a shared `expectWrapsLongWords` — written
+  against a set of acceptable utilities rather than one literal — because **jsdom computes no layout and
+  a unit test therefore cannot see overflow at all**; the outcome is measured in the e2e, which was
+  **verified to fail without the fix at 613px against a 375px viewport**.
+- **One e2e here, for the one criterion no unit test can reach.** Phase 17 owns the structural sweep and
+  the per-state fixture specs, and neither lists overflow. The seeded token is fifty-odd characters
+  rather than a hundred, because the contacts domain caps a name at 100 and the data manager appends its
+  own uniqueness suffix — a 93-character name 500s.
+- **The summary card's own `localDateIn` is left duplicating `date-utils`'.** Considered and declined:
+  they differ deliberately on an unrecognised zone — the card **trusts the anchor**, `date-utils` falls
+  back to the browser — and folding them would silently change when Regenerate is disabled. Named as a
+  follow-up rather than changed by a phase that is not about it.
+
+**Docs:** wireframe gap 9 now records what was built rather than who owed it, and gap 12 records the
+tie-break. `frontend-design.md`'s Home Dashboard section gains four blocks — the placeholder pair, the
+boundary, the anchor-day refresh (replacing its recorded *"no refetch scheduled at the day boundary"*
+note), and the keyboard/overflow rules. `api-design.md` and `mcp-tools.md` are deliberately untouched: no
+endpoint and no tool changed shape, and the agenda's ordering description (*"ascending by start"*) is
+still true.
+
+**Follow-ups — both now carried by Phase 18 rather than left as notes:**
+
+- **`DashboardSummaryCard.localDateIn` duplicates `date-utils.localDateIn`** with a deliberate difference
+  on an unrecognised zone. Two ~15-line functions.
+- **`UpcomingDatesCard` still names its show-more off `total` while gating on the list's length** —
+  Phase 15's follow-up, inherited unchanged. This phase touched that card for focus and overflow but not
+  for its wording, on the same "not this phase's card" grounds Phase 15 applied.
+
+Both were declined here on that same rule, and **both are the reason Phase 18 exists**: each is one
+question answered two ways, invisible on every payload the endpoint can send, which is exactly the shape
+of thing that stays a note for ever unless a phase owns it. Phase 15's own follow-up had already survived
+one phase that way.
 
 **Required Test Coverage:** unit (RTL) — per-section loading and error rendering with the other sections
 still present; **keyboard traversal order across all interactive elements**; section and list labelling after
 layout; long-content layout assertions; **the midnight refetch, at a day boundary and across a DST
-transition**. E2E in Phase 17 covers the mobile project.
+transition**. ~~E2E in Phase 17 covers the mobile project.~~ **One e2e landed here** — the overflow
+criterion is a layout property and jsdom computes no layout, so no unit test can discharge it; the rest
+of the mobile project stays Phase 17's. — **Delivered:** 9 backend cases (5 unit over the tie-break, 1
+integration end to end, plus the existing agenda suites re-run), 11 over `DashboardSectionPlaceholder`,
+7 over the error boundary, 9 over `msUntilNextAnchorDay` (including both Sydney DST transitions), 7 over
+`useAnchorDayRefresh` with fake timers, 8 over the long-content contract, 2 over focus on reveal, and 13
+new page-level cases — the four sections' independence and the two whole-page states, a section that
+throws, the tab sweep, the no-jumping-the-queue guard, the labelling, the two refresh boundaries and the
+three mutation assertions. **Frontend: 2,771 unit tests green; backend: 4,718 unit and 81 integration;
+e2e: 63 on `firefox` and `Mobile Chrome`.**
+
+**Phase 17's scope is left intact**: its structural sweep and its per-state fixture specs are untouched,
+and its criteria stay `[ ]`.
 
 #### Phase 17: E2E — Dashboard Wireframe Conformance
 
@@ -11665,6 +11810,51 @@ transition**. E2E in Phase 17 covers the mobile project.
 
 **Required Test Coverage:** this phase *is* the e2e coverage for ITER18-004; unit and integration coverage
 landed in Phases 1–16.
+
+#### Phase 18: Two Answers to One Question
+
+**Prerequisites:** Phase 16.
+**Estimated diff:** ~30 production → **~180 tracked** (×6). Small, and budgeted at ×6 rather than ×4 for
+the reason calibration rule 14 gives: neither criterion is *new behaviour*. Both are a **decision** about
+which of two existing answers is right, and the cost of one is the cases that pin the answer — the
+unrecognised-zone branch below has three outcomes and only one of them is currently asserted anywhere.
+
+Phase 16 found both of these, declined both on the grounds that a phase should not change a card it is
+not about, and recorded them as follow-ups. This is the phase that is about them. They are together
+because they are the same shape: **one question answered two ways in two places**, invisible on every
+payload the endpoint can send, and therefore not a defect — which is exactly why neither will ever be the
+most urgent thing on any other phase's list.
+
+**Acceptance Criteria:**
+
+- [ ] `DashboardSummaryCard` no longer carries its own `localDateIn`; the card and `src/lib/date-utils.ts`
+      resolve a calendar date in a named zone through **one** function.
+- [ ] **The unrecognised-zone behaviour is decided rather than inherited**, and the decision is recorded
+      here. The two implementations differ on it deliberately today: `date-utils` falls back to the
+      *browser's* zone, on the grounds that a stale stored timezone should cost accuracy rather than the
+      render; the card catches the throw and **trusts the anchor**, on the grounds that the server
+      resolved that day and the browser cannot second-guess which one it meant. Both are defensible and
+      they are not interchangeable — through `date-utils`, a browser in another zone can read the anchor
+      as *not today* and disable Regenerate on a perfectly current one, which is the failure the card's
+      version exists to avoid. Whichever wins, `DashboardSummaryCard.test.tsx`'s
+      unrecognised-zone case must still pin the **card's** answer, not the helper's.
+- [ ] `UpcomingDatesCard` names its show-more and gates it on the **same** quantity. It currently names
+      `upcoming.total` while gating on `dates.length`; `TasksCard` reads both off the list, on Phase 15's
+      reasoning that a button should name what pressing it reveals — *"were the two ever to disagree,
+      `total` is the half that is not true here"*. Two idioms for one button, invisible for any conforming
+      payload, so this is a consistency fix and the tests must say which quantity won and why.
+- [ ] A test that would **fail** if the two disagreed: serve a ready section whose `total` does not match
+      its `dates` length and assert what the button says. No such payload can come off the endpoint, which
+      is precisely why nothing catches this today.
+
+**Decisions to take:** whether `date-utils.localDateIn` grows the card's trust-the-anchor branch, or the
+card keeps a thin wrapper that supplies it. Prefer the second if the first would change any other caller's
+behaviour — `future-journals.ts` re-exports that helper, so the blast radius is wider than the dashboard.
+
+**Required Test Coverage:** unit (RTL and lib) — the three zone outcomes for the card's day comparison
+(current anchor, outlived anchor, unrecognised zone), and the show-more's wording against a payload whose
+`total` and list length disagree. No integration or e2e: no endpoint, no tool and no user-visible change
+on any payload the server can produce.
 
 ### ITER18-005: Extending the Daily Summary
 

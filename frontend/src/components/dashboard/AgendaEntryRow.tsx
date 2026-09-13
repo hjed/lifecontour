@@ -62,7 +62,7 @@ export function AgendaEntryRow({ entry }: AgendaEntryRowProps) {
         <Link
           href={`/journals/${entry.journal_id}` as Route}
           className={cn(
-            'min-w-0 font-medium underline-offset-4 hover:underline',
+            'min-w-0 font-medium break-words underline-offset-4 hover:underline',
             entry.is_cancelled && 'text-muted-foreground line-through'
           )}
         >
@@ -99,7 +99,10 @@ export function AgendaEntryRow({ entry }: AgendaEntryRowProps) {
           )}
           {clock && entry.location && <span aria-hidden='true'>·</span>}
           {entry.location && (
-            <span data-testid='agenda-entry-location' className='min-w-0'>
+            <span
+              data-testid='agenda-entry-location'
+              className='min-w-0 break-words'
+            >
               {entry.location}
             </span>
           )}
@@ -117,6 +120,9 @@ export function AgendaEntryRow({ entry }: AgendaEntryRowProps) {
                 <Badge
                   key={tag.id}
                   variant='outline'
+                  // A tag name is free text and can arrive as one unbroken
+                  // token; `min-w-0` on the row above cannot break a word.
+                  className='break-words'
                   style={
                     tag.color
                       ? { borderColor: tag.color, color: tag.color }
