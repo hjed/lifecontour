@@ -17,8 +17,10 @@
  * Phase 11): the server sends the *whole* window with its `total`, three rows
  * are drawn, and the show-more reveals the remainder **in place** from data
  * already held. That is what makes the show-more free — asserted against the
- * request count, not just the DOM — and it is why the button names `total`
- * rather than the number hidden behind the cap.
+ * request count, not just the DOM. The button names the **whole list** rather
+ * than the number hidden behind the cap, and it reads that count off the list
+ * rather than off `total`, as `TasksCard` does: a button
+ * names what pressing it reveals.
  *
  * Three things the list can hold nothing for, kept apart on purpose: **nothing
  * coming up** is a real answer and gets the single **W29**-idiom line the
@@ -131,10 +133,11 @@ function UpcomingDatesCardBody() {
     ? upcoming.dates
     : null;
 
-  // `total` is the window's own count and is what the show-more names. It can
-  // exceed what is drawn but never what was sent, so the button is offered
-  // against the list's own length — a `total` that disagreed with the payload
-  // would otherwise offer to reveal rows that are not there.
+  // Counted off the **list**, and both the button's gate and its name read
+  // this one number. The wire says it equals the section's `total` — the server
+  // caps nothing — but a `total` that disagreed would offer to reveal rows that
+  // are not there, or name a count the press cannot show. `TasksCard` reads both
+  // off the list for the same reason.
   const total = dates?.length ?? 0;
   const shown =
     expanded || dates === null ? dates : dates.slice(0, VISIBLE_UPCOMING_DATES);
@@ -164,7 +167,7 @@ function UpcomingDatesCardBody() {
               data-testid='upcoming-dates-show-more'
               onClick={() => setExpanded(true)}
             >
-              {showAllLabel(upcoming?.total ?? total)}
+              {showAllLabel(total)}
             </Button>
           </div>
         ) : undefined

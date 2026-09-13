@@ -19,7 +19,7 @@
  * exactly the hour a DST transition moves.
  */
 
-import { msUntilNextAnchorDay } from '../dashboard-anchor';
+import { isAnchorStillToday, msUntilNextAnchorDay } from '../dashboard-anchor';
 
 const SYDNEY = 'Australia/Sydney';
 
@@ -152,5 +152,85 @@ describe('msUntilNextAnchorDay', () => {
     expect(
       msUntilNextAnchorDay({ date: '2026-07-31', timezone: SYDNEY })
     ).not.toBeNull();
+  });
+});
+
+/** See the helper of the same name in `date-utils.test.ts`. */
+function browserLocalDate(instant: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}`;
+}
+
+/**
+ * Whether the anchor is still the day it claims to be (ITER18-004 Phase 18).
+ *
+ * The summary card's Regenerate posts `meta.anchor.date`, so a dashboard held
+ * open across local midnight must not rewrite yesterday's summary under a page
+ * headed "Today". The day is resolved through `date-utils.localDateIn` — the
+ * **one** function that answers "which calendar day is this instant in that
+ * zone" — including its answer for a zone the browser does not recognise.
+ */
+describe('isAnchorStillToday', () => {
+  // 13:00 on 31 July in Sydney (UTC+10); midnight there is 14:00Z.
+  const NOW = new Date('2026-07-31T03:00:00Z');
+
+  it('holds for an anchor that is today in its own zone', () => {
+    expect(
+      isAnchorStillToday({ date: '2026-07-31', timezone: SYDNEY }, NOW)
+    ).toBe(true);
+  });
+
+  it('does not hold for an anchor the day has outlived', () => {
+    expect(
+      isAnchorStillToday({ date: '2026-07-30', timezone: SYDNEY }, NOW)
+    ).toBe(false);
+  });
+
+  /**
+   * The boundary is the anchor zone's midnight, not the browser's and not
+   * UTC's — one minute either side of 14:00Z.
+   */
+  it('turns over at midnight in the anchor’s own zone', () => {
+    const anchor = { date: '2026-07-31', timezone: SYDNEY };
+
+    expect(isAnchorStillToday(anchor, new Date('2026-07-31T13:59:00Z'))).toBe(
+      true
+    );
+    expect(isAnchorStillToday(anchor, new Date('2026-07-31T14:01:00Z'))).toBe(
+      false
+    );
+  });
+
+  /**
+   * **Decided in Phase 18: the zone is always resolved.** A zone `Intl` does
+   * not know falls back to the browser's, as it does for every other caller of
+   * `localDateIn` and for `msUntilNextAnchorDay` above. The card used to catch
+   * the throw and trust the anchor instead; the pair below fails for that
+   * version, because 2020 is never today in any zone.
+   */
+  describe('for a zone the browser does not recognise', () => {
+    it('holds for an anchor on the browser’s own date', () => {
+      expect(
+        isAnchorStillToday(
+          { date: browserLocalDate(NOW), timezone: 'Nowhere/Nothing' },
+          NOW
+        )
+      ).toBe(true);
+    });
+
+    it('does not trust an anchor the browser’s date disagrees with', () => {
+      expect(
+        isAnchorStillToday(
+          { date: '2020-01-01', timezone: 'Nowhere/Nothing' },
+          NOW
+        )
+      ).toBe(false);
+    });
+  });
+
+  it('reads the clock itself when it is not given one', () => {
+    expect(isAnchorStillToday({ date: '2020-01-01', timezone: SYDNEY })).toBe(
+      false
+    );
   });
 });

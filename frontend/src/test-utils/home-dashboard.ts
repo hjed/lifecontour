@@ -66,7 +66,8 @@ export function dashboardTaskFixture(
  *
  * `total` is the list's own length, because the server caps nothing: the whole
  * window travels so the show-more can reveal the remainder without a second
- * request, and `total` is the number it displays.
+ * request. The show-more names the list's length, not `total`; a suite that
+ * needs the two to disagree spreads its own `total` over this.
  */
 export function tasksSectionFixture(
   tasks: readonly HomeDashboardTask[]

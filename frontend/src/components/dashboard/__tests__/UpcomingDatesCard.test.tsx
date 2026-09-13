@@ -82,7 +82,8 @@ function upcomingDates(
     // three fields disagreed, which is a window the endpoint cannot send.
     window: { start_date: ANCHOR_DATE, end_date: '2026-08-07', days_ahead: 7 },
     // Named on the wire and derived from the same list here, because the
-    // server does not cap: total is what the show-more displays.
+    // server does not cap. The show-more names the list, not this — see the
+    // disagreeing-total cases below.
     total: dates.length,
     dates,
   };
@@ -196,6 +197,35 @@ describe('UpcomingDatesCard', () => {
         await screen.findByRole('button', { name: /show all/i })
       ).toHaveTextContent('Show all 5 this week');
     });
+
+    /**
+     * **The show-more names the list it reveals, not `total`** (ITER18-004
+     * Phase 18). The card offers the button against the list's own length, and
+     * it used to *name* `total` — two quantities for one button, which agree
+     * on every payload the endpoint sends, so nothing could catch it. The list
+     * won, on the reasoning `TasksCard` records: a button names what pressing
+     * it reveals, and were the two ever to disagree, `total` is the half that
+     * is not true on screen. Both directions, because a `total` below the list
+     * must neither hide the button nor under-name it.
+     */
+    it.each([
+      ['exceeds', 9],
+      ['falls short of', 2],
+    ])(
+      'names the five it holds when total %s the list',
+      async (_direction, total) => {
+        serveSection({
+          status: DashboardSectionStatus.READY,
+          data: { ...upcomingDates(FIVE_DATES), total },
+        });
+
+        renderWithProviders(<UpcomingDatesCard />);
+
+        expect(
+          await screen.findByRole('button', { name: /show all/i })
+        ).toHaveTextContent('Show all 5 this week');
+      }
+    );
 
     it('reveals the remainder in place', async () => {
       serveReady(FIVE_DATES);

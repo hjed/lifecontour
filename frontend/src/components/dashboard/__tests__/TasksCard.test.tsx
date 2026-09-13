@@ -339,6 +339,31 @@ describe('TasksCard', () => {
       ).toHaveTextContent('Show all 7 due this week');
     });
 
+    /**
+     * The same rule `UpcomingDatesCard` now follows (ITER18-004 Phase 18), pinned
+     * here too so neither card can drift back to a second idiom: the button
+     * names the list it reveals, never the section's `total`. No endpoint
+     * payload disagrees, which is why only a served one can catch it.
+     */
+    it.each([
+      ['exceeds', 12],
+      ['falls short of', 3],
+    ])(
+      'names the seven it holds when total %s the list',
+      async (_direction, total) => {
+        serveSection({
+          status: DashboardSectionStatus.READY,
+          data: { ...tasksSection(SEVEN_TASKS), total },
+        });
+
+        renderWithProviders(<TasksCard />);
+
+        expect(
+          await screen.findByRole('button', { name: /show all/i })
+        ).toHaveTextContent('Show all 7 due this week');
+      }
+    );
+
     it('reveals the remainder in place', async () => {
       serveReady(SEVEN_TASKS);
       const user = userEvent.setup();

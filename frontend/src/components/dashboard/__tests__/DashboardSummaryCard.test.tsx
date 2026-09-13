@@ -15,7 +15,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { renderWithProviders } from '@/test-utils';
-import { DashboardSummaryCard, localDateIn } from '../DashboardSummaryCard';
+import { DashboardSummaryCard } from '../DashboardSummaryCard';
+import { todayIn } from '@/lib/date-utils';
 import {
   DashboardSectionStatus,
   DashboardSummaryState,
@@ -42,16 +43,30 @@ const DASHBOARD_URL = '/api/home-dashboard';
 const ANCHOR_TIMEZONE = 'Australia/Sydney';
 
 /**
+ * The instant every test runs at: 13:00 in Sydney on 31 July 2026.
+ *
+ * Frozen for the whole suite (see the top-level `beforeEach`), because the card
+ * reads the clock itself — at render, and again inside the click handler — and
+ * the expectations here are built from a "today" sampled separately. On a live
+ * clock the two readings can straddle midnight, and an "enabled" assertion then
+ * fails for a reason that has nothing to do with the card: Augment's review of
+ * PR #1447 found it in the unrecognised-zone pair, and `ANCHOR_DATE`, sampled
+ * at import, had the same exposure across the whole suite. Midday keeps the
+ * boundary eleven hours off, so nothing a test waits on can reach it.
+ */
+const NOW = new Date('2026-07-31T03:00:00Z');
+
+/**
  * The day every test renders against: **today in the fixture's zone**.
  *
  * Not a fixed past date, which is what this was before the anchor-freshness
  * guard existed: the card now refuses to regenerate a day its anchor has
- * outlived (see `isStillToday`), so a hard-coded past day would disable the
+ * outlived (see `isAnchorStillToday`), so a hard-coded past day would disable the
  * control in every test rather than in the one test that is about it. The
  * stale case gets its own anchor below and needs no clock mocking — a day in
  * 2020 is stale by construction.
  */
-const ANCHOR_DATE = localDateIn(ANCHOR_TIMEZONE, new Date());
+const ANCHOR_DATE = todayIn(ANCHOR_TIMEZONE, NOW);
 const REGENERATE_URL = `/api/journals/daily-summary/${ANCHOR_DATE}/regenerate`;
 
 const UNAVAILABLE_LINE = /no summary today/i;
@@ -172,6 +187,11 @@ function servingDashboard(document: HomeDashboardResponse) {
   routeFetch({ dashboard: () => jsonResponse(document) });
 }
 
+/** `userEvent` waits on timers, so it has to drive the frozen clock itself. */
+function userOnTheFrozenClock() {
+  return userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+}
+
 /** Render the card and wait for it to be on screen. */
 async function renderCard(): Promise<HTMLElement> {
   renderWithProviders(<DashboardSummaryCard />);
@@ -182,43 +202,17 @@ function regenerateButton(): HTMLElement {
   return screen.getByRole('button', { name: /regenerate/i });
 }
 
-/**
- * The day-in-zone helper, asserted against dates written out by hand.
- *
- * The card's fixtures use this helper too, so they cannot catch it being
- * wrong — these can. `format` was the first implementation and is what these
- * pin against: which separator a locale renders is CLDR data rather than a
- * guarantee, so a build whose `en-CA` used slashes would have disabled
- * Regenerate on a current anchor. Assembling the parts is locale-independent.
- */
-describe('localDateIn', () => {
-  it('renders the day in the given zone as YYYY-MM-DD', () => {
-    // 06:00 UTC on 29 July is 16:00 the same day in Sydney.
-    expect(
-      localDateIn('Australia/Sydney', new Date('2026-07-29T06:00:00Z'))
-    ).toBe('2026-07-29');
-  });
-
-  it('gives the local day, not the UTC one, either side of midnight', () => {
-    const instant = new Date('2026-07-29T20:00:00Z');
-
-    // 06:00 on the 30th in Sydney; still 16:00 on the 29th in New York.
-    expect(localDateIn('Australia/Sydney', instant)).toBe('2026-07-30');
-    expect(localDateIn('America/New_York', instant)).toBe('2026-07-29');
-  });
-
-  it('zero-pads single-digit months and days', () => {
-    expect(localDateIn('UTC', new Date('2026-01-05T12:00:00Z'))).toBe(
-      '2026-01-05'
-    );
-  });
-});
-
 describe('DashboardSummaryCard', () => {
   beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
     jest.clearAllMocks();
     mockFetch.mockReset();
     servingDashboard(dashboardWith(GENERATED_SUMMARY));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   describe('The card itself (W5, W6)', () => {
@@ -519,16 +513,12 @@ describe('DashboardSummaryCard', () => {
       await screen.findByTestId('dashboard-summary-text');
       expect(regenerateButton()).toBeEnabled();
 
-      jest.useFakeTimers();
-      try {
-        jest.setSystemTime(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000));
+      // Two days on, with no render in between: nothing on this page ticks.
+      jest.setSystemTime(new Date(NOW.getTime() + 2 * 24 * 60 * 60 * 1000));
 
-        // Still enabled — nothing has re-rendered, which is the whole point.
-        expect(regenerateButton()).toBeEnabled();
-        fireEvent.click(regenerateButton());
-      } finally {
-        jest.useRealTimers();
-      }
+      // Still enabled — nothing has re-rendered, which is the whole point.
+      expect(regenerateButton()).toBeEnabled();
+      fireEvent.click(regenerateButton());
 
       expect(
         mockFetch.mock.calls.filter(
@@ -538,21 +528,61 @@ describe('DashboardSummaryCard', () => {
     });
 
     /**
-     * A zone the browser cannot parse throws inside `Intl`. The server
-     * resolved this day and the browser cannot second-guess which one it
-     * meant, so the anchor is trusted rather than the control being disabled
-     * for a reason the reader could never resolve.
+     * **Decided in ITER18-004 Phase 18: the zone is always resolved.** A zone
+     * the browser cannot parse used to be caught here and the anchor trusted;
+     * it now resolves through `date-utils`' fallback to the browser's own zone,
+     * the one answer every other caller of `localDateIn` gets. The pair is what
+     * pins the card's answer rather than the helper's: an anchor on the
+     * browser's own date is offered and posted, and an anchor in 2020 — today
+     * in no zone — is not, which the trusting version would have enabled.
+     *
+     * The browser's date is read from `Date`'s local getters, so both cases
+     * hold whatever zone the test runner happens to be in — and from the
+     * suite's frozen clock, so it is the same instant the card reads.
      */
-    it('trusts the anchor when its zone means nothing to the browser', async () => {
-      servingDashboard({
-        ...dashboardWith(GENERATED_SUMMARY),
-        meta: { anchor: { date: ANCHOR_DATE, timezone: 'Nowhere/Nothing' } },
+    describe('for a zone the browser does not recognise', () => {
+      const UNRECOGNISED_ZONE = 'Nowhere/Nothing';
+
+      function browserLocalDate(instant: Date): string {
+        const pad = (value: number) => String(value).padStart(2, '0');
+        return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}`;
+      }
+
+      it('reads the day in the browser’s own zone and posts it', async () => {
+        const browserDay = browserLocalDate(new Date());
+        const browserRegenerateUrl = `/api/journals/daily-summary/${browserDay}/regenerate`;
+        const user = userOnTheFrozenClock();
+        servingDashboard({
+          ...dashboardWith(GENERATED_SUMMARY),
+          meta: { anchor: { date: browserDay, timezone: UNRECOGNISED_ZONE } },
+        });
+
+        await renderCard();
+        await screen.findByTestId('dashboard-summary-text');
+        expect(regenerateButton()).toBeEnabled();
+
+        await user.click(regenerateButton());
+
+        await waitFor(() =>
+          expect(
+            mockFetch.mock.calls.filter(
+              ([input]) => String(input) === browserRegenerateUrl
+            )
+          ).toHaveLength(1)
+        );
       });
 
-      await renderCard();
-      await screen.findByTestId('dashboard-summary-text');
+      it('does not trust an anchor the browser’s date disagrees with', async () => {
+        servingDashboard({
+          ...dashboardWith(GENERATED_SUMMARY),
+          meta: { anchor: { date: '2020-01-01', timezone: UNRECOGNISED_ZONE } },
+        });
 
-      expect(regenerateButton()).toBeEnabled();
+        await renderCard();
+        await screen.findByTestId('dashboard-summary-text');
+
+        expect(regenerateButton()).toBeDisabled();
+      });
     });
 
     it.each([
@@ -590,7 +620,7 @@ describe('DashboardSummaryCard', () => {
     });
 
     it("posts to the server's anchor day and shows the refreshed summary", async () => {
-      const user = userEvent.setup();
+      const user = userOnTheFrozenClock();
       let current = dashboardWith(GENERATED_SUMMARY);
 
       routeFetch({
@@ -641,7 +671,7 @@ describe('DashboardSummaryCard', () => {
     });
 
     it('marks itself busy while the regeneration is in flight', async () => {
-      const user = userEvent.setup();
+      const user = userOnTheFrozenClock();
 
       routeFetch({
         dashboard: () => jsonResponse(dashboardWith(GENERATED_SUMMARY)),
@@ -658,7 +688,7 @@ describe('DashboardSummaryCard', () => {
     });
 
     it('keeps the card on screen and surfaces the failure when it fails', async () => {
-      const user = userEvent.setup();
+      const user = userOnTheFrozenClock();
 
       routeFetch({
         dashboard: () => jsonResponse(dashboardWith(GENERATED_SUMMARY)),

@@ -119,6 +119,11 @@ nothing tested, which is the lesson worth keeping: **a criterion a shared shell 
 accidentally until the phase that owns it says which icon and which sentence.** The cap and Phase 14's
 inline write meet here too, in both directions, against a fetch mock that applies the tick rather than one
 that keeps serving the list the tick removed from.
+**ITER18-004 Phase 18 complete: one question, one answer, twice.** The summary card no longer resolves
+the day with its own copy of `localDateIn`; `isAnchorStillToday` compares the anchor through
+`date-utils`' helper, so a zone the browser cannot parse resolves in the browser's own zone as it does
+everywhere else. And the upcoming-dates show-more names the list it reveals, the quantity it already
+gated on and the one the tasks card reads. Both answers are pinned by payloads the endpoint cannot send.
 **ITER18-005 Phase 6 complete: the current day's prompt says whose important dates are coming up.**
 `DailySummaryInputAssembler` calls `UpcomingImportantDatesService.upcoming_dates` — the read the
 dashboard's section and `list_upcoming_important_dates` already share — so the recurrence rule, the
@@ -11899,13 +11904,23 @@ each verified to fail against a deliberate break. No unit or integration tests: 
 changed. Gates run locally: `pnpm quality:check` (0 errors), the dashboard Jest suites (18 suites, 244
 tests), and the full spec on both projects with `--repeat-each 2`.
 
-#### Phase 18: Two Answers to One Question
+#### Phase 18: Two Answers to One Question ✅ COMPLETE
 
 **Prerequisites:** Phase 16.
+
 **Estimated diff:** ~30 production → **~180 tracked** (×6). Small, and budgeted at ×6 rather than ×4 for
 the reason calibration rule 14 gives: neither criterion is *new behaviour*. Both are a **decision** about
 which of two existing answers is right, and the cost of one is the cases that pin the answer — the
 unrecognised-zone branch below has three outcomes and only one of them is currently asserted anywhere.
+
+**Actual: 121 production lines changed (+60 / −61), 322 in tests (+261 / −61)**, plus 27 in
+`frontend-design.md`, and this entry. Production came in near four times the ~30 estimate, and almost all
+of it is prose: the card's deleted helper carried the longest doc comment in the file, and the decision
+moved into `isAnchorStillToday`'s. The code delta is one new one-expression function, two call sites and
+one label argument. **The tracked total, ~440 against ~180, overran even rule 14's ×6**, and the tests
+are why: pinning an answer that no endpoint payload can reach took a served pair per decision, in both
+cards and at both layers — which is the entry's own warning that the cost is the cases, borne out at
+about two and a half times the size it priced (the Augment review round added the frozen-clock rework).
 
 Phase 16 found both of these, declined both on the grounds that a phase should not change a card it is
 not about, and recorded them as follow-ups. This is the phase that is about them. They are together
@@ -11915,9 +11930,11 @@ most urgent thing on any other phase's list.
 
 **Acceptance Criteria:**
 
-- [ ] `DashboardSummaryCard` no longer carries its own `localDateIn`; the card and `src/lib/date-utils.ts`
-      resolve a calendar date in a named zone through **one** function.
-- [ ] **The unrecognised-zone behaviour is decided rather than inherited**, and the decision is recorded
+- [x] `DashboardSummaryCard` no longer carries its own `localDateIn`; the card and `src/lib/date-utils.ts`
+      resolve a calendar date in a named zone through **one** function. — The card's `localDateIn` and
+      `isStillToday` are deleted; it calls `isAnchorStillToday` (`src/lib/dashboard-anchor.ts`), which is
+      `date-utils.localDateIn` compared with the anchor. `tsc` fails for any import of the old export.
+- [x] **The unrecognised-zone behaviour is decided rather than inherited**, and the decision is recorded
       here. The two implementations differ on it deliberately today: `date-utils` falls back to the
       *browser's* zone, on the grounds that a stale stored timezone should cost accuracy rather than the
       render; the card catches the throw and **trusts the anchor**, on the grounds that the server
@@ -11925,15 +11942,22 @@ most urgent thing on any other phase's list.
       they are not interchangeable — through `date-utils`, a browser in another zone can read the anchor
       as *not today* and disable Regenerate on a perfectly current one, which is the failure the card's
       version exists to avoid. Whichever wins, `DashboardSummaryCard.test.tsx`'s
-      unrecognised-zone case must still pin the **card's** answer, not the helper's.
-- [ ] `UpcomingDatesCard` names its show-more and gates it on the **same** quantity. It currently names
+      unrecognised-zone case must still pin the **card's** answer, not the helper's. — **Decided at plan
+      review: the zone is always resolved**, through `date-utils`' browser fallback (decision 1 below). The
+      card's case is now a pair — an anchor on the browser's own date is offered and posted, an anchor in
+      2020 is disabled — which fails for the old trusting card and holds in any runner zone.
+- [x] `UpcomingDatesCard` names its show-more and gates it on the **same** quantity. It currently names
       `upcoming.total` while gating on `dates.length`; `TasksCard` reads both off the list, on Phase 15's
       reasoning that a button should name what pressing it reveals — *"were the two ever to disagree,
       `total` is the half that is not true here"*. Two idioms for one button, invisible for any conforming
-      payload, so this is a consistency fix and the tests must say which quantity won and why.
-- [ ] A test that would **fail** if the two disagreed: serve a ready section whose `total` does not match
+      payload, so this is a consistency fix and the tests must say which quantity won and why. — **The
+      list's length won** (decision 3); `showAllLabel(total)` now reads the same count the gate does, and
+      the tests' doc comments say why.
+- [x] A test that would **fail** if the two disagreed: serve a ready section whose `total` does not match
       its `dates` length and assert what the button says. No such payload can come off the endpoint, which
-      is precisely why nothing catches this today.
+      is precisely why nothing catches this today. — `names the five it holds when total exceeds / falls
+      short of the list` in `UpcomingDatesCard.test.tsx`, red against the old card; the same pair in
+      `TasksCard.test.tsx`, red against a deliberate `ready?.total` break.
 
 **Decisions to take:** whether `date-utils.localDateIn` grows the card's trust-the-anchor branch, or the
 card keeps a thin wrapper that supplies it. Prefer the second if the first would change any other caller's
@@ -11942,7 +11966,64 @@ behaviour — `future-journals.ts` re-exports that helper, so the blast radius i
 **Required Test Coverage:** unit (RTL and lib) — the three zone outcomes for the card's day comparison
 (current anchor, outlived anchor, unrecognised zone), and the show-more's wording against a payload whose
 `total` and list length disagree. No integration or e2e: no endpoint, no tool and no user-visible change
-on any payload the server can produce.
+on any payload the server can produce. — **Delivered:** 14 new cases — 6 over `isAnchorStillToday` (current,
+outlived, the Sydney midnight boundary, the unrecognised-zone pair, the default clock), 2 over
+`localDateIn` in `date-utils.test.ts` (one migrated from the card, one pinning the browser fallback to the
+browser's own date), the card's unrecognised-zone pair, and the disagreeing-`total` pair in each of the two
+cards — with 4 retired from the card suite (its three `localDateIn` cases and the test that could not tell
+the two answers apart). **E2E deferred, as the entry allows:** the only payloads that behave differently
+cannot be produced for a browser that knows the zone, so they cannot be seeded, and a `page.route` mock
+would restate the RTL case. The spec was run as a regression gate instead. **Gates run locally:**
+`pnpm quality:check` (0 errors), the full Jest run (**211 suites, 2,784 tests**), and
+`home-dashboard.spec.ts` on `firefox` and `Mobile Chrome` (**77 passed**). No backend file changed.
+A review pass against this entry and the specification found every criterion and required test met; its one
+finding, iteration tags written into two production comments, was removed.
+
+**Decisions taken (Phase 18):**
+
+1. **The zone is always resolved — `date-utils`' browser fallback won, and the card has no second answer.**
+   Decided at plan review. `isAnchorStillToday` (`src/lib/dashboard-anchor.ts`) is
+   `localDateIn(anchor.timezone, now) === anchor.date` and nothing else; the card's own `localDateIn`,
+   its `isStillToday` and the catch that trusted the anchor are deleted. The planning draft kept the card's
+   answer behind a zone-validity check, and was declined: one question should have one answer in the
+   app, and the dashboard's other anchor helper, `msUntilNextAnchorDay`, **already** resolved an
+   unparseable zone in the browser's — so the card was the odd one out on its own page, not only against
+   the picker. **The accepted cost:** for an anchor whose zone the browser cannot parse and whose date the
+   browser's own disagrees with, Regenerate stays disabled — the same safe failure an outlived anchor
+   gets. It never posts a wrong day. **That window is longer than it first looks, found by Augment's
+   review on PR #1447:** sharing a fallback zone is not sharing a boundary. The refresh waits for the
+   browser's midnight *after `anchor.date` plus one*, not the next browser midnight, and nothing re-renders
+   the card in between — a focus refetch returning the same payload does not, since the card reads only
+   `data` and `isPending` — so the control can stay disabled for up to about a day after the browser's
+   date first matches the anchor, until the scheduled refresh brings the next one. Declined as a change
+   here: aligning the scheduler with the check would re-open Phase 16's refresh for a branch that needs
+   out-of-date browser tzdata. **Follow-up:** schedule the refresh at the earlier of the anchor zone's
+   midnight and the browser's for a zone `Intl` cannot parse. **How reachable that is was checked rather than
+   assumed:** `meta.anchor.timezone` is `tz.key` of the `ZoneInfo` that `JournalDateResolver.timezone_for`
+   returns, and that goes through `resolve_timezone`, which falls back to UTC for a missing or unknown
+   stored name. The server therefore only ever sends a zone *Python's* tzdata knows, so the branch is
+   reached only by a browser whose ICU data lacks one — a newly added or renamed IANA zone on an old
+   browser — and never by a stale or mistyped user setting.
+2. **The wrapper stayed thin, and `date-utils` did not change.** `future-journals.ts` re-exports
+   `localDateIn` for the due-journal picker and `zonedCalendarDay` builds on it, so the helper's behaviour
+   is untouched; the comparison lives beside `msUntilNextAnchorDay` because that module already owns the
+   anchor day, and there it gets a lib test with an injected clock.
+3. **The show-more names the list.** `UpcomingDatesCard` gated on `dates.length` and named `total`; it now
+   names the length too, which is `TasksCard`'s Phase 15 reasoning — a button names what pressing it
+   reveals. Both cards carry the same disagreeing-`total` pair, in both directions, so neither can drift
+   back to the other idiom. The fixtures spread a `total` over the ready section rather than growing an
+   override parameter: the disagreement is one test's business, not the shared fixture's.
+4. **Every new test was run red first, against the code it replaces.** The card's unrecognised-zone pair
+   failed on the old trusting card (anchor `2020-01-01` enabled); the upcoming-dates pair failed on the
+   old `upcoming?.total`; the tasks pair failed against a deliberate `ready?.total` break, then reverted.
+   The expectations read the browser's date from `Date`'s local getters, so none of them depends on the
+   test runner's zone — which is exactly what the card's old unrecognised-zone test did, since it anchored
+   on today in Sydney and could not tell the two answers apart on a Sydney machine.
+   **The card suite then moved onto a frozen clock** (13:00 in Sydney on 31 July 2026), found by Augment's
+   review on PR #1447: the unrecognised-zone pair sampled the browser's date before rendering while the card
+   reads the clock again during it, and `ANCHOR_DATE`, sampled at import, carried the same midnight
+   exposure into every "enabled" assertion in the suite. Freezing the clock fixes the whole category rather
+   than the one test the review named.
 
 ### ITER18-005: Extending the Daily Summary
 
