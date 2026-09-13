@@ -102,7 +102,7 @@ class TestRouteServiceUpdate:
     @pytest.mark.asyncio
     async def test_update_route_merges_the_edit_into_the_locked_row(
         self, route_service, mock_route_repo, mock_event_publisher, mock_transaction
-    ):
+    ) -> None:
         route_id = uuid4()
         mock_route_repo.find_by_id_for_update.return_value = create_test_route(
             route_id=route_id, name="Old", description="kept"
@@ -132,7 +132,7 @@ class TestRouteServiceUpdate:
     @pytest.mark.asyncio
     async def test_update_route_not_found(
         self, route_service, mock_route_repo, mock_event_publisher, mock_transaction
-    ):
+    ) -> None:
         mock_route_repo.find_by_id_for_update.return_value = None
 
         with pytest.raises(RouteNotFoundError):
@@ -146,7 +146,7 @@ class TestRouteServiceUpdate:
     @pytest.mark.asyncio
     async def test_an_invalid_edit_writes_nothing(
         self, route_service, mock_route_repo, mock_event_publisher, mock_transaction
-    ):
+    ) -> None:
         route_id = uuid4()
         mock_route_repo.find_by_id_for_update.return_value = create_test_route(
             route_id=route_id

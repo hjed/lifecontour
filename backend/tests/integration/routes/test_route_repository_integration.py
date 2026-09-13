@@ -167,7 +167,7 @@ class TestRouteRepositoryFindByIdForUpdate:
 
     async def test_returns_the_route(
         self, route_repository: SqlRouteRepository, test_journal: Journal
-    ):
+    ) -> None:
         gpx_data = '<?xml version="1.0"?><gpx version="1.1"></gpx>'
         saved = await route_repository.save(
             create_test_route(journal_id=test_journal.id, gpx_data=gpx_data)
@@ -185,7 +185,9 @@ class TestRouteRepositoryFindByIdForUpdate:
         )
         assert found.created_at == saved.created_at
 
-    async def test_returns_none_for_missing(self, route_repository: SqlRouteRepository):
+    async def test_returns_none_for_missing(
+        self, route_repository: SqlRouteRepository
+    ) -> None:
         assert await route_repository.find_by_id_for_update(uuid4()) is None
 
 
