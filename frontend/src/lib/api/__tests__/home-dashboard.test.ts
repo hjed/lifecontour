@@ -364,6 +364,37 @@ describe('useAnchorDayRefresh', () => {
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
   });
 
+  /**
+   * Raised in review on PR #1434. A boundary further off than a `setTimeout`
+   * can hold cannot be waited for in one go, and the obvious fix — cap the
+   * delay — invalidates **early**: the refetch returns the same anchor, the
+   * effect does not re-run, and the page is left with no timer at all. The
+   * wait is taken in instalments instead, and only a timer that actually
+   * reached the boundary invalidates.
+   */
+  it('waits in instalments for a boundary a single timer cannot reach', async () => {
+    const MAX_TIMEOUT = 2_147_483_647;
+    // A browser clock the better part of a year behind the anchor.
+    jest.setSystemTime(new Date('2026-01-01T03:00:00Z'));
+    const boundary = new Date('2026-07-31T14:00:00Z');
+
+    const { result } = renderPageLikeCaller(ANCHOR);
+    await settle(result);
+
+    // One whole timer's worth of waiting, and still nothing: the page must not
+    // spend its one rescheduling opportunity before the day has ended.
+    await act(async () => {
+      jest.advanceTimersByTime(MAX_TIMEOUT);
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // The rest of the way, through however many further instalments it takes.
+    await act(async () => {
+      jest.advanceTimersByTime(boundary.getTime() - Date.now());
+    });
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+  });
+
   it('clears the timer when the page goes away', async () => {
     const { result, unmount } = renderPageLikeCaller(ANCHOR);
     await settle(result);

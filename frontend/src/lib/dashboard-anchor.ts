@@ -30,19 +30,20 @@ import { isIsoCalendarDate, zonedMidnight } from '@/lib/date-utils';
 import type { HomeDashboardAnchor } from '@/lib/api/home-dashboard';
 
 /**
- * The longest delay `setTimeout` can hold. Past it the browser fires
- * immediately, so a wildly skewed clock would refetch at once instead of never
- * — which is the better of the two failures, but it should be deliberate.
- */
-const MAX_TIMEOUT_MS = 2_147_483_647;
-
-/**
  * How long until the anchor day ends, in milliseconds.
  *
  * Zero or negative means it already has — a payload cached across midnight —
  * and the caller should refresh at once. `null` means the anchor cannot be
  * read at all and **nothing should be scheduled**: the arithmetic would be
  * `NaN`, and `setTimeout(NaN)` fires immediately rather than never.
+ *
+ * The answer is **not** clamped to what a `setTimeout` can hold. How long a
+ * timer can wait is the scheduler's problem, and clamping here made it look
+ * solved when it was not: a boundary further off than ~24.8 days — a browser
+ * clock weeks behind, or an anchor the server should never send — would fire
+ * the timer early, and `useAnchorDayRefresh` would not re-arm because its
+ * effect is keyed on an anchor the refetch did not change. The page would then
+ * have *no* timer at all. The hook sleeps in instalments instead.
  *
  * @param anchor The payload's own `meta.anchor`: the day, and the zone it was
  *   resolved in.
@@ -66,5 +67,5 @@ export function msUntilNextAnchorDay(
     return null;
   }
 
-  return Math.min(boundary - now.getTime(), MAX_TIMEOUT_MS);
+  return boundary - now.getTime();
 }

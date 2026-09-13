@@ -128,6 +128,26 @@ describe('msUntilNextAnchorDay', () => {
     ).toBeNull();
   });
 
+  /**
+   * Raised in review on PR #1434. This used to clamp its answer to what a
+   * `setTimeout` can hold (~24.8 days), which read as prudence and was not:
+   * the hook would then fire **early**, get the same anchor back, and — being
+   * keyed on that anchor — never re-run to schedule anything else, leaving the
+   * page with no timer at all. How long a timer can wait is the scheduler's
+   * problem; this answers when the day ends.
+   */
+  it('reports a boundary further off than a timer can hold, uncapped', () => {
+    const MAX_TIMEOUT = 2_147_483_647;
+
+    const delay = msUntilNextAnchorDay(
+      // A browser clock the better part of a year behind the anchor.
+      { date: '2026-07-31', timezone: SYDNEY },
+      new Date('2026-01-01T03:00:00Z')
+    );
+
+    expect(delay).toBeGreaterThan(MAX_TIMEOUT);
+  });
+
   it('reads the clock itself when it is not given one', () => {
     expect(
       msUntilNextAnchorDay({ date: '2026-07-31', timezone: SYDNEY })

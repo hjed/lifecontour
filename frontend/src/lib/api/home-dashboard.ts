@@ -29,6 +29,13 @@ import { ImportantDateTypeEnum } from '@/types/contacts';
 import { API_ENDPOINTS, ERROR_MESSAGES } from '@/lib/constants';
 import { msUntilNextAnchorDay } from '@/lib/dashboard-anchor';
 
+/**
+ * The longest delay a `setTimeout` can hold; past it a browser fires
+ * immediately. A timer concern, so it lives with the timer rather than with the
+ * arithmetic that says when the anchor day ends.
+ */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
 /** Whether a section has a payload for you. */
 export enum DashboardSectionStatus {
   READY = 'ready',
@@ -385,6 +392,14 @@ export function useHomeDashboard() {
  * anchor — a browser clock that disagrees with the server about the day — the
  * dependencies have not moved, the effect does not run again, and there is no
  * loop. A refetch that does move the day reschedules for the next boundary.
+ *
+ * **That same property is why the timer sleeps in instalments.** A boundary
+ * further off than a `setTimeout` can hold — a browser clock weeks behind, or
+ * an anchor the server should never send — cannot be waited for in one go, and
+ * simply capping the delay would *invalidate early*: the refetch would return
+ * the same anchor, the effect would not run again, and the page would be left
+ * with no timer at all. So a capped wait re-arms rather than firing, and only a
+ * timer that actually reached the boundary invalidates.
  */
 export function useAnchorDayRefresh(anchor: HomeDashboardAnchor | undefined) {
   const queryClient = useQueryClient();
@@ -396,19 +411,33 @@ export function useAnchorDayRefresh(anchor: HomeDashboardAnchor | undefined) {
       return;
     }
 
-    const delay = msUntilNextAnchorDay({ date, timezone });
-    if (delay === null) {
-      // An anchor that cannot be read schedules nothing: the arithmetic would
-      // be `NaN`, and `setTimeout(NaN)` fires immediately rather than never.
-      return;
-    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const timer = setTimeout(
-      () => {
+    const arm = () => {
+      const remaining = msUntilNextAnchorDay({ date, timezone });
+      if (remaining === null) {
+        // An anchor that cannot be read schedules nothing: the arithmetic
+        // would be `NaN`, and `setTimeout(NaN)` fires immediately, not never.
+        return;
+      }
+
+      // Re-measured on each arming rather than counted down, so a machine that
+      // slept through part of the wait still stops at the right instant.
+      const wait = Math.min(Math.max(remaining, 0), MAX_TIMEOUT_MS);
+      timer = setTimeout(() => {
+        if (wait < remaining) {
+          // Only part of the way there. Sleeping again rather than
+          // invalidating is the whole point: an early invalidation would
+          // return the same anchor, and the effect — keyed on that anchor —
+          // would not run again to schedule anything else.
+          arm();
+          return;
+        }
         void queryClient.invalidateQueries({ queryKey: homeDashboardKeys.all });
-      },
-      Math.max(delay, 0)
-    );
+      }, wait);
+    };
+
+    arm();
 
     return () => clearTimeout(timer);
   }, [date, timezone, queryClient]);
