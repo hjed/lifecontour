@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from datetime import date, datetime
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -58,6 +60,270 @@ def _returned_id(result: Any) -> Any:
     row = result.fetchone()
     assert row is not None
     return row.id
+
+
+async def _insert_gear_usage_journal(
+    async_connection: AsyncConnection,
+    *,
+    start: str,
+    end: str,
+    asset_id: str = "42",
+    user_timezone: str | None = None,
+    event_timezone: str | None = None,
+) -> int:
+    """Insert a GEAR_USAGE journal on a Snipe-IT-synced gear item.
+
+    ``start``/``end`` are the stored instants (the UTC instant of a local
+    midnight, as the app writes them). A user timezone is stored in
+    ``user_settings`` and an event timezone on ``journal_calendar_info``.
+    """
+    gear_item_id = str(
+        _returned_id(
+            await async_connection.execute(
+                text("""
+                    INSERT INTO gear_items (name, user_id)
+                    VALUES ('Tent', 'user-123')
+                    RETURNING id
+                """)
+            )
+        )
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (integration_source, external_id, internal_uuid,
+                 last_synced_at, version_hash, sync_status,
+                 error_message, retry_count, created_at, updated_at)
+            VALUES
+                ('snipeit', :asset_id, :gear_item_id,
+                 now(), 'hash', 'success', NULL, 0, now(), now())
+        """),
+        {"asset_id": asset_id, "gear_item_id": gear_item_id},
+    )
+    journal_id: int = _returned_id(
+        await async_connection.execute(
+            text("""
+                INSERT INTO journals (title, content, user_id,
+                    event_date_range_start, event_date_range_end)
+                VALUES ('Past trip', '', 'user-123', :start, :end)
+                RETURNING id
+            """),
+            {
+                "start": datetime.fromisoformat(start),
+                "end": datetime.fromisoformat(end),
+            },
+        )
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_gear_usage_data
+                (journal_id, gear_item_id, checkout_date, checkin_date)
+            VALUES (:journal_id, :gear_item_id, NULL, NULL)
+        """),
+        {"journal_id": journal_id, "gear_item_id": gear_item_id},
+    )
+    if user_timezone:
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_settings (user_id, timezone)
+                VALUES ('user-123', :timezone)
+            """),
+            {"timezone": user_timezone},
+        )
+    if event_timezone:
+        calendar_id = uuid4()
+        await async_connection.execute(
+            text("""
+                INSERT INTO calendars (id, user_id, name, color, is_synced_to_google)
+                VALUES (:id, 'user-123', 'Trips', '#FF0000', false)
+            """),
+            {"id": calendar_id},
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_calendar_info
+                    (journal_id, calendar_id, is_all_day, timezone)
+                VALUES (:journal_id, :calendar_id, true, :timezone)
+            """),
+            {
+                "journal_id": journal_id,
+                "calendar_id": calendar_id,
+                "timezone": event_timezone,
+            },
+        )
+    return journal_id
+
+
+def _request_body(mock_transport: Any, path: str) -> dict[str, Any]:
+    """Return the JSON body of the single request whose URL contains ``path``."""
+    (request,) = [r for r in mock_transport.requests if path in str(r.url)]
+    body: dict[str, Any] = json.loads(request.content)
+    return body
+
+
+async def _reference_data(
+    async_connection: AsyncConnection, *, source: str, journal_id: int
+) -> Any:
+    """Return the decoded ``reference_data`` of a journal's sync row for ``source``."""
+    result = await async_connection.execute(
+        text("""
+            SELECT reference_data FROM sync_metadata
+            WHERE integration_source = :source AND internal_uuid = :journal_id
+        """),
+        {"source": source, "journal_id": str(journal_id)},
+    )
+    row = result.fetchone()
+    assert row is not None, source
+    return json.loads(row.reference_data)
+
+
+def _queue_checkout_and_checkin(mock_transport: Any, asset_id: str = "42") -> None:
+    mock_transport.add_response(
+        f"/hardware/{asset_id}/checkout",
+        json_data={"status": "success", "messages": "Checked out."},
+    )
+    mock_transport.add_response(
+        f"/hardware/{asset_id}/checkin",
+        json_data={"status": "success", "messages": "Checked in."},
+    )
+
+
+class TestHistoricalDatesIntegration:
+    """Past usage is recorded in Snipe-IT on the journal's local dates."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("start", "end", "checkout_at", "checkin_at"),
+        [
+            # AEDT (+11:00): 8-9 March local
+            (
+                "2025-03-07T13:00:00+00:00",
+                "2025-03-08T13:00:00+00:00",
+                "2025-03-08",
+                "2025-03-09",
+            ),
+            # AEST (+10:00): 8-9 June local
+            (
+                "2025-06-07T14:00:00+00:00",
+                "2025-06-08T14:00:00+00:00",
+                "2025-06-08",
+                "2025-06-09",
+            ),
+        ],
+        ids=["aedt", "aest"],
+    )
+    async def test_past_usage_is_checked_out_and_in_on_local_dates(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        start: str,
+        end: str,
+        checkout_at: str,
+        checkin_at: str,
+    ) -> None:
+        journal_id = await _insert_gear_usage_journal(
+            async_connection, start=start, end=end, user_timezone="Australia/Sydney"
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        checkout_body = _request_body(mock_transport, "hardware/42/checkout")
+        assert checkout_body["checkout_at"] == checkout_at
+        assert checkout_body["expected_checkin"] == checkin_at
+        checkin_body = _request_body(mock_transport, "hardware/42/checkin")
+        assert checkin_body == {
+            "checkin_at": checkin_at,
+            "note": f"Usage period {checkout_at} to {checkin_at}",
+        }
+        assert await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        ) == {"checkout_at": checkout_at, "expected_checkin": checkin_at}
+        assert await _reference_data(
+            async_connection, source="snipeit_checkin", journal_id=journal_id
+        ) == {"checkin_at": checkin_at}
+
+    @pytest.mark.asyncio
+    async def test_event_timezone_takes_precedence_over_user_timezone(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # 23:30 UTC is still the same day in London but the next day in Sydney.
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2025-03-07T23:30:00+00:00",
+            end="2025-03-08T23:30:00+00:00",
+            user_timezone="Australia/Sydney",
+            event_timezone="Europe/London",
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        checkout_body = _request_body(mock_transport, "hardware/42/checkout")
+        assert checkout_body["checkout_at"] == "2025-03-07"
+        assert checkout_body["expected_checkin"] == "2025-03-08"
+        checkin_body = _request_body(mock_transport, "hardware/42/checkin")
+        assert checkin_body["checkin_at"] == "2025-03-08"
+
+    @pytest.mark.asyncio
+    async def test_retried_checkout_follows_a_changed_gear_item(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A failed checkout recorded against the old asset is retried on the new one."""
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+            asset_id="42",
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (integration_source, external_id, internal_uuid,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    ('snipeit_checkout', :external_id, :journal_id,
+                     now(), 'PENDING', 'failed', 'boom', 0, now(), now())
+            """),
+            {
+                "external_id": f"snipeit_checkout:41:{journal_id}",
+                "journal_id": str(journal_id),
+            },
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert len(mock_transport.responses) == 0
+        result = await async_connection.execute(
+            text("""
+                SELECT external_id, sync_status FROM sync_metadata
+                WHERE integration_source = 'snipeit_checkout'
+                  AND internal_uuid = :journal_id
+            """),
+            {"journal_id": str(journal_id)},
+        )
+        row = result.fetchone()
+        assert row is not None
+        assert row.external_id == f"snipeit_checkout:42:{journal_id}"
+        assert row.sync_status == "success"
 
 
 class TestCheckinSyncIntegration:
@@ -307,68 +573,38 @@ class TestCheckinSyncIntegration:
             assert row.sync_status == "success", source
 
     @pytest.mark.asyncio
-    async def test_periodic_sweep_query_selects_overdue_checkouts(
+    async def test_fetch_overdue_gear_usage_selects_unreturned_past_usage(
         self,
         async_connection: AsyncConnection,
     ) -> None:
-        """The periodic sweep query selects only past, not-yet-checked-in usages.
+        """The periodic sweep selects past, not-yet-checked-in usage on local dates."""
+        from snipeit_sync_service import OverdueGearUsage, fetch_overdue_gear_usage
 
-        Validates the SQL shape used by
-        ``periodic_checkin_all_snipeit_accounts`` against real Postgres.
-        """
-        # Overdue, no checkin → selected.
-        overdue = await async_connection.execute(
-            text("""
-                INSERT INTO journals (title, content, user_id,
-                    event_date_range_start, event_date_range_end)
-                VALUES ('Overdue', '', 'user-123', '2000-01-01', '2000-01-02')
-                RETURNING id
-            """)
+        # Overdue, no check-in → selected, dated in the user's zone (AEDT).
+        overdue_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+            asset_id="41",
+            user_timezone="Australia/Sydney",
         )
-        overdue_id = _returned_id(overdue)
-
         # Future window → excluded.
-        future = await async_connection.execute(
-            text("""
-                INSERT INTO journals (title, content, user_id,
-                    event_date_range_start, event_date_range_end)
-                VALUES ('Future', '', 'user-123', '2099-01-01', '2099-01-02')
-                RETURNING id
-            """)
+        future_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2099-01-01T00:00:00+00:00",
+            end="2099-01-02T00:00:00+00:00",
+            asset_id="42",
         )
-        future_id = _returned_id(future)
-
         # Overdue but already checked in → excluded.
-        done = await async_connection.execute(
-            text("""
-                INSERT INTO journals (title, content, user_id,
-                    event_date_range_start, event_date_range_end)
-                VALUES ('Done', '', 'user-123', '2000-01-01', '2000-01-02')
-                RETURNING id
-            """)
+        done_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2000-01-01T00:00:00+00:00",
+            end="2000-01-02T00:00:00+00:00",
+            asset_id="43",
         )
-        done_id = _returned_id(done)
-
-        gear_ids: dict[int, str] = {}
-        for jid in (overdue_id, future_id, done_id):
-            gear = await async_connection.execute(
-                text("""
-                    INSERT INTO gear_items (name, user_id)
-                    VALUES ('Item', 'user-123') RETURNING id
-                """)
-            )
-            gear_id = str(_returned_id(gear))
-            gear_ids[jid] = gear_id
-            await async_connection.execute(
-                text("""
-                    INSERT INTO journal_gear_usage_data
-                        (journal_id, gear_item_id, checkout_date, checkin_date)
-                    VALUES (:journal_id, :gear_item_id, NULL, NULL)
-                """),
-                {"journal_id": jid, "gear_item_id": gear_id},
-            )
+        for asset_id, jid in (("41", overdue_id), ("42", future_id), ("43", done_id)):
             await _insert_checkout_metadata(
-                async_connection, asset_id=str(jid), journal_id=jid
+                async_connection, asset_id=asset_id, journal_id=jid
             )
 
         # Mark the "done" journal as already checked in.
@@ -388,26 +624,15 @@ class TestCheckinSyncIntegration:
             },
         )
 
-        result = await async_connection.execute(
-            text("""
-                SELECT j.id AS journal_id
-                FROM sync_metadata co
-                JOIN journals j ON j.id = co.internal_uuid::integer
-                JOIN journal_gear_usage_data u ON u.journal_id = j.id
-                LEFT JOIN sync_metadata ci
-                    ON ci.integration_source = 'snipeit_checkin'
-                    AND ci.internal_uuid = co.internal_uuid
-                    AND ci.sync_status = 'success'
-                WHERE co.integration_source = 'snipeit_checkout'
-                  AND co.sync_status = 'success'
-                  AND j.user_id = :user_id
-                  AND ci.id IS NULL
-                  AND COALESCE(u.checkin_date, j.event_date_range_end) < now()
-            """),
-            {"user_id": "user-123"},
+        overdue = await fetch_overdue_gear_usage(
+            lambda: _session_factory(async_connection), "user-123"
         )
-        selected = {row.journal_id for row in result.fetchall()}
 
-        assert overdue_id in selected
-        assert future_id not in selected
-        assert done_id not in selected
+        assert overdue == [
+            OverdueGearUsage(
+                journal_id=overdue_id,
+                checkout_at=date(2025, 3, 8),
+                checkin_at=date(2025, 3, 9),
+                zone="Australia/Sydney",
+            )
+        ]

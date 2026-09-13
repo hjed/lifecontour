@@ -12,11 +12,14 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import structlog
+from core_shared.models.journals.calendar_info import event_date_in_timezone
 from sqlalchemy import text
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
@@ -30,20 +33,77 @@ logger = structlog.get_logger(__name__)
 _PAGE_SIZE = 50
 
 
-def _format_date_for_snipeit(value: date | datetime | str | None) -> str | None:
-    """Format a date/datetime value as ``YYYY-MM-DD`` for the Snipe-IT API.
+def _resolve_zone(*candidates: object) -> str | None:
+    """Return the first candidate naming a zone ``ZoneInfo`` can load, else ``None``.
 
-    Handles ``datetime``, ``date``, and ISO-formatted strings.
-    Returns ``None`` for falsy inputs.
+    Pass the event's zone before the user's: journal dates are read in the
+    event's zone when it records one, the user's otherwise, and UTC when neither
+    is usable. Settings are user input and a row column may be absent, so
+    anything that is not a loadable zone name is skipped rather than trusted.
     """
-    if not value:
+    for candidate in candidates:
+        if not isinstance(candidate, str) or not candidate:
+            continue
+        try:
+            ZoneInfo(candidate)
+        except (ZoneInfoNotFoundError, ValueError):
+            continue
+        return candidate
+    return None
+
+
+def _local_date(value: date | datetime | str | None, zone: str | None) -> date | None:
+    """Return the calendar date ``value`` falls on in ``zone``.
+
+    Journal date ranges are stored as the UTC instant of a *local* midnight, so
+    taking the date of the stored UTC value lands a day early east of UTC.
+    Plain dates are already calendar dates; strings are read by their ISO date
+    prefix. Returns ``None`` for missing or unparseable input.
+    """
+    if value is None:
         return None
     if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d")
+        return event_date_in_timezone(value, zone)
     if isinstance(value, date):
-        return value.isoformat()
-    # Already a string — extract just the date portion
-    return str(value)[:10]
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _format_date_for_snipeit(
+    value: date | datetime | str | None, zone: str | None
+) -> str | None:
+    """Format ``value`` as the ``YYYY-MM-DD`` local date the Snipe-IT API takes."""
+    local = _local_date(value, zone)
+    return local.isoformat() if local else None
+
+
+def _journal_zone(journal_row: Any) -> str | None:
+    """Return the zone a journal row's dates are read in (event, then user)."""
+    return _resolve_zone(
+        getattr(journal_row, "event_timezone", None),
+        getattr(journal_row, "user_timezone", None),
+    )
+
+
+def _snipeit_checkin_at(
+    local_checkin: date | None, zone: str | None, *, now: datetime | None = None
+) -> date | None:
+    """Return the historical ``checkin_at`` to send Snipe-IT, or ``None`` for "now".
+
+    Snipe-IT records ``checkin_at`` against its own server date, whose zone we do
+    not know. A usage period ending today is recorded correctly by omitting the
+    date (Snipe-IT stamps the check-in now), and omitting it for anything later
+    means a date the server could read as the future is never sent.
+    """
+    if local_checkin is None:
+        return None
+    local_today = _local_date(now or datetime.now(tz=UTC), zone)
+    if local_today is None or local_checkin >= local_today:
+        return None
+    return local_checkin
 
 
 def _usage_period_has_ended(
@@ -754,9 +814,14 @@ class SnipeItSyncService:
             # 1. Get journal data
             journal_result = await session.execute(
                 text("""
-                    SELECT title, content, event_date_range_start, event_date_range_end
-                    FROM journals
-                    WHERE id = :journal_id
+                    SELECT j.title, j.content,
+                           j.event_date_range_start, j.event_date_range_end,
+                           jci.timezone AS event_timezone,
+                           us.timezone AS user_timezone
+                    FROM journals j
+                    LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
+                    LEFT JOIN user_settings us ON us.user_id = j.user_id
+                    WHERE j.id = :journal_id
                 """),
                 {"journal_id": journal_id},
             )
@@ -850,8 +915,12 @@ class SnipeItSyncService:
             content=journal_row.content or "",
             maintenance_type=maintenance_data_row.maintenance_type
             or "routine maintenance",
-            start_date=_format_date_for_snipeit(journal_row.event_date_range_start),
-            end_date=_format_date_for_snipeit(journal_row.event_date_range_end),
+            start_date=_format_date_for_snipeit(
+                journal_row.event_date_range_start, _journal_zone(journal_row)
+            ),
+            end_date=_format_date_for_snipeit(
+                journal_row.event_date_range_end, _journal_zone(journal_row)
+            ),
         )
 
         try:
@@ -975,8 +1044,12 @@ class SnipeItSyncService:
             content=journal_row.content or "",
             maintenance_type=maintenance_data_row.maintenance_type
             or "routine maintenance",
-            start_date=_format_date_for_snipeit(journal_row.event_date_range_start),
-            end_date=_format_date_for_snipeit(journal_row.event_date_range_end),
+            start_date=_format_date_for_snipeit(
+                journal_row.event_date_range_start, _journal_zone(journal_row)
+            ),
+            end_date=_format_date_for_snipeit(
+                journal_row.event_date_range_end, _journal_zone(journal_row)
+            ),
         )
 
         # PATCH the Snipe-IT maintenance record
@@ -1036,9 +1109,14 @@ class SnipeItSyncService:
             # 1. Get journal data
             journal_result = await session.execute(
                 text("""
-                    SELECT title, content, event_date_range_start, event_date_range_end
-                    FROM journals
-                    WHERE id = :journal_id
+                    SELECT j.title, j.content,
+                           j.event_date_range_start, j.event_date_range_end,
+                           jci.timezone AS event_timezone,
+                           us.timezone AS user_timezone
+                    FROM journals j
+                    LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
+                    LEFT JOIN user_settings us ON us.user_id = j.user_id
+                    WHERE j.id = :journal_id
                 """),
                 {"journal_id": journal_id},
             )
@@ -1162,10 +1240,14 @@ class SnipeItSyncService:
                     await session.execute(
                         text("""
                             UPDATE sync_metadata
-                            SET sync_status = 'pending', updated_at = now()
+                            SET sync_status = 'pending',
+                                external_id = :external_id,
+                                updated_at = now()
                             WHERE integration_source = 'snipeit_checkout' AND internal_uuid = :journal_id
                         """),
-                        {"journal_id": str(journal_id)},
+                        # The gear item may have changed since the last attempt;
+                        # re-key the row to the asset being checked out now.
+                        {"journal_id": str(journal_id), "external_id": external_id},
                     )
                 else:
                     insert_result = await session.execute(
@@ -1223,8 +1305,9 @@ class SnipeItSyncService:
             )
             return
 
-        checkout_at = _format_date_for_snipeit(checkout_date)
-        expected_checkin = _format_date_for_snipeit(checkin_date)
+        zone = _journal_zone(journal_row)
+        checkout_at = _format_date_for_snipeit(checkout_date, zone)
+        expected_checkin = _format_date_for_snipeit(checkin_date, zone)
 
         # Build checkout payload
         payload: dict[str, Any] = {
@@ -1285,6 +1368,7 @@ class SnipeItSyncService:
                             last_synced_at = now(),
                             sync_status = 'success',
                             error_message = NULL,
+                            reference_data = :reference_data,
                             updated_at = now()
                         WHERE integration_source = 'snipeit_checkout'
                           AND internal_uuid = :internal_uuid
@@ -1294,6 +1378,12 @@ class SnipeItSyncService:
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "version_hash": version_hash,
+                        "reference_data": json.dumps(
+                            {
+                                "checkout_at": checkout_at,
+                                "expected_checkin": expected_checkin,
+                            }
+                        ),
                     },
                 )
 
@@ -1310,6 +1400,7 @@ class SnipeItSyncService:
                 journal_id=journal_id,
                 session_factory=session_factory,
                 note=f"Usage period {checkout_at} to {expected_checkin}",
+                checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone), zone),
             )
 
     async def _unlock_pending_checkout(
@@ -1353,6 +1444,7 @@ class SnipeItSyncService:
         journal_id: int,
         session_factory: Any,
         note: str | None = None,
+        checkin_at: date | None = None,
     ) -> bool:
         """Return (check in) the asset previously checked out for a GEAR_USAGE journal.
 
@@ -1366,9 +1458,11 @@ class SnipeItSyncService:
         Args:
             journal_id: Internal journal ID whose checkout should be reversed.
             session_factory: Async session factory for DB queries.
-            note: Optional note recorded on the Snipe-IT check-in (Snipe-IT does
-                not accept a backdated return date, so the usage window is carried
-                here when known).
+            note: Optional note recorded on the Snipe-IT check-in (the usage
+                window, when known).
+            checkin_at: The local date the asset was returned. Sent as Snipe-IT's
+                ``checkin_at`` so the check-in is backdated; ``None`` lets
+                Snipe-IT stamp the check-in now (e.g. on journal deletion).
 
         Returns:
             ``True`` only when a check-in was actively performed against Snipe-IT;
@@ -1479,6 +1573,8 @@ class SnipeItSyncService:
         payload: dict[str, Any] = {}
         if note:
             payload["note"] = note
+        if checkin_at:
+            payload["checkin_at"] = checkin_at.isoformat()
 
         try:
             await self._api_client.checkin_asset(
@@ -1502,6 +1598,7 @@ class SnipeItSyncService:
                     external_id,
                     session_factory,
                     error_message=f"Terminal: API {exc.status_code}",
+                    checkin_at=checkin_at,
                 )
                 return False
 
@@ -1516,7 +1613,9 @@ class SnipeItSyncService:
             raise
 
         # 4. Record the checkin as successful.
-        await self._finalize_checkin(journal_id, external_id, session_factory)
+        await self._finalize_checkin(
+            journal_id, external_id, session_factory, checkin_at=checkin_at
+        )
 
         logger.info(
             "Successfully checked in asset to Snipe-IT",
@@ -1531,6 +1630,7 @@ class SnipeItSyncService:
         external_id: str,
         session_factory: Any,
         error_message: str | None = None,
+        checkin_at: date | None = None,
     ) -> None:
         """Mark a checkin sync row terminal (``success``) so it is not retried.
 
@@ -1547,6 +1647,7 @@ class SnipeItSyncService:
                             last_synced_at = now(),
                             sync_status = 'success',
                             error_message = :error_message,
+                            reference_data = :reference_data,
                             updated_at = now()
                         WHERE integration_source = 'snipeit_checkin'
                           AND internal_uuid = :internal_uuid
@@ -1556,6 +1657,13 @@ class SnipeItSyncService:
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "error_message": error_message,
+                        "reference_data": json.dumps(
+                            {
+                                "checkin_at": checkin_at.isoformat()
+                                if checkin_at
+                                else None
+                            }
+                        ),
                     },
                 )
 
@@ -1638,12 +1746,91 @@ class SnipeItSyncService:
             checkout_date = (
                 usage_data_row.checkout_date or journal_row.event_date_range_start
             )
+            zone = _journal_zone(journal_row)
             note = (
-                f"Usage period {_format_date_for_snipeit(checkout_date)} "
-                f"to {_format_date_for_snipeit(checkin_date)}"
+                f"Usage period {_format_date_for_snipeit(checkout_date, zone)} "
+                f"to {_format_date_for_snipeit(checkin_date, zone)}"
             )
             await self.push_checkin_create(
                 journal_id=journal_id,
                 session_factory=session_factory,
                 note=note,
+                checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone), zone),
             )
+
+
+@dataclass(frozen=True)
+class OverdueGearUsage:
+    """A checked-out GEAR_USAGE journal whose usage period has ended.
+
+    Dates are the local calendar dates the usage ran over, read in ``zone``.
+    """
+
+    journal_id: int
+    checkout_at: date | None
+    checkin_at: date
+    zone: str | None
+
+    @property
+    def note(self) -> str:
+        """The usage window recorded on the Snipe-IT check-in."""
+        start = self.checkout_at.isoformat() if self.checkout_at else "unknown"
+        return f"Usage period {start} to {self.checkin_at.isoformat()}"
+
+    def snipeit_checkin_at(self, *, now: datetime | None = None) -> date | None:
+        """The ``checkin_at`` to send Snipe-IT (``None`` when it ends today)."""
+        return _snipeit_checkin_at(self.checkin_at, self.zone, now=now)
+
+
+async def fetch_overdue_gear_usage(
+    session_factory: Any, user_id: str
+) -> list[OverdueGearUsage]:
+    """Return a user's successful checkouts with no check-in whose period has ended.
+
+    Drives the periodic check-in sweep. The resolved check-in instant is compared
+    against ``now()``, matching :func:`_usage_period_has_ended`; the returned
+    dates are local to the journal's event zone, else the user's zone.
+    """
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT j.id AS journal_id,
+                       COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
+                       COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date,
+                       jci.timezone AS event_timezone,
+                       us.timezone AS user_timezone
+                FROM sync_metadata co
+                JOIN journals j ON j.id = co.internal_uuid::integer
+                JOIN journal_gear_usage_data u ON u.journal_id = j.id
+                LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
+                LEFT JOIN user_settings us ON us.user_id = j.user_id
+                LEFT JOIN sync_metadata ci
+                    ON ci.integration_source = 'snipeit_checkin'
+                    AND ci.internal_uuid = co.internal_uuid
+                    AND ci.sync_status = 'success'
+                WHERE co.integration_source = 'snipeit_checkout'
+                  AND co.sync_status = 'success'
+                  AND j.user_id = :user_id
+                  AND ci.id IS NULL
+                  AND COALESCE(u.checkin_date, j.event_date_range_end) < now()
+                ORDER BY j.id
+            """),
+            {"user_id": user_id},
+        )
+        rows = result.fetchall()
+
+    overdue: list[OverdueGearUsage] = []
+    for row in rows:
+        zone = _journal_zone(row)
+        checkin_at = _local_date(row.checkin_date, zone)
+        if checkin_at is None:
+            continue
+        overdue.append(
+            OverdueGearUsage(
+                journal_id=row.journal_id,
+                checkout_at=_local_date(row.checkout_date, zone),
+                checkin_at=checkin_at,
+                zone=zone,
+            )
+        )
+    return overdue

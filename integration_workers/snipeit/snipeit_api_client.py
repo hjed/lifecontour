@@ -263,12 +263,16 @@ class SnipeItAPIClient:
         The checkin response is returned as a raw dict because it differs
         from the standard asset response structure.
 
-        Note: Snipe-IT records the check-in at server time and does not accept
-        a historical return date; pass the actual usage window in ``note``.
+        Pass ``checkin_at`` (``YYYY-MM-DD``) to backdate the return. The field
+        is missing from Snipe-IT's API reference but is read by
+        ``Api\\AssetsController::checkin``: Snipe-IT appends its current time and
+        sets the log's ``action_date`` when the date is not the server's today.
+        Without it the check-in is stamped at server time.
 
         Args:
             asset_id: Snipe-IT asset numeric ID.
-            payload: Checkin fields (e.g. note, location_id, status_id).
+            payload: Checkin fields (e.g. note, checkin_at, location_id,
+                status_id).
 
         Returns:
             Raw response dict from Snipe-IT.

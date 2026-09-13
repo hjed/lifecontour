@@ -7,7 +7,105 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
-from snipeit_sync_service import SnipeItSyncService, _usage_period_has_ended
+from snipeit_sync_service import (
+    SnipeItSyncService,
+    _format_date_for_snipeit,
+    _local_date,
+    _resolve_zone,
+    _snipeit_checkin_at,
+    _usage_period_has_ended,
+)
+
+SYDNEY = "Australia/Sydney"
+
+
+class TestResolveZone:
+    """Snipe dates are read in the event's zone, then the user's, then UTC."""
+
+    def test_event_zone_wins(self) -> None:
+        assert _resolve_zone("Europe/London", SYDNEY) == "Europe/London"
+
+    def test_invalid_event_zone_falls_back_to_user_zone(self) -> None:
+        assert _resolve_zone("Not/AZone", SYDNEY) == SYDNEY
+
+    def test_non_string_and_empty_values_are_skipped(self) -> None:
+        assert _resolve_zone(MagicMock(), "") is None
+
+    def test_no_zone_is_none(self) -> None:
+        assert _resolve_zone(None, None) is None
+
+
+class TestLocalDate:
+    """Journal dates are local-midnight instants stored in UTC."""
+
+    def test_sydney_daylight_time_midnight(self) -> None:
+        # 2025-03-08 00:00 AEDT (+11:00)
+        assert _local_date(datetime(2025, 3, 7, 13, 0, tzinfo=UTC), SYDNEY) == date(
+            2025, 3, 8
+        )
+
+    def test_sydney_standard_time_midnight(self) -> None:
+        # 2025-06-08 00:00 AEST (+10:00)
+        assert _local_date(datetime(2025, 6, 7, 14, 0, tzinfo=UTC), SYDNEY) == date(
+            2025, 6, 8
+        )
+
+    def test_sydney_morning_buffer_time(self) -> None:
+        # A datetime-local checkout of 2025-03-08 08:00 AEDT
+        assert _local_date(datetime(2025, 3, 7, 21, 0, tzinfo=UTC), SYDNEY) == date(
+            2025, 3, 8
+        )
+
+    def test_event_zone_other_than_sydney(self) -> None:
+        # 23:30 on the 7th in London is already the 8th in Sydney.
+        instant = datetime(2025, 3, 7, 23, 30, tzinfo=UTC)
+        zone = _resolve_zone("Europe/London", SYDNEY)
+        assert _local_date(instant, zone) == date(2025, 3, 7)
+
+    def test_no_zone_uses_utc(self) -> None:
+        assert _local_date(datetime(2025, 3, 7, 13, 0, tzinfo=UTC), None) == date(
+            2025, 3, 7
+        )
+
+    def test_plain_date_and_iso_string_pass_through(self) -> None:
+        assert _local_date(date(2025, 3, 8), SYDNEY) == date(2025, 3, 8)
+        assert _local_date("2025-03-08", SYDNEY) == date(2025, 3, 8)
+
+    def test_none_and_unparseable_are_none(self) -> None:
+        assert _local_date(None, SYDNEY) is None
+        assert _local_date("not a date", SYDNEY) is None
+
+    def test_format_uses_local_date(self) -> None:
+        assert (
+            _format_date_for_snipeit(datetime(2025, 3, 7, 13, 0, tzinfo=UTC), SYDNEY)
+            == "2025-03-08"
+        )
+
+
+class TestSnipeitCheckinAt:
+    """Snipe-IT must never be sent a check-in date it reads as the future."""
+
+    # 2025-03-08 08:00 in Sydney, still the 7th in UTC.
+    NOW = datetime(2025, 3, 7, 21, 0, tzinfo=UTC)
+
+    def test_historical_date_is_sent(self) -> None:
+        assert _snipeit_checkin_at(date(2019, 5, 4), SYDNEY, now=self.NOW) == date(
+            2019, 5, 4
+        )
+
+    def test_local_today_is_omitted(self) -> None:
+        assert _snipeit_checkin_at(date(2025, 3, 8), SYDNEY, now=self.NOW) is None
+
+    def test_local_yesterday_is_sent(self) -> None:
+        assert _snipeit_checkin_at(date(2025, 3, 7), SYDNEY, now=self.NOW) == date(
+            2025, 3, 7
+        )
+
+    def test_future_date_is_omitted(self) -> None:
+        assert _snipeit_checkin_at(date(2025, 3, 9), SYDNEY, now=self.NOW) is None
+
+    def test_none_is_none(self) -> None:
+        assert _snipeit_checkin_at(None, SYDNEY, now=self.NOW) is None
 
 
 class TestUsagePeriodHasEnded:
@@ -942,7 +1040,44 @@ class TestPushCheckinCreate:
         api_client.checkin_asset.assert_called_once()
         call_args = api_client.checkin_asset.call_args
         assert call_args.kwargs["asset_id"] == 42
-        assert call_args.kwargs["payload"]["note"] == "Returned from trip"
+        # Without a historical date Snipe-IT stamps the check-in now.
+        assert call_args.kwargs["payload"] == {"note": "Returned from trip"}
+
+    @pytest.mark.asyncio
+    async def test_sends_historical_checkin_at(self) -> None:
+        """A known return date is sent as ``checkin_at`` so Snipe-IT backdates it."""
+        api_client = _mock_api_client()
+        api_client.checkin_asset.return_value = {"status": "success"}
+
+        checkout_row = MagicMock(
+            external_id="snipeit_checkout:42:100", sync_status="success"
+        )
+        lock_ctx = _begin_session_ctx(
+            [
+                MagicMock(fetchone=MagicMock(return_value=None)),
+                MagicMock(fetchone=MagicMock(return_value=(1,))),
+            ]
+        )
+        success_ctx = _begin_session_ctx([MagicMock()])
+        session_factory = MagicMock(
+            side_effect=[_checkin_resolve_ctx(checkout_row), lock_ctx, success_ctx]
+        )
+
+        service = SnipeItSyncService(
+            api_client=api_client, user_id="user-1", snipeit_user_id="5"
+        )
+
+        await service.push_checkin_create(
+            journal_id=100,
+            session_factory=session_factory,
+            note="Usage period 2019-05-01 to 2019-05-04",
+            checkin_at=date(2019, 5, 4),
+        )
+
+        assert api_client.checkin_asset.call_args.kwargs["payload"] == {
+            "note": "Usage period 2019-05-01 to 2019-05-04",
+            "checkin_at": "2019-05-04",
+        }
 
     @pytest.mark.asyncio
     async def test_skips_when_no_checkout_metadata(self) -> None:
