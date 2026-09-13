@@ -938,6 +938,63 @@ class TestSupersededAssetRetryIntegration:
         )
 
 
+class TestInFlightCheckinIntegration:
+    """An event that meets another worker's check-in is retried, not acknowledged."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "operation", ["push_checkin_create", "reconcile_gear_usage"]
+    )
+    async def test_event_meeting_an_in_flight_checkin_is_retried(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        operation: str,
+    ) -> None:
+        """A changed checkout date must still be re-recorded once the check-in lands.
+
+        Acknowledging the event while the older check-in is in flight would leave
+        nothing to supersede that check-in afterwards.
+        """
+        from snipeit_sync_service import SnipeItSyncInProgress
+
+        journal_id = await _sydney_trip(async_connection)
+        # The recorded checkout date differs from the journal's (8 March).
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data={
+                "checkout_at": "2025-03-01",
+                "expected_checkin": "2025-03-02",
+            },
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (integration_source, external_id, internal_uuid,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    ('snipeit_checkin', :external_id, :journal_id,
+                     now(), 'PENDING', 'pending', NULL, 0, now(), now())
+            """),
+            {
+                "external_id": f"snipeit_checkin:42:{journal_id}",
+                "journal_id": str(journal_id),
+            },
+        )
+
+        with pytest.raises(SnipeItSyncInProgress):
+            await getattr(snipeit_sync_service, operation)(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        assert mock_transport.requests == []
+
+
 class TestPreviousAssetHeldElsewhereIntegration:
     """A superseded asset is only returned when no other journal may be using it."""
 

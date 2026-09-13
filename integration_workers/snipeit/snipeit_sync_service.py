@@ -1566,8 +1566,14 @@ class SnipeItSyncService:
 
         Returns:
             ``True`` only when a check-in was actively performed against Snipe-IT;
-            ``False`` for any no-op (no checkout, already checked in, lock
-            contention) or terminal non-retryable outcome (403/404).
+            ``False`` for any no-op (no checkout, already checked in) or terminal
+            non-retryable outcome (403/404).
+
+        Raises:
+            SnipeItSyncInProgress: Another worker holds this journal's check-in.
+                The caller's event must be retried rather than acknowledged: a
+                checkout-date change arriving now could otherwise never supersede
+                the check-in once it lands.
         """
         # 1. Resolve the asset and confirm a successful checkout exists.
         async with session_factory() as session:
@@ -1628,11 +1634,9 @@ class SnipeItSyncService:
                         and row.age_seconds is not None
                         and row.age_seconds < 300
                     ):
-                        logger.debug(
-                            "Skipping checkin: currently processing in another worker",
-                            journal_id=journal_id,
+                        raise SnipeItSyncInProgress(
+                            f"Check-in of journal {journal_id} is in flight"
                         )
-                        return False
 
                     await session.execute(
                         text("""
@@ -1661,11 +1665,9 @@ class SnipeItSyncService:
                         },
                     )
                     if not insert_result.fetchone():
-                        logger.debug(
-                            "Skipping checkin: locked by another process",
-                            journal_id=journal_id,
+                        raise SnipeItSyncInProgress(
+                            f"Check-in of journal {journal_id} is locked by another worker"
                         )
-                        return False
 
         # 3. Build the checkin payload and POST to Snipe-IT.
         payload: dict[str, Any] = {}
