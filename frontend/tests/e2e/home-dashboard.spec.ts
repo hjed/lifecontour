@@ -1,6 +1,26 @@
 import type { Locator, Page } from '@playwright/test';
+import type {
+  DashboardSection,
+  DashboardSectionStatus,
+  DashboardSummaryState,
+  HomeDashboardAgendaEntry,
+  HomeDashboardAttributes,
+  HomeDashboardResponse,
+  HomeDashboardSummary,
+  HomeDashboardTask,
+  HomeDashboardTasks,
+  HomeDashboardUpcomingDate,
+  HomeDashboardUpcomingDates,
+} from '../../src/lib/api/home-dashboard';
+import type { ImportantDateTypeEnum } from '../../src/types/contacts';
 import { TestDataManager } from './data-management';
-import { test, expect, type TestJournal, type TestTask } from './fixtures';
+import {
+  test,
+  expect,
+  type TestContact,
+  type TestJournal,
+  type TestTask,
+} from './fixtures';
 
 /**
  * Home Dashboard — page shell (ITER18-004 Phase 3)
@@ -21,6 +41,18 @@ import { test, expect, type TestJournal, type TestTask } from './fixtures';
 
 /** Wireframe order (**W3**), which is also the below-`lg` stacking order. */
 const SECTION_NAMES = ['Agenda', 'Tasks', 'Upcoming dates'] as const;
+
+/**
+ * All four sections in wireframe order — the summary headline (**W5**) over
+ * the three evidence sections (**W3**) — each with the card its visible title
+ * is drawn in.
+ */
+const ALL_SECTIONS = [
+  { name: 'AI Daily Summary', cardTestId: 'dashboard-summary-card' },
+  { name: 'Agenda', cardTestId: 'agenda-card' },
+  { name: 'Tasks', cardTestId: 'tasks-card' },
+  { name: 'Upcoming dates', cardTestId: 'upcoming-dates-card' },
+] as const;
 
 /** Every card the placeholder home page used to render. */
 const RETIRED_PLACEHOLDER_TEXT = [
@@ -148,6 +180,50 @@ test.describe('Home Dashboard — page shell', () => {
 
       for (const [index, name] of SECTION_NAMES.entries()) {
         await expect(regions.nth(index)).toHaveAccessibleName(name);
+      }
+    });
+  });
+
+  test.describe('All four sections (W3, W4, W5)', () => {
+    /**
+     * ITER18-004 Phase 17's first structural fact: the summary over the three
+     * evidence sections, in wireframe order, each under its heading.
+     *
+     * Scoped to the page body rather than the grid the test above uses, because
+     * the summary is not in the grid and its place among the sections is the
+     * question. The tomorrow disclosure's panel is a region too, but collapsed
+     * it is `hidden` and so out of the accessibility tree (see Phase 8's note),
+     * which is why four is the right count on arrival.
+     *
+     * No fixtures and no mock: the summary's heading lives in the frame every
+     * one of its states shares, so the structure is the same whatever the
+     * account holds.
+     */
+    test('renders the four sections in wireframe order, each under its heading', async ({
+      authenticatedPage: page,
+    }) => {
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const regions = page
+        .getByTestId('home-dashboard-ready')
+        .getByRole('region');
+      await expect(regions).toHaveCount(ALL_SECTIONS.length);
+
+      for (const [index, section] of ALL_SECTIONS.entries()) {
+        const region = regions.nth(index);
+        await expect(region).toHaveAccessibleName(section.name);
+        // The level-2 heading the region is labelled by (W4) — visually
+        // hidden on the three evidence sections, whose visible title is the
+        // card's own, asserted next.
+        await expect(
+          region.getByRole('heading', { level: 2, name: section.name })
+        ).toHaveCount(1);
+        await expect(
+          region
+            .getByTestId(section.cardTestId)
+            .getByText(section.name, { exact: true })
+        ).toBeVisible();
       }
     });
   });
@@ -351,7 +427,7 @@ const MOCK_WINDOW = {
  * reads this section, and a ready one that carries no `dates` is a broken
  * contract rather than an empty week, so these mocks now send the real shape.
  */
-const MOCK_EMPTY_UPCOMING_DATES = {
+const MOCK_EMPTY_UPCOMING_DATES: HomeDashboardUpcomingDates = {
   window: MOCK_WINDOW,
   total: 0,
   dates: [],
@@ -365,7 +441,7 @@ const MOCK_EMPTY_UPCOMING_DATES = {
  * the same correction the dates mock above records. Nothing renders it until
  * Phase 14; the mock stops lying now.
  */
-const MOCK_EMPTY_TASKS = {
+const MOCK_EMPTY_TASKS: HomeDashboardTasks = {
   window: MOCK_WINDOW,
   total: 0,
   tasks: [],
@@ -376,70 +452,115 @@ const REGENERATE_PATH = `**/api/journals/daily-summary/${SUMMARY_ANCHOR}/regener
 const SUMMARY_PROSE = 'A quiet Wednesday. Two journals and one long walk.';
 const REGENERATED_PROSE = 'A busier Wednesday after all. Three journals.';
 
-type SummarySection =
-  | {
-      status: 'ready';
-      data: {
-        state: 'generated' | 'generating';
-        summary_text: string | null;
-        journal_count: number;
-        event_count: number;
-        contact_count: number;
-        mood_average: number | null;
-      };
-    }
-  | { status: 'unavailable'; data: null };
+/**
+ * The wire values of the two enums the payload carries.
+ *
+ * The enums live in `src/lib/api/home-dashboard.ts`, which imports React Query
+ * at module scope, so this spec takes them as **types only** and spells the
+ * values itself. `satisfies` is what keeps that honest: a literal that drifted
+ * from its enum fails `tsc`, where a bare `as` would accept any string at all.
+ */
+const READY =
+  'ready' satisfies `${DashboardSectionStatus.READY}` as DashboardSectionStatus.READY;
+const UNAVAILABLE =
+  'unavailable' satisfies `${DashboardSectionStatus.UNAVAILABLE}` as DashboardSectionStatus.UNAVAILABLE;
+const GENERATED =
+  'generated' satisfies `${DashboardSummaryState.GENERATED}` as DashboardSummaryState.GENERATED;
+const GENERATING =
+  'generating' satisfies `${DashboardSummaryState.GENERATING}` as DashboardSummaryState.GENERATING;
 
-const generatedSection = (summaryText: string): SummarySection => ({
-  status: 'ready',
-  data: {
-    state: 'generated',
+type SummarySection = DashboardSection<HomeDashboardSummary>;
+
+/** A section that answered, holding `data`. */
+function ready<T>(data: T): DashboardSection<T> {
+  return { status: READY, data };
+}
+
+const generatedSection = (summaryText: string): SummarySection =>
+  ready<HomeDashboardSummary>({
+    state: GENERATED,
     summary_text: summaryText,
     journal_count: 3,
     event_count: 2,
     contact_count: 4,
     mood_average: 7.5,
-  },
+  });
+
+const generatingSection: SummarySection = ready<HomeDashboardSummary>({
+  state: GENERATING,
+  summary_text: null,
+  journal_count: 3,
+  event_count: 2,
+  contact_count: 4,
+  mood_average: 7.5,
 });
 
-const generatingSection: SummarySection = {
-  status: 'ready',
-  data: {
-    state: 'generating',
-    summary_text: null,
-    journal_count: 3,
-    event_count: 2,
-    contact_count: 4,
-    mood_average: 7.5,
-  },
-};
-
 const unavailableSection: SummarySection = {
-  status: 'unavailable',
+  status: UNAVAILABLE,
   data: null,
 };
 
-/** The dashboard document, with the summary section under test. */
-function dashboardBody(summary: SummarySection) {
+/** The sections a test serves; any it leaves out take the defaults below. */
+type DashboardSections = Partial<HomeDashboardAttributes>;
+
+/**
+ * The dashboard document, **typed as the client reads it**.
+ *
+ * Every route mock in this file is built here. A route mock is a claim about
+ * the wire contract that nothing else checks — ITER18-004 Phases 6 and 12 each
+ * found one here serving a payload the API cannot produce — so building them
+ * through `HomeDashboardResponse` is what puts `tsc` in front of that claim.
+ *
+ * A section a test does not name is the quiet default: the summary
+ * unavailable, and the three evidence sections ready and empty.
+ */
+function dashboardDocument(
+  sections: DashboardSections = {}
+): HomeDashboardResponse {
   return {
     data: {
       type: 'home-dashboards',
       id: 'e2e-user',
       attributes: {
-        summary,
-        // `tomorrow` rides on every ready agenda (Phase 6). Omitting it here
+        summary: unavailableSection,
+        // `tomorrow` rides on every ready agenda (Phase 6). Omitting it
         // served a payload the API cannot produce, and the tomorrow
         // disclosure beneath today's list is drawn from it.
-        agenda: {
-          status: 'ready',
-          data: { entries: [], tomorrow: { date: MOCK_TOMORROW, entries: [] } },
-        },
-        tasks: { status: 'ready', data: MOCK_EMPTY_TASKS },
-        upcoming_dates: { status: 'ready', data: MOCK_EMPTY_UPCOMING_DATES },
+        agenda: ready({
+          entries: [],
+          tomorrow: { date: MOCK_TOMORROW, entries: [] },
+        }),
+        tasks: ready(MOCK_EMPTY_TASKS),
+        upcoming_dates: ready(MOCK_EMPTY_UPCOMING_DATES),
+        ...sections,
       },
     },
     meta: { anchor: { date: SUMMARY_ANCHOR, timezone: SUMMARY_TIMEZONE } },
   };
+}
+
+/**
+ * Serve the dashboard for the life of the test, counting each read served.
+ *
+ * `sectionsFor` is a function so a test that regenerates can move the served
+ * state on. The count is how a show-more proves it revealed rows the page
+ * already held: a test compares it before and after the click, rather than
+ * against an absolute number the page's own refetches are free to change.
+ */
+async function mockDashboardSections(
+  page: Page,
+  sectionsFor: () => DashboardSections
+): Promise<{ served: () => number }> {
+  let served = 0;
+  await page.route('**/api/home-dashboard', async route => {
+    served += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(dashboardDocument(sectionsFor())),
+    });
+  });
+  return { served: () => served };
 }
 
 /**
@@ -452,13 +573,7 @@ async function mockDashboard(
   page: Page,
   summaryFor: () => SummarySection
 ): Promise<void> {
-  await page.route('**/api/home-dashboard', async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(dashboardBody(summaryFor())),
-    });
-  });
+  await mockDashboardSections(page, () => ({ summary: summaryFor() }));
 }
 
 function summaryCard(page: Page) {
@@ -834,13 +949,15 @@ async function boxOf(locator: Locator) {
 }
 
 /**
- * The weekday-and-date half of the disclosure's label, in **W19**'s form.
+ * A day as `Wednesday, 30 September` — the weekday-and-date half of the
+ * disclosure's label (**W19**), and an upcoming date's occurrence (**W31**,
+ * wireframe gap 20, which settled that both carry the comma).
  *
  * Built with `Intl` in UTC — deliberately not the app's `formatIsoWeekdayDate`
  * — so this asserts what the row should say rather than re-running the code
  * that says it.
  */
-function expectedTomorrowLabel(day: string): string {
+function expectedWeekdayDate(day: string): string {
   const at = new Date(`${day}T00:00:00Z`);
   const weekday = new Intl.DateTimeFormat('en-AU', {
     timeZone: 'UTC',
@@ -861,7 +978,11 @@ function agendaRow(page: Page, journal: TestJournal) {
 }
 
 /** One mocked agenda entry, in the payload's shape. */
-function mockEntry(journalId: number, title: string, startTime: string) {
+function mockEntry(
+  journalId: number,
+  title: string,
+  startTime: string
+): HomeDashboardAgendaEntry {
   return {
     journal_id: journalId,
     title,
@@ -890,41 +1011,16 @@ function mockEntry(journalId: number, title: string, startTime: string) {
 async function mockAgenda(
   page: Page,
   agenda: {
-    entries?: ReturnType<typeof mockEntry>[];
-    tomorrow?: ReturnType<typeof mockEntry>[];
+    entries?: HomeDashboardAgendaEntry[];
+    tomorrow?: HomeDashboardAgendaEntry[];
   } = {}
 ): Promise<void> {
-  await page.route('**/api/home-dashboard', async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        data: {
-          type: 'home-dashboards',
-          id: 'e2e-user',
-          attributes: {
-            summary: unavailableSection,
-            agenda: {
-              status: 'ready',
-              data: {
-                entries: agenda.entries ?? [],
-                tomorrow: {
-                  date: MOCK_TOMORROW,
-                  entries: agenda.tomorrow ?? [],
-                },
-              },
-            },
-            tasks: { status: 'ready', data: MOCK_EMPTY_TASKS },
-            upcoming_dates: {
-              status: 'ready',
-              data: MOCK_EMPTY_UPCOMING_DATES,
-            },
-          },
-        },
-        meta: { anchor: { date: SUMMARY_ANCHOR, timezone: SUMMARY_TIMEZONE } },
-      }),
-    });
-  });
+  await mockDashboardSections(page, () => ({
+    agenda: ready({
+      entries: agenda.entries ?? [],
+      tomorrow: { date: MOCK_TOMORROW, entries: agenda.tomorrow ?? [] },
+    }),
+  }));
 }
 
 /** Serve a dashboard whose agenda is ready and empty, today and tomorrow. */
@@ -1216,7 +1312,7 @@ test.describe('Home Dashboard — the agenda card', () => {
       // rather than the app's own `date-fns` helper, so the assertion is
       // independent of the code it is checking.
       await expect(page.getByTestId('tomorrow-label')).toHaveText(
-        `Tomorrow — ${expectedTomorrowLabel(tomorrow)}`
+        `Tomorrow — ${expectedWeekdayDate(tomorrow)}`
       );
       await expect(holidayRow).toHaveCount(0);
       await expect(retroRow).toHaveCount(0);
@@ -1400,19 +1496,21 @@ function tasksList(page: Page) {
 }
 
 /**
- * A task due two days out, with both its anchors, on the anchor day.
+ * A task due `dueInDays` out (two by default), with both its anchors, on the
+ * anchor day.
  *
- * Two days rather than the shared helper's seven: the window's last day is its
- * edge, and a UTC midnight passing between seeding and the page's own read
- * would push a task seeded there out of the window and fail the test for a
- * reason that has nothing to do with the card.
+ * Never the window's last day: that is its edge, and a UTC midnight passing
+ * between seeding and the page's own read would push a task seeded there out
+ * of the window and fail the test for a reason that has nothing to do with the
+ * card.
  */
 async function createDashboardTask(
   dataManager: TestDataManager,
   day: string,
-  text: string
+  text: string,
+  dueInDays = 2
 ): Promise<{ task: TestTask; dueJournal: TestJournal }> {
-  const dueDay = daysAfter(day, 2);
+  const dueDay = daysAfter(day, dueInDays);
 
   const creating = await dataManager.createJournal({
     title: 'Tasks card journal it came from',
@@ -1453,6 +1551,52 @@ function writeFor(page: Page, task: TestTask) {
       response.url().includes(`/api/tasks/${task.id}`) &&
       response.request().method() === 'PATCH'
   );
+}
+
+/** Every task row the list draws — and none of the contacts nested in them. */
+function taskRows(page: Page) {
+  return tasksList(page).locator(':scope > li');
+}
+
+/**
+ * One mocked task `daysAway` into the window, in the payload's shape.
+ *
+ * Each is due in a journal of its own, and each names a contact, so every row
+ * holds a nested list item of its own: a row count that counted those would
+ * read double and fail, which is what makes `taskRows` provably row-scoped.
+ */
+function mockTask(taskId: number, daysAway: number): HomeDashboardTask {
+  return {
+    task_id: taskId,
+    text: `Mocked task ${taskId}`,
+    due_journal: {
+      id: taskId + 1000,
+      title: `Mocked due journal ${taskId}`,
+      date: daysAfter(SUMMARY_ANCHOR, daysAway),
+    },
+    days_away: daysAway,
+    contacts: [
+      { contact_id: taskId + 2000, name: 'Mocked Contact', photo_url: null },
+    ],
+  };
+}
+
+/**
+ * **W25**'s absolute short form — `Thu 17 Sep` — for a due day past tomorrow.
+ *
+ * Built from `Intl` parts in UTC rather than with the app's date-fns helper,
+ * so this asserts what the chip should say rather than re-running the code
+ * that says it. The parts come from `en-US` and the order is assembled here:
+ * CLDR's Australian short month for September is `Sept`, where the app and
+ * **W25** both write three letters.
+ */
+function expectedShortDueLabel(day: string): string {
+  const at = new Date(`${day}T00:00:00Z`);
+  const part = (options: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', ...options }).format(
+      at
+    );
+  return `${part({ weekday: 'short' })} ${Number(day.slice(8, 10))} ${part({ month: 'short' })}`;
 }
 
 test.describe('Home Dashboard — the tasks card', () => {
@@ -1558,6 +1702,317 @@ test.describe('Home Dashboard — the tasks card', () => {
     );
     expect(stored.attributes.status).toBe('done');
     expect(stored.attributes.text).toBe('Tasks card confirm the caterer');
+  });
+
+  /**
+   * The structural sweep ITER18-004 Phase 17 owns (**W22**, **W25**, **W28**,
+   * **W29**).
+   *
+   * The cap and the empty state are served, for the reason the agenda block
+   * gives for its counts: the account is shared across the run, so a count
+   * read from real data would depend on suite ordering. The order is seeded,
+   * and asserted only between this test's own rows.
+   */
+  test.describe('Wireframe conformance', () => {
+    test('draws five rows and names the whole week, then reveals the rest in place (W22, W28)', async ({
+      authenticatedPage: page,
+    }) => {
+      const week = Array.from({ length: 7 }, (_, index) =>
+        mockTask(9101 + index, index + 1)
+      );
+      const dashboard = await mockDashboardSections(page, () => ({
+        tasks: ready({ window: MOCK_WINDOW, total: week.length, tasks: week }),
+      }));
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const card = page.getByTestId('tasks-card');
+      await expect(taskRows(page)).toHaveCount(5);
+      await expect(tasksList(page).getByText('Mocked task 9106')).toHaveCount(
+        0
+      );
+      const showMore = card.getByRole('button', {
+        name: 'Show all 7 due this week',
+      });
+      await expect(showMore).toBeVisible();
+
+      const urlBefore = page.url();
+      const readsBefore = dashboard.served();
+      await showMore.click();
+
+      // In place: the remainder is drawn from the payload already held, the
+      // control withdraws, and nothing navigated or re-read the dashboard.
+      await expect(taskRows(page)).toHaveCount(7);
+      await expect(tasksList(page).getByText('Mocked task 9107')).toBeVisible();
+      await expect(showMore).toHaveCount(0);
+      expect(page.url()).toBe(urlBefore);
+      expect(dashboard.served()).toBe(readsBefore);
+    });
+
+    test('orders its own tasks soonest first, each with its due chip (W22, W25)', async ({
+      authenticatedPage: page,
+      testCleanup,
+    }) => {
+      const dataManager = new TestDataManager(page);
+      testCleanup(() => dataManager.cleanup());
+      const day = await anchorDay(page);
+
+      // Seeded latest first, so creation order cannot pass for the rule.
+      const later = await createDashboardTask(
+        dataManager,
+        day,
+        'Tasks card book the venue',
+        4
+      );
+      const sooner = await createDashboardTask(
+        dataManager,
+        day,
+        'Tasks card post the invitations',
+        1
+      );
+
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const soonerRow = tasksList(page).getByTestId(
+        `dashboard-task-${sooner.task.id}`
+      );
+      const laterRow = tasksList(page).getByTestId(
+        `dashboard-task-${later.task.id}`
+      );
+      await expect(soonerRow).toBeVisible();
+      await expect(laterRow).toBeVisible();
+      expect((await boxOf(soonerRow)).y).toBeLessThan(
+        (await boxOf(laterRow)).y
+      );
+
+      // W25: relative for tomorrow, the absolute short form beyond it.
+      await expect(soonerRow.getByTestId('dashboard-task-chip')).toHaveText(
+        'Tomorrow'
+      );
+      await expect(laterRow.getByTestId('dashboard-task-chip')).toHaveText(
+        expectedShortDueLabel(daysAfter(day, 4))
+      );
+      // W26: each row names the journal it is due in, and links to it.
+      await expect(
+        laterRow.getByRole('link', { name: later.dueJournal.title })
+      ).toHaveAttribute('href', `/journals/${later.dueJournal.id}`);
+    });
+
+    test('says in one line that nothing is due, as a good outcome (W29)', async ({
+      authenticatedPage: page,
+    }) => {
+      await mockDashboardSections(page, () => ({}));
+      await page.setViewportSize(DESKTOP);
+      await openDashboard(page);
+
+      const card = page.getByTestId('tasks-card');
+      await expect(
+        card.getByText('Nothing due in the next seven days.')
+      ).toBeVisible();
+      // The labelled list stays in place (W4); it is simply empty.
+      await expect(tasksList(page)).toBeAttached();
+      await expect(taskRows(page)).toHaveCount(0);
+      await expect(card.getByTestId('tasks-show-more')).toHaveCount(0);
+      await expect(card.getByRole('alert')).toHaveCount(0);
+    });
+  });
+});
+
+/**
+ * Home Dashboard — the upcoming dates card (ITER18-004 Phase 17, **W30**–
+ * **W32**, wireframe gaps 2 and 3).
+ *
+ * The order and each row's elements are seeded — two contacts whose birthdays
+ * fall inside the window — and asserted only between this test's own rows,
+ * found by the link to each contact rather than by position. The cap and the
+ * empty state are served, for the reason the agenda block gives for its
+ * counts.
+ *
+ * **The e2e user has no configured timezone**, so the window is the UTC week
+ * starting on the anchor the server reports, and each birthday's month and day
+ * are taken from that anchor stepped in UTC. Neither sits on the window's last
+ * day, for the reason `createDashboardTask` gives.
+ */
+
+const UPCOMING_LIST_NAME = 'Upcoming contact dates';
+
+/** The wire value of a birthday, checked against its enum as `READY` is. */
+const BIRTHDAY =
+  'birthday' satisfies `${ImportantDateTypeEnum.BIRTHDAY}` as ImportantDateTypeEnum.BIRTHDAY;
+
+function upcomingList(page: Page) {
+  return page.getByRole('list', { name: UPCOMING_LIST_NAME });
+}
+
+function upcomingRows(page: Page) {
+  return upcomingList(page).getByTestId('upcoming-date');
+}
+
+/** The row for one seeded contact, by the link to them (W31). */
+function upcomingRowFor(page: Page, contact: TestContact) {
+  return upcomingRows(page).filter({
+    has: page.getByRole('link', {
+      name: `${contact.firstName} ${contact.lastName}`,
+    }),
+  });
+}
+
+/** One mocked occurrence `daysAway` into the window, in the payload's shape. */
+function mockUpcomingDate(
+  contactId: number,
+  daysAway: number
+): HomeDashboardUpcomingDate {
+  return {
+    contact_id: contactId,
+    contact_name: `Mocked Contact ${contactId}`,
+    photo_url: null,
+    date_type: BIRTHDAY,
+    custom_date_type_name: null,
+    occurs_on: daysAfter(SUMMARY_ANCHOR, daysAway),
+    days_away: daysAway,
+    years: null,
+    observed_for_leap_day: false,
+  };
+}
+
+/** The month and day of a `YYYY-MM-DD`, as an important date stores them. */
+function monthAndDay(day: string): { month: number; day: number } {
+  return { month: Number(day.slice(5, 7)), day: Number(day.slice(8, 10)) };
+}
+
+test.describe('Home Dashboard — the upcoming dates card', () => {
+  test('orders its own dates soonest first, each with its in-N-days chip (W31)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const anchor = await anchorDay(page);
+    const laterDay = daysAfter(anchor, 4);
+    const soonerDay = daysAfter(anchor, 2);
+
+    // Seeded latest first, so creation order cannot pass for the rule. The
+    // later one has a year, so it carries an age; the sooner one does not, so
+    // its badge degrades to the bare type (W31).
+    const [later] = await dataManager.createContacts([
+      {
+        firstName: 'Upcoming',
+        lastName: 'Later',
+        importantDates: [
+          {
+            date_type: BIRTHDAY,
+            precision: 'full',
+            year: 1990,
+            ...monthAndDay(laterDay),
+          },
+        ],
+      },
+    ]);
+    const [sooner] = await dataManager.createContacts([
+      {
+        firstName: 'Upcoming',
+        lastName: 'Sooner',
+        importantDates: [
+          {
+            date_type: BIRTHDAY,
+            precision: 'day_month',
+            ...monthAndDay(soonerDay),
+          },
+        ],
+      },
+    ]);
+
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+
+    const soonerRow = upcomingRowFor(page, sooner);
+    const laterRow = upcomingRowFor(page, later);
+    await expect(soonerRow).toBeVisible();
+    await expect(laterRow).toBeVisible();
+    expect((await boxOf(soonerRow)).y).toBeLessThan((await boxOf(laterRow)).y);
+
+    await expect(soonerRow.getByTestId('upcoming-date-chip')).toHaveText(
+      'in 2 days'
+    );
+    await expect(laterRow.getByTestId('upcoming-date-chip')).toHaveText(
+      'in 4 days'
+    );
+
+    await expect(soonerRow.getByTestId('upcoming-date-badge')).toHaveText(
+      'Birthday'
+    );
+    // The age the occurrence makes, counted from the year it falls in — which
+    // is the window's year, or the next one when the week spans New Year.
+    await expect(laterRow.getByTestId('upcoming-date-badge')).toHaveText(
+      `Birthday · turns ${Number(laterDay.slice(0, 4)) - 1990}`
+    );
+    await expect(laterRow.getByTestId('upcoming-date-when')).toHaveText(
+      expectedWeekdayDate(laterDay)
+    );
+
+    // Each row links to its contact.
+    await expect(
+      laterRow.getByRole('link', {
+        name: `${later.firstName} ${later.lastName}`,
+      })
+    ).toHaveAttribute('href', `/contacts/${later.id}`);
+  });
+
+  test('draws three rows and names the whole week, then reveals the rest in place (W32)', async ({
+    authenticatedPage: page,
+  }) => {
+    const week = Array.from({ length: 5 }, (_, index) =>
+      mockUpcomingDate(9201 + index, index + 1)
+    );
+    const dashboard = await mockDashboardSections(page, () => ({
+      upcoming_dates: ready({
+        window: MOCK_WINDOW,
+        total: week.length,
+        dates: week,
+      }),
+    }));
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+
+    const card = page.getByTestId('upcoming-dates-card');
+    await expect(upcomingRows(page)).toHaveCount(3);
+    await expect(
+      upcomingList(page).getByRole('link', { name: 'Mocked Contact 9204' })
+    ).toHaveCount(0);
+    const showMore = card.getByRole('button', {
+      name: 'Show all 5 this week',
+    });
+    await expect(showMore).toBeVisible();
+
+    const urlBefore = page.url();
+    const readsBefore = dashboard.served();
+    await showMore.click();
+
+    await expect(upcomingRows(page)).toHaveCount(5);
+    await expect(
+      upcomingList(page).getByRole('link', { name: 'Mocked Contact 9205' })
+    ).toBeVisible();
+    await expect(showMore).toHaveCount(0);
+    expect(page.url()).toBe(urlBefore);
+    expect(dashboard.served()).toBe(readsBefore);
+  });
+
+  test('says in one line that no dates are coming up (gap 2)', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockDashboardSections(page, () => ({}));
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+
+    const card = page.getByTestId('upcoming-dates-card');
+    await expect(
+      card.getByText('No important dates in the next seven days.')
+    ).toBeVisible();
+    await expect(upcomingList(page)).toBeAttached();
+    await expect(upcomingRows(page)).toHaveCount(0);
+    await expect(card.getByTestId('upcoming-dates-show-more')).toHaveCount(0);
+    await expect(card.getByRole('alert')).toHaveCount(0);
   });
 });
 

@@ -494,6 +494,8 @@ Every phase must meet the same bar before merge:
 - `main` is green at the end of the phase.
 - Explicit **unit, integration and e2e** coverage. E2E may be deferred only for a phase with no
   user-visible surface, and the deferral must be stated in the phase.
+  **E2E is never deferred to a later "E2E-only" phase** — see the note under ITER18-004 Phase 17 for why
+  that shape should not be planned again.
 - E2E is deterministic and fixture-driven: each test creates its own journals, tasks, contacts and dates.
   No conditional logic on data state, no skipping on missing data, no multi-outcome assertions. Empty
   states get their own tests, never an `if` branch inside a populated one.
@@ -11780,36 +11782,113 @@ e2e: 63 on `firefox` and `Mobile Chrome`.**
 **Phase 17's scope is left intact**: its structural sweep and its per-state fixture specs are untouched,
 and its criteria stay `[ ]`.
 
-#### Phase 17: E2E — Dashboard Wireframe Conformance
+#### Phase 17: E2E — Dashboard Wireframe Conformance ✅ COMPLETE
 
 **Prerequisites:** Phases 3–16. **Phase 3 already shipped the shell's e2e**, so this phase extends
 `frontend/tests/e2e/home-dashboard.spec.ts` rather than creating it.
+
+> **Do not plan a phase like this again.** A trailing "E2E — …" phase that collects the end-to-end coverage
+> for surfaces other phases built is the wrong shape: e2e belongs to **the phase that builds the surface**,
+> in the same PR, alongside its unit and integration tests. This iteration proved it by accident — Phases 3,
+> 4, 7, 8, 14 and 16 each pulled their own e2e forward rather than defer it here, because *Phase Completion
+> Requirements* already allow deferral only for a phase with no user-visible surface. What was left for this
+> phase was a gap-sweep of criteria nobody owned: easy to duplicate, easy to under-cover, and reviewed long
+> after the code it checks. Future iterations should put each surface's e2e criteria in the phase that
+> ships it and plan no e2e-only phase. **ITER18-005 Phase 8** (*E2E — Summary on the Dashboard*) is the one
+> remaining instance of this shape; it is named here rather than re-scoped, and any phase that touches the
+> summary before it should bring its own e2e.
 **Estimated diff:** ~160 production → **~640 tracked** (×4)
+
+**Actual: 0 production, ~645 tracked in the spec (+550 / −95)**, plus
+this entry. The estimate priced production that never existed: six earlier phases had already pulled
+their e2e forward, so what reached this phase was a gap-sweep — seven tests and a refactor of the mocks
+they share — and every line of it is test code. Calibration rule 17's lesson again, from the other
+side: the title said "E2E for the dashboard", and the honest count was the criteria nobody had yet
+discharged.
 
 **Acceptance Criteria:**
 
-- [ ] Deterministic fixture-driven specs asserting the **structural** wireframe facts: the four sections in
+- [x] Deterministic fixture-driven specs asserting the **structural** wireframe facts: the four sections in
       wireframe order with their headings; all-day entries above timed ones; a cancelled event carrying its
       marker; exactly five task rows with a show-more naming the full count; the collapsed-by-default
       tomorrow disclosure expanding in place; upcoming dates ascending with their "in N days" chips.
+      — **Three were already green** and are inherited rather than rewritten: all-day above timed and the
+      cancelled marker (Phase 7), the tomorrow disclosure (Phase 8). **New here:** *renders the four
+      sections in wireframe order, each under its heading* (**W3**–**W5**); *draws five rows and names the
+      whole week, then reveals the rest in place* (**W22**, **W28**); *orders its own tasks soonest first,
+      each with its due chip* (**W22**, **W25**, **W26**); *orders its own dates soonest first, each with its
+      in-N-days chip* (**W31**, including the age badge, the bare-type badge, the full date and the contact
+      link); and *draws three rows and names the whole week, then reveals the rest in place* (**W32**,
+      gap 3).
 - [x] ~~Ticking a task off removes it from the section **without navigation** and without the summary
       changing.~~ — **discharged in Phase 14**, which brought two e2e tests of its own rather than deferring
       them: *Phase Completion Requirements* permit deferral only for a phase with no user-visible surface,
       and that phase is the surface. This phase inherits them and adds the structural sweep around them.
-- [ ] Each declared state (**W33**) has its own test with its own fixtures: summary generated, generating and
+- [x] Each declared state (**W33**) has its own test with its own fixtures: summary generated, generating and
       unavailable; tasks populated and empty; and the agenda and upcoming-dates empty states.
+      — Summary generated, generating and unavailable: **Phase 4's per-state tests**, see decision 1 below.
+      Tasks populated: Phase 14's two tests plus the cap and order tests above. Agenda empty: Phase 7.
+      **New here:** *says in one line that nothing is due, as a good outcome* (**W29**) and *says in one
+      line that no dates are coming up* (gap 2).
 - [x] ~~The placeholder cards are gone and the navigation entry reaches the dashboard.~~ — **discharged in
       Phase 3**, which brought its own e2e spec (`frontend/tests/e2e/home-dashboard.spec.ts`) rather than
       deferring it here. That spec also covers the page frame (**W1**, **W2**) and the section grid
       (**W3**, **W4**), so this phase inherits a working shell and adds only the sections' own behaviour.
-- [ ] **Fixtures account for the e2e user having no configured timezone** (backend day boundaries are UTC),
+- [x] **Fixtures account for the e2e user having no configured timezone** (backend day boundaries are UTC),
       so "today" and "tomorrow" fixtures are built from explicit UTC offsets — otherwise a local-noon
-      journal lands on the wrong dashboard day.
-- [ ] No conditional logic on data state, no skips, no multi-outcome assertions; green on both `firefox` and
-      `Mobile Chrome`.
+      journal lands on the wrong dashboard day. — Every seeded task and birthday is placed from the day the
+      **server** anchored on (`anchorDay`), stepped in UTC by `daysAfter`, and kept off the window's last
+      day for the midnight reason `createDashboardTask` records.
+- [x] No conditional logic on data state, no skips, no multi-outcome assertions; green on both `firefox` and
+      `Mobile Chrome`. — The whole spec, **153 passed**, green locally on both projects with `--repeat-each 2`.
+
+**Decisions taken (Phase 17):**
+
+1. **The summary's three states are discharged by Phase 4's per-state tests, not rebuilt on real data.**
+   Phase 4 left this criterion open because its states are served from `page.route` rather than created,
+   and asked for "real fixtures once ITER18-005 makes the summary reachable end to end". It still is not
+   reachable from an e2e fixture: the stack configures no AI provider and `DailySummaryService` has no stub
+   seam — it checks `gemini_api_key` and nothing else — so *generated* cannot be created and *generating*
+   is transient by nature. Each of those tests installs exactly one state before navigating, which is
+   what "its own fixtures, one outcome" protects. **The real generated path is ITER18-005 Phase 8's first
+   criterion by name**, and that phase lists this one as its prerequisite; building it here would be the
+   duplication the calibration rules exist to prevent.
+2. **Counts are served; order is seeded.** The rule Phases 7 and 8 recorded, applied to the two new caps
+   and both empty states: the account is shared across the run, so a count read from real data depends
+   on suite ordering. Each served test is paired with a seeded one proving the endpoint feeds the same
+   rendering, and each seeded test asserts only between its own rows — found by id or by the link to the
+   contact, never by list position.
+3. **Every route mock in the spec is now typed as `HomeDashboardResponse`.** `dashboardDocument` builds
+   them all, from `import type`s of the client's own payload types. A route mock is a claim about the
+   wire contract that nothing checked — Phases 6 and 12 each found one here serving a payload the API
+   cannot produce. The two string enums are spelled as literals, because their module imports React Query
+   at load, and pinned with `satisfies` so a drifted value fails `tsc` rather than passing a bare `as`.
+4. **Each new test was verified to fail against a deliberate break**, then the break reverted: the summary
+   card moved below the grid, `VISIBLE_TASKS = 6`, `VISIBLE_UPCOMING_DATES = 4`, each card's rows
+   reversed, and each empty line changed. A structural test that cannot fail is the failure mode an
+   inherited-green phase is most exposed to.
+5. **The show-more "no second request" half is asserted against the reads served, before and after the
+   click** — not against an absolute count, and not with `waitForResponse`, which an always-mounted query
+   observer can silence.
+6. **The due chip's expected label is built from `en-US` `Intl` parts.** CLDR's Australian short month for
+   September is `Sept`; the app's date-fns `en-AU` and **W25** both write `Sep`. Asserting against `en-AU`
+   would have failed for a reason that has nothing to do with the chip — in September.
+7. **The spec was extended, not split**, as this entry directed. Its helpers (`anchorDay`, `daysAfter`,
+   `atUtc`, `openDashboard`) are module-local, and a split would have moved several hundred lines of them
+   for no behaviour.
+8. **Contact importance as the same-day tie-break is not re-asserted end to end.** It is the backend's rule,
+   pinned by Phase 11's integration suite, and the payload publishes none of the signals it ranks by — an
+   e2e could only restate the server's order, not check it.
+
+**Docs:** this entry, and the pointer under *Phase Completion Requirements*. The wireframe document is
+unchanged — no divergence was found — as are `frontend-design.md` and `testing-strategy.md`, since no
+component or pattern changed.
 
 **Required Test Coverage:** this phase *is* the e2e coverage for ITER18-004; unit and integration coverage
-landed in Phases 1–16.
+landed in Phases 1–16. — **Delivered:** 7 new e2e tests (14 runs across `firefox` and `Mobile Chrome`),
+each verified to fail against a deliberate break. No unit or integration tests: no production code
+changed. Gates run locally: `pnpm quality:check` (0 errors), the dashboard Jest suites (18 suites, 244
+tests), and the full spec on both projects with `--repeat-each 2`.
 
 #### Phase 18: Two Answers to One Question
 
