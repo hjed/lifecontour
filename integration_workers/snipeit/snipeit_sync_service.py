@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 import structlog
 from core_shared.models.journals.calendar_info import event_date_in_timezone
+from pydantic import ValidationError
 from sqlalchemy import text
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
@@ -1359,6 +1360,7 @@ class SnipeItSyncService:
                 day=checkout_at,
                 source="snipeit_checkout",
                 journal_id=journal_id,
+                external_id=external_id,
                 session_factory=session_factory,
             )
             if linked_log_id is None:
@@ -1533,65 +1535,156 @@ class SnipeItSyncService:
         day: str | None,
         source: str,
         journal_id: int,
+        external_id: str,
         session_factory: Any,
         after_log_id: int | None = None,
     ) -> int | None:
-        """Return the id of an existing Snipe-IT log entry this journal can link to.
+        """Claim an existing Snipe-IT log entry this journal can link to, if any.
 
-        Pages through the asset's ``action_type`` activity, newest first, for an
-        entry dated ``day`` (Snipe-IT's server date) that involves the mapped
-        Snipe-IT user and, when ``after_log_id`` is given, was logged after it.
-        An entry already linked to another journal's ``source`` row is skipped,
-        so two journals using the same asset on the same day each get a record.
+        Candidates are entries dated ``day`` (Snipe-IT's server date) that involve
+        the mapped Snipe-IT user and, when ``after_log_id`` is given, were logged
+        after it; one no other journal holds is claimed on this journal's
+        ``source`` row (``external_id``). Linking is best-effort: when the
+        activity report cannot be read, nothing is linked and the caller records
+        the history as usual.
         """
         if not day or not self._snipeit_user_id:
             return None
-        candidates: list[int] = []
-        for page in range(1, _ACTIVITY_MAX_PAGES + 1):
-            response = await self._api_client.list_asset_activity(
-                asset_id, action_type=action_type, page=page, per_page=_PAGE_SIZE
-            )
-            candidates.extend(
-                activity.id
-                for activity in response.rows
-                if activity.action_day == day
-                and activity.item is not None
-                and activity.item.id == asset_id
-                and activity.target is not None
-                and activity.target.type == "user"
-                and str(activity.target.id) == str(self._snipeit_user_id)
-                and (after_log_id is None or activity.id > after_log_id)
-            )
-            if len(response.rows) < _PAGE_SIZE:
-                break
-        else:
-            logger.warning(
-                "Stopped searching Snipe-IT activity at the page limit",
-                snipeit_asset_id=asset_id,
-                action_type=action_type,
-            )
+        candidates = await self._activity_candidates(
+            asset_id=asset_id,
+            action_type=action_type,
+            day=day,
+            after_log_id=after_log_id,
+        )
         if not candidates:
             return None
-
-        async with session_factory() as session:
-            result = await session.execute(
-                text("""
-                    SELECT reference_data::jsonb ->> 'snipeit_log_id' AS log_id
-                    FROM sync_metadata
-                    WHERE integration_source = :source
-                      AND internal_uuid <> :journal_id
-                      AND reference_data LIKE :linked_pattern
-                """),
-                {
-                    "source": source,
-                    "journal_id": str(journal_id),
-                    "linked_pattern": '%"snipeit_log_id"%',
-                },
-            )
-            linked = {row.log_id for row in result.fetchall()}
-        return next(
-            (log_id for log_id in candidates if str(log_id) not in linked), None
+        return await self._claim_activity_log(
+            candidates,
+            source=source,
+            asset_id=asset_id,
+            journal_id=journal_id,
+            external_id=external_id,
+            session_factory=session_factory,
         )
+
+    async def _activity_candidates(
+        self,
+        *,
+        asset_id: int,
+        action_type: str,
+        day: str,
+        after_log_id: int | None,
+    ) -> list[int]:
+        """Page the asset's ``action_type`` activity, newest first, for matches."""
+        candidates: list[int] = []
+        try:
+            for page in range(1, _ACTIVITY_MAX_PAGES + 1):
+                response = await self._api_client.list_asset_activity(
+                    asset_id, action_type=action_type, page=page, per_page=_PAGE_SIZE
+                )
+                candidates.extend(
+                    activity.id
+                    for activity in response.rows
+                    if activity.action_day == day
+                    and activity.item is not None
+                    and activity.item.id == asset_id
+                    and activity.target is not None
+                    and activity.target.type == "user"
+                    and str(activity.target.id) == str(self._snipeit_user_id)
+                    and (after_log_id is None or activity.id > after_log_id)
+                )
+                if len(response.rows) < _PAGE_SIZE:
+                    break
+            else:
+                logger.warning(
+                    "Stopped searching Snipe-IT activity at the page limit",
+                    snipeit_asset_id=asset_id,
+                    action_type=action_type,
+                )
+        except SnipeItAPIError as exc:
+            # Transient and auth failures must still retry; a report this API key
+            # may not read, or this Snipe-IT version lacks, only skips linking.
+            if exc.status_code not in (403, 404):
+                raise
+            logger.warning(
+                "Snipe-IT activity report unavailable; recording without linking",
+                snipeit_asset_id=asset_id,
+                status_code=exc.status_code,
+            )
+            return []
+        except ValidationError:
+            logger.warning(
+                "Snipe-IT activity report unreadable; recording without linking",
+                snipeit_asset_id=asset_id,
+            )
+            return []
+        return candidates
+
+    async def _claim_activity_log(
+        self,
+        candidates: list[int],
+        *,
+        source: str,
+        asset_id: int,
+        journal_id: int,
+        external_id: str,
+        session_factory: Any,
+    ) -> int | None:
+        """Claim the first candidate no other journal holds, or return ``None``.
+
+        The claim is written onto this journal's in-progress ``source`` row while
+        a per-asset advisory lock is held, so journals processed at once see each
+        other's claims and cannot both link one Snipe-IT entry. A claim left on a
+        failed row is stale and ignored.
+        """
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": f"{source}:{asset_id}"},
+                )
+                result = await session.execute(
+                    text("""
+                        SELECT reference_data::jsonb ->> 'snipeit_log_id' AS log_id
+                        FROM sync_metadata
+                        WHERE integration_source = :source
+                          AND internal_uuid <> :journal_id
+                          AND sync_status <> 'failed'
+                          AND reference_data LIKE :linked_pattern
+                    """),
+                    {
+                        "source": source,
+                        "journal_id": str(journal_id),
+                        "linked_pattern": '%"snipeit_log_id"%',
+                    },
+                )
+                held = {row.log_id for row in result.fetchall()}
+                log_id = next(
+                    (
+                        candidate
+                        for candidate in candidates
+                        if str(candidate) not in held
+                    ),
+                    None,
+                )
+                if log_id is None:
+                    return None
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET reference_data = :claim, updated_at = now()
+                        WHERE integration_source = :source
+                          AND internal_uuid = :journal_id
+                          AND external_id = :external_id
+                    """),
+                    {
+                        "claim": json.dumps({"snipeit_log_id": log_id}),
+                        "source": source,
+                        "journal_id": str(journal_id),
+                        "external_id": external_id,
+                    },
+                )
+        return log_id
 
     async def _unlock_pending_checkout(
         self,
@@ -1779,6 +1872,7 @@ class SnipeItSyncService:
                     day=checkin_at.isoformat(),
                     source="snipeit_checkin",
                     journal_id=journal_id,
+                    external_id=external_id,
                     session_factory=session_factory,
                     after_log_id=checkout_log_id,
                 )

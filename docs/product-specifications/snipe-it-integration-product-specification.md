@@ -92,6 +92,8 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
   - When the checkout was linked, a check-in on the journal's check-in date that was logged after that checkout is linked the same way; otherwise the check-in is posted.
   - A log entry already linked to another journal is never reused, so two journals using the same asset on the same day each get their own record.
   - The search reads the newest 500 entries per asset and action type.
+  - A match is claimed on the journal's sync row before anything is recorded, under a per-asset lock, so journals processed at the same time cannot both link one entry.
+  - Linking is best-effort: if the activity report cannot be read (the API key lacks permission, the Snipe-IT version has no report, or the response is unexpected), the history is recorded as usual.
 - **Buffer Dates**:
   - Users can specify a separate start and end date for the gear checkout to allow for buffer (e.g., packing the day before).
   - **Default**: The buffer dates explicitly default to the journal's event dates if not modified by the user.

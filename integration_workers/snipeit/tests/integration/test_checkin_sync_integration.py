@@ -1045,6 +1045,97 @@ class TestInFlightCheckoutIntegration:
         assert mock_transport.requests == []
 
 
+class TestActivityClaimsIntegration:
+    """Claims on Snipe-IT log entries are exclusive and never block recording."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("other_status", "claimed"),
+        [("pending", None), ("success", None), ("failed", 100)],
+        ids=["held-by-in-flight-journal", "held-by-synced-journal", "stale-failed"],
+    )
+    async def test_a_log_entry_is_claimed_by_one_journal(
+        self,
+        snipeit_sync_service: Any,
+        async_connection: AsyncConnection,
+        other_status: str,
+        claimed: int | None,
+    ) -> None:
+        """A claim is written while the other journal is still in progress.
+
+        Two journals processed at once each hold a pending row, so the claim
+        must be visible before either finishes; a claim on a failed row is stale.
+        """
+        journal_id, other_journal_id = 700001, 700002
+        await _insert_checkout_metadata(
+            async_connection,
+            asset_id="42",
+            journal_id=journal_id,
+            sync_status="pending",
+        )
+        await _insert_checkout_metadata(
+            async_connection,
+            asset_id="42",
+            journal_id=other_journal_id,
+            sync_status=other_status,
+        )
+        assert (
+            await snipeit_sync_service._claim_activity_log(
+                [100],
+                source="snipeit_checkout",
+                asset_id=42,
+                journal_id=other_journal_id,
+                external_id=f"snipeit_checkout:42:{other_journal_id}",
+                session_factory=lambda: _session_factory(async_connection),
+            )
+            == 100
+        )
+
+        assert (
+            await snipeit_sync_service._claim_activity_log(
+                [100],
+                source="snipeit_checkout",
+                asset_id=42,
+                journal_id=journal_id,
+                external_id=f"snipeit_checkout:42:{journal_id}",
+                session_factory=lambda: _session_factory(async_connection),
+            )
+            == claimed
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body"),
+        [
+            (403, {"status": "error", "messages": "Forbidden."}),
+            (404, None),
+            (200, {"status": "error", "messages": "Unauthorized."}),
+        ],
+        ids=["forbidden", "missing-endpoint", "unreadable-report"],
+    )
+    async def test_unavailable_activity_report_does_not_block_the_checkout(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        status_code: int,
+        body: dict[str, Any] | None,
+    ) -> None:
+        """Linking is best-effort: without the report, history is recorded as usual."""
+        journal_id = await _sydney_trip(async_connection)
+        mock_transport.add_response(
+            "action_type=checkout", status_code=status_code, json_data=body
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST]
+
+
 class TestSupersededAssetRetryIntegration:
     """A failed return of the previous asset is retried against that asset."""
 
