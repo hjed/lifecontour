@@ -26,7 +26,11 @@
  * coming out.
  */
 
-import { isIsoCalendarDate, zonedMidnight } from '@/lib/date-utils';
+import {
+  isIsoCalendarDate,
+  localDateIn,
+  zonedMidnight,
+} from '@/lib/date-utils';
 import type { HomeDashboardAnchor } from '@/lib/api/home-dashboard';
 
 /**
@@ -68,4 +72,41 @@ export function msUntilNextAnchorDay(
   }
 
   return boundary - now.getTime();
+}
+
+/**
+ * Whether the anchor is still the day it claims to be.
+ *
+ * The summary card's Regenerate posts `meta.anchor.date`, and a dashboard held
+ * open across local midnight keeps yesterday's anchor until the refresh above
+ * lands — which is one more thing that can fail to arrive. A **write** keyed on
+ * that anchor would rewrite yesterday's summary under a page headed "Today", so
+ * the card checks the anchor against the wall clock in the zone the payload
+ * itself names and declines rather than guessing.
+ *
+ * **The day is `localDateIn`'s answer, including for a zone the browser does
+ * not recognise**, which it resolves in the browser's own zone. That was
+ * a decision rather than an inheritance: the card used to catch
+ * the throw and trust the anchor, which made it the one caller in the app with
+ * a second answer to "which day is this instant in that zone". The cost is
+ * accepted — for an unparseable zone whose date the browser disagrees with,
+ * Regenerate stays disabled rather than posting a day it cannot confirm, the
+ * same safe failure an outlived anchor gets.
+ *
+ * That window is longer than it looks. `msUntilNextAnchorDay` resolves such a
+ * zone in the browser's too, but the two do not share a boundary: the refresh
+ * waits for the browser's midnight after `anchor.date` plus one, not the next
+ * browser midnight, and nothing re-renders the card in between — a refetch
+ * returning the same payload does not either. So the control can stay disabled
+ * for up to about a day after the browser's date first matches the anchor,
+ * until the scheduled refresh brings the next one.
+ *
+ * @param anchor The payload's own `meta.anchor`.
+ * @param now Defaults to the current instant; passed in by tests.
+ */
+export function isAnchorStillToday(
+  anchor: HomeDashboardAnchor,
+  now: Date = new Date()
+): boolean {
+  return localDateIn(anchor.timezone, now) === anchor.date;
 }

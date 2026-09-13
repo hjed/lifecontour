@@ -1121,9 +1121,25 @@ elements are numbered **W1**–**W33**.
     the refresh is one more thing that can fail to arrive. The card
     compares the anchor against the wall clock in the zone the payload itself
     names and declines rather than guessing — leaving the control disabled
-    until the query refetches, exactly as before the first load arrives. An
-    unparseable zone trusts the anchor: the server resolved that day and the
-    browser cannot second-guess it.
+    until the query refetches, exactly as before the first load arrives. The
+    check is `isAnchorStillToday` in `src/lib/dashboard-anchor.ts`, and the day
+    it compares is **`date-utils.localDateIn`'s** — the one function in the app
+    that resolves an instant to a calendar date in a named zone. That includes
+    its answer for a zone the browser does not recognise, which resolves in the
+    browser's own zone (ITER18-004 Phase 18). The card used to catch the throw
+    and trust the anchor instead; the cost of one answer is accepted — for an
+    unparseable zone whose date the browser disagrees with, Regenerate stays
+    disabled rather than posting a day it cannot confirm. **That window can
+    outlast the browser's own midnight.** `msUntilNextAnchorDay` falls back to
+    the browser's zone too, but the two do not share a boundary there: the
+    refresh waits for the browser's midnight *after `anchor.date` plus one*,
+    not the next browser midnight, and nothing re-renders the card in between
+    (a focus refetch returning the same payload does not either). So the
+    control can stay disabled for up to about a day after the browser's date
+    first matches the anchor, until the scheduled refresh brings the next one.
+    The branch needs a browser whose tzdata lacks a zone the server knows, and
+    aligning the scheduler with the check is recorded as a follow-up rather
+    than done here.
 
     Two details of that check are worth knowing, because both are easy to get
     subtly wrong. `localDateIn` builds `YYYY-MM-DD` from
@@ -1378,7 +1394,10 @@ elements are numbered **W1**–**W33**.
   the centred `link`-variant show-more reveals the remainder **in place** from
   data already held — asserted against the request count, not only the DOM,
   because a card that refetched would still look right on screen. The button
-  names `total` rather than the hidden count, as **W32** writes it. Ready-and-
+  names the whole list rather than the hidden count, as **W32** writes it — and
+  counts that list itself rather than reading the section's `total`, so the
+  button's gate and its name are one quantity, the same one `TasksCard` reads
+  (ITER18-004 Phase 18). Ready-and-
   empty draws the **W29** line (wireframe gap 2); pending and unavailable each
   draw their own treatment through `DashboardSectionPlaceholder`
   (`upcoming-dates-loading`, `upcoming-dates-unavailable`). The

@@ -385,3 +385,37 @@ describe('zonedCalendarDay', () => {
     expect(zonedMidnight(reopened, zone).toISOString()).toBe(stored);
   });
 });
+
+/**
+ * The calendar date `instant` falls on in the browser's own zone, read from
+ * `Date`'s local getters so the expectation does not reuse `Intl` to predict
+ * `Intl` — and holds whatever zone the test runner happens to be in.
+ */
+function browserLocalDate(instant: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}`;
+}
+
+describe('localDateIn', () => {
+  it('gives the local day, not the UTC one, either side of midnight', () => {
+    const instant = new Date('2026-07-29T20:00:00Z');
+
+    // 06:00 on the 30th in Sydney; still 16:00 on the 29th in New York.
+    expect(localDateIn(SYDNEY, instant)).toBe('2026-07-30');
+    expect(localDateIn(NEW_YORK, instant)).toBe('2026-07-29');
+  });
+
+  /**
+   * The one answer every caller gets for a zone `Intl` does not know — the
+   * due-journal picker, the range editor and, since ITER18-004 Phase 18, the
+   * dashboard's anchor check. Pinned to the browser's own date rather than to
+   * the shape of one, so a fallback that went anywhere else would fail.
+   */
+  it('resolves an unrecognised zone in the browser’s own zone', () => {
+    const instant = new Date('2026-07-29T20:00:00Z');
+
+    expect(localDateIn('Nowhere/Nothing', instant)).toBe(
+      browserLocalDate(instant)
+    );
+  });
+});

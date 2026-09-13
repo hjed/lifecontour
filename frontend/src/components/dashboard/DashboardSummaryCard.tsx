@@ -50,8 +50,8 @@ import {
   DashboardSummaryState,
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
-import type { HomeDashboardAnchor } from '@/lib/api/home-dashboard';
 import { useRegenerateDailySummary } from '@/lib/api/journals';
+import { isAnchorStillToday } from '@/lib/dashboard-anchor';
 import { cn } from '@/lib/utils';
 
 const HEADING_ID = 'dashboard-summary-heading';
@@ -72,54 +72,6 @@ const SUMMARY_COPY = {
    */
   unavailable: 'No summary today — everything below still works.',
 } as const;
-
-/**
- * Whether the cached anchor is still the day it claims to be.
- *
- * The dashboard query has one fixed key and the app-wide `staleTime` is five
- * minutes, with no refetch scheduled at the day boundary — a dashboard left
- * open and focused across local midnight keeps yesterday's anchor. Phase 3
- * recorded that as a follow-up owned by Phase 16, when the only consequence was
- * a stale *label*.
- *
- * A **write** keyed on that anchor is a different matter: regenerating would
- * rewrite yesterday's summary while the page says "Today". So the action checks
- * the anchor against the wall clock in the zone the payload itself names, and
- * declines rather than guessing — which leaves the control disabled until the
- * query refetches, exactly as it is before the first load arrives.
- *
- * The comparison is built from `formatToParts` rather than `format`, because
- * `format` returns *presentation* output: which separator a locale uses is
- * CLDR data, not a guarantee, so a locale that renders `en-CA` with slashes
- * would make every comparison false and disable the control on a perfectly
- * current anchor. Reading the year, month and day parts and assembling
- * `YYYY-MM-DD` ourselves is locale-independent. The zone lookup is still
- * `Intl`'s, so there is no date arithmetic here and nothing for a DST
- * transition to catch out. Scheduling the refetch that *fixes* the staleness is
- * still Phase 16's; this only stops the write going to the wrong day.
- */
-export function localDateIn(timeZone: string, now: Date): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now);
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find(candidate => candidate.type === type)?.value ?? '';
-
-  return `${part('year')}-${part('month')}-${part('day')}`;
-}
-
-function isStillToday(anchor: HomeDashboardAnchor, now: Date = new Date()) {
-  try {
-    return localDateIn(anchor.timezone, now) === anchor.date;
-  } catch {
-    // An unrecognised zone would throw. The server resolved this day and the
-    // browser cannot second-guess which one it meant, so trust the anchor.
-    return true;
-  }
-}
 
 /**
  * The headline as the page mounts it: the card behind the boundary that keeps a
@@ -215,8 +167,11 @@ function DashboardSummaryCardBody() {
     useRegenerateDailySummary();
 
   const anchor = data?.meta.anchor;
-  // Only regenerate a day the anchor still agrees is today. See `isStillToday`.
-  const anchorDate = anchor && isStillToday(anchor) ? anchor.date : undefined;
+  // Only regenerate a day the anchor still agrees is today — a dashboard held
+  // open across local midnight would otherwise rewrite yesterday's summary
+  // under a page headed "Today". See `isAnchorStillToday`.
+  const anchorDate =
+    anchor && isAnchorStillToday(anchor) ? anchor.date : undefined;
   const section = data?.data.attributes.summary;
   const summary =
     section?.status === DashboardSectionStatus.READY ? section.data : null;
@@ -235,7 +190,7 @@ function DashboardSummaryCardBody() {
     // local midnight need never render again — so the enabled button would
     // still be closing over yesterday's anchor, which is the exact write this
     // guard exists to prevent.
-    if (anchor && isStillToday(anchor)) {
+    if (anchor && isAnchorStillToday(anchor)) {
       regenerate(anchor.date);
     }
   };
@@ -262,7 +217,7 @@ function DashboardSummaryCardBody() {
                 other whole-page resilience.
 
                 The same disabling covers a *stale* anchor — see
-                `isStillToday`: a dashboard held open across local midnight
+                `isAnchorStillToday`: a dashboard held open across local midnight
                 would otherwise regenerate yesterday under a page headed
                 "Today". */}
             <Button
