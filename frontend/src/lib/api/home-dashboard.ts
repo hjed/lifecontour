@@ -22,10 +22,12 @@
  *   page with; the browser's idea of today can differ.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { JsonApiErrorResponse } from '@/types/api';
 import { ImportantDateTypeEnum } from '@/types/contacts';
 import { API_ENDPOINTS, ERROR_MESSAGES } from '@/lib/constants';
+import { msUntilNextAnchorDay } from '@/lib/dashboard-anchor';
 
 /** Whether a section has a payload for you. */
 export enum DashboardSectionStatus {
@@ -362,4 +364,52 @@ export function useHomeDashboard() {
     queryKey: homeDashboardKeys.all,
     queryFn: fetchHomeDashboard,
   });
+}
+
+/**
+ * Refresh the dashboard when its anchor day ends.
+ *
+ * The whole page is read for one day and every window hangs off it, so a
+ * dashboard left open *and focused* across local midnight keeps yesterday's
+ * anchor — and, since Phase 3, yesterday's date in the **W2** header. That is
+ * the same "a wrong date is worse than none" failure the header refuses when it
+ * declines to guess a date, arriving by a different route; Phase 3 recorded it
+ * as owned by Phase 16 and this is it.
+ *
+ * Called **once**, by the page. Every card reads the query itself, and one
+ * timer per card would be four timers invalidating one query key.
+ *
+ * **The effect is keyed on the anchor, and that is what makes it terminate.**
+ * An anchor already in the past is due immediately, which is right for a
+ * payload cached across midnight; if the refetch comes back with the *same*
+ * anchor — a browser clock that disagrees with the server about the day — the
+ * dependencies have not moved, the effect does not run again, and there is no
+ * loop. A refetch that does move the day reschedules for the next boundary.
+ */
+export function useAnchorDayRefresh(anchor: HomeDashboardAnchor | undefined) {
+  const queryClient = useQueryClient();
+  const date = anchor?.date;
+  const timezone = anchor?.timezone;
+
+  useEffect(() => {
+    if (date === undefined || timezone === undefined) {
+      return;
+    }
+
+    const delay = msUntilNextAnchorDay({ date, timezone });
+    if (delay === null) {
+      // An anchor that cannot be read schedules nothing: the arithmetic would
+      // be `NaN`, and `setTimeout(NaN)` fires immediately rather than never.
+      return;
+    }
+
+    const timer = setTimeout(
+      () => {
+        void queryClient.invalidateQueries({ queryKey: homeDashboardKeys.all });
+      },
+      Math.max(delay, 0)
+    );
+
+    return () => clearTimeout(timer);
+  }, [date, timezone, queryClient]);
 }

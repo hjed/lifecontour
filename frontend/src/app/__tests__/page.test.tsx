@@ -10,7 +10,7 @@
  * however many sections mount.
  */
 
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '@/test-utils';
 import HomePage from '@/app/page';
 import {
@@ -182,6 +182,24 @@ function respondWithDashboard() {
   );
 }
 
+/**
+ * Freeze the clock on the fixture's anchor day.
+ *
+ * For the request-counting tests only. Since ITER18-004 Phase 16 the page
+ * schedules a refresh for the end of `meta.anchor.date`, and an anchor already
+ * in the past is due **immediately** — which is right in life and is exactly
+ * what a fixture deliberately dated in the past looks like. A test asking
+ * "how many requests does mounting this page cost?" has to ask it on a day the
+ * anchor is current, or it is counting the staleness of its own fixture.
+ *
+ * 13:00 in Sydney on the anchor day, so the boundary is eleven hours off and
+ * no timer can fire inside a test.
+ */
+function freezeOnTheAnchorDay() {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(`${ANCHOR_DATE}T03:00:00Z`));
+}
+
 /** Render the page and wait for the shell to be on screen. */
 async function renderHomePage() {
   renderWithProviders(<HomePage />);
@@ -217,6 +235,12 @@ describe('HomePage — the dashboard shell', () => {
     jest.clearAllMocks();
     mockFetch.mockReset();
     respondWithDashboard();
+  });
+
+  // Several tests below freeze the clock; leaking fake timers into the next
+  // test is how a suite starts failing somewhere it never touched.
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   describe('Page header (W2)', () => {
@@ -322,6 +346,7 @@ describe('HomePage — the dashboard shell', () => {
 
   describe('One round trip', () => {
     it('fetches the dashboard once for the whole page', async () => {
+      freezeOnTheAnchorDay();
       await renderHomePage();
 
       await waitFor(() =>
@@ -414,6 +439,70 @@ describe('HomePage — the dashboard shell', () => {
     });
   });
 
+  /**
+   * ITER18-004 Phase 16, inherited from Phase 3. When the boundary falls is
+   * `msUntilNextAnchorDay`'s and the scheduling is `useAnchorDayRefresh`'s,
+   * both pinned in their own suites; what belongs here is that the **page**
+   * calls it, with the anchor the payload actually carried. Nothing else on
+   * the page would notice if it did not — until the morning after.
+   */
+  describe('The anchor day ending', () => {
+    /** Midnight in Sydney at the end of the fixture's anchor day. */
+    const BOUNDARY = new Date('2026-07-29T14:00:00Z');
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-07-29T03:00:00Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('re-reads the dashboard when the day it is anchored on ends', async () => {
+      respondWithDashboard();
+
+      await renderHomePage();
+      await screen.findByTestId('dashboard-summary-text');
+      expect(
+        mockFetch.mock.calls.filter(
+          ([input]) => String(input) === DASHBOARD_URL
+        )
+      ).toHaveLength(1);
+
+      // Measured against the clock rather than assumed: `waitFor` advances
+      // fake timers itself while it polls.
+      await act(async () => {
+        jest.advanceTimersByTime(BOUNDARY.getTime() - Date.now());
+      });
+
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.filter(
+            ([input]) => String(input) === DASHBOARD_URL
+          )
+        ).toHaveLength(2)
+      );
+    });
+
+    it('leaves it alone until then', async () => {
+      respondWithDashboard();
+
+      await renderHomePage();
+      await screen.findByTestId('dashboard-summary-text');
+
+      await act(async () => {
+        jest.advanceTimersByTime(BOUNDARY.getTime() - 1000 - Date.now());
+      });
+
+      expect(
+        mockFetch.mock.calls.filter(
+          ([input]) => String(input) === DASHBOARD_URL
+        )
+      ).toHaveLength(1);
+    });
+  });
+
   describe('The summary card (W5)', () => {
     it('sits between the page header and the section grid', async () => {
       const ready = await renderHomePage();
@@ -442,6 +531,7 @@ describe('HomePage — the dashboard shell', () => {
     });
 
     it('still costs one dashboard request with the card mounted', async () => {
+      freezeOnTheAnchorDay();
       await renderHomePage();
 
       await screen.findByTestId('dashboard-summary-text');
@@ -691,6 +781,7 @@ describe('HomePage — the dashboard shell', () => {
     });
 
     it('still costs one dashboard request with the agenda card reading it', async () => {
+      freezeOnTheAnchorDay();
       routeFetch(() =>
         Promise.resolve({
           ok: true,
@@ -768,6 +859,7 @@ describe('HomePage — the dashboard shell', () => {
     });
 
     it('still costs one dashboard request with the tasks card reading it', async () => {
+      freezeOnTheAnchorDay();
       respondWithTasks();
 
       await renderHomePage();

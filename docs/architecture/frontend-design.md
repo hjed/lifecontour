@@ -1113,11 +1113,12 @@ elements are numbered **W1**–**W33**.
     whose zone differs. Recovering a failed request is a *retry*, not a
     regeneration, and belongs to Phase 16.
   - **It also refuses a day the anchor has outlived.** The query has one fixed
-    key, the app-wide five-minute `staleTime`, and no refetch scheduled at the
-    day boundary, so a dashboard left open and focused across local midnight
-    keeps yesterday's anchor. A stale *label* is Phase 16's to fix; a **write**
-    keyed on a stale anchor is not something to leave until then, because it
-    would rewrite yesterday's summary under a page headed "Today". The card
+    key and the app-wide five-minute `staleTime`, so a dashboard left open and
+    focused across local midnight would keep yesterday's anchor were nothing
+    scheduled for the boundary — which is what `useAnchorDayRefresh` now is
+    (see below). This check predates it and stays: a **write** keyed on a stale
+    anchor would rewrite yesterday's summary under a page headed "Today", and
+    the refresh is one more thing that can fail to arrive. The card
     compares the anchor against the wall clock in the zone the payload itself
     names and declines rather than guessing — leaving the control disabled
     until the query refetches, exactly as before the first load arrives. An
@@ -1190,6 +1191,35 @@ elements are numbered **W1**–**W33**.
   an entry, and it has to survive an empty section, because "nothing scheduled
   today" says nothing about what a footer is for. The agenda's tomorrow
   disclosure is its only user so far.
+- **The read expires at the anchor day's end** (**ITER18-004 Phase 16**,
+  inherited from Phase 3): the page calls `useAnchorDayRefresh(data?.meta.anchor)`
+  once, which schedules `invalidateQueries(homeDashboardKeys.all)` for the next
+  midnight **in `meta.anchor.timezone`**.
+  - **Why the page and not each card.** Every card reads the same query key, so
+    four schedulers would be four timers invalidating one query. Which day the
+    page is showing is the one thing here that is the page's, not a section's.
+  - **Why a boundary and not an interval.** An interval refetches a page nobody
+    is watching all day and still arrives late at the one moment that matters.
+    The zone is the anchor's own, because the browser's midnight is a different
+    instant for anyone whose configured zone is not their machine's.
+  - **The arithmetic is `zonedMidnight`'s** (`src/lib/date-utils.ts`), through
+    the pure `msUntilNextAnchorDay` in `src/lib/dashboard-anchor.ts`. Adding
+    twenty-four hours to the anchor day's own midnight is the tempting version
+    and it is wrong twice a year — an hour late going into DST, an hour early
+    coming out — which is what the Sydney spring-forward and fall-back cases in
+    `dashboard-anchor.test.ts` pin.
+  - **An anchor already in the past is due at once**, which is what a payload
+    cached across midnight looks like, and it terminates: the effect is keyed on
+    the anchor, so a refetch returning the same day schedules nothing further.
+    A **malformed** anchor schedules nothing at all — the arithmetic would be
+    `NaN` and `setTimeout(NaN)` fires immediately rather than never, which is
+    why the helper returns `number | null` rather than a bare number.
+  - **A consequence for tests**: a fixture anchor dated in the past is *stale*,
+    so mounting the page costs a second request. `page.test.tsx`'s
+    request-counting tests freeze the clock on the fixture's anchor day
+    (`freezeOnTheAnchorDay`); the rest keep the real clock, since the extra read
+    changes nothing they assert.
+
 - **A section that throws does not blank the page** (**ITER18-004 Phase 16**):
   every card is `DashboardSectionBoundary` wrapping its own body, with a
   fallback of that section's card shell showing its unavailable state
