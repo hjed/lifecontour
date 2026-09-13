@@ -61,6 +61,22 @@ interface DashboardSectionCardProps {
   readonly testId?: string;
 }
 
+/**
+ * The wireframe copy a section supplies to the shell — everything but the
+ * per-render slots. Each card exports one of these as its `*_SECTION` constant,
+ * so its populated card and its unavailable fallback are drawn from one source.
+ */
+export type DashboardSectionCardCopy = Pick<
+  DashboardSectionCardProps,
+  | 'icon'
+  | 'iconChipClassName'
+  | 'title'
+  | 'description'
+  | 'listLabel'
+  | 'emptyIcon'
+  | 'emptyMessage'
+>;
+
 export function DashboardSectionCard({
   icon: Icon,
   iconChipClassName,

@@ -34,8 +34,12 @@
 import { useState } from 'react';
 import { CalendarOff, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DashboardSectionBoundary } from './DashboardSectionBoundary';
 import { DashboardSectionCard } from './DashboardSectionCard';
-import { DashboardSectionPlaceholder } from './DashboardSectionPlaceholder';
+import {
+  DashboardSectionPlaceholder,
+  DashboardUnavailableSection,
+} from './DashboardSectionPlaceholder';
 import { UpcomingDateRow } from './UpcomingDateRow';
 import {
   DashboardSectionStatus,
@@ -70,7 +74,32 @@ const UPCOMING_DATES_PLACEHOLDER_COPY = {
  */
 export const VISIBLE_UPCOMING_DATES = 3;
 
+/**
+ * The section as the page mounts it: the card itself behind the boundary that
+ * keeps the coming week’s dates from taking the rest of the page with them.
+ *
+ * The body's own guards stay in front of it and handle the shapes they were
+ * written for; this catches what they could not foresee — a malformed entry
+ * *inside* the list, which no field check at the top of the card can see — and
+ * degrades this one section to unavailable while its neighbours carry on.
+ */
 export function UpcomingDatesCard() {
+  return (
+    <DashboardSectionBoundary
+      fallback={
+        <DashboardUnavailableSection
+          section={UPCOMING_DATES_SECTION}
+          copy={UPCOMING_DATES_PLACEHOLDER_COPY}
+          testIdPrefix='upcoming-dates'
+        />
+      }
+    >
+      <UpcomingDatesCardBody />
+    </DashboardSectionBoundary>
+  );
+}
+
+function UpcomingDatesCardBody() {
   const { data, isPending } = useHomeDashboard();
   const [expanded, setExpanded] = useState(false);
 
@@ -82,7 +111,9 @@ export function UpcomingDatesCard() {
   // tomorrow: the type promises an array on every ready section, but a payload
   // that broke that used to throw out of render and take the *whole page* with
   // it. "Sections render independently" has to survive a section that breaks
-  // its contract, not only one that reports itself unavailable.
+  // its contract, not only one that reports itself unavailable. What this cannot see — a
+  // malformed entry *inside* the list — is `DashboardSectionBoundary`'s,
+  // which the card now sits behind.
   const dates: HomeDashboardUpcomingDate[] | null = Array.isArray(
     upcoming?.dates
   )

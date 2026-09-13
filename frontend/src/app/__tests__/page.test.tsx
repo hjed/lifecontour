@@ -631,6 +631,65 @@ describe('HomePage — the dashboard shell', () => {
       ).toBeInTheDocument();
     });
 
+    /**
+     * ITER18-004 Phase 16. Every card guards the field it reads and each
+     * recorded the same limit: nothing guards it against a malformed entry
+     * *inside* the list, and a component that throws out of render takes its
+     * whole tree with it — which, before the section boundary, was the page.
+     * `tags` arriving as `null` is the smallest payload that does it.
+     */
+    it('loses only the section whose entry breaks its contract', async () => {
+      const consoleError = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.agenda = {
+              status: DashboardSectionStatus.READY,
+              data: {
+                entries: [
+                  { ...STANDUP, tags: null as unknown as [] },
+                ] as HomeDashboardAgendaEntry[],
+                tomorrow: { date: TOMORROW_DATE, entries: [] },
+              },
+            };
+            return document;
+          },
+        } as Response)
+      );
+
+      try {
+        await renderHomePage();
+
+        expect(await screen.findByTestId('agenda-unavailable')).toBeVisible();
+        // The broken section still reads as a section: its header, its
+        // description and its labelled list are all still there (W4).
+        expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+        expect(
+          screen.getByRole('list', { name: "Today's agenda" })
+        ).toBeInTheDocument();
+        // And the page it used to take down with it is intact.
+        expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+          'Today'
+        );
+        expect(screen.getByTestId('dashboard-summary-text')).toHaveTextContent(
+          'A quiet Wednesday.'
+        );
+        expect(
+          screen.getByText('Nothing due in the next seven days.')
+        ).toBeInTheDocument();
+        expect(
+          screen.getByText('No important dates in the next seven days.')
+        ).toBeInTheDocument();
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
     it('still costs one dashboard request with the agenda card reading it', async () => {
       routeFetch(() =>
         Promise.resolve({

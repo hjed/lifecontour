@@ -32,8 +32,12 @@
 
 import { CalendarCheck, CalendarDays } from 'lucide-react';
 import { AgendaEntryRow } from './AgendaEntryRow';
+import { DashboardSectionBoundary } from './DashboardSectionBoundary';
 import { DashboardSectionCard } from './DashboardSectionCard';
-import { DashboardSectionPlaceholder } from './DashboardSectionPlaceholder';
+import {
+  DashboardSectionPlaceholder,
+  DashboardUnavailableSection,
+} from './DashboardSectionPlaceholder';
 import { TomorrowDisclosure } from './TomorrowDisclosure';
 import {
   DashboardSectionStatus,
@@ -58,7 +62,32 @@ const AGENDA_PLACEHOLDER_COPY = {
   unavailable: "Today's agenda is unavailable.",
 } as const;
 
+/**
+ * The section as the page mounts it: the card itself behind the boundary that
+ * keeps today's agenda from taking the rest of the page with them.
+ *
+ * The body's own guards stay in front of it and handle the shapes they were
+ * written for; this catches what they could not foresee — a malformed entry
+ * *inside* the list, which no field check at the top of the card can see — and
+ * degrades this one section to unavailable while its neighbours carry on.
+ */
 export function AgendaCard() {
+  return (
+    <DashboardSectionBoundary
+      fallback={
+        <DashboardUnavailableSection
+          section={AGENDA_SECTION}
+          copy={AGENDA_PLACEHOLDER_COPY}
+          testIdPrefix='agenda'
+        />
+      }
+    >
+      <AgendaCardBody />
+    </DashboardSectionBoundary>
+  );
+}
+
+function AgendaCardBody() {
   const { data, isPending } = useHomeDashboard();
 
   const section = data?.data.attributes.agenda;
@@ -76,9 +105,11 @@ export function AgendaCard() {
   // unparseable date all fail identically from the reader's seat.
   //
   // This guards the two fields *this* card reads. Blanket protection against an
-  // arbitrarily malformed section — a bad entry inside the list, say — wants an
-  // error boundary around the section rather than a longer list of checks here,
-  // and that is Phase 16's scope (Section Resilience).
+  // arbitrarily malformed section — a bad entry inside the list, say — is
+  // `DashboardSectionBoundary`'s, which this card now sits behind. The guard
+  // stays in front of it because it is cheaper and quieter: React reports every
+  // error a boundary catches, and a payload shape we already know how to handle
+  // should not be reported as a defect.
   const tomorrow = agenda?.tomorrow;
   const hasTomorrow =
     isIsoCalendarDate(tomorrow?.date) && Array.isArray(tomorrow?.entries);
