@@ -22,12 +22,11 @@
  *
  * Three things the list can hold nothing for, kept apart on purpose: **nothing
  * coming up** is a real answer and gets the single **W29**-idiom line the
- * wireframe does not draw (gap 2); the query still being **in flight** and the
- * section coming back **unavailable** each get a quiet line of their own, in
- * **W9**'s idiom, because "no important dates" would be a false claim about
- * either. The proper loading skeleton and unavailable treatment are Phase 16's
- * (wireframe gap 9); these are the placeholders until then, as the agenda's
- * are.
+ * wireframe does not draw (gap 2); the query still being **in flight** gets the
+ * pulsing row skeleton and the section coming back **unavailable** its own
+ * centred line, because "no important dates" would be a false claim about
+ * either. Both are `DashboardSectionPlaceholder`'s; this card supplies only
+ * their wording.
  */
 
 'use client';
@@ -36,6 +35,7 @@ import { useState } from 'react';
 import { CalendarOff, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DashboardSectionCard } from './DashboardSectionCard';
+import { DashboardSectionPlaceholder } from './DashboardSectionPlaceholder';
 import { UpcomingDateRow } from './UpcomingDateRow';
 import {
   DashboardSectionStatus,
@@ -103,7 +103,13 @@ export function UpcomingDatesCard() {
       {...UPCOMING_DATES_SECTION}
       testId='upcoming-dates-card'
       placeholder={
-        dates ? undefined : <UpcomingDatesPlaceholder pending={isPending} />
+        dates ? undefined : (
+          <DashboardSectionPlaceholder
+            pending={isPending}
+            copy={UPCOMING_DATES_PLACEHOLDER_COPY}
+            testIdPrefix='upcoming-dates'
+          />
+        )
       }
       footer={
         hasMore ? (
@@ -133,32 +139,5 @@ export function UpcomingDatesCard() {
         />
       ))}
     </DashboardSectionCard>
-  );
-}
-
-interface UpcomingDatesPlaceholderProps {
-  readonly pending: boolean;
-}
-
-/**
- * What the card says while it has no list to draw: still loading, or the
- * section is unavailable — which also covers a dashboard request that failed
- * outright, where there is no envelope at all.
- */
-function UpcomingDatesPlaceholder({ pending }: UpcomingDatesPlaceholderProps) {
-  return pending ? (
-    <p
-      className='text-muted-foreground text-sm'
-      data-testid='upcoming-dates-loading'
-    >
-      {UPCOMING_DATES_PLACEHOLDER_COPY.loading}
-    </p>
-  ) : (
-    <p
-      className='text-muted-foreground text-sm'
-      data-testid='upcoming-dates-unavailable'
-    >
-      {UPCOMING_DATES_PLACEHOLDER_COPY.unavailable}
-    </p>
   );
 }

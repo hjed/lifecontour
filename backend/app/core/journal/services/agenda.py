@@ -20,9 +20,20 @@ draws.** A journal that began yesterday and runs through today carries a
 ``start_time`` belonging to another day, so ordering by that component would
 interleave it with today's entries at an hour that never happened today. The
 instant is also the quantity the day window compares against, so the list is
-ordered by the same measure that decided which entries are on it. Ties fall back
-to the journal id, so two events that really do start at once render the same way
-on every request.
+ordered by the same measure that decided which entries are on it.
+
+**The clock is a tie-break beneath it, and only that.** Every event the app
+itself creates carries the day's *local midnight* as its instant —
+``JournalCreateForm`` sends the picked day and the later clock edits never touch
+``event_date_range`` — so a whole day of them ties on ``starts_at``, and before
+the tie-break they fell to the journal id, which is creation order. ITER18-004
+Phase 7's e2e found it by drawing a 19:00 dinner above a 09:00 standup. Synced
+events carry real instants and were never affected, which is exactly why the
+clock sits *under* the instant rather than replacing it: promoting it would
+reintroduce the multi-day case above. An entry with no clock at all — an all-day
+one, or a timed one whose times were never filled in — reads as the earliest
+clock there is. Ties beneath both fall back to the journal id, so two events
+that really do start at once render the same way on every request.
 
 Pure, and deliberately not a method on a service: the rule is only meaningful at
 its boundaries, and a function over a sequence is the shape those boundaries can
@@ -31,6 +42,7 @@ be asserted at without a database.
 
 from __future__ import annotations
 
+from datetime import time
 from typing import TYPE_CHECKING
 
 from app.core.journal.services.journal_date_resolver import local_day_window
@@ -53,7 +65,8 @@ def order_agenda_entries(entries: Iterable[AgendaEntry]) -> tuple[AgendaEntry, .
 
     Returns:
         A new tuple: every all-day entry first, then the timed ones, each group
-        ascending by the instant it starts and then by journal id.
+        ascending by the instant it starts, then by the clock time it is drawn
+        with, and then by journal id.
     """
     return tuple(
         sorted(
@@ -61,6 +74,7 @@ def order_agenda_entries(entries: Iterable[AgendaEntry]) -> tuple[AgendaEntry, .
             key=lambda entry: (
                 not entry.is_all_day,
                 entry.starts_at,
+                entry.start_time or time.min,
                 entry.journal_id,
             ),
         )
@@ -90,7 +104,8 @@ async def agenda_for_day(
         tz: The user's configured timezone, which decides where the day starts.
 
     Returns:
-        The day's entries, all-day first and then ascending by start instant.
+        The day's entries, all-day first and then ascending by start instant,
+        with the drawn clock time breaking the ties the instant leaves.
     """
     entries = await repo.list_entries_in_window(
         user_id, window=local_day_window(day, tz), anchor=day

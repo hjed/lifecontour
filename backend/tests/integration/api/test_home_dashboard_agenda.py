@@ -129,6 +129,7 @@ class EventSeeder:
         duration_hours: int = 1,
         ends_days_later: int = 0,
         all_day: bool = False,
+        clock_hour: int | None = None,
         location: str | None = None,
         event_state: str = "confirmed",
         with_calendar_info: bool = True,
@@ -148,12 +149,21 @@ class EventSeeder:
         test that only asks the endpoint about "now" — but a test that *also*
         computes a date to assert against must pass the day it computed, or the
         two readings can straddle local midnight and disagree.
+
+        ``clock_hour`` splits the stored clock from the stored instant, which is
+        the shape every event the **app itself** creates arrives in: the create
+        form writes the picked day's local midnight into ``event_date_range``
+        and the clock columns are edited afterwards without touching it. Given
+        it, ``hour`` still places the instant and ``clock_hour`` is what the
+        ``TIME`` columns hold.
         """
         tz = ZoneInfo(timezone)
         anchor = on_day if on_day is not None else datetime.datetime.now(tz).date()
         local_day = anchor + datetime.timedelta(days=day_offset)
         start = datetime.datetime.combine(local_day, datetime.time(hour), tz)
         end = start + datetime.timedelta(hours=duration_hours, days=ends_days_later)
+        clock_start = start if clock_hour is None else start.replace(hour=clock_hour)
+        clock_end = clock_start + datetime.timedelta(hours=duration_hours)
 
         result = await self.connection.execute(
             text(
@@ -183,8 +193,8 @@ class EventSeeder:
                 {
                     "journal_id": journal_id,
                     "calendar_id": await self.calendar(),
-                    "start_time": None if all_day else start.time(),
-                    "end_time": None if all_day else end.time(),
+                    "start_time": None if all_day else clock_start.time(),
+                    "end_time": None if all_day else clock_end.time(),
                     "all_day": all_day,
                     "location": location,
                     "timezone": (
@@ -518,6 +528,26 @@ class TestTheOrderOnTheWire:
             "Lunch",
             "Dinner",
         ]
+
+    async def test_events_sharing_an_instant_ascend_by_the_clock_they_are_drawn_with(
+        self, authenticated_client: AsyncClient, seeder: EventSeeder
+    ) -> None:
+        """The shape every app-created event arrives in (ITER18-004 Phase 16).
+
+        ``JournalCreateForm`` writes the picked day's local midnight into
+        ``event_date_range`` and never revisits it when the clock times are
+        edited, so a whole day of app-created events ties on the instant the
+        agenda orders by. Before the tie-break they came back in creation order,
+        which is how Phase 7's e2e came to see a 19:00 dinner above a 09:00
+        standup. Seeded in creation order here, so an endpoint that had lost the
+        tie-break could not pass by accident.
+        """
+        await seeder.event(title="Dinner", hour=0, clock_hour=19)
+        await seeder.event(title="Standup", hour=0, clock_hour=9)
+
+        entries = entries_of(await authenticated_client.get(URL))
+
+        assert [entry["title"] for entry in entries] == ["Standup", "Dinner"]
 
 
 @pytest.mark.asyncio

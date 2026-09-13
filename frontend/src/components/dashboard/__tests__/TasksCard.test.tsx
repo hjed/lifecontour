@@ -559,6 +559,35 @@ describe('TasksCard', () => {
     });
 
     /**
+     * The shapes belong to `DashboardSectionPlaceholder` and are asserted
+     * there; what belongs here is that *this* card reaches them, which the
+     * sentences alone cannot show.
+     */
+    it('draws the skeleton and the W29 unavailable line (ITER18-004 Phase 16)', async () => {
+      routeFetch(() => new Promise<Response>(() => {}));
+
+      const { unmount } = renderWithProviders(<TasksCard />);
+
+      const loading = screen.getByTestId('tasks-loading');
+      expect(loading).toHaveAttribute('aria-busy', 'true');
+      expect(
+        loading.querySelectorAll(
+          '[data-testid="dashboard-section-skeleton-row"]'
+        ).length
+      ).toBeGreaterThan(0);
+      unmount();
+
+      serveSection({ status: DashboardSectionStatus.UNAVAILABLE, data: null });
+      renderWithProviders(<TasksCard />);
+
+      const unavailable = await screen.findByTestId('tasks-unavailable');
+      expect(unavailable.querySelector('svg')).toHaveAttribute(
+        'aria-hidden',
+        'true'
+      );
+    });
+
+    /**
      * The guard the agenda and dates cards both carry, for the reason they
      * carry it: the type promises an array on every ready section, but a
      * payload that broke that used to throw out of render and take the

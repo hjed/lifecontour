@@ -266,6 +266,26 @@ describe('AgendaCard', () => {
       expect(screen.queryByText(EMPTY_LINE)).not.toBeInTheDocument();
       expect(agendaList()).toBeInTheDocument();
     });
+
+    /**
+     * The shape is `DashboardSectionPlaceholder`'s and is asserted there; what
+     * belongs here is that *this* card reaches it, which the sentence alone
+     * cannot show — Phase 15's lesson about a criterion a shared shell
+     * satisfies accidentally until the owning section says so.
+     */
+    it('draws the skeleton rather than a bare line (ITER18-004 Phase 16)', () => {
+      routeFetch(() => new Promise<Response>(() => {}));
+
+      renderWithProviders(<AgendaCard />);
+
+      const loading = screen.getByTestId('agenda-loading');
+      expect(loading).toHaveAttribute('aria-busy', 'true');
+      expect(
+        loading.querySelectorAll(
+          '[data-testid="dashboard-section-skeleton-row"]'
+        ).length
+      ).toBeGreaterThan(0);
+    });
   });
 
   describe('when the section is unavailable', () => {
@@ -293,6 +313,19 @@ describe('AgendaCard', () => {
 
       expect(await screen.findByTestId('agenda-unavailable')).toBeVisible();
       expect(screen.queryByText(EMPTY_LINE)).not.toBeInTheDocument();
+    });
+
+    it('draws it beneath an icon, in the W29 idiom (ITER18-004 Phase 16)', async () => {
+      serveAgenda({ status: DashboardSectionStatus.UNAVAILABLE, data: null });
+
+      renderWithProviders(<AgendaCard />);
+
+      const unavailable = await screen.findByTestId('agenda-unavailable');
+      expect(unavailable.querySelector('svg')).toHaveAttribute(
+        'aria-hidden',
+        'true'
+      );
+      expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
     });
   });
 

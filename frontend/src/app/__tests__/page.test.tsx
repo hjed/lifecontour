@@ -348,8 +348,6 @@ describe('HomePage — the dashboard shell', () => {
     });
 
     it('renders the sections when the dashboard request fails', async () => {
-      // Per-section unavailable states are Phase 16's; what this pins is that
-      // a failed request does not take the page down with it.
       routeFetch(() =>
         Promise.resolve({
           ok: false,
@@ -363,6 +361,56 @@ describe('HomePage — the dashboard shell', () => {
         'Today'
       );
       expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+
+    /**
+     * ITER18-004 Phase 16. A request in flight has answered nothing about any
+     * section, so all four say so at once — and none of them says the week is
+     * clear, which is the claim that would be false.
+     */
+    it('gives every section its own skeleton while the request is in flight', async () => {
+      routeFetch(() => new Promise<Response>(() => {}));
+
+      await renderHomePage();
+
+      for (const testId of [
+        'dashboard-summary-loading',
+        'agenda-loading',
+        'tasks-loading',
+        'upcoming-dates-loading',
+      ]) {
+        expect(screen.getByTestId(testId)).toHaveAttribute('aria-busy', 'true');
+      }
+      expect(
+        screen.queryByText('Nothing scheduled today.')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Nothing due in the next seven days.')
+      ).not.toBeInTheDocument();
+    });
+
+    /**
+     * A failed request carries no envelope at all, so there is no section to
+     * have reported itself — every one of them reads as unavailable, and each
+     * says which one it is rather than the page showing a single banner.
+     */
+    it('gives every section its own unavailable line when the request fails', async () => {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: false,
+          json: async () => ({ errors: [{ detail: 'Session expired' }] }),
+        } as Response)
+      );
+
+      await renderHomePage();
+
+      expect(
+        await screen.findByTestId('dashboard-summary-unavailable')
+      ).toBeVisible();
+      expect(screen.getByTestId('agenda-unavailable')).toBeVisible();
+      expect(screen.getByTestId('tasks-unavailable')).toBeVisible();
+      expect(screen.getByTestId('upcoming-dates-unavailable')).toBeVisible();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
   });
 
@@ -497,6 +545,90 @@ describe('HomePage — the dashboard shell', () => {
         screen.queryByText('Nothing scheduled today.')
       ).not.toBeInTheDocument();
       expect(sectionNames()).toEqual(['Agenda', 'Tasks', 'Upcoming dates']);
+    });
+
+    /**
+     * ITER18-004 Phase 16 closes the remaining two directions. The summary and
+     * the agenda already had one each; these put real data on the surviving
+     * side for the other two, so "one section failing never blanks the others"
+     * is a claim about every section rather than about the two that had tests.
+     */
+    it('renders the other three sections when the tasks section is unavailable', async () => {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.tasks = {
+              status: DashboardSectionStatus.UNAVAILABLE,
+              data: null,
+            };
+            document.data.attributes.agenda = {
+              status: DashboardSectionStatus.READY,
+              data: {
+                entries: [STANDUP],
+                tomorrow: { date: TOMORROW_DATE, entries: [] },
+              },
+            };
+            return document;
+          },
+        } as Response)
+      );
+
+      await renderHomePage();
+
+      expect(await screen.findByTestId('tasks-unavailable')).toBeVisible();
+      expect(
+        screen.queryByText('Nothing due in the next seven days.')
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId('dashboard-summary-text')).toHaveTextContent(
+        'A quiet Wednesday.'
+      );
+      expect(screen.getByRole('link', { name: 'Standup' })).toBeInTheDocument();
+      expect(
+        screen.getByText('No important dates in the next seven days.')
+      ).toBeInTheDocument();
+    });
+
+    it('renders the other three sections when the upcoming dates are unavailable', async () => {
+      routeFetch(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            const document = dashboardDocument();
+            document.data.attributes.upcoming_dates = {
+              status: DashboardSectionStatus.UNAVAILABLE,
+              data: null,
+            };
+            document.data.attributes.agenda = {
+              status: DashboardSectionStatus.READY,
+              data: {
+                entries: [LUNCH],
+                tomorrow: { date: TOMORROW_DATE, entries: [] },
+              },
+            };
+            return document;
+          },
+        } as Response)
+      );
+
+      await renderHomePage();
+
+      expect(
+        await screen.findByTestId('upcoming-dates-unavailable')
+      ).toBeVisible();
+      expect(
+        screen.queryByText('No important dates in the next seven days.')
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId('dashboard-summary-text')).toHaveTextContent(
+        'A quiet Wednesday.'
+      );
+      expect(
+        screen.getByRole('link', { name: 'Lunch with Sam' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Nothing due in the next seven days.')
+      ).toBeInTheDocument();
     });
 
     it('still costs one dashboard request with the agenda card reading it', async () => {
