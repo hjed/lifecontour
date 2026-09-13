@@ -995,6 +995,75 @@ class TestInFlightCheckinIntegration:
         assert mock_transport.requests == []
 
 
+class TestLateCheckinRerecordIntegration:
+    """A check-in that lands for an outdated checkout date is followed by a new pair."""
+
+    @pytest.mark.asyncio
+    async def test_retried_checkin_rerecords_a_changed_checkout_date(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The update that finally checks the asset in must also record the new dates.
+
+        Acknowledging it after the check-in alone would leave no event to replace
+        the checkout still recorded on the old date.
+        """
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data={
+                "checkout_at": "2025-03-01",
+                "expected_checkin": "2025-03-02",
+            },
+        )
+        # An earlier check-in attempt failed with a retryable error.
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (integration_source, external_id, internal_uuid,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    ('snipeit_checkin', :external_id, :journal_id,
+                     now(), 'PENDING', 'failed', 'Snipe-IT API error: 502', 0,
+                     now(), now())
+            """),
+            {
+                "external_id": f"snipeit_checkin:42:{journal_id}",
+                "journal_id": str(journal_id),
+            },
+        )
+        for path in (
+            "/hardware/42/checkin",
+            "/hardware/42/checkout",
+            "/hardware/42/checkin",
+        ):
+            mock_transport.add_response(
+                path, json_data={"status": "success", "messages": "Done."}
+            )
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert [r.url.path for r in mock_transport.requests if r.method == "POST"] == [
+            "/api/v1/hardware/42/checkin",
+            "/api/v1/hardware/42/checkout",
+            "/api/v1/hardware/42/checkin",
+        ]
+        assert await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        ) == {"checkout_at": "2025-03-08", "expected_checkin": "2025-03-09"}
+        assert await _reference_data(
+            async_connection, source="snipeit_checkin", journal_id=journal_id
+        ) == {"checkin_at": "2025-03-09"}
+
+
 class TestPreviousAssetHeldElsewhereIntegration:
     """A superseded asset is only returned when no other journal may be using it."""
 

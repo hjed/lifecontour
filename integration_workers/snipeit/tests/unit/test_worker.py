@@ -463,3 +463,60 @@ async def test_sync_snipeit_maintenance_batch(mock_ctx):
             maintenance_ids=maintenance_ids,
             session_factory=mock_ctx["session_factory"],
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("did_checkin", "reconciles"),
+    [(True, 1), (False, 0)],
+    ids=["checked-in", "nothing-to-check-in"],
+)
+async def test_periodic_checkin_reconciles_after_a_checkin(
+    mock_ctx: dict[str, Any], did_checkin: bool, reconciles: int
+) -> None:
+    """A sweep check-in may close a checkout recorded on an outdated date.
+
+    Reconciling straight after lets that journal's corrected pair be recorded;
+    nothing else would revisit it once the asset is back.
+    """
+    from datetime import date
+
+    from snipeit_sync_service import OverdueGearUsage
+    from worker import periodic_checkin_all_snipeit_accounts
+
+    settings_result = MagicMock()
+    settings_result.fetchall.return_value = [
+        MagicMock(
+            user_id="user-1",
+            base_url="https://snipeit.example.com",
+            snipeit_user_id="5",
+        )
+    ]
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = settings_result
+    mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
+
+    mock_sync_service = MagicMock()
+    mock_sync_service.push_checkin_create = AsyncMock(return_value=did_checkin)
+    mock_sync_service.reconcile_gear_usage = AsyncMock()
+    mock_sync_service._api_client.close = AsyncMock()
+    overdue = OverdueGearUsage(
+        journal_id=100, checkout_at=date(2025, 3, 8), checkin_at=date(2025, 3, 9)
+    )
+
+    with (
+        patch(
+            "worker._get_auth_data",
+            new_callable=AsyncMock,
+            return_value={"encrypted_api_key": b"api-key"},
+        ),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+        patch(
+            "snipeit_sync_service.fetch_overdue_gear_usage",
+            new_callable=AsyncMock,
+            return_value=[overdue],
+        ),
+    ):
+        await periodic_checkin_all_snipeit_accounts(mock_ctx)
+
+    assert mock_sync_service.reconcile_gear_usage.await_count == reconciles

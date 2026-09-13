@@ -1819,7 +1819,8 @@ class SnipeItSyncService:
           the recorded pair and record a new checkout and check-in.
         - Otherwise: check the asset in once the period has ended. This is a
           no-op when already checked in, so a changed check-in date alone is not
-          re-recorded.
+          re-recorded. If the check-in closes a checkout recorded on an older
+          date, the corrected pair is recorded straight after.
 
         A checkout recorded before its dates were stored, or one whose check-in
         ended in a terminal 403/404 (the asset may still be out), is never
@@ -1891,12 +1892,16 @@ class SnipeItSyncService:
                 f"Usage period {checkout_at} "
                 f"to {_format_date_for_snipeit(checkin_date, zone)}"
             )
-            await self.push_checkin_create(
+            checked_in = await self.push_checkin_create(
                 journal_id=journal_id,
                 session_factory=session_factory,
                 note=note,
                 checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
             )
+            if checked_in and checkout_date_changed:
+                # That check-in closed a checkout recorded on the old date; with
+                # the asset back, the pass above now records the corrected pair.
+                await self.reconcile_gear_usage(journal_id, session_factory)
 
     async def _supersede_checkout(
         self,

@@ -86,7 +86,7 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
   - A check-in that has not happened yet uses the updated check-in date.
   - An update that arrives while another worker is recording the same journal's checkout or check-in is retried once that finishes, so a newer date is never dropped.
   - Not re-recorded: a change to only the check-in date of an already checked-in journal; a checkout recorded before dates were stored; and a checkout whose check-in failed terminally (403/404), since the asset may still be checked out.
-  - A checkout date changed while the asset is still checked out keeps its original start in Snipe-IT; Snipe-IT refuses to check out an asset that is already out.
+  - A checkout date changed while the asset is still checked out is re-recorded once the asset is checked in, whether by that update, a later one or the periodic sweep. Snipe-IT refuses to check out an asset that is already out, so the corrected pair follows the return.
 - **Buffer Dates**:
   - Users can specify a separate start and end date for the gear checkout to allow for buffer (e.g., packing the day before).
   - **Default**: The buffer dates explicitly default to the journal's event dates if not modified by the user.
