@@ -413,6 +413,44 @@ describe('TasksCard', () => {
       expect(document.activeElement).not.toBe(document.body);
     });
 
+    /**
+     * Raised by review on PR #1435, and the case the test above could not
+     * catch: every task in the fixture has an empty `contacts` list, so the
+     * rows nested no lists of their own. A task **with** contacts draws them as
+     * a `ul` of `li`s (**W27**), which an unscoped `querySelectorAll('li')`
+     * counts — indexing into an earlier row, or into a contact with no control
+     * in it, and leaving focus on `<body>`.
+     */
+    it('counts only rows, not the contacts nested inside them', async () => {
+      const withContacts = SEVEN_TASKS.map((task, index) => ({
+        ...task,
+        // Only the rows *above* the cap, so the miscount is a real offset.
+        contacts:
+          index < VISIBLE_TASKS
+            ? [
+                {
+                  contact_id: 90 + index,
+                  name: 'Priya Patel',
+                  photo_url: null,
+                },
+                { contact_id: 70 + index, name: 'Jordan Lee', photo_url: null },
+              ]
+            : [],
+      }));
+      serveReady(withContacts);
+      const user = userEvent.setup();
+
+      renderWithProviders(<TasksCard />);
+      await user.click(
+        await screen.findByRole('button', { name: /show all/i })
+      );
+
+      const revealed = taskRows()[VISIBLE_TASKS];
+      await waitFor(() =>
+        expect(revealed).toContainElement(document.activeElement as HTMLElement)
+      );
+    });
+
     it('withdraws the show-more once everything is shown', async () => {
       serveReady(SEVEN_TASKS);
       const user = userEvent.setup();

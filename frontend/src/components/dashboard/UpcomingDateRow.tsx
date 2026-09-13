@@ -27,6 +27,7 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import { CalendarClock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { FREE_TEXT_BADGE } from '@/lib/dashboard-badges';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import type { HomeDashboardUpcomingDate } from '@/lib/api/home-dashboard';
 import { nameParts } from '@/lib/contact-names';
@@ -73,9 +74,11 @@ export function UpcomingDateRow({ date }: UpcomingDateRowProps) {
             <Badge
               variant='outline'
               data-testid='upcoming-date-badge'
-              // A custom date type is free text and can be one unbroken token.
+              // A custom date type is free text and can be one unbroken token;
+              // see `FREE_TEXT_BADGE` for why the wrapping class is not enough
+              // on its own.
               className={cn(
-                'break-words',
+                FREE_TEXT_BADGE,
                 dateTypeBadgeClassName(date.date_type)
               )}
             >

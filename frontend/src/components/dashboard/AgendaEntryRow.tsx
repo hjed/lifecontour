@@ -30,6 +30,7 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import { CalendarDays, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { FREE_TEXT_BADGE } from '@/lib/dashboard-badges';
 import { formatClockRange } from '@/lib/agenda-display';
 import type { HomeDashboardAgendaEntry } from '@/lib/api/home-dashboard';
 import { cn } from '@/lib/utils';
@@ -121,8 +122,10 @@ export function AgendaEntryRow({ entry }: AgendaEntryRowProps) {
                   key={tag.id}
                   variant='outline'
                   // A tag name is free text and can arrive as one unbroken
-                  // token; `min-w-0` on the row above cannot break a word.
-                  className='break-words'
+                  // token. `min-w-0` on the row above cannot break a word, and
+                  // neither can `break-words` on its own here — see
+                  // `FREE_TEXT_BADGE` for what the shared badge styles do.
+                  className={FREE_TEXT_BADGE}
                   style={
                     tag.color
                       ? { borderColor: tag.color, color: tag.color }

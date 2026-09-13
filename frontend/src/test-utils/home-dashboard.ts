@@ -181,15 +181,26 @@ export function dashboardRequestCount(
  * shrinkable.
  *
  * Overflow is a layout property and jsdom computes no layout, so this pins the
- * *contract* rather than the outcome — a wrapping utility is present. The
- * outcome is measured for real in `home-dashboard.spec.ts`, at mobile width,
- * against `scrollWidth`. Written against a set of acceptable utilities rather
- * than one literal, so swapping `break-words` for another that solves the same
- * problem is not a test failure.
+ * *contract* rather than the outcome — a wrapping utility is present, and
+ * nothing left on the element forbids the line break it needs. The outcome is
+ * measured for real in `home-dashboard.spec.ts`, at mobile width, against
+ * `scrollWidth`. Written against a set of acceptable utilities rather than one
+ * literal, so swapping `break-words` for another that solves the same problem
+ * is not a test failure.
+ *
+ * **The second half was added after review found the first half insufficient**
+ * (PR #1435). `Badge`'s base styles carry `whitespace-nowrap`, and
+ * `overflow-wrap: break-word` cannot break anything while a line break is
+ * forbidden — so a badge with `break-words` bolted on satisfied the original
+ * assertion while still taking the page sideways. `cn` removes the conflicting
+ * class through tailwind-merge, so an element that really can wrap no longer
+ * carries it.
  */
 export function expectWrapsLongWords(element: HTMLElement | null): void {
   expect(element).not.toBeNull();
-  expect(element?.className ?? '').toMatch(
+  const className = element?.className ?? '';
+  expect(className).toMatch(
     /\b(break-words|break-all|wrap-anywhere|wrap-break-word|truncate)\b/
   );
+  expect(className).not.toMatch(/\bwhitespace-nowrap\b/);
 }

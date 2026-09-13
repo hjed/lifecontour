@@ -1584,7 +1584,16 @@ test.describe('Home Dashboard — mobile layout (W3)', () => {
    */
   const UNBROKEN = `Zzz${'x'.repeat(50)}`;
 
-  test('overflows nothing with a long task, journal, contact and date', async ({
+  /**
+   * Longer, because a badge draws at `text-xs`: fifty characters there is only
+   * about as wide as the column, so it would neither prove nor disprove the
+   * badge fix. Eighty-odd is unambiguously wider than a 375px viewport, and
+   * still inside the tag name's own hundred-character limit once the data
+   * manager has appended its uniqueness suffix.
+   */
+  const UNBROKEN_TAG = `Zzz${'x'.repeat(80)}`;
+
+  test('overflows nothing with a long task, journal, contact, date and tag', async ({
     authenticatedPage: page,
     testCleanup,
   }) => {
@@ -1608,6 +1617,25 @@ test.describe('Home Dashboard — mobile layout (W3)', () => {
         ],
       },
     ]);
+
+    // An agenda event carrying a tag of the same shape (W15), so all three
+    // sections are drawing something unbreakable when the page is measured —
+    // and so a **badge** is among them. Badges are the case review found the
+    // first attempt at this had missed: `Badge`'s own `whitespace-nowrap`
+    // forbids the break `break-words` asks for, so the class went on and the
+    // layout stayed broken. A tag rather than a custom date type only because
+    // a custom type needs its own record seeded; the two share one override.
+    const [tag] = await dataManager.createJournalTags([{ name: UNBROKEN_TAG }]);
+    const [calendar] = await dataManager.createCalendars([
+      { name: 'Mobile Overflow Cal', color: '#EC4899' },
+    ]);
+    const event = await createAgendaEvent(dataManager, day, {
+      title: `Mobile overflow ${UNBROKEN}`,
+      startTime: '09:00:00',
+      endTime: '10:00:00',
+      calendarId: calendar.id,
+    });
+    await dataManager.assignTagsToJournal(event.id, [tag.id]);
 
     const creating = await dataManager.createJournal({
       title: 'Mobile overflow journal it came from',
@@ -1635,21 +1663,38 @@ test.describe('Home Dashboard — mobile layout (W3)', () => {
     await page.setViewportSize(MOBILE);
     await openDashboard(page);
 
-    // Both sections have to be on screen, or the measurement proves nothing.
-    await expect(
-      tasksList(page).getByText(UNBROKEN, { exact: false }).first()
-    ).toBeVisible();
-    await expect(
-      page
-        .getByRole('list', { name: 'Upcoming contact dates' })
-        .getByText(UNBROKEN, { exact: false })
-        .first()
-    ).toBeVisible();
+    // Every section has to be drawing it, or the measurement proves nothing.
+    for (const list of [
+      "Today's agenda",
+      TASKS_LIST_NAME,
+      'Upcoming contact dates',
+    ]) {
+      await expect(
+        page
+          .getByRole('list', { name: list })
+          .getByText(/^Zzzx+/, { exact: false })
+          .first()
+      ).toBeVisible();
+    }
 
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+
+    // And the badge is legible rather than merely contained. Review (PR #1435)
+    // read the badge case as page overflow; it is not, because `w-fit` resolves
+    // against the available width and `overflow-hidden` swallows the rest — so
+    // a long tag name was **clipped in place** instead of pushing the page
+    // sideways. That is invisible to the measurement above and to any test that
+    // only checks a class is present, which is why it is asserted directly.
+    const badge = page.getByTestId('agenda-entry-tags').getByText(/^Zzzx+/);
+    await expect(badge).toBeVisible();
+    const clipped = await badge.evaluate(node => ({
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
+    }));
+    expect(clipped.scrollWidth).toBeLessThanOrEqual(clipped.clientWidth);
   });
 });

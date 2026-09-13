@@ -21,14 +21,22 @@ const FOCUSABLE = 'a[href], button:not([disabled])';
 /**
  * Focus the first control inside the row at `index`, if there is one.
  *
- * Silent when there is not: a row with nothing to act on — an upcoming date
- * whose contact link failed to render, say — should leave focus where it is
- * rather than throw inside an effect.
+ * **`:scope >` is load-bearing.** A section's rows nest lists of their own — a
+ * task row draws its linked contacts as a `ul` of `li`s (**W27**), an agenda
+ * row its participant stack — so an unscoped `querySelectorAll('li')` counts
+ * those too and indexes into the wrong row the moment any row above the cap
+ * has one. Focus would then land on an earlier row, or on a contact `li` with
+ * no control in it and so nowhere at all. Raised by review on PR #1435; the
+ * first version of the test could not catch it because every task in the
+ * fixture had an empty `contacts` list.
+ *
+ * Silent when the row holds no control: a row with nothing to act on should
+ * leave focus where it is rather than throw inside an effect.
  */
 export function focusRevealedRow(
   list: HTMLUListElement | null,
   index: number
 ): void {
-  const row = list?.querySelectorAll('li')[index];
+  const row = list?.querySelectorAll<HTMLLIElement>(':scope > li')[index];
   row?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
 }

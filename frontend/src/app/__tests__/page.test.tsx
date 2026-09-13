@@ -994,9 +994,9 @@ describe('HomePage — the dashboard shell', () => {
       const { container } = renderWithProviders(<HomePage />);
       await screen.findByRole('link', { name: 'Standup' });
 
-      const jumpers = [...container.querySelectorAll('[tabindex]')].filter(
-        element => Number(element.getAttribute('tabindex')) > 0
-      );
+      const jumpers = Array.from(
+        container.querySelectorAll('[tabindex]')
+      ).filter(element => Number(element.getAttribute('tabindex')) > 0);
       expect(jumpers).toEqual([]);
     });
 
