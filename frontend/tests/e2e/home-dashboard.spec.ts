@@ -35,10 +35,35 @@ const RETIRED_PLACEHOLDER_TEXT = [
 const DESKTOP = { width: 1280, height: 900 };
 const MOBILE = { width: 375, height: 667 };
 
-/** Open the dashboard and wait for its shell, not for the network to go quiet. */
+/**
+ * Open the dashboard and wait for its shell — and for every section to have
+ * *answered*, which is not the same thing and is not "wait for the network".
+ *
+ * The shell renders immediately and the sections fill in behind it, so a test
+ * that measures geometry the moment the shell appears is measuring a page that
+ * is still moving. That was survivable while a pending section drew a single
+ * muted line, and stopped being so when ITER18-004 Phase 16 gave it a skeleton:
+ * the summary's placeholder is now three bars tall rather than one line, so the
+ * grid beneath it drops ~44px when the real summary arrives. `sectionBoxes`
+ * reads its three boxes one after another, and a shift landing between two of
+ * them made the three columns look misaligned — which is how CI caught it on
+ * `Mobile Chrome` while every other project's timing hid it.
+ *
+ * Waiting for the loading states to clear costs nothing: they are gone the
+ * moment the one dashboard request resolves, whatever it says.
+ */
 async function openDashboard(page: Page) {
   await page.goto('/');
   await expect(page.getByTestId('home-dashboard-ready')).toBeVisible();
+
+  for (const loading of [
+    'dashboard-summary-loading',
+    'agenda-loading',
+    'tasks-loading',
+    'upcoming-dates-loading',
+  ]) {
+    await expect(page.getByTestId(loading)).toHaveCount(0);
+  }
 }
 
 /**
