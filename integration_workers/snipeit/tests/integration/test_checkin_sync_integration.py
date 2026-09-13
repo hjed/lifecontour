@@ -627,3 +627,67 @@ class TestCheckinSyncIntegration:
                 checkin_at=date(2025, 3, 9),
             )
         ]
+
+
+class TestSupersededAssetRetryIntegration:
+    """A failed return of the previous asset is retried against that asset."""
+
+    @pytest.mark.asyncio
+    async def test_failed_return_keeps_the_row_on_the_previous_asset(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The row must not forget the old asset until that asset is returned.
+
+        Re-keying it first would make the next retry derive the new asset and
+        never return the old one.
+        """
+        from snipeit_api_client import SnipeItAPIError
+
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+            asset_id="42",
+        )
+        await _insert_checkout_metadata(
+            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+        )
+        mock_transport.add_response(
+            "/hardware/41",
+            json_data={
+                "id": 41,
+                "asset_tag": "T-41",
+                "assigned_to": {"id": 5, "name": "Harry", "type": "user"},
+            },
+        )
+        mock_transport.add_response(
+            "/hardware/41/checkin", status_code=500, json_data={"status": "error"}
+        )
+
+        with pytest.raises(SnipeItAPIError):
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        result = await async_connection.execute(
+            text("""
+                SELECT external_id, sync_status FROM sync_metadata
+                WHERE integration_source = 'snipeit_checkout'
+                  AND internal_uuid = :journal_id
+            """),
+            {"journal_id": str(journal_id)},
+        )
+        row = result.fetchone()
+        assert row is not None
+        assert (row.external_id, row.sync_status) == (
+            f"snipeit_checkout:41:{journal_id}",
+            "failed",
+        )
+        assert not any(
+            r.url.path.endswith("/hardware/42/checkout")
+            for r in mock_transport.requests
+        )

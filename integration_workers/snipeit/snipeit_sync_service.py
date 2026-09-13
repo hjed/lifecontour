@@ -1246,14 +1246,12 @@ class SnipeItSyncService:
                     await session.execute(
                         text("""
                             UPDATE sync_metadata
-                            SET sync_status = 'pending',
-                                external_id = :external_id,
-                                updated_at = now()
+                            SET sync_status = 'pending', updated_at = now()
                             WHERE integration_source = 'snipeit_checkout' AND internal_uuid = :journal_id
                         """),
-                        # The gear item may have changed since the last attempt;
-                        # re-key the row to the asset being checked out now.
-                        {"journal_id": str(journal_id), "external_id": external_id},
+                        # The row keeps the previous attempt's asset until that
+                        # asset has been dealt with (see below).
+                        {"journal_id": str(journal_id)},
                     )
                 else:
                     insert_result = await session.execute(
@@ -1295,7 +1293,7 @@ class SnipeItSyncService:
             )
             # Unlock the pending status so it can be retried when data is fixed
             await self._unlock_pending_checkout(
-                journal_id, external_id, session_factory, "Missing required dates"
+                journal_id, session_factory, "Missing required dates"
             )
             return
 
@@ -1307,7 +1305,7 @@ class SnipeItSyncService:
                 checkin_date=str(checkin_date),
             )
             await self._unlock_pending_checkout(
-                journal_id, external_id, session_factory, "Invalid date range"
+                journal_id, session_factory, "Invalid date range"
             )
             return
 
@@ -1333,6 +1331,9 @@ class SnipeItSyncService:
                     journal_id=journal_id,
                     session_factory=session_factory,
                 )
+                # Only now may the row forget the previous asset: had the return
+                # failed, the retry must still derive it from the row.
+                await self._rekey_checkout(journal_id, external_id, session_factory)
             await self._api_client.checkout_asset(
                 asset_id=snipeit_asset_id,
                 payload=payload,
@@ -1348,7 +1349,6 @@ class SnipeItSyncService:
                 )
                 await self._unlock_pending_checkout(
                     journal_id,
-                    external_id,
                     session_factory,
                     f"API Error {exc.status_code}",
                 )
@@ -1356,12 +1356,12 @@ class SnipeItSyncService:
 
             # For 500s or other errors, unlock and raise so it retries
             await self._unlock_pending_checkout(
-                journal_id, external_id, session_factory, str(exc)[:255]
+                journal_id, session_factory, str(exc)[:255]
             )
             raise
         except Exception as exc:
             await self._unlock_pending_checkout(
-                journal_id, external_id, session_factory, str(exc)[:255]
+                journal_id, session_factory, str(exc)[:255]
             )
             raise
 
@@ -1476,14 +1476,33 @@ class SnipeItSyncService:
             snipeit_asset_id=asset_id,
         )
 
+    async def _rekey_checkout(
+        self, journal_id: int, external_id: str, session_factory: Any
+    ) -> None:
+        """Point a journal's checkout row at the asset now being checked out."""
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET external_id = :external_id, updated_at = now()
+                        WHERE integration_source = 'snipeit_checkout'
+                          AND internal_uuid = :internal_uuid
+                    """),
+                    {"internal_uuid": str(journal_id), "external_id": external_id},
+                )
+
     async def _unlock_pending_checkout(
         self,
         journal_id: int,
-        external_id: str,
         session_factory: Any,
         error_message: str,
     ) -> None:
-        """Mark a pending checkout sync as failed to release the lock for future retries."""
+        """Mark a pending checkout sync as failed to release the lock for future retries.
+
+        The row is found by journal, not external id: it may still be keyed to a
+        previous attempt's asset.
+        """
         try:
             async with session_factory() as session:
                 async with session.begin():
@@ -1495,11 +1514,9 @@ class SnipeItSyncService:
                                 error_message = :error_message
                             WHERE integration_source = 'snipeit_checkout'
                               AND internal_uuid = :internal_uuid
-                              AND external_id = :external_id
                         """),
                         {
                             "internal_uuid": str(journal_id),
-                            "external_id": external_id,
                             "error_message": error_message,
                         },
                     )
