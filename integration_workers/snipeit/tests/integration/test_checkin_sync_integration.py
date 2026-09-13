@@ -841,11 +841,17 @@ class TestReconcileGearUsageIntegration:
 
 
 def _activity_row(
-    log_id: int, day: str, *, asset_id: int = 42, user_id: int = 5
+    log_id: int,
+    day: str,
+    *,
+    action_type: str = "checkout",
+    asset_id: int = 42,
+    user_id: int = 5,
 ) -> dict[str, Any]:
     """An activity report row as Snipe-IT's ``ActionlogsTransformer`` returns it."""
     return {
         "id": log_id,
+        "action_type": action_type,
         "action_date": {"datetime": f"{day} 00:00:00", "formatted": day},
         "created_at": {"datetime": "2026-09-13 09:00:00", "formatted": ""},
         "item": {"id": asset_id, "name": "Tent", "type": "asset"},
@@ -902,7 +908,11 @@ class TestLinkExistingActivityIntegration:
     ) -> None:
         journal_id = await _sydney_trip(async_connection)
         _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
-        _queue_activity(mock_transport, "checkin", _activity_row(101, "2025-03-09"))
+        _queue_activity(
+            mock_transport,
+            "checkin",
+            _activity_row(101, "2025-03-09", action_type="checkin from"),
+        )
 
         await snipeit_sync_service.push_checkout_create(
             journal_id=journal_id,
@@ -932,8 +942,10 @@ class TestLinkExistingActivityIntegration:
             _activity_row(100, "2025-03-07"),
             _activity_row(100, "2025-03-08", user_id=6),
             _activity_row(100, "2025-03-08", asset_id=41),
+            # Snipe-IT 6.3.1 can ignore the report's action_type filter.
+            _activity_row(100, "2025-03-08", action_type="checkin from"),
         ],
-        ids=["other-date", "other-user", "other-asset"],
+        ids=["other-date", "other-user", "other-asset", "other-action"],
     )
     async def test_non_matching_checkout_is_recorded(
         self,
@@ -994,7 +1006,11 @@ class TestLinkExistingActivityIntegration:
     ) -> None:
         journal_id = await _sydney_trip(async_connection)
         _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
-        _queue_activity(mock_transport, "checkin", _activity_row(90, "2025-03-09"))
+        _queue_activity(
+            mock_transport,
+            "checkin",
+            _activity_row(90, "2025-03-09", action_type="checkin from"),
+        )
         mock_transport.add_response(
             "/hardware/42/checkin",
             json_data={"status": "success", "messages": "Checked in."},
@@ -1110,8 +1126,9 @@ class TestActivityClaimsIntegration:
             (403, {"status": "error", "messages": "Forbidden."}),
             (404, None),
             (200, {"status": "error", "messages": "Unauthorized."}),
+            (200, b"<html>Service Unavailable</html>"),
         ],
-        ids=["forbidden", "missing-endpoint", "unreadable-report"],
+        ids=["forbidden", "missing-endpoint", "unreadable-report", "non-json-report"],
     )
     async def test_unavailable_activity_report_does_not_block_the_checkout(
         self,
@@ -1119,7 +1136,7 @@ class TestActivityClaimsIntegration:
         mock_transport: Any,
         async_connection: AsyncConnection,
         status_code: int,
-        body: dict[str, Any] | None,
+        body: dict[str, Any] | bytes | None,
     ) -> None:
         """Linking is best-effort: without the report, history is recorded as usual."""
         journal_id = await _sydney_trip(async_connection)

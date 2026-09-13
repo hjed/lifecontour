@@ -20,7 +20,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 import structlog
 from core_shared.models.journals.calendar_info import event_date_in_timezone
-from pydantic import ValidationError
 from sqlalchemy import text
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
@@ -1586,6 +1585,9 @@ class SnipeItSyncService:
                     activity.id
                     for activity in response.rows
                     if activity.action_day == day
+                    # Checked here too: some Snipe-IT versions (e.g. 6.3.1)
+                    # ignore the report's action_type filter.
+                    and activity.action_type == action_type
                     and activity.item is not None
                     and activity.item.id == asset_id
                     and activity.target is not None
@@ -1612,7 +1614,9 @@ class SnipeItSyncService:
                 status_code=exc.status_code,
             )
             return []
-        except ValidationError:
+        except ValueError:
+            # Covers both a body that is not JSON (JSONDecodeError) and one that
+            # does not match the report's shape (pydantic's ValidationError).
             logger.warning(
                 "Snipe-IT activity report unreadable; recording without linking",
                 snipeit_asset_id=asset_id,

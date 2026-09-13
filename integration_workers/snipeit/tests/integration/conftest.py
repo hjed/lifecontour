@@ -59,7 +59,11 @@ class MockTransport(httpx.AsyncBaseTransport):
         for i, (pattern, status, data, hdrs) in enumerate(self.responses):
             if pattern in url:
                 self.responses.pop(i)
-                content = _json.dumps(data).encode() if data is not None else b""
+                # Bytes are served verbatim, e.g. to simulate a non-JSON body.
+                if isinstance(data, bytes):
+                    content = data
+                else:
+                    content = _json.dumps(data).encode() if data is not None else b""
                 return httpx.Response(
                     status_code=status,
                     content=content,
