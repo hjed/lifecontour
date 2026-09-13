@@ -1639,7 +1639,8 @@ class SnipeItSyncService:
         The claim is written onto this journal's in-progress ``source`` row while
         a per-asset advisory lock is held, so journals processed at once see each
         other's claims and cannot both link one Snipe-IT entry. A claim left on a
-        failed row is stale and ignored.
+        failed row is stale and ignored. Only this user's journals count: log ids
+        are unique within one Snipe-IT instance, and each user has their own.
         """
         async with session_factory() as session:
             async with session.begin():
@@ -1649,17 +1650,20 @@ class SnipeItSyncService:
                 )
                 result = await session.execute(
                     text("""
-                        SELECT reference_data::jsonb ->> 'snipeit_log_id' AS log_id
-                        FROM sync_metadata
-                        WHERE integration_source = :source
-                          AND internal_uuid <> :journal_id
-                          AND sync_status <> 'failed'
-                          AND reference_data LIKE :linked_pattern
+                        SELECT sm.reference_data::jsonb ->> 'snipeit_log_id' AS log_id
+                        FROM sync_metadata sm
+                        JOIN journals j ON j.id::text = sm.internal_uuid
+                        WHERE sm.integration_source = :source
+                          AND sm.internal_uuid <> :journal_id
+                          AND sm.sync_status <> 'failed'
+                          AND sm.reference_data LIKE :linked_pattern
+                          AND j.user_id = :user_id
                     """),
                     {
                         "source": source,
                         "journal_id": str(journal_id),
                         "linked_pattern": '%"snipeit_log_id"%',
+                        "user_id": self._user_id,
                     },
                 )
                 held = {row.log_id for row in result.fetchall()}

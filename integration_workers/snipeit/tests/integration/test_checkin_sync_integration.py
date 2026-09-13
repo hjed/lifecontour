@@ -977,10 +977,16 @@ class TestLinkExistingActivityIntegration:
     ) -> None:
         """Two journals using the same asset on the same day need two checkouts."""
         journal_id = await _sydney_trip(async_connection)
+        other_journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+            asset_id="41",
+        )
         await _insert_recorded_sync_row(
             async_connection,
             source="snipeit_checkout",
-            journal_id=987654,
+            journal_id=other_journal_id,
             reference_data={
                 "checkout_at": "2025-03-08",
                 "expected_checkin": "2025-03-08",
@@ -1082,7 +1088,13 @@ class TestActivityClaimsIntegration:
         Two journals processed at once each hold a pending row, so the claim
         must be visible before either finishes; a claim on a failed row is stale.
         """
-        journal_id, other_journal_id = 700001, 700002
+        journal_id = await _sydney_trip(async_connection)
+        other_journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+            asset_id="41",
+        )
         await _insert_checkout_metadata(
             async_connection,
             asset_id="42",
@@ -1117,6 +1129,53 @@ class TestActivityClaimsIntegration:
                 session_factory=lambda: _session_factory(async_connection),
             )
             == claimed
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_claim_on_another_users_instance_does_not_block(
+        self,
+        snipeit_sync_service: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Snipe-IT log ids are only unique per instance, and each user has their own.
+
+        Another user's journal linked to log 100 on their instance says nothing
+        about log 100 on this user's instance.
+        """
+        journal_id = await _sydney_trip(async_connection)
+        other_users_journal_id = _returned_id(
+            await async_connection.execute(
+                text("""
+                    INSERT INTO journals (title, content, user_id,
+                        event_date_range_start, event_date_range_end)
+                    VALUES ('Their trip', '', 'user-456', '2025-03-08', '2025-03-09')
+                    RETURNING id
+                """)
+            )
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=other_users_journal_id,
+            reference_data={"snipeit_log_id": 100},
+        )
+        await _insert_checkout_metadata(
+            async_connection,
+            asset_id="42",
+            journal_id=journal_id,
+            sync_status="pending",
+        )
+
+        assert (
+            await snipeit_sync_service._claim_activity_log(
+                [100],
+                source="snipeit_checkout",
+                asset_id=42,
+                journal_id=journal_id,
+                external_id=f"snipeit_checkout:42:{journal_id}",
+                session_factory=lambda: _session_factory(async_connection),
+            )
+            == 100
         )
 
     @pytest.mark.asyncio

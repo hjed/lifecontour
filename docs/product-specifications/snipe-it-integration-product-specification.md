@@ -90,7 +90,7 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
 - **Existing Snipe-IT History**: History already in Snipe-IT (for example checkouts entered by hand before a logbook import) is linked rather than recorded twice.
   - Before recording a checkout, the asset's Snipe-IT activity log is searched for a checkout to the mapped user on the same date (Snipe-IT's server date). A match is linked on the checkout `SyncMetadata` row (`snipeit_log_id`) and nothing is posted.
   - When the checkout was linked, a check-in on the journal's check-in date that was logged after that checkout is linked the same way; otherwise the check-in is posted.
-  - A log entry already linked to another journal is never reused, so two journals using the same asset on the same day each get their own record.
+  - A log entry already linked to another of the user's journals is never reused, so two journals using the same asset on the same day each get their own record. Other users' links are ignored: log ids are only unique within a Snipe-IT instance.
   - The search reads the newest 500 entries per asset and action type.
   - A match is claimed on the journal's sync row before anything is recorded, under a per-asset lock, so journals processed at the same time cannot both link one entry.
   - Linking is best-effort: if the activity report cannot be read (the API key lacks permission, the Snipe-IT version has no report, or the response is unexpected), the history is recorded as usual.
