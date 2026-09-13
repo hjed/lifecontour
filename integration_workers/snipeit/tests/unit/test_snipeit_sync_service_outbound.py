@@ -83,29 +83,30 @@ class TestLocalDate:
 
 
 class TestSnipeitCheckinAt:
-    """Snipe-IT must never be sent a check-in date it reads as the future."""
+    """Snipe-IT must never be sent a check-in date its server reads as the future.
 
-    # 2025-03-08 08:00 in Sydney, still the 7th in UTC.
+    The server's zone is unknown, so a date is only sent once it has passed in
+    the earliest zone (UTC-12), where "today" is earliest.
+    """
+
+    # 2025-03-08 08:00 in Sydney; 2025-03-07 09:00 at UTC-12.
     NOW = datetime(2025, 3, 7, 21, 0, tzinfo=UTC)
 
     def test_historical_date_is_sent(self) -> None:
-        assert _snipeit_checkin_at(date(2019, 5, 4), SYDNEY, now=self.NOW) == date(
-            2019, 5, 4
-        )
+        assert _snipeit_checkin_at(date(2019, 5, 4), now=self.NOW) == date(2019, 5, 4)
+
+    def test_date_already_past_everywhere_is_sent(self) -> None:
+        assert _snipeit_checkin_at(date(2025, 3, 6), now=self.NOW) == date(2025, 3, 6)
+
+    def test_date_still_today_at_utc_minus_12_is_omitted(self) -> None:
+        # Yesterday in Sydney, but a server at UTC-12 is still on the 7th.
+        assert _snipeit_checkin_at(date(2025, 3, 7), now=self.NOW) is None
 
     def test_local_today_is_omitted(self) -> None:
-        assert _snipeit_checkin_at(date(2025, 3, 8), SYDNEY, now=self.NOW) is None
-
-    def test_local_yesterday_is_sent(self) -> None:
-        assert _snipeit_checkin_at(date(2025, 3, 7), SYDNEY, now=self.NOW) == date(
-            2025, 3, 7
-        )
-
-    def test_future_date_is_omitted(self) -> None:
-        assert _snipeit_checkin_at(date(2025, 3, 9), SYDNEY, now=self.NOW) is None
+        assert _snipeit_checkin_at(date(2025, 3, 8), now=self.NOW) is None
 
     def test_none_is_none(self) -> None:
-        assert _snipeit_checkin_at(None, SYDNEY, now=self.NOW) is None
+        assert _snipeit_checkin_at(None, now=self.NOW) is None
 
 
 class TestUsagePeriodHasEnded:

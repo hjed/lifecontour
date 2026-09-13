@@ -88,22 +88,50 @@ def _journal_zone(journal_row: Any) -> str | None:
     )
 
 
+async def _fetch_journal_row(session: Any, journal_id: int) -> Any:
+    """Fetch a journal's title, content and dates, with the zones they are read in."""
+    result = await session.execute(
+        text("""
+            SELECT j.title, j.content,
+                   j.event_date_range_start, j.event_date_range_end,
+                   jci.timezone AS event_timezone,
+                   us.timezone AS user_timezone
+            FROM journals j
+            LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
+            LEFT JOIN user_settings us ON us.user_id = j.user_id
+            WHERE j.id = :journal_id
+        """),
+        {"journal_id": journal_id},
+    )
+    return result.fetchone()
+
+
+# UTC-12, the last zone to reach each date: no server's date is behind it.
+_EARLIEST_ZONE = ZoneInfo("Etc/GMT+12")
+
+
 def _snipeit_checkin_at(
-    local_checkin: date | None, zone: str | None, *, now: datetime | None = None
+    local_checkin: date | None, *, now: datetime | None = None
 ) -> date | None:
     """Return the historical ``checkin_at`` to send Snipe-IT, or ``None`` for "now".
 
-    Snipe-IT records ``checkin_at`` against its own server date, whose zone we do
-    not know. A usage period ending today is recorded correctly by omitting the
-    date (Snipe-IT stamps the check-in now), and omitting it for anything later
-    means a date the server could read as the future is never sent.
+    Snipe-IT compares ``checkin_at`` with its own server date, whose zone we do
+    not know, and must never be sent a date it reads as the future. A date is
+    only sent once it has passed at UTC-12, by which point it has passed on
+    every server; a more recent return is stamped at the server's time instead.
     """
     if local_checkin is None:
         return None
-    local_today = _local_date(now or datetime.now(tz=UTC), zone)
-    if local_today is None or local_checkin >= local_today:
+    earliest_today = (now or datetime.now(tz=UTC)).astimezone(_EARLIEST_ZONE).date()
+    return local_checkin if local_checkin < earliest_today else None
+
+
+def _checkout_asset_id(external_id: object) -> int | None:
+    """Return the asset id in a ``snipeit_checkout:{asset}:{journal}`` external id."""
+    try:
+        return int(str(external_id).split(":")[1])
+    except (ValueError, IndexError):
         return None
-    return local_checkin
 
 
 def _usage_period_has_ended(
@@ -812,20 +840,7 @@ class SnipeItSyncService:
         """
         async with session_factory() as session:
             # 1. Get journal data
-            journal_result = await session.execute(
-                text("""
-                    SELECT j.title, j.content,
-                           j.event_date_range_start, j.event_date_range_end,
-                           jci.timezone AS event_timezone,
-                           us.timezone AS user_timezone
-                    FROM journals j
-                    LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
-                    LEFT JOIN user_settings us ON us.user_id = j.user_id
-                    WHERE j.id = :journal_id
-                """),
-                {"journal_id": journal_id},
-            )
-            journal_row = journal_result.fetchone()
+            journal_row = await _fetch_journal_row(session, journal_id)
             if not journal_row:
                 logger.debug(
                     "Skipping outbound maintenance push: journal not found",
@@ -1107,20 +1122,7 @@ class SnipeItSyncService:
         """
         async with session_factory() as session:
             # 1. Get journal data
-            journal_result = await session.execute(
-                text("""
-                    SELECT j.title, j.content,
-                           j.event_date_range_start, j.event_date_range_end,
-                           jci.timezone AS event_timezone,
-                           us.timezone AS user_timezone
-                    FROM journals j
-                    LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
-                    LEFT JOIN user_settings us ON us.user_id = j.user_id
-                    WHERE j.id = :journal_id
-                """),
-                {"journal_id": journal_id},
-            )
-            journal_row = journal_result.fetchone()
+            journal_row = await _fetch_journal_row(session, journal_id)
             if not journal_row:
                 logger.debug(
                     "Skipping outbound checkout push: journal not found",
@@ -1205,12 +1207,15 @@ class SnipeItSyncService:
 
         external_id = f"snipeit_checkout:{snipeit_asset_id}:{journal_id}"
 
+        previous_asset_id: int | None = None
+
         # Check if already synced and acquire a distributed lock by marking as pending
         async with session_factory() as session:
             async with session.begin():
                 checkout_meta_result = await session.execute(
                     text("""
-                        SELECT sync_status, extract(epoch from (now() - updated_at)) as age_seconds
+                        SELECT sync_status, external_id,
+                               extract(epoch from (now() - updated_at)) as age_seconds
                         FROM sync_metadata
                         WHERE integration_source = 'snipeit_checkout'
                           AND internal_uuid = :journal_id
@@ -1237,6 +1242,7 @@ class SnipeItSyncService:
                         )
                         return
 
+                    previous_asset_id = _checkout_asset_id(row.external_id)
                     await session.execute(
                         text("""
                             UPDATE sync_metadata
@@ -1321,6 +1327,12 @@ class SnipeItSyncService:
 
         # POST to Snipe-IT
         try:
+            if previous_asset_id not in (None, snipeit_asset_id):
+                await self._return_previous_asset(
+                    previous_asset_id,
+                    journal_id=journal_id,
+                    session_factory=session_factory,
+                )
             await self._api_client.checkout_asset(
                 asset_id=snipeit_asset_id,
                 payload=payload,
@@ -1400,8 +1412,69 @@ class SnipeItSyncService:
                 journal_id=journal_id,
                 session_factory=session_factory,
                 note=f"Usage period {checkout_at} to {expected_checkin}",
-                checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone), zone),
+                checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
             )
+
+    async def _return_previous_asset(
+        self, asset_id: int | None, *, journal_id: int, session_factory: Any
+    ) -> None:
+        """Check in an asset an earlier, failed checkout attempt may have checked out.
+
+        A checkout whose response was lost is recorded as failed even though
+        Snipe-IT may have checked the asset out. Once the journal moves to another
+        gear item that asset would stay out with no sync row left to return it,
+        so it is returned first — but only while Snipe-IT shows it checked out to
+        the mapped user and no other journal holds an open checkout of it.
+        """
+        if asset_id is None:
+            return
+        try:
+            asset = await self._api_client.get_asset(asset_id)
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                return
+            raise
+        assignee = asset.assigned_to
+        if (
+            assignee is None
+            or assignee.type != "user"
+            or str(assignee.id) != str(self._snipeit_user_id)
+        ):
+            return
+
+        async with session_factory() as session:
+            held_elsewhere = await session.execute(
+                text("""
+                    SELECT 1
+                    FROM sync_metadata co
+                    LEFT JOIN sync_metadata ci
+                        ON ci.integration_source = 'snipeit_checkin'
+                        AND ci.internal_uuid = co.internal_uuid
+                        AND ci.sync_status = 'success'
+                    WHERE co.integration_source = 'snipeit_checkout'
+                      AND co.sync_status = 'success'
+                      AND co.external_id LIKE :asset_prefix
+                      AND co.internal_uuid <> :journal_id
+                      AND ci.id IS NULL
+                    LIMIT 1
+                """),
+                {
+                    "asset_prefix": f"snipeit_checkout:{asset_id}:%",
+                    "journal_id": str(journal_id),
+                },
+            )
+            if held_elsewhere.fetchone():
+                return
+
+        await self._api_client.checkin_asset(
+            asset_id=asset_id,
+            payload={"note": "Gear usage journal moved to another gear item"},
+        )
+        logger.info(
+            "Returned the asset of a superseded checkout attempt",
+            journal_id=journal_id,
+            snipeit_asset_id=asset_id,
+        )
 
     async def _unlock_pending_checkout(
         self,
@@ -1489,10 +1562,8 @@ class SnipeItSyncService:
             )
             return False
 
-        # external_id format: 'snipeit_checkout:{asset_id}:{journal_id}'
-        try:
-            snipeit_asset_id = int(str(checkout_row.external_id).split(":")[1])
-        except (ValueError, IndexError, AttributeError):
+        snipeit_asset_id = _checkout_asset_id(checkout_row.external_id)
+        if snipeit_asset_id is None:
             logger.warning(
                 "Invalid checkout sync metadata external_id; cannot derive asset",
                 external_id=checkout_row.external_id,
@@ -1755,7 +1826,7 @@ class SnipeItSyncService:
                 journal_id=journal_id,
                 session_factory=session_factory,
                 note=note,
-                checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone), zone),
+                checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
             )
 
 
@@ -1763,13 +1834,13 @@ class SnipeItSyncService:
 class OverdueGearUsage:
     """A checked-out GEAR_USAGE journal whose usage period has ended.
 
-    Dates are the local calendar dates the usage ran over, read in ``zone``.
+    Dates are the local calendar dates the usage ran over, read in the journal's
+    event timezone, else the user's.
     """
 
     journal_id: int
     checkout_at: date | None
     checkin_at: date
-    zone: str | None
 
     @property
     def note(self) -> str:
@@ -1778,8 +1849,8 @@ class OverdueGearUsage:
         return f"Usage period {start} to {self.checkin_at.isoformat()}"
 
     def snipeit_checkin_at(self, *, now: datetime | None = None) -> date | None:
-        """The ``checkin_at`` to send Snipe-IT (``None`` when it ends today)."""
-        return _snipeit_checkin_at(self.checkin_at, self.zone, now=now)
+        """The ``checkin_at`` to send Snipe-IT (``None`` while it may be today there)."""
+        return _snipeit_checkin_at(self.checkin_at, now=now)
 
 
 async def fetch_overdue_gear_usage(
@@ -1830,7 +1901,6 @@ async def fetch_overdue_gear_usage(
                 journal_id=row.journal_id,
                 checkout_at=_local_date(row.checkout_date, zone),
                 checkin_at=checkin_at,
-                zone=zone,
             )
         )
     return overdue

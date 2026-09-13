@@ -25,9 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 
 async def _insert_checkout_metadata(
-    async_connection: AsyncConnection, *, asset_id: str, journal_id: int
+    async_connection: AsyncConnection,
+    *,
+    asset_id: str,
+    journal_id: int,
+    sync_status: str = "success",
 ) -> None:
-    """Insert a successful ``snipeit_checkout`` sync_metadata row."""
+    """Insert a ``snipeit_checkout`` sync_metadata row (successful by default)."""
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
@@ -36,11 +40,12 @@ async def _insert_checkout_metadata(
                  error_message, retry_count, created_at, updated_at)
             VALUES
                 ('snipeit_checkout', :external_id, :journal_id,
-                 now(), 'hash', 'success', NULL, 0, now(), now())
+                 now(), 'hash', :sync_status, NULL, 0, now(), now())
         """),
         {
             "external_id": f"snipeit_checkout:{asset_id}:{journal_id}",
             "journal_id": str(journal_id),
+            "sync_status": sync_status,
         },
     )
 
@@ -276,33 +281,57 @@ class TestHistoricalDatesIntegration:
         assert checkin_body["checkin_at"] == "2025-03-08"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("previous_assignee", "posts"),
+        [
+            # The lost attempt did check the old asset out: return it first.
+            (
+                {"id": 5, "name": "Harry", "type": "user"},
+                [
+                    "/api/v1/hardware/41/checkin",
+                    "/api/v1/hardware/42/checkout",
+                    "/api/v1/hardware/42/checkin",
+                ],
+            ),
+            # The old asset is not out to the mapped user: leave it alone.
+            (None, ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"]),
+            (
+                {"id": 6, "name": "Someone else", "type": "user"},
+                ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"],
+            ),
+        ],
+        ids=["old-asset-still-out", "old-asset-returned", "old-asset-with-other-user"],
+    )
     async def test_retried_checkout_follows_a_changed_gear_item(
         self,
         snipeit_sync_service: Any,
         mock_transport: Any,
         async_connection: AsyncConnection,
+        previous_assignee: dict[str, Any] | None,
+        posts: list[str],
     ) -> None:
-        """A failed checkout recorded against the old asset is retried on the new one."""
+        """A failed checkout recorded against the old asset is retried on the new one.
+
+        The failure may have been a lost response after Snipe-IT checked the old
+        asset out, so the old asset is returned before it loses its association.
+        """
         journal_id = await _insert_gear_usage_journal(
             async_connection,
             start="2025-03-07T13:00:00+00:00",
             end="2025-03-08T13:00:00+00:00",
             asset_id="42",
         )
-        await async_connection.execute(
-            text("""
-                INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
-                     last_synced_at, version_hash, sync_status,
-                     error_message, retry_count, created_at, updated_at)
-                VALUES
-                    ('snipeit_checkout', :external_id, :journal_id,
-                     now(), 'PENDING', 'failed', 'boom', 0, now(), now())
-            """),
-            {
-                "external_id": f"snipeit_checkout:41:{journal_id}",
-                "journal_id": str(journal_id),
-            },
+        await _insert_checkout_metadata(
+            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+        )
+        mock_transport.add_response(
+            "/hardware/41",
+            json_data={"id": 41, "asset_tag": "T-41", "assigned_to": previous_assignee},
+        )
+        # Consumed only when the old asset is returned.
+        mock_transport.add_response(
+            "/hardware/41/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
         )
         _queue_checkout_and_checkin(mock_transport)
 
@@ -311,7 +340,9 @@ class TestHistoricalDatesIntegration:
             session_factory=lambda: _session_factory(async_connection),
         )
 
-        assert len(mock_transport.responses) == 0
+        assert [
+            r.url.path for r in mock_transport.requests if r.method == "POST"
+        ] == posts
         result = await async_connection.execute(
             text("""
                 SELECT external_id, sync_status FROM sync_metadata
@@ -491,49 +522,10 @@ class TestCheckinSyncIntegration:
         async_connection: AsyncConnection,
     ) -> None:
         """A checkout with a past usage window is checked out then checked in."""
-        gear_result = await async_connection.execute(
-            text("""
-                INSERT INTO gear_items (name, user_id)
-                VALUES ('Tent', 'user-123')
-                RETURNING id
-            """)
-        )
-        gear_row = gear_result.fetchone()
-        assert gear_row is not None
-        gear_item_id = str(gear_row.id)
-
-        await async_connection.execute(
-            text("""
-                INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
-                     last_synced_at, version_hash, sync_status,
-                     error_message, retry_count, created_at, updated_at)
-                VALUES
-                    ('snipeit', '42', :gear_item_id,
-                     now(), 'hash', 'success', NULL, 0, now(), now())
-            """),
-            {"gear_item_id": gear_item_id},
-        )
-
-        journal_result = await async_connection.execute(
-            text("""
-                INSERT INTO journals (title, content, user_id,
-                    event_date_range_start, event_date_range_end)
-                VALUES ('Past trip', '', 'user-123', '2000-01-01', '2000-01-02')
-                RETURNING id
-            """)
-        )
-        journal_row = journal_result.fetchone()
-        assert journal_row is not None
-        journal_id = journal_row.id
-
-        await async_connection.execute(
-            text("""
-                INSERT INTO journal_gear_usage_data
-                    (journal_id, gear_item_id, checkout_date, checkin_date)
-                VALUES (:journal_id, :gear_item_id, NULL, NULL)
-            """),
-            {"journal_id": journal_id, "gear_item_id": gear_item_id},
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2000-01-01T00:00:00+00:00",
+            end="2000-01-02T00:00:00+00:00",
         )
 
         mock_transport.add_response(
@@ -633,6 +625,5 @@ class TestCheckinSyncIntegration:
                 journal_id=overdue_id,
                 checkout_at=date(2025, 3, 8),
                 checkin_at=date(2025, 3, 9),
-                zone="Australia/Sydney",
             )
         ]
