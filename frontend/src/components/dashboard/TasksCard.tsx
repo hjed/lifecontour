@@ -44,8 +44,12 @@
 import { useState } from 'react';
 import { CheckCircle2, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DashboardSectionBoundary } from './DashboardSectionBoundary';
 import { DashboardSectionCard } from './DashboardSectionCard';
-import { DashboardSectionPlaceholder } from './DashboardSectionPlaceholder';
+import {
+  DashboardSectionPlaceholder,
+  DashboardUnavailableSection,
+} from './DashboardSectionPlaceholder';
 import { DashboardTaskActions } from './DashboardTaskActions';
 import { DashboardTaskRow } from './DashboardTaskRow';
 import {
@@ -81,7 +85,32 @@ const TASKS_PLACEHOLDER_COPY = {
  */
 export const VISIBLE_TASKS = 5;
 
+/**
+ * The section as the page mounts it: the card itself behind the boundary that
+ * keeps the week's tasks from taking the rest of the page with them.
+ *
+ * The body's own guards stay in front of it and handle the shapes they were
+ * written for; this catches what they could not foresee — a malformed entry
+ * *inside* the list, which no field check at the top of the card can see — and
+ * degrades this one section to unavailable while its neighbours carry on.
+ */
 export function TasksCard() {
+  return (
+    <DashboardSectionBoundary
+      fallback={
+        <DashboardUnavailableSection
+          section={TASKS_SECTION}
+          copy={TASKS_PLACEHOLDER_COPY}
+          testIdPrefix='tasks'
+        />
+      }
+    >
+      <TasksCardBody />
+    </DashboardSectionBoundary>
+  );
+}
+
+function TasksCardBody() {
   const { data, isPending } = useHomeDashboard();
   const [expanded, setExpanded] = useState(false);
 
@@ -94,7 +123,9 @@ export function TasksCard() {
   // ready section, but a payload that broke that used to throw out of render
   // and take the *whole page* with it. "Sections render independently" has to
   // survive a section that breaks its contract, not only one that reports
-  // itself unavailable.
+  // itself unavailable. What this cannot see — a
+  // malformed entry *inside* the list — is `DashboardSectionBoundary`'s,
+  // which the card now sits behind.
   const tasks: HomeDashboardTask[] | null = Array.isArray(ready?.tasks)
     ? ready.tasks
     : null;

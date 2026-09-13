@@ -1190,6 +1190,36 @@ elements are numbered **W1**–**W33**.
   an entry, and it has to survive an empty section, because "nothing scheduled
   today" says nothing about what a footer is for. The agenda's tomorrow
   disclosure is its only user so far.
+- **A section that throws does not blank the page** (**ITER18-004 Phase 16**):
+  every card is `DashboardSectionBoundary` wrapping its own body, with a
+  fallback of that section's card shell showing its unavailable state
+  (`DashboardUnavailableSection`, or the summary's own frame carrying **W9**).
+  - **Why a boundary and not more guards.** Each card guards the field it reads
+    and each recorded the same limit: nothing guards a malformed entry *inside*
+    the list, and a component that throws out of render takes its whole React
+    tree with it — so one bad row used to blank the header, the summary and the
+    other two sections. The specification's independence claim has to survive a
+    section that breaks its contract, not only one that reports itself
+    unavailable.
+  - **The guards stay in front of it.** They are cheaper and quieter: React
+    reports every error a boundary catches to the console, and a payload shape
+    already known and handled should not be reported as a defect. The boundary
+    is for what the guards could not foresee.
+  - **The fallback is a whole card**, not a bare line: a broken section has to
+    keep reading as a section — header, description and labelled list (**W4**) —
+    or the page looks like it lost one. The summary's fallback drops the
+    Regenerate control, because the day it posts is read from the very payload
+    that could not be drawn ("a wrong date is worse than none").
+  - **It does not latch.** `resetKey` carries the query's `dataUpdatedAt` and
+    `errorUpdatedAt`, so the window-focus refetch and the anchor-day refresh
+    each give a section another chance. It is consulted **only** while an error
+    is held, so the ordinary path never remounts and a card's expansion state
+    survives every refetch.
+  - **A class component, and no new dependency.** `getDerivedStateFromError`
+    still has no hook equivalent; `react-error-boundary` would buy resets and
+    retry callbacks this page has no use for, since **W9** is explicit that
+    there is no retry control.
+
 - **Section loading and unavailable states** (**ITER18-004 Phase 16**, wireframe
   gap 9, which depicts neither): `DashboardSectionPlaceholder` is what a section
   passes to the shell's `placeholder` slot, and it owns both. Three cards faced

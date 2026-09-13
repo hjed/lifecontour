@@ -25,6 +25,8 @@
  */
 
 import { CloudOff } from 'lucide-react';
+import { DashboardSectionCard } from './DashboardSectionCard';
+import type { DashboardSectionCardCopy } from './DashboardSectionCard';
 import { DashboardSectionSkeleton } from './DashboardSectionSkeleton';
 import { WidgetEmptyState } from '@/components/journals/WidgetEmptyState';
 
@@ -68,6 +70,41 @@ export function DashboardSectionPlaceholder({
       icon={CloudOff}
       message={copy.unavailable}
       data-testid={`${testIdPrefix}-unavailable`}
+    />
+  );
+}
+
+interface DashboardUnavailableSectionProps {
+  readonly section: DashboardSectionCardCopy;
+  readonly copy: DashboardSectionPlaceholderCopy;
+  readonly testIdPrefix: string;
+}
+
+/**
+ * A whole section card showing nothing but its unavailable state.
+ *
+ * What `DashboardSectionBoundary` falls back to when a card throws: a broken
+ * section has to keep reading as a *section* — its header, its description and
+ * its labelled list (**W4**) — or the page looks like it lost one rather than
+ * like one of them could not be drawn. The card's test id comes back too, so a
+ * suite can still find the section it is asking about.
+ */
+export function DashboardUnavailableSection({
+  section,
+  copy,
+  testIdPrefix,
+}: DashboardUnavailableSectionProps) {
+  return (
+    <DashboardSectionCard
+      {...section}
+      testId={`${testIdPrefix}-card`}
+      placeholder={
+        <DashboardSectionPlaceholder
+          pending={false}
+          copy={copy}
+          testIdPrefix={testIdPrefix}
+        />
+      }
     />
   );
 }

@@ -43,6 +43,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DashboardSectionBoundary } from './DashboardSectionBoundary';
 import { SummaryKeyStats } from './SummaryKeyStats';
 import {
   DashboardSectionStatus,
@@ -120,7 +121,95 @@ function isStillToday(anchor: HomeDashboardAnchor, now: Date = new Date()) {
   }
 }
 
+/**
+ * The headline as the page mounts it: the card behind the boundary that keeps a
+ * malformed summary from taking the rest of the page with it.
+ *
+ * The card is the one part of the page that renders free prose and a row of
+ * derived counters, which is where a payload that broke its contract actually
+ * throws — `summary_text` arriving as anything but a string, say, or a mood
+ * value the stats row cannot format. The fallback is the same frame carrying
+ * **W9**'s line, without the Regenerate control: the day to post to is read
+ * from the very payload that could not be drawn.
+ */
 export function DashboardSummaryCard() {
+  return (
+    <DashboardSectionBoundary fallback={<DashboardSummaryUnavailable />}>
+      <DashboardSummaryCardBody />
+    </DashboardSectionBoundary>
+  );
+}
+
+/** The frame both the card and its fallback are drawn in (**W5**, **W6**). */
+function SummaryCardFrame({
+  children,
+}: {
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <section aria-labelledby={HEADING_ID}>
+      <Card
+        className='bg-primary/5 border-primary/20 border-l-primary border-l-4'
+        data-testid='dashboard-summary-card'
+      >
+        <CardContent className='flex flex-col gap-3 p-4'>
+          {children}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+interface SummaryCardHeaderProps {
+  readonly isGenerating: boolean;
+  /** The Regenerate control, where there is a day it could act on. */
+  readonly actions?: React.ReactNode;
+}
+
+/** The label row (**W6**), shared so the fallback cannot drift from the card. */
+function SummaryCardHeader({ isGenerating, actions }: SummaryCardHeaderProps) {
+  return (
+    <div className='flex items-center justify-between gap-2'>
+      <div className='text-primary flex min-w-0 items-center gap-2'>
+        <span className='bg-primary/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-md'>
+          <Sparkles className='h-4 w-4' aria-hidden='true' />
+        </span>
+        <h2 id={HEADING_ID} className='text-sm font-semibold'>
+          {SUMMARY_COPY.label}
+        </h2>
+        {isGenerating && (
+          <Badge variant='secondary' className='text-xs'>
+            {SUMMARY_COPY.generatingBadge}
+          </Badge>
+        )}
+      </div>
+      {actions}
+    </div>
+  );
+}
+
+/**
+ * The card with nothing in it but **W9**'s line — the boundary's fallback.
+ *
+ * No Regenerate: the control posts `meta.anchor.date`, and a card that threw
+ * rendering this payload has no anchor it can be trusted to have read. That is
+ * the same "a wrong date is worse than none" rule the page header follows.
+ */
+function DashboardSummaryUnavailable() {
+  return (
+    <SummaryCardFrame>
+      <SummaryCardHeader isGenerating={false} />
+      <p
+        className='text-muted-foreground text-sm'
+        data-testid='dashboard-summary-unavailable'
+      >
+        {SUMMARY_COPY.unavailable}
+      </p>
+    </SummaryCardFrame>
+  );
+}
+
+function DashboardSummaryCardBody() {
   const { data, isPending } = useHomeDashboard();
   const { mutate: regenerate, isPending: isRegenerating } =
     useRegenerateDailySummary();
@@ -152,26 +241,11 @@ export function DashboardSummaryCard() {
   };
 
   return (
-    <section aria-labelledby={HEADING_ID}>
-      <Card
-        className='bg-primary/5 border-primary/20 border-l-primary border-l-4'
-        data-testid='dashboard-summary-card'
-      >
-        <CardContent className='flex flex-col gap-3 p-4'>
-          <div className='flex items-center justify-between gap-2'>
-            <div className='text-primary flex min-w-0 items-center gap-2'>
-              <span className='bg-primary/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-md'>
-                <Sparkles className='h-4 w-4' aria-hidden='true' />
-              </span>
-              <h2 id={HEADING_ID} className='text-sm font-semibold'>
-                {SUMMARY_COPY.label}
-              </h2>
-              {isGenerating && (
-                <Badge variant='secondary' className='text-xs'>
-                  {SUMMARY_COPY.generatingBadge}
-                </Badge>
-              )}
-            </div>
+    <SummaryCardFrame>
+      <SummaryCardHeader
+        isGenerating={isGenerating}
+        actions={
+          <>
             {/* Outside the state branches below, per W6: it is the action that
                 resolves W8's dead end and W9's absence alike.
 
@@ -206,9 +280,11 @@ export function DashboardSummaryCard() {
               />
               {SUMMARY_COPY.regenerate}
             </Button>
-          </div>
+          </>
+        }
+      />
 
-          {/* Deliberately **not** an `aria-live` region. The change worth
+      {/* Deliberately **not** an `aria-live` region. The change worth
               announcing is the one the reader asked for, and the regeneration
               already announces itself through the toast — which is a live
               region. Marking the body live would announce it a second time,
@@ -216,25 +292,23 @@ export function DashboardSummaryCard() {
               every page load, because the body's first content change is
               "loading" giving way to prose on a page this iteration makes the
               post-sign-in default. */}
-          <SummaryBody
-            isPending={isPending}
-            isGenerating={isGenerating}
-            prose={prose}
-          />
+      <SummaryBody
+        isPending={isPending}
+        isGenerating={isGenerating}
+        prose={prose}
+      />
 
-          {/* W10 renders in the generated state only. The counters ride in the
-              payload either way; where they are drawn is the card's call. */}
-          {prose && summary && (
-            <SummaryKeyStats
-              journalCount={summary.journal_count}
-              eventCount={summary.event_count}
-              contactCount={summary.contact_count}
-              moodAverage={summary.mood_average}
-            />
-          )}
-        </CardContent>
-      </Card>
-    </section>
+      {/* W10 renders in the generated state only. The counters ride in the
+          payload either way; where they are drawn is the card's call. */}
+      {prose && summary && (
+        <SummaryKeyStats
+          journalCount={summary.journal_count}
+          eventCount={summary.event_count}
+          contactCount={summary.contact_count}
+          moodAverage={summary.mood_average}
+        />
+      )}
+    </SummaryCardFrame>
   );
 }
 
