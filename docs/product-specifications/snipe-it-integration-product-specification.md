@@ -84,7 +84,7 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
 - **Date Changes**: Snipe-IT cannot edit or delete its activity log, so updating a `GEAR_USAGE` journal only adds history that is missing:
   - If the checkout date changes after the asset was checked in, a new checkout and check-in are recorded on the new dates. The earlier pair stays in Snipe-IT.
   - A check-in that has not happened yet uses the updated check-in date.
-  - An update that arrives while another worker is recording the same journal's checkout or check-in is retried once that finishes, so a newer date is never dropped.
+  - An update that arrives while another worker is recording the same journal's checkout or check-in is retried once that finishes, so a newer date is never dropped. A lock left by a worker that crashed is retaken after five minutes, and the event is still being retried at that point.
   - Not re-recorded: a change to only the check-in date of an already checked-in journal; a checkout recorded before dates were stored; and a checkout whose check-in failed terminally (403/404), since the asset may still be checked out.
   - A checkout date changed while the asset is still checked out is re-recorded once the asset is checked in, whether by that update, a later one or the periodic sweep. Snipe-IT refuses to check out an asset that is already out, so the corrected pair follows the return.
 - **Buffer Dates**:

@@ -181,6 +181,12 @@ class _MaintenanceFailed(Exception):
     """Raised when a maintenance record failed after all retries."""
 
 
+# How long a pending checkout or check-in lock counts as held by a live worker.
+# An older lock is assumed abandoned (its worker died) and is retaken, so the
+# stream consumer's retry budget must outlast it (see stream_consumer_tasks).
+IN_FLIGHT_LOCK_SECONDS = 300
+
+
 class SnipeItSyncInProgress(Exception):
     """Raised when another worker holds a journal's Snipe-IT checkout.
 
@@ -1246,7 +1252,7 @@ class SnipeItSyncService:
                     if (
                         row.sync_status == "pending"
                         and row.age_seconds is not None
-                        and row.age_seconds < 300
+                        and row.age_seconds < IN_FLIGHT_LOCK_SECONDS
                     ):
                         raise SnipeItSyncInProgress(
                             f"Checkout of journal {journal_id} is in flight"
@@ -1632,7 +1638,7 @@ class SnipeItSyncService:
                     if (
                         row.sync_status == "pending"
                         and row.age_seconds is not None
-                        and row.age_seconds < 300
+                        and row.age_seconds < IN_FLIGHT_LOCK_SECONDS
                     ):
                         raise SnipeItSyncInProgress(
                             f"Check-in of journal {journal_id} is in flight"

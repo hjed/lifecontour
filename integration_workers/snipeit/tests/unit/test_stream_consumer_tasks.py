@@ -680,3 +680,27 @@ async def test_handle_event_gear_usage_in_flight_checkout_is_left_for_retry(
         await consumer._handle_event(event)
 
     mock_sync_service._api_client.close.assert_called_once()
+
+
+def test_retry_budget_outlasts_an_abandoned_snipeit_lock(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """A dead worker's Snipe-IT lock must go stale while the event can still retry.
+
+    Events that meet another worker's checkout or check-in lock raise
+    ``SnipeItSyncInProgress`` and are redelivered. Delivery ``n`` is handled
+    about ``n - 1`` idle intervals after the first, and the event is
+    dead-lettered once ``max_delivery_count`` deliveries have been made, so at
+    least one attempt must fall a full interval after the lock is retakeable.
+    """
+    from snipeit_sync_service import IN_FLIGHT_LOCK_SECONDS
+
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+
+    interval_seconds = consumer._retry_min_idle_ms / 1000
+    last_attempt_seconds = (consumer._max_delivery_count - 1) * interval_seconds
+    assert last_attempt_seconds >= IN_FLIGHT_LOCK_SECONDS + interval_seconds
