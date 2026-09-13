@@ -17,6 +17,7 @@ from core_shared.models.journals import (
     JournalDomainError,
     JournalHasAnchoredTasksError,
     JournalNotFoundError,
+    RouteValidationError,
 )
 from core_shared.models.tasks import TaskDomainError
 from fastapi import HTTPException
@@ -29,6 +30,10 @@ from app.core.contacts.models.exceptions import (
 )
 from app.infrastructure.database_errors import describe_data_error
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
+
+# String arguments longer than this are logged by size only: a GPX track can be
+# megabytes, and copying it into every log line helps nobody.
+_MAX_LOGGED_STRING_LENGTH = 1000
 
 
 def mcp_unified_error_handler(
@@ -57,10 +62,12 @@ def mcp_unified_error_handler(
                 from pydantic import BaseModel
 
                 # Make kwargs serializable for structlog JSONRenderer
-                serializable_kwargs = {}
+                serializable_kwargs: dict[str, Any] = {}
                 for k, v in kwargs.items():
                     if isinstance(v, BaseModel):
                         serializable_kwargs[k] = v.model_dump()
+                    elif isinstance(v, str) and len(v) > _MAX_LOGGED_STRING_LENGTH:
+                        serializable_kwargs[k] = f"<str: {len(v)} chars>"
                     else:
                         serializable_kwargs[k] = v
 
@@ -145,6 +152,13 @@ def mcp_unified_error_handler(
                     message=e.message,
                     context={"code": "JOURNAL_HAS_ANCHORED_TASKS", **e.error_meta()},
                 )
+
+            except RouteValidationError as e:
+                # Above the journal catch-all, which would bury the field in
+                # prose: a caller sending a bad GPX track needs to be told the
+                # refusal is about ``gpx_data``, as the REST surface does.
+                MCPLogger.log_validation_error(operation_name, e.message)
+                return MCPResponseBuilder.validation_error_response(e.field, e.reason)
 
             except JournalDomainError as e:
                 # Handles all journal domain errors including validation errors raised

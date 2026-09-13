@@ -1087,3 +1087,30 @@ def build_dashboard_summary(
         f"{template_count} unique template{'' if template_count == 1 else 's'} done "
         f"({templates_done_last_30_days} in the last 30 days)."
     )
+
+
+class RouteMCPResponse(BaseModel):
+    """AI-friendly summary of a journal route, without its GPX body."""
+
+    id: str = Field(description="Route UUID")
+    journal_id: int = Field(description="ID of the journal the route belongs to")
+    name: str = Field(description="Route name")
+    description: str | None = Field(default=None, description="Route description")
+    has_gpx_data: bool = Field(description="Whether GPX track data is stored")
+    gpx_size_bytes: int | None = Field(
+        default=None,
+        description="Size of the stored GPX document in bytes, or null when none",
+    )
+    created_at: datetime | None = Field(default=None, description="Creation time")
+    updated_at: datetime | None = Field(default=None, description="Last update time")
+    summary: str = Field(description="AI-friendly summary of the route")
+
+
+class RouteListMCPResponse(BaseModel):
+    """AI-friendly page of a journal's routes."""
+
+    routes: list[RouteMCPResponse] = Field(description="Routes on this page")
+    total_count: int = Field(description="Routes matching the filter, all pages")
+    limit: int = Field(description="Maximum routes per page")
+    offset: int = Field(description="Routes skipped before this page")
+    summary: str = Field(description="AI-friendly summary")

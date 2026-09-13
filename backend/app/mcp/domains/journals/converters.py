@@ -11,6 +11,7 @@ from typing import Any
 from core_shared.etag import resource_etag
 from core_shared.models.journals import Calendar, GearItem, Journal
 from core_shared.models.journals.activity_template import ActivityTemplate
+from core_shared.models.route import Route
 
 from app.core.integrations.external_link_helpers import ExternalLinkInfo
 from app.core.journal.models.journal_tag import JournalTag
@@ -27,6 +28,8 @@ from app.mcp.domains.journals.schemas import (
     JournalChildSummary,
     JournalResponse,
     JournalSearchResult,
+    RouteListMCPResponse,
+    RouteMCPResponse,
     TemplatePitchMCPSchema,
 )
 
@@ -380,4 +383,45 @@ class GearItemMCPConverter:
         return GearItemListMCPResponse(
             gear_items=mcp_items,
             summary=summary,
+        )
+
+
+class RouteMCPConverter:
+    """Converter for journal routes to AI-friendly MCP summaries.
+
+    GPX bodies are never echoed back: a track can be megabytes, and a caller
+    finding a route to update needs its id and name, not its points.
+    """
+
+    @staticmethod
+    def to_mcp_response(route: Route) -> RouteMCPResponse:
+        """Convert a route entity to an MCP summary."""
+        gpx_size_bytes = len(route.gpx_data.encode()) if route.gpx_data else None
+        gpx_summary = (
+            f"{gpx_size_bytes} bytes of GPX" if gpx_size_bytes else "no GPX data"
+        )
+        return RouteMCPResponse(
+            id=str(route.id),
+            journal_id=route.journal_id,
+            name=route.name,
+            description=route.description,
+            has_gpx_data=gpx_size_bytes is not None,
+            gpx_size_bytes=gpx_size_bytes,
+            created_at=route.created_at,
+            updated_at=route.updated_at,
+            summary=f"Route '{route.name}' on journal {route.journal_id} "
+            f"with {gpx_summary}",
+        )
+
+    @staticmethod
+    def to_mcp_list_response(
+        routes: list[Route], *, total_count: int, limit: int, offset: int
+    ) -> RouteListMCPResponse:
+        """Convert a page of routes to an MCP list response."""
+        return RouteListMCPResponse(
+            routes=[RouteMCPConverter.to_mcp_response(route) for route in routes],
+            total_count=total_count,
+            limit=limit,
+            offset=offset,
+            summary=f"Showing {len(routes)} of {total_count} route(s)",
         )
