@@ -366,7 +366,8 @@ async def periodic_checkin_all_snipeit_accounts(
 
     For every user with Snipe-IT configured, finds successful checkouts that
     have no successful check-in yet and whose resolved check-in date has passed,
-    then returns those assets in Snipe-IT. Complements the event-driven triggers
+    then returns those assets in Snipe-IT, backdated to the local check-in date
+    when it is before today. Complements the event-driven triggers
     (journal deletion / update / immediate-on-create) by catching usage windows
     that only become past with the passage of time.
     """
@@ -376,7 +377,7 @@ async def periodic_checkin_all_snipeit_accounts(
     from sqlalchemy import text
 
     from snipeit_api_client import SnipeItAPIError
-    from snipeit_sync_service import _format_date_for_snipeit
+    from snipeit_sync_service import fetch_overdue_gear_usage
 
     async with session_factory() as session:
         result = await session.execute(
@@ -400,31 +401,8 @@ async def periodic_checkin_all_snipeit_accounts(
         if not auth_data:
             continue
 
-        # Active checkouts (no successful checkin) whose period has ended.
-        async with session_factory() as session:
-            overdue_result = await session.execute(
-                text("""
-                    SELECT j.id AS journal_id,
-                           COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
-                           COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date
-                    FROM sync_metadata co
-                    JOIN journals j ON j.id = co.internal_uuid::integer
-                    JOIN journal_gear_usage_data u ON u.journal_id = j.id
-                    LEFT JOIN sync_metadata ci
-                        ON ci.integration_source = 'snipeit_checkin'
-                        AND ci.internal_uuid = co.internal_uuid
-                        AND ci.sync_status = 'success'
-                    WHERE co.integration_source = 'snipeit_checkout'
-                      AND co.sync_status = 'success'
-                      AND j.user_id = :user_id
-                      AND ci.id IS NULL
-                      AND COALESCE(u.checkin_date, j.event_date_range_end) < now()
-                """),
-                {"user_id": user_id},
-            )
-            overdue_rows = overdue_result.fetchall()
-
-        if not overdue_rows:
+        overdue_usages = await fetch_overdue_gear_usage(session_factory, user_id)
+        if not overdue_usages:
             continue
 
         sync_service = _create_sync_service(
@@ -437,16 +415,13 @@ async def periodic_checkin_all_snipeit_accounts(
         )
 
         try:
-            for overdue in overdue_rows:
-                note = (
-                    f"Usage period {_format_date_for_snipeit(overdue.checkout_date)} "
-                    f"to {_format_date_for_snipeit(overdue.checkin_date)}"
-                )
+            for overdue in overdue_usages:
                 try:
                     did_checkin = await sync_service.push_checkin_create(
                         journal_id=overdue.journal_id,
                         session_factory=session_factory,
-                        note=note,
+                        note=overdue.note,
+                        checkin_at=overdue.snipeit_checkin_at(),
                     )
                     if did_checkin:
                         checked_in += 1
