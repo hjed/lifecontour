@@ -14,6 +14,7 @@ from core_shared.models.journals import RouteValidationError
 
 from app.api.common.schemas import JsonApiLinks
 from app.api.routes.schemas import RouteResource, RouteResponseAttributes
+from app.core.journal.utils.route_edits import build_new_route
 
 if TYPE_CHECKING:
     from app.api.routes.schemas import RouteCreateData, RouteUpdateData
@@ -73,7 +74,7 @@ class RouteRequestConverter:
 
         Args:
             data: The API request data
-            user_id: The user ID from the authenticated session
+            journal_id: The journal the route belongs to
 
         Returns:
             Route domain entity ready for creation
@@ -81,26 +82,12 @@ class RouteRequestConverter:
         Raises:
             RouteValidationError: If route validation fails
         """
-        try:
-            return Route(
-                journal_id=journal_id,
-                name=data.attributes.name,
-                description=data.attributes.description,
-                gpx_data=data.attributes.gpx_data,
-            )
-        except ValueError as e:
-            # Convert ValueError from Route entity to RouteValidationError
-            # Extract field name from error message if possible
-            error_msg = str(e)
-            if "GPX" in error_msg or "gpx" in error_msg:
-                field = "gpx_data"
-            elif "name" in error_msg.lower():
-                field = "name"
-            elif "user" in error_msg.lower():
-                field = "user_id"
-            else:
-                field = "route"
-            raise RouteValidationError(field, error_msg) from e
+        return build_new_route(
+            journal_id=journal_id,
+            name=data.attributes.name,
+            description=data.attributes.description,
+            gpx_data=data.attributes.gpx_data,
+        )
 
     @staticmethod
     def from_update_request(

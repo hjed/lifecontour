@@ -291,6 +291,9 @@ class RouteValidationError(JournalDomainError):
     def __init__(self, field: str, message: str):
         super().__init__(f"{field}: {message}", 400)
         self.field = field
+        # The refusal without the field prefix, for surfaces that name the
+        # field separately.
+        self.reason = message
 
 
 class OutdoorActivityDataValidationError(JournalDomainError):
