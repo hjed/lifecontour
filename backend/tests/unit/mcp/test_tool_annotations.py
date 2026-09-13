@@ -52,6 +52,7 @@ DESTRUCTIVE_TOOLS = frozenset(
         "merge_journals",
         "delete_journal_tag",
         "merge_journal_tag",
+        "delete_journal_route",
         # Journal series
         "delete_series",
         "remove_journal_from_series",

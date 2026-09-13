@@ -6,9 +6,13 @@ else reads as not found. Writes go through ``RouteService``, which owns the
 transaction and records the change in the journal's history as made by MCP.
 """
 
+import json
 from typing import Annotated
+from uuid import UUID
 
+from core_shared.models import Route
 from core_shared.models.history import Provenance
+from core_shared.models.journals import RouteNotFoundError
 from fastmcp import FastMCP
 from fastmcp.tools import tool
 from pydantic import Field
@@ -16,9 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.route_service import RouteService
-from app.core.journal.utils.route_edits import build_new_route
+from app.core.journal.utils.route_edits import apply_route_update, build_new_route
 from app.mcp.domains.journals.converters import RouteMCPConverter
-from app.mcp.shared.annotations import ADDITIVE_WRITE, READ_ONLY
+from app.mcp.shared.annotations import (
+    ADDITIVE_WRITE,
+    DESTRUCTIVE_WRITE,
+    IDEMPOTENT_WRITE,
+    READ_ONLY,
+)
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -35,6 +44,10 @@ _GPX_DATA_DESCRIPTION = (
     "its own request-size limit."
 )
 
+_ROUTE_ID_DESCRIPTION = (
+    "Route UUID, as returned by create_journal_route or list_journal_routes"
+)
+
 
 async def _owns_journal(
     db_connection: AsyncConnection, journal_id: int, user_id: str
@@ -43,6 +56,42 @@ async def _owns_journal(
         journal_id, user_id
     )
     return journal is not None
+
+
+async def _load_owned_route(
+    db_connection: AsyncConnection,
+    route_service: RouteService,
+    user_id: str,
+    journal_id: int,
+    route_id: str,
+) -> Route | str:
+    """The route, or the error response to return in its place.
+
+    A journal the caller does not own, and a route that is not on that journal,
+    both read as not found rather than confirming that they exist.
+    """
+    if not await _owns_journal(db_connection, journal_id, user_id):
+        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+    try:
+        route_uuid = UUID(route_id)
+    except ValueError:
+        return MCPResponseBuilder.validation_error_response(
+            "route_id", "Must be a valid UUID"
+        )
+    try:
+        route = await route_service.get_route(route_uuid)
+    except RouteNotFoundError:
+        return MCPResponseBuilder.not_found_error_response("Route", route_id)
+    if route.journal_id != journal_id:
+        return MCPResponseBuilder.not_found_error_response("Route", route_id)
+    return route
+
+
+def _keep_or_clear(current: str | None, requested: str | None) -> str | None:
+    """An omitted argument keeps the current value; an empty string clears it."""
+    if requested is None:
+        return current
+    return requested or None
 
 
 @tool(annotations=ADDITIVE_WRITE)
@@ -128,7 +177,106 @@ async def list_journal_routes(
     )
 
 
+@tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("update_journal_route", "journal")
+async def update_journal_route(
+    journal_id: Annotated[
+        int, Field(description="ID of the journal entry the route is attached to")
+    ],
+    route_id: Annotated[str, Field(description=_ROUTE_ID_DESCRIPTION)],
+    name: Annotated[
+        str | None,
+        Field(default=None, description="New route name (max 200 characters)"),
+    ] = None,
+    description: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="New description (pass an empty string to clear it)",
+        ),
+    ] = None,
+    gpx_data: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=_GPX_DATA_DESCRIPTION
+            + " Pass an empty string to remove the stored track.",
+        ),
+    ] = None,
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    route_service: RouteService = mcp_depends(get_route_service),
+) -> str:
+    """
+    Change a route's name, description or GPX track on a journal entry the user owns.
+
+    Only the arguments you pass change; omitted ones keep their current value.
+    The update is validated before anything is written, with the same
+    ``gpx_data`` and ``name`` refusals as ``create_journal_route``. A route that
+    is not on ``journal_id`` is reported as not found. The change is recorded in
+    the journal's history (a GPX change as present/absent, not its content).
+    """
+    route = await _load_owned_route(
+        db_connection, route_service, user_id, journal_id, route_id
+    )
+    if isinstance(route, str):
+        return route
+
+    updated_route, changed_fields = apply_route_update(
+        route,
+        name=name if name is not None else route.name,
+        description=_keep_or_clear(route.description, description),
+        gpx_data=_keep_or_clear(route.gpx_data, gpx_data),
+    )
+    saved_route = await route_service.update_route(
+        updated_route,
+        changed_fields,
+        db_connection,
+        changed_by="mcp",
+        source=Provenance.MCP,
+    )
+    return MCPResponseBuilder.success_response(
+        RouteMCPConverter.to_mcp_response(saved_route)
+    )
+
+
+@tool(annotations=DESTRUCTIVE_WRITE)
+@mcp_unified_error_handler("delete_journal_route", "journal")
+async def delete_journal_route(
+    journal_id: Annotated[
+        int, Field(description="ID of the journal entry the route is attached to")
+    ],
+    route_id: Annotated[str, Field(description=_ROUTE_ID_DESCRIPTION)],
+    user_id: str = mcp_depends(get_current_user_id),
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    route_service: RouteService = mcp_depends(get_route_service),
+) -> str:
+    """
+    Permanently delete a route (and its GPX track) from a journal entry the user owns.
+
+    The journal entry itself is not changed. A route that is not on
+    ``journal_id`` is reported as not found. The deletion is recorded in the
+    journal's history.
+    """
+    route = await _load_owned_route(
+        db_connection, route_service, user_id, journal_id, route_id
+    )
+    if isinstance(route, str):
+        return route
+    assert route.id is not None, "A route loaded from the database has an id"
+
+    await route_service.delete_route(
+        route.id, db_connection, changed_by="mcp", source=Provenance.MCP
+    )
+    return json.dumps(
+        {"deleted": True, "route_id": str(route.id), "journal_id": journal_id},
+        indent=2,
+    )
+
+
 def register_journal_route_tools(mcp: FastMCP[None]) -> None:
     """Register journal route MCP tools with the FastMCP server."""
     mcp.add_tool(create_journal_route)
     mcp.add_tool(list_journal_routes)
+    mcp.add_tool(update_journal_route)
+    mcp.add_tool(delete_journal_route)

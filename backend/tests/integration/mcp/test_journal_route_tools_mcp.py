@@ -2,12 +2,15 @@
 
 import json
 from typing import Any
+from uuid import uuid4
 
 import pytest
+from core_shared.models import Route
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from tests.integration.mcp.http_helpers import call_mcp_tool, initialize_mcp_session
 from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_journal
 
@@ -219,3 +222,273 @@ class TestListJournalRoutes:
             )
 
         assert payload["error"] == "Journal not found"
+
+
+OTHER_GPX = VALID_GPX.replace("Harbour Loop", "Harbour Loop (resurveyed)")
+
+
+async def _seed_route(
+    connection: AsyncConnection,
+    journal_id: int,
+    *,
+    name: str = "Harbour Loop",
+    description: str | None = "Morning paddle",
+    gpx_data: str | None = VALID_GPX,
+) -> str:
+    route = await SqlRouteRepository(connection).save(
+        Route(
+            journal_id=journal_id,
+            name=name,
+            description=description,
+            gpx_data=gpx_data,
+        )
+    )
+    return str(route.id)
+
+
+class TestUpdateJournalRoute:
+    @pytest.mark.asyncio
+    async def test_updates_every_field_with_mcp_provenance(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+        route_id = await _seed_route(clean_database, journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "update_journal_route",
+                {
+                    "journal_id": journal_id,
+                    "route_id": route_id,
+                    "name": "Harbour Circuit",
+                    "description": "Evening paddle",
+                    "gpx_data": OTHER_GPX,
+                },
+            )
+
+        assert "error" not in payload, payload
+        assert payload["id"] == route_id
+        assert payload["name"] == "Harbour Circuit"
+        assert payload["gpx_size_bytes"] == len(OTHER_GPX.encode())
+
+        rows = await _route_rows(clean_database, journal_id)
+        assert [(r.name, r.description, r.gpx_data) for r in rows] == [
+            ("Harbour Circuit", "Evening paddle", OTHER_GPX)
+        ]
+
+        events = await _route_event_payloads(clean_database, "RouteUpdated")
+        assert len(events) == 1
+        assert events[0]["route_id"] == route_id
+        assert events[0]["changed_fields"] == {
+            "name": ["Harbour Loop", "Harbour Circuit"],
+            "description": ["Morning paddle", "Evening paddle"],
+            "gpx_data": ["present", "present"],
+        }
+        assert events[0]["source"] == "mcp"
+        assert events[0]["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_omitted_arguments_are_kept_and_empty_strings_clear(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+        route_id = await _seed_route(clean_database, journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            session_id = await initialize_mcp_session(client)
+            renamed = await call_mcp_tool(
+                client,
+                session_id,
+                "update_journal_route",
+                {"journal_id": journal_id, "route_id": route_id, "name": "Renamed"},
+            )
+            rows_after_rename = await _route_rows(clean_database, journal_id)
+            cleared = await call_mcp_tool(
+                client,
+                session_id,
+                "update_journal_route",
+                {
+                    "journal_id": journal_id,
+                    "route_id": route_id,
+                    "description": "",
+                    "gpx_data": "",
+                },
+            )
+
+        assert "error" not in renamed, renamed
+        assert [(r.name, r.description, r.gpx_data) for r in rows_after_rename] == [
+            ("Renamed", "Morning paddle", VALID_GPX)
+        ]
+        assert "error" not in cleared, cleared
+        assert cleared["has_gpx_data"] is False
+        rows = await _route_rows(clean_database, journal_id)
+        assert [(r.name, r.description, r.gpx_data) for r in rows] == [
+            ("Renamed", None, None)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_invalid_gpx_is_refused_and_the_route_is_unchanged(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+        route_id = await _seed_route(clean_database, journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "update_journal_route",
+                {
+                    "journal_id": journal_id,
+                    "route_id": route_id,
+                    "name": "Should not stick",
+                    "gpx_data": "<kml><Document/></kml>",
+                },
+            )
+
+        assert payload["error"] == "Validation error"
+        assert payload["field"] == "gpx_data"
+        rows = await _route_rows(clean_database, journal_id)
+        assert [(r.name, r.gpx_data) for r in rows] == [("Harbour Loop", VALID_GPX)]
+        assert await _route_event_payloads(clean_database, "RouteUpdated") == []
+
+    @pytest.mark.asyncio
+    async def test_a_route_on_another_journal_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_repository = SqlJournalRepository(clean_database)
+        route_journal_id = await create_journal(journal_repository, title="Paddle")
+        other_journal_id = await create_journal(journal_repository, title="Walk")
+        route_id = await _seed_route(clean_database, route_journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "update_journal_route",
+                {"journal_id": other_journal_id, "route_id": route_id, "name": "X"},
+            )
+
+        assert payload["error"] == "Route not found"
+        rows = await _route_rows(clean_database, route_journal_id)
+        assert [r.name for r in rows] == ["Harbour Loop"]
+
+    @pytest.mark.asyncio
+    async def test_another_users_journal_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(
+            SqlJournalRepository(clean_database), user_id=OTHER_USER_ID
+        )
+        route_id = await _seed_route(clean_database, journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "update_journal_route",
+                {"journal_id": journal_id, "route_id": route_id, "name": "Mine now"},
+            )
+
+        assert payload["error"] == "Journal not found"
+        rows = await _route_rows(clean_database, journal_id)
+        assert [r.name for r in rows] == ["Harbour Loop"]
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_route_id_names_the_route_id_field(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "update_journal_route",
+                {"journal_id": journal_id, "route_id": "not-a-uuid", "name": "X"},
+            )
+
+        assert payload["error"] == "Validation error"
+        assert payload["field"] == "route_id"
+
+
+class TestDeleteJournalRoute:
+    @pytest.mark.asyncio
+    async def test_deletes_the_route_with_mcp_provenance(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+        route_id = await _seed_route(clean_database, journal_id)
+        kept_route_id = await _seed_route(clean_database, journal_id, name="Kept")
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "delete_journal_route",
+                {"journal_id": journal_id, "route_id": route_id},
+            )
+
+        assert payload == {
+            "deleted": True,
+            "route_id": route_id,
+            "journal_id": journal_id,
+        }
+        rows = await _route_rows(clean_database, journal_id)
+        assert [str(r.id) for r in rows] == [kept_route_id]
+
+        events = await _route_event_payloads(clean_database, "RouteDeleted")
+        assert len(events) == 1
+        assert events[0]["route_id"] == route_id
+        assert events[0]["source"] == "mcp"
+        assert events[0]["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_route_on_another_journal_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_repository = SqlJournalRepository(clean_database)
+        route_journal_id = await create_journal(journal_repository, title="Paddle")
+        other_journal_id = await create_journal(journal_repository, title="Walk")
+        route_id = await _seed_route(clean_database, route_journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "delete_journal_route",
+                {"journal_id": other_journal_id, "route_id": route_id},
+            )
+
+        assert payload["error"] == "Route not found"
+        assert len(await _route_rows(clean_database, route_journal_id)) == 1
+
+    @pytest.mark.asyncio
+    async def test_another_users_journal_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(
+            SqlJournalRepository(clean_database), user_id=OTHER_USER_ID
+        )
+        route_id = await _seed_route(clean_database, journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "delete_journal_route",
+                {"journal_id": journal_id, "route_id": route_id},
+            )
+
+        assert payload["error"] == "Journal not found"
+        assert len(await _route_rows(clean_database, journal_id)) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_route_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "delete_journal_route",
+                {"journal_id": journal_id, "route_id": str(uuid4())},
+            )
+
+        assert payload["error"] == "Route not found"
+        assert await _route_event_payloads(clean_database, "RouteDeleted") == []
