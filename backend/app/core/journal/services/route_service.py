@@ -153,7 +153,8 @@ class RouteService:
         the edit is merged into, and its changed fields computed from, that
         locked row. Concurrent edits to one route therefore run one after the
         other: neither can revert a field the other changed, and each records
-        exactly what it changed.
+        exactly what it changed. An edit that changes nothing writes nothing:
+        no save and no ``RouteUpdated``, so repeating an update is a no-op.
 
         Publishes RouteUpdated event via outbox pattern.
 
@@ -176,6 +177,8 @@ class RouteService:
             raise RouteNotFoundError(str(route_id))
 
         updated_route, changed_fields = apply_route_update(existing_route, edit)
+        if not changed_fields:
+            return existing_route
 
         # Save the updated route
         try:
@@ -216,7 +219,12 @@ class RouteService:
         source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """
-        Delete a route after checking it's not in use.
+        Delete a route.
+
+        The route is read with a row lock held until the unit of work ends, so
+        of two concurrent deletes the second waits, finds the route gone and
+        raises ``RouteNotFoundError`` instead of publishing a deletion that did
+        not happen.
 
         Publishes RouteDeleted event via outbox pattern.
 
@@ -228,10 +236,9 @@ class RouteService:
 
         Raises:
             RouteNotFoundError: If route doesn't exist
-            RouteInUseError: If route is in use by journals
         """
-        # Validate route exists (loaded before deletion so journal_id is available)
-        route = await self.route_repo.find_by_id(route_id)
+        # Lock the row; it is also loaded so journal_id is available for the event
+        route = await self.route_repo.find_by_id_for_update(route_id)
         if route is None:
             raise RouteNotFoundError(str(route_id))
 

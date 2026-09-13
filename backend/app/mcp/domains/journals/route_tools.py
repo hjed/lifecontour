@@ -208,7 +208,8 @@ async def update_journal_route(
     is validated before anything is written, with the same ``gpx_data`` and
     ``name`` refusals as ``create_journal_route``. A route that is not on
     ``journal_id`` is reported as not found. The change is recorded in the
-    journal's history (a GPX change as present/absent, not its content).
+    journal's history (a GPX change as present/absent, not its content); an
+    update that changes nothing records nothing.
     """
     route = await _load_owned_route(
         db_connection, route_service, user_id, journal_id, route_id

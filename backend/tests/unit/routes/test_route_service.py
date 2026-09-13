@@ -161,41 +161,68 @@ class TestRouteServiceUpdate:
         mock_route_repo.save.assert_not_called()
         mock_event_publisher.publish.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_an_edit_that_changes_nothing_writes_nothing(
+        self, route_service, mock_route_repo, mock_event_publisher, mock_transaction
+    ) -> None:
+        """Repeating an update is a no-op: no save, no ``RouteUpdated``.
+
+        The update tools are annotated idempotent, so a retried request must
+        not advance ``updated_at`` or add a history event.
+        """
+        route_id = uuid4()
+        current = create_test_route(route_id=route_id, name="Same", description="d")
+        mock_route_repo.find_by_id_for_update.return_value = current
+
+        result = await route_service.update_route(
+            route_id, RouteEdit(name="Same", description="d"), mock_transaction
+        )
+
+        assert result is current
+        mock_route_repo.save.assert_not_called()
+        mock_event_publisher.publish.assert_not_called()
+
 
 class TestRouteServiceDelete:
-    """Test route deletion."""
+    """Deletion reads the route under a row lock.
+
+    Of two concurrent deletes, the second waits for the first to commit, finds
+    the row gone and is refused, rather than reporting (and recording in
+    history) a deletion that did not happen.
+    """
 
     @pytest.mark.asyncio
-    async def test_delete_route_success(
+    async def test_delete_route_locks_deletes_and_publishes(
         self, route_service, mock_route_repo, mock_event_publisher, mock_transaction
-    ):
-        """Test successful route deletion."""
-        # Arrange
+    ) -> None:
         route_id = uuid4()
-        route = create_test_route(route_id=route_id)
+        mock_route_repo.find_by_id_for_update.return_value = create_test_route(
+            route_id=route_id, journal_id=7
+        )
 
-        mock_route_repo.find_by_id.return_value = route
-        # Act
-        await route_service.delete_route(route_id, mock_transaction)
+        await route_service.delete_route(
+            route_id, mock_transaction, changed_by="mcp", source=Provenance.MCP
+        )
 
-        # Assert
-        mock_route_repo.find_by_id.assert_called_once_with(route_id)
-        mock_route_repo.delete.assert_called_once_with(route_id)
-        mock_event_publisher.publish.assert_called_once()
+        mock_route_repo.find_by_id_for_update.assert_awaited_once_with(route_id)
+        mock_route_repo.find_by_id.assert_not_called()
+        mock_route_repo.delete.assert_awaited_once_with(route_id)
+        event = mock_event_publisher.publish.await_args.args[0]
+        assert event.event_type == "RouteDeleted"
+        assert event.event_data["journal_id"] == 7
+        assert event.event_data["source"] == "mcp"
 
     @pytest.mark.asyncio
-    async def test_delete_route_not_found(
-        self, route_service, mock_route_repo, mock_transaction
-    ):
-        """Test delete fails when route doesn't exist."""
-        # Arrange
-        route_id = uuid4()
+    async def test_delete_route_not_found_deletes_and_publishes_nothing(
+        self, route_service, mock_route_repo, mock_event_publisher, mock_transaction
+    ) -> None:
+        mock_route_repo.find_by_id_for_update.return_value = None
 
-        mock_route_repo.find_by_id.return_value = None
-
-        # Act & Assert
         with pytest.raises(RouteNotFoundError):
-            await route_service.delete_route(route_id, mock_transaction)
+            await route_service.delete_route(uuid4(), mock_transaction)
+
+        mock_route_repo.delete.assert_not_called()
+        mock_event_publisher.publish.assert_not_called()
 
 
 class TestRouteServiceGet:

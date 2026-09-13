@@ -408,6 +408,30 @@ class TestUpdateJournalRoute:
         assert payload["error"] == "Validation error"
         assert payload["field"] == "route_id"
 
+    @pytest.mark.asyncio
+    async def test_an_identical_update_records_nothing(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+        route_id = await _seed_route(clean_database, journal_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "update_journal_route",
+                {
+                    "journal_id": journal_id,
+                    "route_id": route_id,
+                    "name": "Harbour Loop",
+                    "description": "Morning paddle",
+                    "gpx_data": VALID_GPX,
+                },
+            )
+
+        assert "error" not in payload, payload
+        assert payload["name"] == "Harbour Loop"
+        assert await _route_event_payloads(clean_database, "RouteUpdated") == []
+
 
 class TestDeleteJournalRoute:
     @pytest.mark.asyncio
