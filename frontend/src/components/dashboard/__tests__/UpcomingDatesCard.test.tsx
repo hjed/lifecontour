@@ -302,6 +302,36 @@ describe('UpcomingDatesCard', () => {
       expect(screen.queryByText(EMPTY_LINE)).not.toBeInTheDocument();
     });
 
+    /**
+     * The shapes belong to `DashboardSectionPlaceholder` and are asserted
+     * there; what belongs here is that *this* card reaches them.
+     */
+    it('draws the skeleton and the W29 unavailable line (ITER18-004 Phase 16)', async () => {
+      routeFetch(() => new Promise<Response>(() => {}));
+
+      const { unmount } = renderWithProviders(<UpcomingDatesCard />);
+
+      const loading = screen.getByTestId('upcoming-dates-loading');
+      expect(loading).toHaveAttribute('aria-busy', 'true');
+      expect(
+        loading.querySelectorAll(
+          '[data-testid="dashboard-section-skeleton-row"]'
+        ).length
+      ).toBeGreaterThan(0);
+      unmount();
+
+      serveSection({ status: DashboardSectionStatus.UNAVAILABLE, data: null });
+      renderWithProviders(<UpcomingDatesCard />);
+
+      const unavailable = await screen.findByTestId(
+        'upcoming-dates-unavailable'
+      );
+      expect(unavailable.querySelector('svg')).toHaveAttribute(
+        'aria-hidden',
+        'true'
+      );
+    });
+
     it('keeps the labelled list in place whatever it holds', async () => {
       // W4 asks for a labelled list per section whether or not it has entries,
       // and a hidden one is out of the accessibility tree.

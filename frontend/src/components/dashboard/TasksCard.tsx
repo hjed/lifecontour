@@ -27,12 +27,11 @@
  *
  * Three things the list can hold nothing for, kept apart on purpose: **nothing
  * due this week** is a real answer and gets the single **W29** line the
- * wireframe does draw for this section; the query still being **in flight** and
- * the section coming back **unavailable** each get a quiet line of their own,
- * in **W9**'s idiom, because "nothing due in the next seven days" would be a
- * false claim about either. The proper loading skeleton and unavailable
- * treatment are Phase 16's (wireframe gap 9); these are the placeholders until
- * then, as the agenda's and the dates' are.
+ * wireframe does draw for this section; the query still being **in flight**
+ * gets the pulsing row skeleton and the section coming back **unavailable**
+ * its own centred line, because "nothing due in the next seven days" would be
+ * a false claim about either. Both are `DashboardSectionPlaceholder`'s; this
+ * card supplies only their wording.
  *
  * **The card mounts each row's inline done action** (**W24**) rather than the
  * row doing it: the action is the one thing here that writes, and keeping it
@@ -46,6 +45,7 @@ import { useState } from 'react';
 import { CheckCircle2, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DashboardSectionCard } from './DashboardSectionCard';
+import { DashboardSectionPlaceholder } from './DashboardSectionPlaceholder';
 import { DashboardTaskActions } from './DashboardTaskActions';
 import { DashboardTaskRow } from './DashboardTaskRow';
 import {
@@ -114,7 +114,15 @@ export function TasksCard() {
     <DashboardSectionCard
       {...TASKS_SECTION}
       testId='tasks-card'
-      placeholder={tasks ? undefined : <TasksPlaceholder pending={isPending} />}
+      placeholder={
+        tasks ? undefined : (
+          <DashboardSectionPlaceholder
+            pending={isPending}
+            copy={TASKS_PLACEHOLDER_COPY}
+            testIdPrefix='tasks'
+          />
+        )
+      }
       footer={
         hasMore ? (
           <div className='mt-3 flex justify-center'>
@@ -147,29 +155,5 @@ export function TasksCard() {
         />
       ))}
     </DashboardSectionCard>
-  );
-}
-
-interface TasksPlaceholderProps {
-  readonly pending: boolean;
-}
-
-/**
- * What the card says while it has no list to draw: still loading, or the
- * section is unavailable — which also covers a dashboard request that failed
- * outright, where there is no envelope at all.
- */
-function TasksPlaceholder({ pending }: TasksPlaceholderProps) {
-  return pending ? (
-    <p className='text-muted-foreground text-sm' data-testid='tasks-loading'>
-      {TASKS_PLACEHOLDER_COPY.loading}
-    </p>
-  ) : (
-    <p
-      className='text-muted-foreground text-sm'
-      data-testid='tasks-unavailable'
-    >
-      {TASKS_PLACEHOLDER_COPY.unavailable}
-    </p>
   );
 }

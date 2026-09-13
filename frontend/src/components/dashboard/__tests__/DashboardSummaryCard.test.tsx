@@ -278,6 +278,19 @@ describe('DashboardSummaryCard', () => {
       expect(screen.getByTestId('dashboard-summary-loading')).toHaveTextContent(
         "Loading today's summary..."
       );
+      // ITER18-004 Phase 16 draws that sentence as bars in the shape of the
+      // prose that is coming (W7), with the sentence itself kept for a reader
+      // who cannot see them. Busy rather than live, for the reason this card
+      // refused `aria-live` on its body in Phase 4.
+      expect(screen.getByTestId('dashboard-summary-loading')).toHaveAttribute(
+        'aria-busy',
+        'true'
+      );
+      expect(
+        screen
+          .getByTestId('dashboard-summary-loading')
+          .querySelectorAll('[data-slot="skeleton"]').length
+      ).toBeGreaterThan(0);
     });
   });
 

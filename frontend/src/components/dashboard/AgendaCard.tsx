@@ -22,11 +22,10 @@
  * Three things the list can hold nothing for, and they are kept apart on
  * purpose: **nothing scheduled** is a real answer and gets the single
  * **W29**-idiom line the wireframe does not draw (gap 1); the query still
- * being **in flight** and the section coming back **unavailable** each get a
- * quiet line of their own, in **W9**'s idiom, so neither can be mistaken for a
- * clear day. The proper loading skeleton and unavailable treatment are Phase
- * 16's (wireframe gap 9); these are the placeholders until then, as the
- * summary card's were.
+ * being **in flight** gets the pulsing row skeleton and the section coming
+ * back **unavailable** its own centred line, so neither can be mistaken for a
+ * clear day. Both are `DashboardSectionPlaceholder`'s, which is where the
+ * shape of the two states now lives; this card supplies only their wording.
  */
 
 'use client';
@@ -34,6 +33,7 @@
 import { CalendarCheck, CalendarDays } from 'lucide-react';
 import { AgendaEntryRow } from './AgendaEntryRow';
 import { DashboardSectionCard } from './DashboardSectionCard';
+import { DashboardSectionPlaceholder } from './DashboardSectionPlaceholder';
 import { TomorrowDisclosure } from './TomorrowDisclosure';
 import {
   DashboardSectionStatus,
@@ -88,7 +88,13 @@ export function AgendaCard() {
       {...AGENDA_SECTION}
       testId='agenda-card'
       placeholder={
-        agenda ? undefined : <AgendaPlaceholder pending={isPending} />
+        agenda ? undefined : (
+          <DashboardSectionPlaceholder
+            pending={isPending}
+            copy={AGENDA_PLACEHOLDER_COPY}
+            testIdPrefix='agenda'
+          />
+        )
       }
       footer={
         hasTomorrow && tomorrow ? (
@@ -100,29 +106,5 @@ export function AgendaCard() {
         <AgendaEntryRow key={entry.journal_id} entry={entry} />
       ))}
     </DashboardSectionCard>
-  );
-}
-
-interface AgendaPlaceholderProps {
-  readonly pending: boolean;
-}
-
-/**
- * What the card says while it has no list to draw: still loading, or the
- * section is unavailable — which also covers a dashboard request that failed
- * outright, where there is no envelope at all.
- */
-function AgendaPlaceholder({ pending }: AgendaPlaceholderProps) {
-  return pending ? (
-    <p className='text-muted-foreground text-sm' data-testid='agenda-loading'>
-      {AGENDA_PLACEHOLDER_COPY.loading}
-    </p>
-  ) : (
-    <p
-      className='text-muted-foreground text-sm'
-      data-testid='agenda-unavailable'
-    >
-      {AGENDA_PLACEHOLDER_COPY.unavailable}
-    </p>
   );
 }

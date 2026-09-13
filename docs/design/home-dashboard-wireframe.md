@@ -161,7 +161,11 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     component would interleave it with today's entries at an hour that never happened today, so it is
     ordered by when it actually began and therefore leads the timed block. Recorded here as delivery
     rule 4 requires; settled in ITER18-004 Phase 5a, which pins it with
-    `test_it_sorts_by_when_it_began_not_by_when_today_began`.
+    `test_it_sorts_by_when_it_began_not_by_when_today_began`. **ITER18-004 Phase 16 adds the clock
+    back as a tie-break beneath the instant**, because every event the app itself creates stores the
+    picked day's local midnight as its instant — so a whole day of them tied and fell to creation
+    order, which is how Phase 7's e2e came to draw a 19:00 dinner above a 09:00 standup. The clock
+    only separates entries that already share an instant, so the multi-day rule above is untouched.
 13. **W9's cause clause is dropped; its reassurance is kept verbatim.** The wireframe words the
     unavailable line *"No summary today — AI summaries are not configured. Everything below still
     works."*, which names a cause. ITER18-004 Phase 2 ruled that *unavailable* also covers a day that

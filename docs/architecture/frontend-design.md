@@ -1076,10 +1076,13 @@ elements are numbered **W1**–**W33**.
   - **Three declared states**: generated (**W7**), generating (a `secondary`
     "Generating..." badge beside the label and one muted line — **W8**), and
     unavailable (one quiet line — **W9**), which a failed dashboard request
-    degrades to as well. A fourth *rendering* — a quiet line while the page's
-    query is in flight — is not a state the wire produces; it is the
-    placeholder wireframe gap 9 anticipates until Phase 16 builds the
-    skeletons.
+    degrades to as well. A fourth *rendering* — what the card shows while the
+    page's query is in flight — is not a state the wire produces; wireframe
+    gap 9 anticipates it, and ITER18-004 Phase 16 draws it as three pulsing
+    bars in the shape of the prose that is coming (`dashboard-summary-loading`,
+    `aria-busy`, with the sentence kept as `sr-only` text). **Not a live
+    region**, for the same reason the body is not one: it would read out on
+    every load of the page every sign-in lands on.
   - The generated body splits the summary on blank lines into real `<p>`
     elements (**W7**'s "one or more prose paragraphs"), with
     `whitespace-pre-line` for the single newlines inside one. Never clamped,
@@ -1187,14 +1190,43 @@ elements are numbered **W1**–**W33**.
   an entry, and it has to survive an empty section, because "nothing scheduled
   today" says nothing about what a footer is for. The agenda's tomorrow
   disclosure is its only user so far.
+- **Section loading and unavailable states** (**ITER18-004 Phase 16**, wireframe
+  gap 9, which depicts neither): `DashboardSectionPlaceholder` is what a section
+  passes to the shell's `placeholder` slot, and it owns both. Three cards faced
+  the same three-way choice and each shipped one muted line for two of the
+  answers; the sentences differ per section and stay with the card, but the
+  *shape* of the two states is a property of the page.
+  - **Pending** draws `DashboardSectionSkeleton`: a run of three pulsing rows in
+    the same bordered, accent-barred shape the sections really draw. Deliberately
+    **not** `ui/loading.tsx`'s `ListSkeleton`, which is avatar-led and so
+    describes the upcoming-dates rows while mis-describing the other two — a
+    skeleton is a promise about what is arriving.
+  - **Unavailable** draws `WidgetEmptyState` with one shared `CloudOff` icon over
+    the section's own sentence. The icon is shared on purpose: it makes
+    *unavailable* one recognisable state rather than three, and the sentence
+    beside it already names which section is missing. No retry and no alert, per
+    **W9** and per the page's rule that exactly two things here write — recovery
+    is the window-focus refetch.
+  - **The skeleton is `aria-busy`, not a live region.** Four mount at once on the
+    post-sign-in page, and `role="status"` would announce four loading sentences
+    to a reader who asked for none. The sentence the quiet line used to show is
+    kept as `sr-only` text — there to be found, not read out — and the bars are
+    `aria-hidden`.
+  - **The test ids survive the change** (`<section>-loading`,
+    `<section>-unavailable`). Phase 16 replaced the rendering, not the handle, so
+    the cards' suites and the e2e keep reaching the states the way they did. Each
+    card's own suite asserts that *it* reaches the shared treatment, which the
+    sentence alone cannot show — Phase 15's lesson that a criterion a shared
+    shell satisfies is satisfied accidentally until the owning section says so.
+
 - **Agenda card**: `AgendaCard` (**W11**–**W18**) reads `useHomeDashboard()`
   itself and maps `agenda.data.entries` to one `AgendaEntryRow` each, **in the
   server's order** — all-day first, then timed ascending by start instant is
   the backend's rule (`order_agenda_entries`) and is pinned there, so the card
   does not re-sort. Ready-and-empty draws the **W29** line (wireframe gap 1);
-  pending and unavailable each draw a quiet line of their own in **W9**'s
-  idiom (`agenda-loading`, `agenda-unavailable`) as placeholders until Phase
-  16's skeletons, so the three cannot be confused. A dashboard request that
+  pending draws the row skeleton and unavailable its own centred line
+  (`agenda-loading`, `agenda-unavailable`, both `DashboardSectionPlaceholder`'s
+  — see below), so the three cannot be confused. A dashboard request that
   fails outright has no envelope at all and reads as unavailable.
   - **`TomorrowDisclosure`** (**W19**, **W20**) hangs off that `footer` slot,
     shut until asked. It is drawn **only on a ready agenda**, and guarded on
@@ -1259,8 +1291,8 @@ elements are numbered **W1**–**W33**.
   because a card that refetched would still look right on screen. The button
   names `total` rather than the hidden count, as **W32** writes it. Ready-and-
   empty draws the **W29** line (wireframe gap 2); pending and unavailable each
-  draw a quiet line of their own in **W9**'s idiom (`upcoming-dates-loading`,
-  `upcoming-dates-unavailable`), placeholders until Phase 16's skeletons. The
+  draw their own treatment through `DashboardSectionPlaceholder`
+  (`upcoming-dates-loading`, `upcoming-dates-unavailable`). The
   `dates` array is guarded with `Array.isArray` for the same reason the agenda
   guards its `tomorrow`, and with the same limit: this protects the one field
   the card reads, not an arbitrarily malformed section.
@@ -1313,9 +1345,9 @@ elements are numbered **W1**–**W33**.
   as **W28** describes one control. Ready-and-empty draws the **W29** state the
   wireframe does draw for this section — a decorative `lucide-circle-check`
   over one muted line, reading as a good outcome — while pending and
-  unavailable each draw a quiet line of their own in **W9**'s idiom
-  (`tasks-loading`, `tasks-unavailable`) as placeholders until Phase 16's
-  skeletons, so the three cannot be confused. The `tasks` array is guarded with
+  unavailable each draw their own treatment through
+  `DashboardSectionPlaceholder` (`tasks-loading`, `tasks-unavailable`), so the
+  three cannot be confused. The `tasks` array is guarded with
   `Array.isArray` for the same reason the agenda guards its `tomorrow`, and
   with the same limit.
   - **The cap and the inline write meet at the show-more.** Ticking a row

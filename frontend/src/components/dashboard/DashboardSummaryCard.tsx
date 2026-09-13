@@ -18,12 +18,12 @@
  * empty state. **W6**'s Regenerate control sits *outside* all three branches
  * and stays enabled in every one of them.
  *
- * There is one rendering the wireframe does not declare: a quiet line while the
- * page's query is still in flight. Wireframe gap 9 anticipates it — no
- * per-section loading state is depicted, and each section needs one — and gives
- * Phase 16 the skeletons; this is the placeholder until then, built in **W9**'s
- * one-quiet-line idiom rather than as a fourth *state*, since nothing on the
- * wire produces it.
+ * There is one rendering the wireframe does not declare: what the card shows
+ * while the page's query is still in flight. Wireframe gap 9 anticipates it —
+ * no per-section loading state is depicted, and each section needs one — and
+ * Phase 16 draws it as a skeleton of the prose that is coming. It is not a
+ * fourth *state*, since nothing on the wire produces it: **W9** still covers
+ * every way the card can end up with no summary once the read has landed.
  *
  * **Regeneration is never automatic.** Nothing currently moves a journal daily
  * summary out of `pending`, so a user who edits today's journal can see **W8**
@@ -42,6 +42,7 @@ import { RefreshCw, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { SummaryKeyStats } from './SummaryKeyStats';
 import {
   DashboardSectionStatus,
@@ -258,13 +259,22 @@ interface SummaryBodyProps {
 
 function SummaryBody({ isPending, isGenerating, prose }: SummaryBodyProps) {
   if (isPending) {
+    // Bars in the shape of the paragraph that is arriving, not a row skeleton:
+    // the summary is prose (W7), and a skeleton is a promise about what is
+    // coming. `aria-busy` with the sentence visually hidden, for the reason
+    // the sections' skeleton gives and this card gave first — a live region
+    // here would read out on every load of the post-sign-in page.
     return (
-      <p
-        className='text-muted-foreground text-sm'
+      <div
+        aria-busy='true'
+        className='space-y-2'
         data-testid='dashboard-summary-loading'
       >
-        {SUMMARY_COPY.loading}
-      </p>
+        <span className='sr-only'>{SUMMARY_COPY.loading}</span>
+        <Skeleton aria-hidden='true' className='h-4 w-full' />
+        <Skeleton aria-hidden='true' className='h-4 w-full' />
+        <Skeleton aria-hidden='true' className='h-4 w-2/3' />
+      </div>
     );
   }
 

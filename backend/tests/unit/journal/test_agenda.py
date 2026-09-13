@@ -12,6 +12,11 @@ belonging to another day; ordering by it would interleave that entry with today'
 by an hour that never happened today. The instant is also the key the day window
 already compares against, so the list is ordered by the same quantity that
 decided which entries are on it.
+
+**The clock sits beneath it as a tie-break** (ITER18-004 Phase 16), because every
+event the app creates carries the day's local midnight as its instant and a whole
+day of them therefore ties. Both halves need pinning: that the clock separates
+entries sharing an instant, and that it never reorders entries that do not.
 """
 
 import datetime
@@ -49,9 +54,16 @@ def entry(
     all_day: bool = False,
     starts_at: datetime.datetime | None = None,
     ends_at: datetime.datetime | None = None,
+    start_time: datetime.time | None = None,
     cancelled: bool = False,
 ) -> AgendaEntry:
-    """One agenda entry, with only the fields the ordering rule reads set."""
+    """One agenda entry, with only the fields the ordering rule reads set.
+
+    ``start_time`` defaults to ``None`` rather than to a clock matching
+    ``starts_at``: it is what an all-day entry carries, and what a timed one
+    whose times were never filled in carries, so the default is the shape the
+    tie-break has to survive rather than the shape that exercises it.
+    """
     start = starts_at if starts_at is not None else instant(9)
     return AgendaEntry(
         journal_id=journal_id,
@@ -59,6 +71,7 @@ def entry(
         is_all_day=all_day,
         starts_at=start,
         ends_at=ends_at if ends_at is not None else start + datetime.timedelta(hours=1),
+        start_time=start_time,
         is_cancelled=cancelled,
     )
 
@@ -125,6 +138,89 @@ class TestTimedEntriesAscendByStart:
         ]
 
         assert ids(order_agenda_entries(entries)) == [2, 5, 8]
+
+
+class TestEntriesSharingAnInstant:
+    """The clock separates entries the instant cannot, and never more than that.
+
+    App-created events all carry the *day's local midnight* as their stored
+    instant — ``JournalCreateForm`` sends the picked day, and the later clock
+    edits never touch ``event_date_range`` — so a whole day of them ties on
+    ``starts_at`` and used to fall to journal id, which is creation order.
+    ITER18-004 Phase 7's e2e found it by drawing Dinner above Standup.
+
+    Google-synced events carry real instants and were always ordered correctly,
+    which is why the clock is a **tie-break** rather than the key: promoting it
+    would interleave a multi-day journal at an hour that never happened today,
+    the case ``TestAMultiDayJournalOverlappingToday`` pins.
+    """
+
+    def test_entries_sharing_an_instant_are_separated_by_their_clock_times(
+        self,
+    ) -> None:
+        """The defect itself: one midnight instant, two evenings apart."""
+        midnight = instant(0)
+        dinner = entry(
+            1, title="Dinner", starts_at=midnight, start_time=datetime.time(19, 0)
+        )
+        standup = entry(
+            2, title="Standup", starts_at=midnight, start_time=datetime.time(9, 0)
+        )
+
+        ordered = order_agenda_entries([dinner, standup])
+
+        assert [item.title for item in ordered] == ["Standup", "Dinner"]
+
+    def test_the_clock_never_reorders_entries_that_begin_at_different_instants(
+        self,
+    ) -> None:
+        """A tie-break only breaks ties. Yesterday's 20:00 still leads today's 09:00."""
+        yesterday = TODAY - datetime.timedelta(days=1)
+        ongoing = entry(
+            1,
+            title="Three days on the river",
+            starts_at=instant(20, day=yesterday),
+            ends_at=instant(16, day=TODAY + datetime.timedelta(days=1)),
+            start_time=datetime.time(20, 0),
+        )
+        this_morning = entry(2, starts_at=instant(9), start_time=datetime.time(9, 0))
+
+        assert ids(order_agenda_entries([this_morning, ongoing])) == [1, 2]
+
+    def test_an_entry_with_no_clock_time_leads_those_sharing_its_instant(self) -> None:
+        """``None`` is a real payload: a timed entry whose times were never filled in.
+
+        It sorts as the earliest clock rather than crashing the comparison, and
+        the assertion is built so the id could not produce the same answer.
+        """
+        midnight = instant(0)
+        untimed = entry(5, starts_at=midnight, start_time=None)
+        morning = entry(1, starts_at=midnight, start_time=datetime.time(9, 0))
+
+        assert ids(order_agenda_entries([morning, untimed])) == [5, 1]
+
+    def test_entries_sharing_an_instant_and_a_clock_fall_back_to_journal_id(
+        self,
+    ) -> None:
+        """Two things really can start at once, and the order must still be stable."""
+        nine = datetime.time(9, 0)
+        entries = [
+            entry(8, starts_at=instant(0), start_time=nine),
+            entry(2, starts_at=instant(0), start_time=nine),
+            entry(5, starts_at=instant(0), start_time=nine),
+        ]
+
+        assert ids(order_agenda_entries(entries)) == [2, 5, 8]
+
+    def test_an_all_day_entry_still_outranks_a_timed_one_with_an_earlier_clock(
+        self,
+    ) -> None:
+        """The pin is above the tie-break: an all-day entry carries no clock at all."""
+        midnight = instant(0)
+        timed = entry(1, starts_at=midnight, start_time=datetime.time(6, 0))
+        all_day = entry(2, all_day=True, starts_at=midnight)
+
+        assert ids(order_agenda_entries([timed, all_day])) == [2, 1]
 
 
 class TestAMultiDayJournalOverlappingToday:
