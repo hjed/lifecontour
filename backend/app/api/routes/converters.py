@@ -13,11 +13,7 @@ from core_shared.models import Route
 
 from app.api.common.schemas import JsonApiLinks
 from app.api.routes.schemas import RouteResource, RouteResponseAttributes
-from app.core.journal.utils.route_edits import (
-    ChangedFields,
-    apply_route_update,
-    build_new_route,
-)
+from app.core.journal.utils.route_edits import RouteEdit, build_new_route
 
 if TYPE_CHECKING:
     from app.api.routes.schemas import RouteCreateData, RouteUpdateData
@@ -93,29 +89,21 @@ class RouteRequestConverter:
         )
 
     @staticmethod
-    def from_update_request(
-        data: RouteUpdateData, existing_route: Route
-    ) -> tuple[Route, ChangedFields]:
+    def to_route_edit(data: RouteUpdateData) -> RouteEdit:
         """
-        Convert API update request to Route domain entity with changed fields.
+        Convert an API update request to a route edit.
 
-        A PUT replaces every editable field. The route's id comes from the
-        existing route, never the request body, so a mismatched id in the body
-        cannot retarget the update.
+        A PUT replaces every editable field, so all three are set. The route's
+        id comes from the URL, never the request body, so a mismatched id in
+        the body cannot retarget the update.
 
         Args:
             data: The API request data
-            existing_route: The existing route from the database
 
         Returns:
-            Tuple of (updated Route entity, changed fields dict)
-            Changed fields format: {field_name: (old_value, new_value)}
-
-        Raises:
-            RouteValidationError: If route validation fails
+            RouteEdit setting the name, description and GPX data
         """
-        return apply_route_update(
-            existing_route,
+        return RouteEdit(
             name=data.attributes.name,
             description=data.attributes.description,
             gpx_data=data.attributes.gpx_data,

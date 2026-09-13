@@ -19,11 +19,19 @@ class SqlRouteRepository(RouteRepository):
 
     async def find_by_id(self, route_id: UUID) -> Route | None:
         """Find a route by ID."""
+        return await self._find_by_id(route_id, lock_clause="")
+
+    async def find_by_id_for_update(self, route_id: UUID) -> Route | None:
+        """Find a route by ID, locking its row until the transaction ends."""
+        return await self._find_by_id(route_id, lock_clause="FOR UPDATE")
+
+    async def _find_by_id(self, route_id: UUID, *, lock_clause: str) -> Route | None:
         query = text(
-            """
+            f"""
             SELECT id, journal_id, name, description, gpx_data, created_at, updated_at
             FROM routes
             WHERE id = :route_id
+            {lock_clause}
         """
         )
         result = await self.conn.execute(query, {"route_id": route_id})

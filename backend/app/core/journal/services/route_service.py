@@ -1,6 +1,5 @@
 """Service for managing routes."""
 
-from typing import Any
 from uuid import UUID
 
 import structlog
@@ -15,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.models.events import RouteCreated, RouteDeleted, RouteUpdated
 from app.core.journal.models.repositories import RouteRepository
+from app.core.journal.utils.route_edits import RouteEdit, apply_route_update
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
@@ -140,20 +140,26 @@ class RouteService:
     @transactional
     async def update_route(
         self,
-        route: Route,
-        changed_fields: dict[str, Any],
+        route_id: UUID,
+        edit: RouteEdit,
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> Route:
         """
-        Update an existing route.
+        Apply an edit to a route and record what changed.
+
+        The route is read with a row lock held until the unit of work ends, and
+        the edit is merged into, and its changed fields computed from, that
+        locked row. Concurrent edits to one route therefore run one after the
+        other: neither can revert a field the other changed, and each records
+        exactly what it changed.
 
         Publishes RouteUpdated event via outbox pattern.
 
         Args:
-            route: The route to update (must have id set)
-            changed_fields: Dictionary of changed fields for event tracking
+            route_id: The ID of the route to edit
+            edit: The fields to change; unset fields keep their current value
             transaction: Database transaction
             changed_by: Who/what made the change (for history provenance)
             source: Provenance of the change (for history provenance)
@@ -162,20 +168,18 @@ class RouteService:
             The updated route
 
         Raises:
-            RouteValidationError: If validation fails or route has no ID
+            RouteValidationError: If the edited route fails validation
             RouteNotFoundError: If route doesn't exist
         """
-        if route.id is None:
-            raise RouteValidationError("id", "Route ID is required for update")
-
-        # Validate route exists
-        existing_route = await self.route_repo.find_by_id(route.id)
+        existing_route = await self.route_repo.find_by_id_for_update(route_id)
         if existing_route is None:
-            raise RouteNotFoundError(str(route.id))
+            raise RouteNotFoundError(str(route_id))
+
+        updated_route, changed_fields = apply_route_update(existing_route, edit)
 
         # Save the updated route
         try:
-            saved_route = await self.route_repo.save(route)
+            saved_route = await self.route_repo.save(updated_route)
         except IntegrityError as e:
             raise RouteValidationError(
                 "database", f"Database constraint violation: {e}"

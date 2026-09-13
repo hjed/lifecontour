@@ -1536,6 +1536,22 @@ class RouteRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_by_id_for_update(self, route_id: UUID) -> Route | None:
+        """
+        Find a route by ID and lock its row until the transaction ends.
+
+        For read-modify-write: a concurrent caller locking the same route waits,
+        so it merges its change into the row this caller saved.
+
+        Args:
+            route_id: The route UUID to look up
+
+        Returns:
+            The Route if found, None otherwise
+        """
+        pass
+
+    @abstractmethod
     async def save(self, route: Route) -> Route:
         """
         Save a route (insert or update).

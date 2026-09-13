@@ -7,7 +7,11 @@ import pytest
 from core_shared.models import Route
 from core_shared.models.journals import RouteValidationError
 
-from app.core.journal.utils.route_edits import apply_route_update, build_new_route
+from app.core.journal.utils.route_edits import (
+    RouteEdit,
+    apply_route_update,
+    build_new_route,
+)
 
 VALID_GPX = '<?xml version="1.0"?><gpx version="1.1" creator="test"></gpx>'
 
@@ -31,40 +35,58 @@ class TestApplyRouteUpdate:
     """``changed_fields`` pairs are published on ``RouteUpdated`` and projected
     under the parent journal as ``route:<id>:<field>`` history rows."""
 
-    def test_no_change_returns_empty(self) -> None:
+    def test_an_empty_edit_keeps_every_field(self) -> None:
+        existing = _existing(description="d", gpx_data=VALID_GPX)
+
+        updated, changed = apply_route_update(existing, RouteEdit())
+
+        assert (updated.name, updated.description, updated.gpx_data) == (
+            "Trail",
+            "d",
+            VALID_GPX,
+        )
+        assert changed == {}
+
+    def test_setting_the_current_values_changes_nothing(self) -> None:
         existing = _existing(description="d")
 
         _, changed = apply_route_update(
-            existing, name="Trail", description="d", gpx_data=None
+            existing, RouteEdit(name="Trail", description="d", gpx_data=None)
         )
 
         assert changed == {}
 
-    def test_name_change_is_a_pair(self) -> None:
-        existing = _existing(name="Old")
+    def test_name_change_is_a_pair_and_other_fields_are_kept(self) -> None:
+        existing = _existing(name="Old", description="kept", gpx_data=VALID_GPX)
 
-        updated, changed = apply_route_update(
-            existing, name="New", description=None, gpx_data=None
+        updated, changed = apply_route_update(existing, RouteEdit(name="New"))
+
+        assert (updated.name, updated.description, updated.gpx_data) == (
+            "New",
+            "kept",
+            VALID_GPX,
         )
-
-        assert updated.name == "New"
         assert changed == {"name": ("Old", "New")}
 
     def test_description_change_is_a_pair(self) -> None:
         existing = _existing(description="old")
 
-        _, changed = apply_route_update(
-            existing, name="Trail", description="new", gpx_data=None
-        )
+        _, changed = apply_route_update(existing, RouteEdit(description="new"))
 
         assert changed == {"description": ("old", "new")}
+
+    def test_a_none_description_clears_it(self) -> None:
+        existing = _existing(description="old")
+
+        updated, changed = apply_route_update(existing, RouteEdit(description=None))
+
+        assert updated.description is None
+        assert changed == {"description": ("old", None)}
 
     def test_gpx_data_change_is_summarised_not_inlined(self) -> None:
         existing = _existing(gpx_data=None)
 
-        updated, changed = apply_route_update(
-            existing, name="Trail", description=None, gpx_data=VALID_GPX
-        )
+        updated, changed = apply_route_update(existing, RouteEdit(gpx_data=VALID_GPX))
 
         # GPX content is large, so the pair records presence rather than content.
         assert updated.gpx_data == VALID_GPX
@@ -73,9 +95,7 @@ class TestApplyRouteUpdate:
     def test_blank_gpx_data_removes_the_track(self) -> None:
         existing = _existing(gpx_data=VALID_GPX)
 
-        updated, changed = apply_route_update(
-            existing, name="Trail", description=None, gpx_data="  "
-        )
+        updated, changed = apply_route_update(existing, RouteEdit(gpx_data="  "))
 
         assert updated.gpx_data is None
         assert changed == {"gpx_data": ("present", None)}
@@ -83,9 +103,7 @@ class TestApplyRouteUpdate:
     def test_keeps_identity_and_timestamps(self) -> None:
         existing = _existing()
 
-        updated, _ = apply_route_update(
-            existing, name="New", description=None, gpx_data=None
-        )
+        updated, _ = apply_route_update(existing, RouteEdit(name="New"))
 
         assert updated.id == existing.id
         assert updated.journal_id == existing.journal_id
@@ -94,9 +112,7 @@ class TestApplyRouteUpdate:
 
     def test_invalid_gpx_names_the_gpx_data_field(self) -> None:
         with pytest.raises(RouteValidationError) as exc_info:
-            apply_route_update(
-                _existing(), name="Trail", description=None, gpx_data="not xml"
-            )
+            apply_route_update(_existing(), RouteEdit(gpx_data="not xml"))
 
         assert exc_info.value.field == "gpx_data"
 

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.route_service import RouteService
-from app.core.journal.utils.route_edits import apply_route_update, build_new_route
+from app.core.journal.utils.route_edits import UNCHANGED, RouteEdit, build_new_route
 from app.mcp.domains.journals.converters import RouteMCPConverter
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
@@ -85,13 +85,6 @@ async def _load_owned_route(
     if route.journal_id != journal_id:
         return MCPResponseBuilder.not_found_error_response("Route", route_id)
     return route
-
-
-def _keep_or_clear(current: str | None, requested: str | None) -> str | None:
-    """An omitted argument keeps the current value; an empty string clears it."""
-    if requested is None:
-        return current
-    return requested or None
 
 
 @tool(annotations=ADDITIVE_WRITE)
@@ -210,30 +203,27 @@ async def update_journal_route(
     """
     Change a route's name, description or GPX track on a journal entry the user owns.
 
-    Only the arguments you pass change; omitted ones keep their current value.
-    The update is validated before anything is written, with the same
-    ``gpx_data`` and ``name`` refusals as ``create_journal_route``. A route that
-    is not on ``journal_id`` is reported as not found. The change is recorded in
-    the journal's history (a GPX change as present/absent, not its content).
+    Only the arguments you pass change; omitted ones keep their current value,
+    even if another update to the same route lands at the same time. The update
+    is validated before anything is written, with the same ``gpx_data`` and
+    ``name`` refusals as ``create_journal_route``. A route that is not on
+    ``journal_id`` is reported as not found. The change is recorded in the
+    journal's history (a GPX change as present/absent, not its content).
     """
     route = await _load_owned_route(
         db_connection, route_service, user_id, journal_id, route_id
     )
     if isinstance(route, str):
         return route
+    assert route.id is not None, "A route loaded from the database has an id"
 
-    updated_route, changed_fields = apply_route_update(
-        route,
-        name=name if name is not None else route.name,
-        description=_keep_or_clear(route.description, description),
-        gpx_data=_keep_or_clear(route.gpx_data, gpx_data),
+    edit = RouteEdit(
+        name=UNCHANGED if name is None else name,
+        description=UNCHANGED if description is None else description or None,
+        gpx_data=UNCHANGED if gpx_data is None else gpx_data,
     )
     saved_route = await route_service.update_route(
-        updated_route,
-        changed_fields,
-        db_connection,
-        changed_by="mcp",
-        source=Provenance.MCP,
+        route.id, edit, db_connection, changed_by="mcp", source=Provenance.MCP
     )
     return MCPResponseBuilder.success_response(
         RouteMCPConverter.to_mcp_response(saved_route)

@@ -215,15 +215,10 @@ async def update_route(
     if existing_route.journal_id != journal_id:
         raise RouteNotFoundError(route_id)
 
-    # Convert request to domain entity with changed fields
-    updated_route, changed_fields = RouteRequestConverter.from_update_request(
-        route_request.data, existing_route
-    )
-
-    # Update the route
+    # Update the route; the service merges the edit into the locked row
     saved_route = await route_service.update_route(
-        updated_route,
-        changed_fields,
+        route_uuid,
+        RouteRequestConverter.to_route_edit(route_request.data),
         connection,
         changed_by="ui",
         source=Provenance.UI,

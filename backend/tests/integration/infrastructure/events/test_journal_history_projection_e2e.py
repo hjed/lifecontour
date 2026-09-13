@@ -48,6 +48,7 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.route_service import RouteService
+from app.core.journal.utils.route_edits import RouteEdit
 from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
@@ -539,10 +540,10 @@ class TestJournalHistoryProjectionE2E:
             changed_by="ui",
             source=Provenance.UI,
         )
-        saved_route.name = "New Route"
+        assert saved_route.id is not None
         await route_service.update_route(
-            saved_route,
-            {"name": ("Old Route", "New Route")},
+            saved_route.id,
+            RouteEdit(name="New Route"),
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
