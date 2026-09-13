@@ -57,7 +57,7 @@ def _stored_gpx(gpx_data: str | None) -> str | None:
 
 
 def _gpx_presence(gpx_data: str | None) -> str | None:
-    return "present" if gpx_data else None
+    return "present" if _stored_gpx(gpx_data) else None
 
 
 def build_new_route(
@@ -95,14 +95,20 @@ def apply_route_update(existing: Route, edit: RouteEdit) -> tuple[Route, Changed
     """
     name = _resolve(edit.name, existing.name)
     description = _resolve(edit.description, existing.description)
-    stored_gpx = _stored_gpx(_resolve(edit.gpx_data, existing.gpx_data))
+    # GPX the edit does not touch is kept exactly as stored, so an unrelated
+    # edit never rewrites it (not even blank GPX saved before normalisation).
+    gpx_data = (
+        existing.gpx_data
+        if isinstance(edit.gpx_data, Unchanged)
+        else _stored_gpx(edit.gpx_data)
+    )
     try:
         updated = Route(
             id=existing.id,
             journal_id=existing.journal_id,
             name=name,
             description=description,
-            gpx_data=stored_gpx,
+            gpx_data=gpx_data,
             created_at=existing.created_at,
             updated_at=existing.updated_at,
         )
@@ -114,9 +120,11 @@ def apply_route_update(existing: Route, edit: RouteEdit) -> tuple[Route, Changed
         changed["name"] = (existing.name, name)
     if description != existing.description:
         changed["description"] = (existing.description, description)
-    if stored_gpx != existing.gpx_data:
+    # Blank and absent GPX are the same track, so moving between them is not
+    # a change worth recording.
+    if _stored_gpx(gpx_data) != _stored_gpx(existing.gpx_data):
         changed["gpx_data"] = (
             _gpx_presence(existing.gpx_data),
-            _gpx_presence(stored_gpx),
+            _gpx_presence(gpx_data),
         )
     return updated, changed

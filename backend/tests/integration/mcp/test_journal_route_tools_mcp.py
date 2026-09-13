@@ -432,6 +432,28 @@ class TestUpdateJournalRoute:
         assert payload["name"] == "Harbour Loop"
         assert await _route_event_payloads(clean_database, "RouteUpdated") == []
 
+    @pytest.mark.asyncio
+    async def test_a_rename_leaves_a_legacy_blank_track_alone(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+        route_id = await _seed_route(clean_database, journal_id, gpx_data="   ")
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call(
+                client,
+                "update_journal_route",
+                {"journal_id": journal_id, "route_id": route_id, "name": "Renamed"},
+            )
+
+        assert "error" not in payload, payload
+        rows = await _route_rows(clean_database, journal_id)
+        assert [(r.name, r.gpx_data) for r in rows] == [("Renamed", "   ")]
+        events = await _route_event_payloads(clean_database, "RouteUpdated")
+        assert [e["changed_fields"] for e in events] == [
+            {"name": ["Harbour Loop", "Renamed"]}
+        ]
+
 
 class TestDeleteJournalRoute:
     @pytest.mark.asyncio

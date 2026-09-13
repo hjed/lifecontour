@@ -100,6 +100,28 @@ class TestApplyRouteUpdate:
         assert updated.gpx_data is None
         assert changed == {"gpx_data": ("present", None)}
 
+    def test_an_edit_that_leaves_gpx_alone_keeps_a_legacy_blank_track(
+        self,
+    ) -> None:
+        """Blank GPX written before normalisation is left as stored.
+
+        Normalising it on an unrelated edit would rewrite a field the caller
+        did not touch and record a GPX change that nobody made.
+        """
+        existing = _existing(name="Old", gpx_data="   ")
+
+        updated, changed = apply_route_update(existing, RouteEdit(name="New"))
+
+        assert updated.gpx_data == "   "
+        assert changed == {"name": ("Old", "New")}
+
+    def test_clearing_a_legacy_blank_track_records_no_change(self) -> None:
+        existing = _existing(gpx_data="   ")
+
+        _, changed = apply_route_update(existing, RouteEdit(gpx_data=""))
+
+        assert changed == {}
+
     def test_keeps_identity_and_timestamps(self) -> None:
         existing = _existing()
 
