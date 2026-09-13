@@ -181,6 +181,14 @@ class _MaintenanceFailed(Exception):
     """Raised when a maintenance record failed after all retries."""
 
 
+class SnipeItSyncInProgress(Exception):
+    """Raised when another worker holds a journal's Snipe-IT checkout.
+
+    That worker may be recording older dates than the event that met it, so the
+    event must be retried rather than dropped; the stream consumer redelivers it.
+    """
+
+
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TimeoutError,
     httpx.TimeoutException,
@@ -1179,6 +1187,10 @@ class SnipeItSyncService:
         Args:
             journal_id: Internal journal ID.
             session_factory: Async session factory for DB queries.
+
+        Raises:
+            SnipeItSyncInProgress: Another worker holds this journal's checkout;
+                the event must be retried once that checkout finishes.
         """
         data = await self._fetch_journal_and_gear_usage_data(
             journal_id, session_factory
@@ -1236,11 +1248,9 @@ class SnipeItSyncService:
                         and row.age_seconds is not None
                         and row.age_seconds < 300
                     ):
-                        logger.debug(
-                            "Skipping checkout create: currently processing in another worker",
-                            journal_id=journal_id,
+                        raise SnipeItSyncInProgress(
+                            f"Checkout of journal {journal_id} is in flight"
                         )
-                        return
 
                     previous_asset_id = _checkout_asset_id(row.external_id)
                     await session.execute(
@@ -1272,11 +1282,9 @@ class SnipeItSyncService:
                         },
                     )
                     if not insert_result.fetchone():
-                        logger.debug(
-                            "Skipping checkout create: locked by another process",
-                            journal_id=journal_id,
+                        raise SnipeItSyncInProgress(
+                            f"Checkout of journal {journal_id} is locked by another worker"
                         )
-                        return
 
         # Resolve dates: buffer dates take precedence, fall back to journal range
         checkout_date = (

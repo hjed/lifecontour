@@ -512,30 +512,8 @@ async def test_handle_event_skips_journal_created_no_maintenance_no_usage(
         mock_create.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_handle_event_journal_updated_gear_usage_reconciles(
-    mock_stream_client: AsyncMock,
-    mock_session_factory: MagicMock,
-) -> None:
-    """JournalUpdated events for GEAR_USAGE reconcile checkout/checkin state."""
-    consumer = SnipeItWorkerStreamConsumer(
-        stream_client=mock_stream_client,
-        session_factory=mock_session_factory,
-    )
-    event = StreamEvent(
-        message_id="123",
-        event_id="abc",
-        event_type="JournalUpdated",
-        aggregate_id=100,
-        event_data={
-            "journal_id": 100,
-            "user_id": "user1",
-            "title": "Gear Usage Note",
-            "journal_type": "GEAR_USAGE",
-        },
-        occurred_at="2024-01-01T00:00:00Z",
-    )
-
+def _gear_usage_updated_event(mock_session_factory: MagicMock) -> StreamEvent:
+    """A GEAR_USAGE ``JournalUpdated`` event, with the lookups it triggers mocked."""
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
 
@@ -551,6 +529,32 @@ async def test_handle_event_journal_updated_gear_usage_reconciles(
     mock_session.execute = AsyncMock(
         side_effect=[settings_result, maintenance_check, usage_check]
     )
+    return StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalUpdated",
+        aggregate_id=100,
+        event_data={
+            "journal_id": 100,
+            "user_id": "user1",
+            "title": "Gear Usage Note",
+            "journal_type": "GEAR_USAGE",
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_event_journal_updated_gear_usage_reconciles(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """JournalUpdated events for GEAR_USAGE reconcile checkout/checkin state."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = _gear_usage_updated_event(mock_session_factory)
 
     mock_sync_service = AsyncMock()
     mock_sync_service._api_client = AsyncMock()
@@ -647,3 +651,32 @@ async def test_handle_journal_deleted_skips_without_checkout(
 
         mock_get_auth.assert_not_called()
         mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_gear_usage_in_flight_checkout_is_left_for_retry(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """An in-flight checkout propagates, leaving the stream event pending to retry."""
+    from snipeit_sync_service import SnipeItSyncInProgress
+
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = _gear_usage_updated_event(mock_session_factory)
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+    mock_sync_service.reconcile_gear_usage.side_effect = SnipeItSyncInProgress(
+        "checkout in flight"
+    )
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+        pytest.raises(SnipeItSyncInProgress),
+    ):
+        await consumer._handle_event(event)
+
+    mock_sync_service._api_client.close.assert_called_once()

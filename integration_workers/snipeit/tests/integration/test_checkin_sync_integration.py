@@ -840,6 +840,40 @@ class TestReconcileGearUsageIntegration:
         ) == {"checkin_at": "2025-03-09"}
 
 
+class TestInFlightCheckoutIntegration:
+    """A journal event that meets another worker's checkout is retried, not dropped."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "operation", ["push_checkout_create", "reconcile_gear_usage"]
+    )
+    async def test_event_meeting_an_in_flight_checkout_is_retried(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        operation: str,
+    ) -> None:
+        """The in-flight worker may be sending older dates, so this event must retry."""
+        from snipeit_sync_service import SnipeItSyncInProgress
+
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_checkout_metadata(
+            async_connection,
+            asset_id="42",
+            journal_id=journal_id,
+            sync_status="pending",
+        )
+
+        with pytest.raises(SnipeItSyncInProgress):
+            await getattr(snipeit_sync_service, operation)(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        assert mock_transport.requests == []
+
+
 class TestSupersededAssetRetryIntegration:
     """A failed return of the previous asset is retried against that asset."""
 
