@@ -20,6 +20,7 @@ import httpx
 import structlog
 
 from snipeit_models import (
+    SnipeItActivityListResponse,
     SnipeItAsset,
     SnipeItAssetListResponse,
     SnipeItMaintenance,
@@ -165,6 +166,39 @@ class SnipeItAPIClient:
 
         data = await self._get("maintenances", params=params)
         return SnipeItMaintenanceListResponse.model_validate(data)
+
+    async def list_asset_activity(
+        self,
+        asset_id: int,
+        *,
+        action_type: str,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> SnipeItActivityListResponse:
+        """List an asset's activity log entries of one action type, newest first.
+
+        Args:
+            asset_id: Snipe-IT asset numeric ID.
+            action_type: Snipe-IT action type, e.g. ``checkout`` or
+                ``checkin from``.
+            page: Page number (1-based).
+            per_page: Number of records per page.
+
+        Returns:
+            Paginated activity list response.
+        """
+        safe_per_page = max(1, per_page)
+        params: dict[str, Any] = {
+            "item_type": "asset",
+            "item_id": asset_id,
+            "action_type": action_type,
+            "sort": "id",
+            "order": "desc",
+            "offset": max(0, page - 1) * safe_per_page,
+            "limit": safe_per_page,
+        }
+        data = await self._get("reports/activity", params=params)
+        return SnipeItActivityListResponse.model_validate(data)
 
     async def get_maintenance(self, maintenance_id: int) -> SnipeItMaintenance:
         """Fetch a single maintenance record by ID.

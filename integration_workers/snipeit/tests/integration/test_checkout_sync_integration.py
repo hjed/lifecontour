@@ -119,8 +119,9 @@ class TestCheckoutSyncIntegration:
         assert len(mock_transport.responses) == 0
 
         # Verify request payload
+        # The activity-report lookup also mentions "checkout"; take the POST.
         checkout_request = next(
-            r for r in mock_transport.requests if "checkout" in str(r.url)
+            r for r in mock_transport.requests if r.url.path.endswith("/checkout")
         )
         request_body = json.loads(checkout_request.content)
         assert request_body["assigned_user"] == "5"
@@ -334,8 +335,9 @@ class TestCheckoutSyncIntegration:
         )
 
         # Step 3: Verify dates fell back to journal range
+        # The activity-report lookup also mentions "checkout"; take the POST.
         checkout_request = next(
-            r for r in mock_transport.requests if "checkout" in str(r.url)
+            r for r in mock_transport.requests if r.url.path.endswith("/checkout")
         )
         request_body = json.loads(checkout_request.content)
         assert request_body["checkout_at"] == "2099-07-10"

@@ -19,6 +19,7 @@ import pytest_asyncio
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError, _parse_retry_after
 from snipeit_models import (
+    SnipeItActivityListResponse,
     SnipeItAsset,
     SnipeItAssetListResponse,
     SnipeItMaintenance,
@@ -26,6 +27,66 @@ from snipeit_models import (
     SnipeItMaintenanceWriteResponse,
 )
 from snipeit_rate_limiter import SnipeItRateLimitError
+
+
+class TestSnipeItAPIClientListAssetActivity:
+    """Tests for list_asset_activity method."""
+
+    @pytest.mark.asyncio
+    async def test_filters_the_asset_activity_report(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """The activity report is filtered to one asset and action, newest first."""
+        resp = _ok_response({"total": 0, "rows": []})
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            await client_no_refresh.list_asset_activity(
+                42, action_type="checkin from", page=2, per_page=50
+            )
+
+        assert mock_get.call_args.args[0] == "reports/activity"
+        assert mock_get.call_args.kwargs["params"] == {
+            "item_type": "asset",
+            "item_id": 42,
+            "action_type": "checkin from",
+            "sort": "id",
+            "order": "desc",
+            "offset": 50,
+            "limit": 50,
+        }
+
+    @pytest.mark.asyncio
+    async def test_parses_activity_rows(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        resp = _ok_response(
+            {
+                "total": 1,
+                "rows": [
+                    {
+                        "id": 277,
+                        "action_type": "checkout",
+                        "action_date": {
+                            "datetime": "2019-05-01 00:00:00",
+                            "formatted": "01/05/2019 12:00 AM",
+                        },
+                        "item": {"id": 42, "name": "Tent", "type": "asset"},
+                        "target": {"id": 5, "name": "Harry", "type": "user"},
+                    }
+                ],
+            }
+        )
+        with patch.object(client_no_refresh._client, "get", return_value=resp):
+            result = await client_no_refresh.list_asset_activity(
+                42, action_type="checkout"
+            )
+
+        assert isinstance(result, SnipeItActivityListResponse)
+        assert result.total == 1
+        (row,) = result.rows
+        assert row.id == 277
+        assert row.action_day == "2019-05-01"
 
 
 @pytest_asyncio.fixture

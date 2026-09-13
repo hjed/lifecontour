@@ -81,6 +81,19 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
   - `checkout_at`, `expected_checkin` and the check-in's `checkin_at` are the journal's **local** calendar dates, read in the event's timezone when it has one, otherwise the user's timezone, otherwise UTC. Journal dates are stored as the UTC instant of a local midnight, so taking their UTC date would land a day early east of UTC.
   - `checkin_at` is sent only once the check-in date has passed in every timezone (it is before today at UTC−12). Snipe-IT's server timezone is unknown, so a more recent return is stamped at the server's time rather than risk sending a date the server reads as the future. A check-in caused by deleting the journal is always stamped at server time.
   - The dates sent are recorded on the checkout and check-in `SyncMetadata` rows (`reference_data`).
+- **Date Changes**: Snipe-IT cannot edit or delete its activity log, so updating a `GEAR_USAGE` journal only adds history that is missing:
+  - If the checkout date changes after the asset was checked in, a new checkout and check-in are recorded on the new dates. The earlier pair stays in Snipe-IT.
+  - A check-in that has not happened yet uses the updated check-in date.
+  - An update that arrives while another worker is recording the same journal's checkout or check-in is retried once that finishes, so a newer date is never dropped. A lock left by a worker that crashed is retaken after five minutes, and the event is still being retried at that point.
+  - Not re-recorded: a change to only the check-in date of an already checked-in journal; a checkout recorded before dates were stored; and a checkout whose check-in failed terminally (403/404), since the asset may still be checked out.
+  - A checkout date changed while the asset is still checked out is re-recorded once the asset is checked in, whether by that update, a later one or the periodic sweep. Snipe-IT refuses to check out an asset that is already out, so the corrected pair follows the return.
+- **Existing Snipe-IT History**: History already in Snipe-IT (for example checkouts entered by hand before a logbook import) is linked rather than recorded twice.
+  - Before recording a checkout, the asset's Snipe-IT activity log is searched for a checkout to the mapped user on the same date (Snipe-IT's server date). A match is linked on the checkout `SyncMetadata` row (`snipeit_log_id`) and nothing is posted.
+  - When the checkout was linked, a check-in on the journal's check-in date that was logged after that checkout is linked the same way; otherwise the check-in is posted.
+  - A log entry already linked to another of the user's journals is never reused, so two journals using the same asset on the same day each get their own record. Other users' links are ignored: log ids are only unique within a Snipe-IT instance.
+  - The search reads the newest 500 entries per asset and action type.
+  - A match is claimed on the journal's sync row before anything is recorded, under a per-asset lock, so journals processed at the same time cannot both link one entry.
+  - Linking is best-effort: if the activity report cannot be read (the API key lacks permission, the Snipe-IT version has no report, or the response is unexpected), the history is recorded as usual.
 - **Buffer Dates**:
   - Users can specify a separate start and end date for the gear checkout to allow for buffer (e.g., packing the day before).
   - **Default**: The buffer dates explicitly default to the journal's event dates if not modified by the user.

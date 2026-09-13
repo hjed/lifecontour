@@ -35,7 +35,9 @@ class MockTransport(httpx.AsyncBaseTransport):
     """In-memory httpx transport that serves queued responses by URL substring.
 
     Shared by the checkout/checkin outbound-sync integration tests to drive the
-    Snipe-IT API client without a live server.
+    Snipe-IT API client without a live server. An activity report request with
+    no queued response gets an empty report, since every checkout first looks
+    for an existing Snipe-IT checkout to link.
     """
 
     def __init__(self) -> None:
@@ -57,13 +59,23 @@ class MockTransport(httpx.AsyncBaseTransport):
         for i, (pattern, status, data, hdrs) in enumerate(self.responses):
             if pattern in url:
                 self.responses.pop(i)
-                content = _json.dumps(data).encode() if data is not None else b""
+                # Bytes are served verbatim, e.g. to simulate a non-JSON body.
+                if isinstance(data, bytes):
+                    content = data
+                else:
+                    content = _json.dumps(data).encode() if data is not None else b""
                 return httpx.Response(
                     status_code=status,
                     content=content,
                     headers={**hdrs, "content-type": "application/json"},
                     request=request,
                 )
+        if "reports/activity" in url:
+            return httpx.Response(
+                status_code=200,
+                json={"total": 0, "rows": []},
+                request=request,
+            )
         raise ValueError(f"No mock response configured for {url}")
 
 

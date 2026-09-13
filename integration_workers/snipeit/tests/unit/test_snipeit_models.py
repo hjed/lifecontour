@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from snipeit_models import (
+    SnipeItActivity,
     SnipeItAsset,
     SnipeItAssetListResponse,
     SnipeItAssignedTo,
@@ -13,6 +14,44 @@ from snipeit_models import (
     SnipeItMaintenanceWriteResponse,
     SnipeItNestedObject,
 )
+
+
+class TestSnipeItActivity:
+    """Tests for rows of the Snipe-IT activity report."""
+
+    def test_action_day_is_the_raw_server_date_of_action_date(self) -> None:
+        activity = SnipeItActivity.model_validate(
+            {
+                "id": 1,
+                "action_type": "checkin from",
+                "action_date": {
+                    "datetime": "2019-05-04 13:22:10",
+                    "formatted": "04/05/2019 1:22 PM",
+                },
+                "created_at": {"datetime": "2026-09-13 09:00:00"},
+                "item": {"id": 42, "name": "Tent", "type": "asset"},
+                "target": {"id": 5, "name": "Harry", "type": "user"},
+            }
+        )
+        assert activity.action_day == "2019-05-04"
+        assert activity.item is not None and activity.item.id == 42
+        assert activity.target is not None and activity.target.type == "user"
+
+    def test_action_day_falls_back_to_created_at(self) -> None:
+        """Same-day check-ins leave ``action_date`` unset."""
+        activity = SnipeItActivity.model_validate(
+            {
+                "id": 1,
+                "action_date": None,
+                "created_at": {"datetime": "2026-09-13 09:00:00"},
+            }
+        )
+        assert activity.action_day == "2026-09-13"
+
+    def test_missing_dates_and_target_are_tolerated(self) -> None:
+        activity = SnipeItActivity.model_validate({"id": 1, "target": None})
+        assert activity.action_day is None
+        assert activity.target is None
 
 
 class TestSnipeItNestedObject:

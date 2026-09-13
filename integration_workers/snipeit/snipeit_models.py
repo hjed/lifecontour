@@ -186,6 +186,50 @@ class SnipeItMaintenanceWriteResponse(_SnipeItMaintenanceBase):
     asset_id: int
 
 
+class SnipeItActivityEntity(BaseModel):
+    """The ``item`` or ``target`` of an activity row (``{id, name, type}``)."""
+
+    id: int | None = None
+    name: str | None = None
+    type: str | None = None
+
+
+class SnipeItActivity(BaseModel):
+    """A row from ``GET /api/v1/reports/activity``.
+
+    See: https://snipe-it.readme.io/reference/reportsactivity
+    """
+
+    id: int
+    action_type: str | None = None
+    action_date: SnipeItDateObject | None = None
+    created_at: SnipeItDateObject | None = None
+    item: SnipeItActivityEntity | None = None
+    target: SnipeItActivityEntity | None = None
+    note: str | None = None
+
+    @property
+    def action_day(self) -> str | None:
+        """The ``YYYY-MM-DD`` the action is recorded on, in Snipe-IT's server time.
+
+        Snipe-IT leaves ``action_date`` unset for actions dated today and reports
+        ``created_at`` instead. The raw ``datetime`` is used because
+        ``formatted`` follows the instance's locale.
+        """
+        for value in (self.action_date, self.created_at):
+            raw = value.datetime or value.date if value else None
+            if raw:
+                return raw[:10]
+        return None
+
+
+class SnipeItActivityListResponse(BaseModel):
+    """Paginated response from ``GET /api/v1/reports/activity``."""
+
+    total: int
+    rows: list[SnipeItActivity] = Field(default_factory=list)
+
+
 class SnipeItMaintenanceListResponse(BaseModel):
     """Paginated response from ``GET /api/v1/maintenances``.
 

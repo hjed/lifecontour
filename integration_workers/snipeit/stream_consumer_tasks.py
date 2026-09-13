@@ -8,13 +8,24 @@ consumer group. The declarative route table consumes ``snipeit.webhook_received`
 """
 
 import asyncio
+import math
 from typing import Any
 
 import structlog
 from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
 from core_shared.stream_consumer import EventRoute, StreamConsumer
 
+from snipeit_sync_service import IN_FLIGHT_LOCK_SECONDS
+
 logger = structlog.get_logger()
+
+# Events that meet a Snipe-IT lock held by another worker raise
+# SnipeItSyncInProgress and are redelivered. If that worker died, its lock only
+# becomes retakeable after IN_FLIGHT_LOCK_SECONDS, so delivery attempts must
+# continue past that point (with an interval to spare) or the event is
+# dead-lettered and its update lost.
+RETRY_MIN_IDLE_MS = 60_000
+MAX_DELIVERY_COUNT = math.ceil(IN_FLIGHT_LOCK_SECONDS * 1000 / RETRY_MIN_IDLE_MS) + 2
 
 
 class SnipeItWorkerStreamConsumer(StreamConsumer):
@@ -36,6 +47,8 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         consumer_name: str = "snipeit-worker-1",
         batch_size: int = 10,
         block_ms: int = 5000,
+        retry_min_idle_ms: int = RETRY_MIN_IDLE_MS,
+        max_delivery_count: int = MAX_DELIVERY_COUNT,
     ) -> None:
         self._session_factory = session_factory
         super().__init__(
@@ -45,6 +58,8 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             consumer_name=consumer_name,
             batch_size=batch_size,
             block_ms=block_ms,
+            retry_min_idle_ms=retry_min_idle_ms,
+            max_delivery_count=max_delivery_count,
             routes=self._build_routes(),
         )
 

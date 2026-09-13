@@ -425,6 +425,12 @@ async def periodic_checkin_all_snipeit_accounts(
                     )
                     if did_checkin:
                         checked_in += 1
+                        # The checkout may be recorded on a date the journal has
+                        # since changed; with the asset back, re-record it.
+                        await sync_service.reconcile_gear_usage(
+                            journal_id=overdue.journal_id,
+                            session_factory=session_factory,
+                        )
                 except SnipeItAPIError as exc:
                     if exc.status_code in (403, 404):
                         logger.debug(
