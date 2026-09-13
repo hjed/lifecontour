@@ -691,3 +691,108 @@ class TestSupersededAssetRetryIntegration:
             r.url.path.endswith("/hardware/42/checkout")
             for r in mock_transport.requests
         )
+
+
+class TestPreviousAssetHeldElsewhereIntegration:
+    """A superseded asset is only returned when no other journal may be using it."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("other_checkout_status", "other_checkin_status", "posts"),
+        [
+            # A pending or failed attempt may have checked the asset out anyway.
+            (
+                "pending",
+                "failed",
+                ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"],
+            ),
+            (
+                "failed",
+                "failed",
+                ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"],
+            ),
+            # Checked out and not yet returned.
+            (
+                "success",
+                "failed",
+                ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"],
+            ),
+            # The other journal already returned it, so the lost attempt holds it.
+            (
+                "success",
+                "success",
+                [
+                    "/api/v1/hardware/41/checkin",
+                    "/api/v1/hardware/42/checkout",
+                    "/api/v1/hardware/42/checkin",
+                ],
+            ),
+        ],
+        ids=["other-pending", "other-failed", "other-still-out", "other-returned"],
+    )
+    async def test_previous_asset_is_left_while_another_journal_may_hold_it(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        other_checkout_status: str,
+        other_checkin_status: str,
+        posts: list[str],
+    ) -> None:
+        """Returning an asset another journal is still using would be worse than
+        leaving it out for that journal's own retry or the periodic sweep."""
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+            asset_id="42",
+        )
+        await _insert_checkout_metadata(
+            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+        )
+        other_journal_id = 880001
+        await _insert_checkout_metadata(
+            async_connection,
+            asset_id="41",
+            journal_id=other_journal_id,
+            sync_status=other_checkout_status,
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (integration_source, external_id, internal_uuid,
+                     last_synced_at, version_hash, sync_status,
+                     error_message, retry_count, created_at, updated_at)
+                VALUES
+                    ('snipeit_checkin', :external_id, :journal_id,
+                     now(), 'CHECKED_IN', :sync_status, NULL, 0, now(), now())
+            """),
+            {
+                "external_id": f"snipeit_checkin:41:{other_journal_id}",
+                "journal_id": str(other_journal_id),
+                "sync_status": other_checkin_status,
+            },
+        )
+        mock_transport.add_response(
+            "/hardware/41",
+            json_data={
+                "id": 41,
+                "asset_tag": "T-41",
+                "assigned_to": {"id": 5, "name": "Harry", "type": "user"},
+            },
+        )
+        # Consumed only when the old asset is returned.
+        mock_transport.add_response(
+            "/hardware/41/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert [
+            r.url.path for r in mock_transport.requests if r.method == "POST"
+        ] == posts

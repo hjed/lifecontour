@@ -1424,7 +1424,10 @@ class SnipeItSyncService:
         Snipe-IT may have checked the asset out. Once the journal moves to another
         gear item that asset would stay out with no sync row left to return it,
         so it is returned first — but only while Snipe-IT shows it checked out to
-        the mapped user and no other journal holds an open checkout of it.
+        the mapped user and no other journal may hold it. A pending or failed
+        attempt by another journal counts as holding it, since that attempt may
+        have checked the asset out too; leaving it out is recoverable, returning
+        an asset still in use is not.
         """
         if asset_id is None:
             return
@@ -1452,10 +1455,9 @@ class SnipeItSyncService:
                         AND ci.internal_uuid = co.internal_uuid
                         AND ci.sync_status = 'success'
                     WHERE co.integration_source = 'snipeit_checkout'
-                      AND co.sync_status = 'success'
                       AND co.external_id LIKE :asset_prefix
                       AND co.internal_uuid <> :journal_id
-                      AND ci.id IS NULL
+                      AND (co.sync_status <> 'success' OR ci.id IS NULL)
                     LIMIT 1
                 """),
                 {
