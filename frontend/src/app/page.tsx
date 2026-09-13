@@ -18,13 +18,16 @@
  *
  * That is the arrangement rather than threading props down from here, and the
  * reason is per-section resilience: a card that owns its own read owns its own
- * loading and unavailable states, which is what the specification asks for and
- * Phase 16 builds. It costs nothing because the hook has one query key, so
- * every caller on the page dedupes into a single fetch — asserted here, with
- * the card mounted, and again in the hook's own tests.
+ * loading and unavailable states, and its own error boundary. It costs nothing
+ * because the hook has one query key, so every caller on the page dedupes into
+ * a single fetch — asserted here, with the card mounted, and again in the
+ * hook's own tests.
  *
- * The summary card (**W5**–**W10**) sits above the grid; the tasks section's
- * own contents land in Phases 14 and 15.
+ * The one thing the page owns rather than a card is **when the read expires**:
+ * every window on it hangs off the single `meta.anchor` day, so the refresh at
+ * that day's end is scheduled here, once, for all four of them.
+ *
+ * The summary card (**W5**–**W10**) sits above the grid.
  */
 
 'use client';
@@ -36,10 +39,19 @@ import { DashboardSection } from '@/components/dashboard/DashboardSection';
 import { DashboardSummaryCard } from '@/components/dashboard/DashboardSummaryCard';
 import { TasksCard } from '@/components/dashboard/TasksCard';
 import { UpcomingDatesCard } from '@/components/dashboard/UpcomingDatesCard';
-import { useHomeDashboard } from '@/lib/api/home-dashboard';
+import {
+  useAnchorDayRefresh,
+  useHomeDashboard,
+} from '@/lib/api/home-dashboard';
 
 function HomeDashboard() {
   const { data } = useHomeDashboard();
+
+  // Once, here, rather than in each card: every card reads the same query key,
+  // so four schedulers would be four timers invalidating one query. See
+  // `useAnchorDayRefresh` for why the boundary is midnight in the anchor's own
+  // zone and not a fixed interval.
+  useAnchorDayRefresh(data?.meta.anchor);
 
   return (
     <div className='space-y-4' data-testid='home-dashboard-ready'>

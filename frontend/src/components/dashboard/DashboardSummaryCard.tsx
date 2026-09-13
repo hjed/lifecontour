@@ -375,7 +375,7 @@ function SummaryBody({ isPending, isGenerating, prose }: SummaryBodyProps) {
         data-testid='dashboard-summary-text'
       >
         {paragraphsOf(prose).map(paragraph => (
-          <p key={paragraph} className='whitespace-pre-line'>
+          <p key={paragraph} className='break-words whitespace-pre-line'>
             {paragraph}
           </p>
         ))}

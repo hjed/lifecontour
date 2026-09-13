@@ -138,7 +138,16 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
    skeleton and an unavailable state that the wireframe does not show. Build them in the idiom of W9
    (one quiet line) and W29 (centred icon plus line). Likewise, no state prop demonstrates a show-more in
    its expanded form (W28, W32); "reveals the remainder in place" is the specification's requirement, not
-   a depicted state. Resolved by ITER18-004 Phase 16.
+   a depicted state. **Resolved in ITER18-004 Phase 16**, which built both in `DashboardSectionPlaceholder`:
+   **pending** is a run of three pulsing rows in the shape the section really draws, `aria-busy` with the
+   sentence the earlier placeholder line showed kept as visually hidden text — deliberately **not** a live
+   region, since four of them mount at once on the page every sign-in lands on; **unavailable** is one
+   shared `CloudOff` icon over the section's own sentence, with no retry and no error styling, as W9
+   directs. The summary card gets bars in the shape of its prose rather than rows, because W7 is
+   paragraphs. The same phase added a per-section error boundary, so a section that *throws* — which no
+   status on the wire can express — falls back to that same unavailable card rather than blanking the
+   page, and moved focus to the first revealed row when a show-more withdraws, which the wireframe could
+   not have shown because it does not depict the expanded form either.
 10. **The retarget affordance is journal-only, like delete.** W24 draws one action because everything on
     the dashboard is not-done and future-dated, so the only move a row there can make is completion.
     ITER18-001 Phase 18 adds a fourth control to the *journal* row — a retarget that reads *Resurrect* on

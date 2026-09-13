@@ -15,6 +15,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { DashboardTaskRow } from '../DashboardTaskRow';
 import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
+import { expectWrapsLongWords } from '@/test-utils/home-dashboard';
 import {
   dueAccentClassName,
   dueChipClassName,
@@ -258,5 +259,40 @@ describe('DashboardTaskRow', () => {
       'data-testid',
       'dashboard-task-12'
     );
+  });
+
+  /** See `expectWrapsLongWords`; the real measurement is in the e2e (W3). */
+  describe('long unbroken content (W3)', () => {
+    const UNBROKEN = 'Supercalifragilistic' + 'x'.repeat(120);
+
+    it('lets a long commitment break rather than widen the column', () => {
+      render(<DashboardTaskRow task={dashboardTask({ text: UNBROKEN })} />);
+
+      expectWrapsLongWords(screen.getByText(UNBROKEN));
+    });
+
+    it('lets a long due-journal title break', () => {
+      render(
+        <DashboardTaskRow
+          task={dashboardTask({
+            due_journal: { id: 44, title: UNBROKEN, date: '2026-08-01' },
+          })}
+        />
+      );
+
+      expectWrapsLongWords(screen.getByTestId('dashboard-task-due'));
+    });
+
+    it('lets a long contact name break', () => {
+      render(
+        <DashboardTaskRow
+          task={dashboardTask({
+            contacts: [{ contact_id: 7, name: UNBROKEN, photo_url: null }],
+          })}
+        />
+      );
+
+      expectWrapsLongWords(screen.getByText(UNBROKEN));
+    });
   });
 });

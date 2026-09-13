@@ -31,7 +31,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CalendarOff, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DashboardSectionBoundary } from './DashboardSectionBoundary';
@@ -46,6 +46,7 @@ import {
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
 import type { HomeDashboardUpcomingDate } from '@/lib/api/home-dashboard';
+import { focusRevealedRow } from '@/lib/dashboard-focus';
 import { showAllLabel } from '@/lib/upcoming-dates-display';
 
 /** The section's wireframe copy, in one place so the page and its tests agree. */
@@ -102,6 +103,16 @@ export function UpcomingDatesCard() {
 function UpcomingDatesCardBody() {
   const { data, isPending } = useHomeDashboard();
   const [expanded, setExpanded] = useState(false);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // The show-more unmounts itself when pressed (W32 describes one control), and
+  // an unmounted focused element drops focus to `<body>`. See
+  // `focusRevealedRow` for where it goes instead and why.
+  useEffect(() => {
+    if (expanded) {
+      focusRevealedRow(listRef.current, VISIBLE_UPCOMING_DATES);
+    }
+  }, [expanded]);
 
   const section = data?.data.attributes.upcoming_dates;
   const upcoming =
@@ -133,6 +144,7 @@ function UpcomingDatesCardBody() {
     <DashboardSectionCard
       {...UPCOMING_DATES_SECTION}
       testId='upcoming-dates-card'
+      listRef={listRef}
       placeholder={
         dates ? undefined : (
           <DashboardSectionPlaceholder

@@ -17,14 +17,17 @@
  * refetched would still look right on screen.
  */
 
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test-utils';
 import {
   DASHBOARD_URL,
   dashboardRequestCount,
 } from '@/test-utils/home-dashboard';
-import { UpcomingDatesCard } from '../UpcomingDatesCard';
+import {
+  UpcomingDatesCard,
+  VISIBLE_UPCOMING_DATES,
+} from '../UpcomingDatesCard';
 import { DashboardSectionStatus } from '@/lib/api/home-dashboard';
 import type {
   DashboardSection,
@@ -217,6 +220,29 @@ describe('UpcomingDatesCard', () => {
       await within(datesList()).findAllByRole('listitem');
 
       expect(dashboardRequestCount(mockFetch)).toBe(1);
+    });
+
+    /**
+     * The button unmounts the moment it is pressed, and an unmounted focused
+     * element drops focus to `<body>` — returning a keyboard user to the top of
+     * the document to re-traverse the page for the rows they just revealed.
+     * The tasks card answers this the same way, and for the same reason.
+     */
+    it('hands focus to the first revealed row rather than dropping it', async () => {
+      serveReady(FIVE_DATES);
+      const user = userEvent.setup();
+
+      renderWithProviders(<UpcomingDatesCard />);
+      await user.click(
+        await screen.findByRole('button', { name: /show all/i })
+      );
+
+      const revealed =
+        within(datesList()).getAllByRole('listitem')[VISIBLE_UPCOMING_DATES];
+      await waitFor(() =>
+        expect(revealed).toContainElement(document.activeElement as HTMLElement)
+      );
+      expect(document.activeElement).not.toBe(document.body);
     });
 
     it('withdraws the show-more once everything is shown', async () => {

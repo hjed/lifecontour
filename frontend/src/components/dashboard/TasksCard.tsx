@@ -41,7 +41,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DashboardSectionBoundary } from './DashboardSectionBoundary';
@@ -57,6 +57,7 @@ import {
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
 import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
+import { focusRevealedRow } from '@/lib/dashboard-focus';
 import { showAllDueLabel, taskTextId } from '@/lib/dashboard-tasks-display';
 
 /** The section's wireframe copy, in one place so the page and its tests agree. */
@@ -113,6 +114,16 @@ export function TasksCard() {
 function TasksCardBody() {
   const { data, isPending } = useHomeDashboard();
   const [expanded, setExpanded] = useState(false);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // The show-more unmounts itself when pressed (W28 describes one control), and
+  // an unmounted focused element drops focus to `<body>`. See
+  // `focusRevealedRow` for where it goes instead and why.
+  useEffect(() => {
+    if (expanded) {
+      focusRevealedRow(listRef.current, VISIBLE_TASKS);
+    }
+  }, [expanded]);
 
   const section = data?.data.attributes.tasks;
   const ready =
@@ -145,6 +156,7 @@ function TasksCardBody() {
     <DashboardSectionCard
       {...TASKS_SECTION}
       testId='tasks-card'
+      listRef={listRef}
       placeholder={
         tasks ? undefined : (
           <DashboardSectionPlaceholder

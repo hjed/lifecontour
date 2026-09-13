@@ -31,7 +31,7 @@ import {
   homeDashboardDocument,
   tasksSectionFixture,
 } from '@/test-utils/home-dashboard';
-import { TasksCard } from '../TasksCard';
+import { TasksCard, VISIBLE_TASKS } from '../TasksCard';
 import { DashboardSectionStatus } from '@/lib/api/home-dashboard';
 import { TaskStatus } from '@/types/tasks';
 import type {
@@ -386,6 +386,69 @@ describe('TasksCard', () => {
           within(row).getByTestId('dashboard-task-action-done')
         ).toBeInTheDocument();
       });
+    });
+
+    /**
+     * The button unmounts the moment it is pressed (**W28** describes one
+     * control, not a toggle), and an unmounted focused element drops focus to
+     * `<body>` — so a keyboard user who revealed the remainder was returned to
+     * the top of the document and had to traverse the whole page to reach the
+     * rows they had just asked for. Focus goes to the first revealed row's own
+     * action instead: the nearest thing to where the user was, and something
+     * they can act on.
+     */
+    it('hands focus to the first revealed row rather than dropping it', async () => {
+      serveReady(SEVEN_TASKS);
+      const user = userEvent.setup();
+
+      renderWithProviders(<TasksCard />);
+      await user.click(
+        await screen.findByRole('button', { name: /show all/i })
+      );
+
+      const revealed = taskRows()[VISIBLE_TASKS];
+      await waitFor(() =>
+        expect(revealed).toContainElement(document.activeElement as HTMLElement)
+      );
+      expect(document.activeElement).not.toBe(document.body);
+    });
+
+    /**
+     * Raised by review on PR #1435, and the case the test above could not
+     * catch: every task in the fixture has an empty `contacts` list, so the
+     * rows nested no lists of their own. A task **with** contacts draws them as
+     * a `ul` of `li`s (**W27**), which an unscoped `querySelectorAll('li')`
+     * counts — indexing into an earlier row, or into a contact with no control
+     * in it, and leaving focus on `<body>`.
+     */
+    it('counts only rows, not the contacts nested inside them', async () => {
+      const withContacts = SEVEN_TASKS.map((task, index) => ({
+        ...task,
+        // Only the rows *above* the cap, so the miscount is a real offset.
+        contacts:
+          index < VISIBLE_TASKS
+            ? [
+                {
+                  contact_id: 90 + index,
+                  name: 'Priya Patel',
+                  photo_url: null,
+                },
+                { contact_id: 70 + index, name: 'Jordan Lee', photo_url: null },
+              ]
+            : [],
+      }));
+      serveReady(withContacts);
+      const user = userEvent.setup();
+
+      renderWithProviders(<TasksCard />);
+      await user.click(
+        await screen.findByRole('button', { name: /show all/i })
+      );
+
+      const revealed = taskRows()[VISIBLE_TASKS];
+      await waitFor(() =>
+        expect(revealed).toContainElement(document.activeElement as HTMLElement)
+      );
     });
 
     it('withdraws the show-more once everything is shown', async () => {

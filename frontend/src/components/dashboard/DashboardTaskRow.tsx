@@ -78,7 +78,7 @@ export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
         <p
           id={taskTextId(task_id)}
           data-testid='dashboard-task-text'
-          className='min-w-0 font-medium'
+          className='min-w-0 font-medium break-words'
         >
           {text}
         </p>
@@ -107,7 +107,7 @@ export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
 
       <p
         data-testid='dashboard-task-due'
-        className='text-muted-foreground mt-1 text-sm'
+        className='text-muted-foreground mt-1 text-sm break-words'
       >
         Due in{' '}
         <Link
@@ -147,7 +147,7 @@ export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
                     className='h-6 w-6 text-[10px]'
                   />
                 </span>
-                <span className='text-muted-foreground min-w-0 text-sm'>
+                <span className='text-muted-foreground min-w-0 text-sm break-words'>
                   {contact.name}
                 </span>
               </li>

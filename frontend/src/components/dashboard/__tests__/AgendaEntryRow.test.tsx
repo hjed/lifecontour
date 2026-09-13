@@ -12,6 +12,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { AgendaEntryRow } from '../AgendaEntryRow';
 import type { HomeDashboardAgendaEntry } from '@/lib/api/home-dashboard';
+import { expectWrapsLongWords } from '@/test-utils/home-dashboard';
 
 const COFFEE: HomeDashboardAgendaEntry = {
   journal_id: 42,
@@ -232,5 +233,39 @@ describe('AgendaEntryRow', () => {
     renderRow(COFFEE);
 
     expect(screen.getByTestId('agenda-entry-42')).toBe(row());
+  });
+
+  /**
+   * **W3** forbids horizontal overflow at mobile widths, and the free-text
+   * fields are what actually breaks it: a title, a location or a tag can arrive
+   * as one long unbroken token. `min-w-0` — which this row already carries
+   * almost everywhere — does nothing for that: it lets a flex item shrink below
+   * its content, and an unbreakable word is not shrinkable. Measured for real
+   * at mobile width in the e2e; what is pinned here is that the contract is on
+   * the element at all (ITER18-004 Phase 16).
+   */
+  describe('long unbroken content (W3)', () => {
+    const UNBROKEN = 'Supercalifragilistic' + 'x'.repeat(120);
+
+    it('lets a long title break rather than widen the column', () => {
+      renderRow({ ...COFFEE, title: UNBROKEN });
+
+      expectWrapsLongWords(screen.getByRole('link', { name: UNBROKEN }));
+    });
+
+    it('lets a long location break', () => {
+      renderRow({ ...COFFEE, location: UNBROKEN });
+
+      expectWrapsLongWords(screen.getByTestId('agenda-entry-location'));
+    });
+
+    it('lets a long tag name break', () => {
+      renderRow({
+        ...COFFEE,
+        tags: [{ id: 'tag-1', name: UNBROKEN, color: null }],
+      });
+
+      expectWrapsLongWords(screen.getByText(UNBROKEN));
+    });
   });
 });
