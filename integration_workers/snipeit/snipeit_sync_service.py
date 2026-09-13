@@ -1798,18 +1798,35 @@ class SnipeItSyncService:
     ) -> None:
         """Reconcile a GEAR_USAGE journal's Snipe-IT state after an update.
 
-        Desired state: if the usage period has ended (resolved ``checkin_date``
-        is in the past) the asset should be checked in; otherwise it should be
-        checked out. A missing checkout is created first (which itself performs
-        an immediate check-in when the period is already past).
+        Desired state: the asset is checked out on the journal's local checkout
+        date and, once the usage period has ended, checked in on its local
+        check-in date. Snipe-IT's activity log cannot be edited, so history is
+        only added where it is missing:
+
+        - No successful checkout: create it (which checks the asset straight
+          back in when the period is already past).
+        - The checkout date changed after the asset was checked in: supersede
+          the recorded pair and record a new checkout and check-in.
+        - Otherwise: check the asset in once the period has ended. This is a
+          no-op when already checked in, so a changed check-in date alone is not
+          re-recorded.
+
+        A checkout recorded before its dates were stored, or one whose check-in
+        ended in a terminal 403/404 (the asset may still be out), is never
+        superseded.
         """
         async with session_factory() as session:
             checkout_result = await session.execute(
                 text("""
-                    SELECT sync_status
-                    FROM sync_metadata
-                    WHERE integration_source = 'snipeit_checkout'
-                      AND internal_uuid = :journal_id
+                    SELECT co.sync_status, co.reference_data,
+                           ci.sync_status AS checkin_status,
+                           ci.error_message AS checkin_error
+                    FROM sync_metadata co
+                    LEFT JOIN sync_metadata ci
+                        ON ci.integration_source = 'snipeit_checkin'
+                        AND ci.internal_uuid = co.internal_uuid
+                    WHERE co.integration_source = 'snipeit_checkout'
+                      AND co.internal_uuid = :journal_id
                 """),
                 {"journal_id": str(journal_id)},
             )
@@ -1823,7 +1840,6 @@ class SnipeItSyncService:
             )
             return
 
-        # Checkout exists; check in if the usage period is now over.
         data = await self._fetch_journal_and_gear_usage_data(
             journal_id, session_factory
         )
@@ -1831,14 +1847,38 @@ class SnipeItSyncService:
             return
 
         journal_row, usage_data_row, _ = data
+        zone = _journal_zone(journal_row)
+        checkout_date = (
+            usage_data_row.checkout_date or journal_row.event_date_range_start
+        )
         checkin_date = usage_data_row.checkin_date or journal_row.event_date_range_end
+
+        recorded_checkout_at = self._recorded_checkout_at(checkout_row.reference_data)
+        checkout_at = _format_date_for_snipeit(checkout_date, zone)
+        checkout_date_changed = (
+            recorded_checkout_at is not None
+            and checkout_at is not None
+            and recorded_checkout_at != checkout_at
+        )
+        if (
+            checkout_date_changed
+            and checkout_row.checkin_status == "success"
+            and checkout_row.checkin_error is None
+        ):
+            if await self._supersede_checkout(
+                journal_id=journal_id,
+                recorded_reference=checkout_row.reference_data,
+                session_factory=session_factory,
+            ):
+                await self.push_checkout_create(
+                    journal_id=journal_id,
+                    session_factory=session_factory,
+                )
+            return
+
         if _usage_period_has_ended(checkin_date):
-            checkout_date = (
-                usage_data_row.checkout_date or journal_row.event_date_range_start
-            )
-            zone = _journal_zone(journal_row)
             note = (
-                f"Usage period {_format_date_for_snipeit(checkout_date, zone)} "
+                f"Usage period {checkout_at} "
                 f"to {_format_date_for_snipeit(checkin_date, zone)}"
             )
             await self.push_checkin_create(
@@ -1847,6 +1887,73 @@ class SnipeItSyncService:
                 note=note,
                 checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
             )
+
+    async def _supersede_checkout(
+        self,
+        *,
+        journal_id: int,
+        recorded_reference: str,
+        session_factory: Any,
+    ) -> bool:
+        """Release a journal's recorded checkout and check-in so a new pair is made.
+
+        The checkout row is reset to ``failed``, which :meth:`push_checkout_create`
+        retries, and the check-in row is removed. The reset only matches while
+        the row still holds ``recorded_reference``, so a concurrent update that
+        read the same dates matches nothing and returns ``False`` instead of
+        recording a second pair.
+        """
+        async with session_factory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET sync_status = 'failed',
+                            error_message = 'Superseded: checkout date changed',
+                            updated_at = now()
+                        WHERE integration_source = 'snipeit_checkout'
+                          AND internal_uuid = :journal_id
+                          AND sync_status = 'success'
+                          AND reference_data = :recorded_reference
+                        RETURNING id
+                    """),
+                    {
+                        "journal_id": str(journal_id),
+                        "recorded_reference": recorded_reference,
+                    },
+                )
+                if result.fetchone() is None:
+                    logger.debug(
+                        "Skipping checkout supersede: already superseded",
+                        journal_id=journal_id,
+                    )
+                    return False
+                await session.execute(
+                    text("""
+                        DELETE FROM sync_metadata
+                        WHERE integration_source = 'snipeit_checkin'
+                          AND internal_uuid = :journal_id
+                    """),
+                    {"journal_id": str(journal_id)},
+                )
+
+        logger.info(
+            "Superseded Snipe-IT checkout after its checkout date changed",
+            journal_id=journal_id,
+        )
+        return True
+
+    @staticmethod
+    def _recorded_checkout_at(reference_data: object) -> str | None:
+        """Return the ``checkout_at`` a checkout sync row recorded, if any."""
+        if not isinstance(reference_data, str):
+            return None
+        try:
+            recorded = json.loads(reference_data)
+        except ValueError:
+            return None
+        value = recorded.get("checkout_at") if isinstance(recorded, dict) else None
+        return value if isinstance(value, str) else None
 
 
 @dataclass(frozen=True)

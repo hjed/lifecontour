@@ -81,6 +81,11 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
   - `checkout_at`, `expected_checkin` and the check-in's `checkin_at` are the journal's **local** calendar dates, read in the event's timezone when it has one, otherwise the user's timezone, otherwise UTC. Journal dates are stored as the UTC instant of a local midnight, so taking their UTC date would land a day early east of UTC.
   - `checkin_at` is sent only once the check-in date has passed in every timezone (it is before today at UTC−12). Snipe-IT's server timezone is unknown, so a more recent return is stamped at the server's time rather than risk sending a date the server reads as the future. A check-in caused by deleting the journal is always stamped at server time.
   - The dates sent are recorded on the checkout and check-in `SyncMetadata` rows (`reference_data`).
+- **Date Changes**: Snipe-IT cannot edit or delete its activity log, so updating a `GEAR_USAGE` journal only adds history that is missing:
+  - If the checkout date changes after the asset was checked in, a new checkout and check-in are recorded on the new dates. The earlier pair stays in Snipe-IT.
+  - A check-in that has not happened yet uses the updated check-in date.
+  - Not re-recorded: a change to only the check-in date of an already checked-in journal; a checkout recorded before dates were stored; and a checkout whose check-in failed terminally (403/404), since the asset may still be checked out.
+  - A checkout date changed while the asset is still checked out keeps its original start in Snipe-IT; Snipe-IT refuses to check out an asset that is already out.
 - **Buffer Dates**:
   - Users can specify a separate start and end date for the gear checkout to allow for buffer (e.g., packing the day before).
   - **Default**: The buffer dates explicitly default to the journal's event dates if not modified by the user.

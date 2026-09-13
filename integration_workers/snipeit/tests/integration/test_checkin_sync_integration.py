@@ -629,6 +629,217 @@ class TestCheckinSyncIntegration:
         ]
 
 
+async def _insert_recorded_sync_row(
+    async_connection: AsyncConnection,
+    *,
+    source: str,
+    journal_id: int,
+    reference_data: dict[str, Any] | None,
+    error_message: str | None = None,
+    asset_id: str = "42",
+) -> None:
+    """Insert a successful checkout/check-in sync row with the dates it recorded."""
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (integration_source, external_id, internal_uuid,
+                 last_synced_at, version_hash, sync_status, reference_data,
+                 error_message, retry_count, created_at, updated_at)
+            VALUES
+                (:source, :external_id, :journal_id,
+                 now(), 'hash', 'success', :reference_data,
+                 :error_message, 0, now(), now())
+        """),
+        {
+            "source": source,
+            "external_id": f"{source}:{asset_id}:{journal_id}",
+            "journal_id": str(journal_id),
+            "reference_data": (
+                json.dumps(reference_data) if reference_data is not None else None
+            ),
+            "error_message": error_message,
+        },
+    )
+
+
+async def _sydney_trip(async_connection: AsyncConnection) -> int:
+    """A past trip that is 8-9 March 2025 in Sydney (AEDT)."""
+    return await _insert_gear_usage_journal(
+        async_connection,
+        start="2025-03-07T13:00:00+00:00",
+        end="2025-03-08T13:00:00+00:00",
+        user_timezone="Australia/Sydney",
+    )
+
+
+class TestReconcileGearUsageIntegration:
+    """Updating a journal re-records Snipe-IT history only where it is missing."""
+
+    @pytest.mark.asyncio
+    async def test_open_checkout_is_checked_in_on_the_journal_date(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data={
+                "checkout_at": "2025-03-08",
+                "expected_checkin": "2099-01-01",
+            },
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+        )
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        (request,) = mock_transport.requests
+        assert "hardware/42/checkin" in str(request.url)
+        assert json.loads(request.content)["checkin_at"] == "2025-03-09"
+
+    @pytest.mark.asyncio
+    async def test_changed_checkout_date_after_checkin_records_a_new_pair(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data={
+                "checkout_at": "2025-03-01",
+                "expected_checkin": "2025-03-02",
+            },
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkin",
+            journal_id=journal_id,
+            reference_data={"checkin_at": "2025-03-02"},
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert len(mock_transport.responses) == 0
+        assert (
+            _request_body(mock_transport, "hardware/42/checkout")["checkout_at"]
+            == "2025-03-08"
+        )
+        assert (
+            _request_body(mock_transport, "hardware/42/checkin")["checkin_at"]
+            == "2025-03-09"
+        )
+        assert await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        ) == {"checkout_at": "2025-03-08", "expected_checkin": "2025-03-09"}
+        assert await _reference_data(
+            async_connection, source="snipeit_checkin", journal_id=journal_id
+        ) == {"checkin_at": "2025-03-09"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("checkout_reference", "checkin_error"),
+        [
+            # Only the check-in date changed: that checkout is already returned.
+            ({"checkout_at": "2025-03-08", "expected_checkin": "2025-03-05"}, None),
+            # A row from before dates were recorded is not re-recorded.
+            (None, None),
+            # A terminal 403/404 check-in may have left the asset checked out.
+            (
+                {"checkout_at": "2025-03-01", "expected_checkin": "2025-03-02"},
+                "Terminal: API 404",
+            ),
+        ],
+        ids=["checkin-date-only", "legacy-row", "terminal-checkin"],
+    )
+    async def test_checked_in_usage_is_left_alone(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        checkout_reference: dict[str, Any] | None,
+        checkin_error: str | None,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data=checkout_reference,
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkin",
+            journal_id=journal_id,
+            reference_data={"checkin_at": "2025-03-05"},
+            error_message=checkin_error,
+        )
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert mock_transport.requests == []
+
+    @pytest.mark.asyncio
+    async def test_supersede_loses_to_a_concurrent_update(
+        self,
+        snipeit_sync_service: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A second update that read the old dates cannot supersede again."""
+        journal_id = await _sydney_trip(async_connection)
+        current = {"checkout_at": "2025-03-08", "expected_checkin": "2025-03-09"}
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data=current,
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkin",
+            journal_id=journal_id,
+            reference_data={"checkin_at": "2025-03-09"},
+        )
+
+        superseded = await snipeit_sync_service._supersede_checkout(
+            journal_id=journal_id,
+            recorded_reference=json.dumps(
+                {"checkout_at": "2025-03-01", "expected_checkin": "2025-03-02"}
+            ),
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert superseded is False
+        assert (
+            await _reference_data(
+                async_connection, source="snipeit_checkout", journal_id=journal_id
+            )
+            == current
+        )
+        assert await _reference_data(
+            async_connection, source="snipeit_checkin", journal_id=journal_id
+        ) == {"checkin_at": "2025-03-09"}
+
+
 class TestSupersededAssetRetryIntegration:
     """A failed return of the previous asset is retried against that asset."""
 
