@@ -9,8 +9,8 @@ import pytest
 
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    sessionless_mcp_headers,
+    sessionless_mcp_request,
 )
 
 
@@ -23,21 +23,18 @@ async def test_important_dates_via_mounted_http_session(
     import typing
 
     async with authenticated_lifespan_client() as authenticated_client:
-        session_id = await initialize_mcp_session(authenticated_client)
 
         async def call_mcp(name: str, args: dict[str, typing.Any]):
             resp = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": name,
                         "arguments": args,
                     },
-                },
-                headers=mcp_headers(session_id),
+                ),
+                headers=sessionless_mcp_headers("tools/call", name),
             )
             assert resp.status_code == 200
             return extract_mcp_json_payload(resp.text)

@@ -30,8 +30,8 @@ from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    sessionless_mcp_headers,
+    sessionless_mcp_request,
 )
 
 
@@ -699,19 +699,17 @@ class TestContactToolsIntegration:
         await tag_repo.save(Tag(name=TagName("colleague")))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "list_contact_tags",
                         "arguments": {"limit": 10},
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "list_contact_tags"),
             )
 
         assert response.status_code == 200
@@ -734,19 +732,17 @@ class TestContactToolsIntegration:
         child = await tag_repo.save(Tag(name=TagName("colleague"), parent_id=parent.id))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "list_contact_tags",
                         "arguments": {"limit": 10},
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "list_contact_tags"),
             )
 
         assert response.status_code == 200
@@ -770,14 +766,11 @@ class TestContactToolsIntegration:
         tag = await tag_repo.save(Tag(name=TagName("friend"), color="#00FF00"))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "update_contact_tag",
                         "arguments": {
                             "tag_id": str(tag.id),
@@ -786,8 +779,9 @@ class TestContactToolsIntegration:
                             "description": "People I see often",
                         },
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "update_contact_tag"),
             )
 
         assert response.status_code == 200
@@ -815,19 +809,17 @@ class TestContactToolsIntegration:
         fall through to the catch-all.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "update_contact_tag",
                         "arguments": {"tag_id": "999999", "name": "ghost"},
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "update_contact_tag"),
             )
 
         assert response.status_code == 200
@@ -850,19 +842,17 @@ class TestContactToolsIntegration:
         rather than letting the int() cast surface as a generic failure.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "update_contact_tag",
                         "arguments": {"tag_id": "not-a-number", "name": "ghost"},
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "update_contact_tag"),
             )
 
         assert response.status_code == 200
@@ -883,19 +873,17 @@ class TestContactToolsIntegration:
 
         async def call(arguments):
             async with authenticated_lifespan_client() as authenticated_client:
-                session_id = await initialize_mcp_session(authenticated_client)
                 return await authenticated_client.post(
                     "/mcp-server/mcp",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "method": "tools/call",
-                        "params": {
+                    json=sessionless_mcp_request(
+                        "tools/call",
+                        {
                             "name": "update_contact_tag",
                             "arguments": arguments,
                         },
-                    },
-                    headers=mcp_headers(session_id),
+                        request_id=2,
+                    ),
+                    headers=sessionless_mcp_headers("tools/call", "update_contact_tag"),
                 )
 
         await call({"tag_id": str(child.id), "parent_id": str(parent.id)})
@@ -923,14 +911,11 @@ class TestContactToolsIntegration:
         child = await tag_repo.save(Tag(name=TagName("colleague"), parent_id=parent.id))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "update_contact_tag",
                         "arguments": {
                             "tag_id": str(child.id),
@@ -938,8 +923,9 @@ class TestContactToolsIntegration:
                             "move_to_root": True,
                         },
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "update_contact_tag"),
             )
 
         assert response.status_code == 200
@@ -958,19 +944,17 @@ class TestContactToolsIntegration:
         other = await tag_repo.save(Tag(name=TagName("colleague")))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "update_contact_tag",
                         "arguments": {"tag_id": str(other.id), "name": "friend"},
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "update_contact_tag"),
             )
 
         assert response.status_code == 200
@@ -1005,19 +989,17 @@ class TestContactToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "delete_contact_tag",
                         "arguments": {"tag_id": str(tag.id)},
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "delete_contact_tag"),
             )
 
         assert response.status_code == 200
@@ -1039,19 +1021,17 @@ class TestContactToolsIntegration:
     ):
         """An unknown tag id is reported as not-found, not a generic failure."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "delete_contact_tag",
                         "arguments": {"tag_id": "999999"},
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "delete_contact_tag"),
             )
 
         assert response.status_code == 200
@@ -1090,22 +1070,20 @@ class TestContactToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "merge_contact_tags",
                         "arguments": {
                             "source_id": str(source.id),
                             "target_id": str(target.id),
                         },
                     },
-                },
-                headers=mcp_headers(session_id),
+                    request_id=2,
+                ),
+                headers=sessionless_mcp_headers("tools/call", "merge_contact_tags"),
             )
 
         assert response.status_code == 200
@@ -1130,16 +1108,10 @@ class TestContactToolsIntegration:
     ):
         """The pre-rename tool name is no longer registered."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             response = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/list",
-                    "params": {},
-                },
-                headers=mcp_headers(session_id),
+                json=sessionless_mcp_request("tools/list", {}, request_id=2),
+                headers=sessionless_mcp_headers("tools/list"),
             )
 
         assert response.status_code == 200
@@ -1165,23 +1137,19 @@ class TestContactToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             import typing
 
             async def call_mcp(name: str, args: dict[str, typing.Any]):
                 resp = await authenticated_client.post(
                     "/mcp-server/mcp",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {
+                    json=sessionless_mcp_request(
+                        "tools/call",
+                        {
                             "name": name,
                             "arguments": args,
                         },
-                    },
-                    headers=mcp_headers(session_id),
+                    ),
+                    headers=sessionless_mcp_headers("tools/call", name),
                 )
                 assert resp.status_code == 200
                 return extract_mcp_json_payload(resp.text)
@@ -1286,18 +1254,14 @@ class TestContactToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
 
             async def call_mcp(name, args):
                 resp = await authenticated_client.post(
                     "/mcp-server/mcp",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {"name": name, "arguments": args},
-                    },
-                    headers=mcp_headers(session_id),
+                    json=sessionless_mcp_request(
+                        "tools/call", {"name": name, "arguments": args}
+                    ),
+                    headers=sessionless_mcp_headers("tools/call", name),
                 )
                 assert resp.status_code == 200
                 return extract_mcp_json_payload(resp.text)
@@ -1360,18 +1324,14 @@ class TestContactToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
 
             async def call_mcp(name, args):
                 resp = await authenticated_client.post(
                     "/mcp-server/mcp",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {"name": name, "arguments": args},
-                    },
-                    headers=mcp_headers(session_id),
+                    json=sessionless_mcp_request(
+                        "tools/call", {"name": name, "arguments": args}
+                    ),
+                    headers=sessionless_mcp_headers("tools/call", name),
                 )
                 assert resp.status_code == 200
                 return extract_mcp_json_payload(resp.text)
@@ -1760,20 +1720,16 @@ class TestContactConverterAISummaryIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             resp = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "get_contact",
                         "arguments": {"contact_id": c1.id},
                     },
-                },
-                headers=mcp_headers(session_id),
+                ),
+                headers=sessionless_mcp_headers("tools/call", "get_contact"),
             )
             assert resp.status_code == 200
             payload = extract_mcp_json_payload(resp.text)
@@ -1824,20 +1780,16 @@ class TestContactConverterAISummaryIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             resp = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "get_contact",
                         "arguments": {"contact_id": c1.id},
                     },
-                },
-                headers=mcp_headers(session_id),
+                ),
+                headers=sessionless_mcp_headers("tools/call", "get_contact"),
             )
             assert resp.status_code == 200
             payload = extract_mcp_json_payload(resp.text)
@@ -1914,23 +1866,19 @@ class TestContactHistoryOverMCPCountsTaskRecords:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             resp = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "get_contact",
                         "arguments": {
                             "contact_id": contact.id,
                             "include_history": True,
                         },
                     },
-                },
-                headers=mcp_headers(session_id),
+                ),
+                headers=sessionless_mcp_headers("tools/call", "get_contact"),
             )
 
             assert resp.status_code == 200
@@ -1983,23 +1931,19 @@ class TestContactHistoryOverMCPCountsTaskRecords:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             resp = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "get_contact",
                         "arguments": {
                             "contact_id": subject.id,
                             "include_history": True,
                         },
                     },
-                },
-                headers=mcp_headers(session_id),
+                ),
+                headers=sessionless_mcp_headers("tools/call", "get_contact"),
             )
 
             assert resp.status_code == 200
@@ -2079,19 +2023,20 @@ class TestListUpcomingImportantDatesTool:
         )
 
     @staticmethod
-    async def call(client, session_id: str, **arguments):
+    async def call(client, **arguments):
         response = await client.post(
             "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
+            json=sessionless_mcp_request(
+                "tools/call",
+                {
                     "name": "list_upcoming_important_dates",
                     "arguments": arguments,
                 },
-            },
-            headers=mcp_headers(session_id),
+                request_id=2,
+            ),
+            headers=sessionless_mcp_headers(
+                "tools/call", "list_upcoming_important_dates"
+            ),
         )
         assert response.status_code == 200
         return extract_mcp_json_payload(response.text)
@@ -2106,8 +2051,7 @@ class TestListUpcomingImportantDatesTool:
         await self.seed_date(clean_database, 10, 1, on=occurs_on, year=1991)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await self.call(client, session_id)
+            payload = await self.call(client)
 
         assert payload["window"]["days_ahead"] == 7
         assert payload["total_count"] == 1
@@ -2128,9 +2072,8 @@ class TestListUpcomingImportantDatesTool:
         await self.seed_date(clean_database, 10, 1, on=self.in_days(5))
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            narrow = await self.call(client, session_id, days_ahead=2)
-            wide = await self.call(client, session_id, days_ahead=7)
+            narrow = await self.call(client, days_ahead=2)
+            wide = await self.call(client, days_ahead=7)
 
         assert narrow["window"]["days_ahead"] == 2
         assert narrow["dates"] == []
@@ -2152,8 +2095,7 @@ class TestListUpcomingImportantDatesTool:
         await self.seed_date(clean_database, 12, 3, on=self.in_days(1))
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await self.call(client, session_id)
+            payload = await self.call(client)
 
         assert [row["contact_id"] for row in payload["dates"]] == [3, 2, 1]
 
@@ -2164,8 +2106,7 @@ class TestListUpcomingImportantDatesTool:
         """Empty, with a window and a summary that say so rather than an error —
         an agent told nothing at all would report a failure instead of a fact."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await self.call(client, session_id)
+            payload = await self.call(client)
 
         assert payload["dates"] == []
         assert payload["total_count"] == 0
@@ -2181,7 +2122,6 @@ class TestListUpcomingImportantDatesTool:
         await self.seed_date(clean_database, 10, 1, on=self.in_days(3))
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await self.call(client, session_id)
+            payload = await self.call(client)
 
         assert payload["dates"][0]["years"] is None

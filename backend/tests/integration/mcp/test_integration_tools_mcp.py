@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    sessionless_mcp_headers,
+    sessionless_mcp_request,
 )
 
 
@@ -38,20 +38,16 @@ async def test_trigger_sync_mcp_tool(
     ) as mock_enqueue:
         mock_enqueue.return_value = "test_job_123"
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             resp = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "trigger_sync",
                         "arguments": {"integration_id": "strava"},
                     },
-                },
-                headers=mcp_headers(session_id),
+                ),
+                headers=sessionless_mcp_headers("tools/call", "trigger_sync"),
             )
             assert resp.status_code == 200
             payload = extract_mcp_json_payload(resp.text)
@@ -85,20 +81,16 @@ async def test_trigger_sync_mcp_tool_immich(
     ) as mock_enqueue:
         mock_enqueue.return_value = "test_immich_job_123"
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             resp = await authenticated_client.post(
                 "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
+                json=sessionless_mcp_request(
+                    "tools/call",
+                    {
                         "name": "trigger_sync",
                         "arguments": {"integration_id": "immich"},
                     },
-                },
-                headers=mcp_headers(session_id),
+                ),
+                headers=sessionless_mcp_headers("tools/call", "trigger_sync"),
             )
             assert resp.status_code == 200
             payload = extract_mcp_json_payload(resp.text)
@@ -137,20 +129,18 @@ async def test_get_strava_athlete_mappings_mcp_tool(
     )
 
     async with authenticated_lifespan_client() as authenticated_client:
-        session_id = await initialize_mcp_session(authenticated_client)
-
         resp = await authenticated_client.post(
             "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {
+            json=sessionless_mcp_request(
+                "tools/call",
+                {
                     "name": "get_strava_athlete_mappings",
                     "arguments": {},
                 },
-            },
-            headers=mcp_headers(session_id),
+            ),
+            headers=sessionless_mcp_headers(
+                "tools/call", "get_strava_athlete_mappings"
+            ),
         )
         assert resp.status_code == 200
         payload = extract_mcp_json_payload(resp.text)
@@ -164,16 +154,17 @@ async def test_get_strava_athlete_mappings_mcp_tool(
         # Test filtering by strava_athlete_id
         resp2 = await authenticated_client.post(
             "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
+            json=sessionless_mcp_request(
+                "tools/call",
+                {
                     "name": "get_strava_athlete_mappings",
                     "arguments": {"strava_athlete_id": "999999"},
                 },
-            },
-            headers=mcp_headers(session_id),
+                request_id=2,
+            ),
+            headers=sessionless_mcp_headers(
+                "tools/call", "get_strava_athlete_mappings"
+            ),
         )
         assert resp2.status_code == 200
         payload2 = extract_mcp_json_payload(resp2.text)

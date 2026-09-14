@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    sessionless_mcp_headers,
+    sessionless_mcp_request,
 )
 
 USER_ID = "test-user-123"
@@ -60,16 +60,12 @@ async def _seed_journal(connection: AsyncConnection) -> int:
 async def _call_tool(
     client: object, name: str, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    session_id = await initialize_mcp_session(client)
     resp = await client.post(  # type: ignore[attr-defined]
         "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
+        json=sessionless_mcp_request(
+            "tools/call", {"name": name, "arguments": arguments}
+        ),
+        headers=sessionless_mcp_headers("tools/call", name),
     )
     assert resp.status_code == 200
     return extract_mcp_json_payload(resp.text)

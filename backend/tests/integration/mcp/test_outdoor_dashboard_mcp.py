@@ -22,8 +22,8 @@ from tests.integration.journal.outdoor_activity_seeding import (
 )
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    sessionless_mcp_headers,
+    sessionless_mcp_request,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -35,17 +35,14 @@ async def seeder(async_connection: AsyncConnection) -> Seeder:
 
 
 async def _call_tool(
-    client: Any, session_id: str, name: str, arguments: dict[str, Any], req_id: int = 1
+    client: Any, name: str, arguments: dict[str, Any], req_id: int = 1
 ) -> dict[str, Any]:
     response = await client.post(
         "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
+        json=sessionless_mcp_request(
+            "tools/call", {"name": name, "arguments": arguments}, request_id=req_id
+        ),
+        headers=sessionless_mcp_headers("tools/call", name),
     )
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
@@ -98,8 +95,7 @@ async def test_get_outdoor_dashboard_returns_all_four_sections(
     )
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        payload = await _call_tool(client, session_id, "get_outdoor_dashboard", {})
+        payload = await _call_tool(client, "get_outdoor_dashboard", {})
 
     assert "error" not in payload, payload
     assert [entry["journal_id"] for entry in payload["upcoming_activities"]] == [
@@ -141,8 +137,7 @@ async def test_get_outdoor_dashboard_empty(
     authenticated_lifespan_client,
 ) -> None:
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        payload = await _call_tool(client, session_id, "get_outdoor_dashboard", {})
+        payload = await _call_tool(client, "get_outdoor_dashboard", {})
 
     assert "error" not in payload, payload
     assert payload["upcoming_activities"] == []
