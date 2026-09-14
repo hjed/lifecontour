@@ -19,7 +19,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.search.search_service import SearchService
-from tests.integration.mcp.http_helpers import call_mcp_tool, initialize_mcp_session
+from tests.integration.mcp.http_helpers import (
+    call_mcp_tool,
+)
 
 USER_ID = "test-user-123"
 
@@ -102,9 +104,8 @@ class TestSearchJournalsViaMeili:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
-                client, session_id, "search_journals", {"query": "Zion canyoning"}
+                client, "search_journals", {"query": "Zion canyoning"}
             )
 
         assert "error" not in payload, payload
@@ -122,10 +123,8 @@ class TestSearchJournalsViaMeili:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"query": "Zion", "integration_source": "strava"},
             )
@@ -139,10 +138,8 @@ class TestSearchJournalsViaMeili:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "browse_journals_by_date_window",
                 {
                     "anchor_date": "2025-10-13",
@@ -164,10 +161,8 @@ class TestSearchJournalsViaMeili:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "browse_journals_by_date_window",
                 {"anchor_date": "2024-01-01", "search": "Zion"},
             )
@@ -185,10 +180,9 @@ class TestSearchJournalsViaMeili:
             raise MeilisearchError("connection refused")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             with patch.object(SearchService, "search_journals", boom):
                 payload = await call_mcp_tool(
-                    client, session_id, "search_journals", {"query": "Zion"}
+                    client, "search_journals", {"query": "Zion"}
                 )
 
         assert payload["error"] == "Search unavailable"
@@ -202,9 +196,8 @@ class TestSearchJournalsViaMeili:
     ) -> None:
         """Listing by source alone does not need the search index."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
-                client, session_id, "search_journals", {"integration_source": "strava"}
+                client, "search_journals", {"integration_source": "strava"}
             )
 
         assert "error" not in payload, payload
@@ -233,16 +226,12 @@ class TestZeroResultDiagnostics:
         await index_journal(journal_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"query": "Kanangra", "integration_source": "strava"},
             )
-            hit = await call_mcp_tool(
-                client, session_id, "search_journals", {"query": "Zion"}
-            )
+            hit = await call_mcp_tool(client, "search_journals", {"query": "Zion"})
 
         assert payload["total_hits"] == 0
         diagnostics = payload["diagnostics"]
@@ -268,10 +257,8 @@ class TestZeroResultDiagnostics:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"integration_source": "immich_album"},
             )
@@ -295,10 +282,8 @@ class TestZeroResultDiagnostics:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "browse_journals_by_date_window",
                 {"anchor_date": "2025-09-04", "days_back": 5, "days_forward": 5},
             )
@@ -343,15 +328,13 @@ class TestNoteFilterMeansUntyped:
         await index_journal(note_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             with_query = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"query": "Zion", "types": "note"},
             )
             without_query = await call_mcp_tool(
-                client, session_id, "search_journals", {"types": "note"}
+                client, "search_journals", {"types": "note"}
             )
 
         assert [r["id"] for r in with_query["results"]] == [note_id]
@@ -418,10 +401,8 @@ class TestSearchJournalsRelationalFilters:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"start_date": "2025-10-13", "end_date": "2025-10-13"},
             )
@@ -436,10 +417,8 @@ class TestSearchJournalsRelationalFilters:
     ) -> None:
         """Both Zion journals match the text; only one is inside the window."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {
                     "query": "Zion canyoning",
@@ -458,10 +437,8 @@ class TestSearchJournalsRelationalFilters:
     ) -> None:
         """Two id sets AND together rather than one overwriting the other."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             inside = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {
                     "query": "Zion",
@@ -471,7 +448,6 @@ class TestSearchJournalsRelationalFilters:
             )
             outside = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {
                     "query": "Zion",
@@ -495,18 +471,16 @@ class TestSearchJournalsRelationalFilters:
         await _tag_journal(clean_database, zion_journals["echo"], tag_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             with_query = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"query": "Zion", "tags": "canyoning-trips"},
             )
             without_query = await call_mcp_tool(
-                client, session_id, "search_journals", {"tags": "Canyoning-Trips"}
+                client, "search_journals", {"tags": "Canyoning-Trips"}
             )
             by_id = await call_mcp_tool(
-                client, session_id, "search_journals", {"tags": str(tag_id)}
+                client, "search_journals", {"tags": str(tag_id)}
             )
 
         assert [r["id"] for r in with_query["results"]] == [zion_journals["echo"]]
@@ -525,9 +499,8 @@ class TestSearchJournalsRelationalFilters:
         await _tag_journal(clean_database, zion_journals["echo"], child_tag)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
-                client, session_id, "search_journals", {"tags": "outdoors"}
+                client, "search_journals", {"tags": "outdoors"}
             )
 
         assert [r["id"] for r in payload["results"]] == [zion_journals["echo"]]
@@ -537,9 +510,8 @@ class TestSearchJournalsRelationalFilters:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
-                client, session_id, "search_journals", {"tags": "no-such-tag"}
+                client, "search_journals", {"tags": "no-such-tag"}
             )
 
         assert "error" in payload, payload
@@ -555,15 +527,13 @@ class TestSearchJournalsRelationalFilters:
         await _link_contact(clean_database, zion_journals["drive"], 7001)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             with_query = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"query": "Zion", "contact_id": 7001},
             )
             without_query = await call_mcp_tool(
-                client, session_id, "search_journals", {"contact_id": 7001}
+                client, "search_journals", {"contact_id": 7001}
             )
 
         assert [r["id"] for r in with_query["results"]] == [zion_journals["drive"]]
@@ -593,13 +563,11 @@ class TestSearchJournalsRelationalFilters:
             await index_journal(journal_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
-                client, session_id, "search_journals", {"parent_id": trip_id}
+                client, "search_journals", {"parent_id": trip_id}
             )
             with_query = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"query": "Zion", "parent_id": trip_id},
             )
@@ -634,10 +602,8 @@ class TestSearchJournalsRelationalFilters:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"calendar_id": str(calendar_id)},
             )
@@ -649,12 +615,9 @@ class TestSearchJournalsRelationalFilters:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            first = await call_mcp_tool(
-                client, session_id, "search_journals", {"limit": 1}
-            )
+            first = await call_mcp_tool(client, "search_journals", {"limit": 1})
             second = await call_mcp_tool(
-                client, session_id, "search_journals", {"limit": 1, "offset": 1}
+                client, "search_journals", {"limit": 1, "offset": 1}
             )
 
         assert first["total_hits"] == 3
@@ -668,10 +631,8 @@ class TestSearchJournalsRelationalFilters:
     ) -> None:
         """An empty result names every filter that produced it."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"start_date": "2030-01-01", "end_date": "2030-01-02"},
             )
@@ -688,9 +649,8 @@ class TestSearchJournalsRelationalFilters:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
-                client, session_id, "search_journals", {"start_date": "last tuesday"}
+                client, "search_journals", {"start_date": "last tuesday"}
             )
 
         assert "error" in payload, payload

@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
 from tests.integration.mcp.http_helpers import (
+    call_mcp_tool,
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    post_mcp_tool,
 )
 
 
@@ -58,44 +58,25 @@ async def _create_journal(connection: AsyncConnection) -> int:
 
 
 async def call_list_journal_tags(
-    authenticated_lifespan_client, arguments: dict[str, Any] | None = None
+    authenticated_lifespan_client: Any, arguments: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """Call the list_journal_tags MCP tool and return its payload."""
     async with authenticated_lifespan_client() as authenticated_client:
-        session_id = await initialize_mcp_session(authenticated_client)
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "list_journal_tags",
-                    "arguments": arguments if arguments is not None else {},
-                },
-            },
-            headers=mcp_headers(session_id),
+        return await call_mcp_tool(
+            authenticated_client,
+            "list_journal_tags",
+            arguments if arguments is not None else {},
+            request_id=2,
         )
-
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
 
 
 async def call_update_journal_tag(
-    authenticated_lifespan_client, arguments: dict[str, Any]
+    authenticated_lifespan_client: Any, arguments: dict[str, Any]
 ) -> str:
-    """Call the update_journal_tag MCP tool and return the raw SSE response text."""
+    """Call the update_journal_tag MCP tool and return the raw response text."""
     async with authenticated_lifespan_client() as authenticated_client:
-        session_id = await initialize_mcp_session(authenticated_client)
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "update_journal_tag", "arguments": arguments},
-            },
-            headers=mcp_headers(session_id),
+        response = await post_mcp_tool(
+            authenticated_client, "update_journal_tag", arguments, request_id=2
         )
 
     assert response.status_code == 200
@@ -103,20 +84,12 @@ async def call_update_journal_tag(
 
 
 async def call_delete_journal_tag(
-    authenticated_lifespan_client, arguments: dict[str, Any]
+    authenticated_lifespan_client: Any, arguments: dict[str, Any]
 ) -> str:
-    """Call the delete_journal_tag MCP tool and return the raw SSE response text."""
+    """Call the delete_journal_tag MCP tool and return the raw response text."""
     async with authenticated_lifespan_client() as authenticated_client:
-        session_id = await initialize_mcp_session(authenticated_client)
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "delete_journal_tag", "arguments": arguments},
-            },
-            headers=mcp_headers(session_id),
+        response = await post_mcp_tool(
+            authenticated_client, "delete_journal_tag", arguments, request_id=2
         )
 
     assert response.status_code == 200
@@ -124,20 +97,12 @@ async def call_delete_journal_tag(
 
 
 async def call_merge_journal_tag(
-    authenticated_lifespan_client, arguments: dict[str, Any]
+    authenticated_lifespan_client: Any, arguments: dict[str, Any]
 ) -> str:
-    """Call the merge_journal_tag MCP tool and return the raw SSE response text."""
+    """Call the merge_journal_tag MCP tool and return the raw response text."""
     async with authenticated_lifespan_client() as authenticated_client:
-        session_id = await initialize_mcp_session(authenticated_client)
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "merge_journal_tag", "arguments": arguments},
-            },
-            headers=mcp_headers(session_id),
+        response = await post_mcp_tool(
+            authenticated_client, "merge_journal_tag", arguments, request_id=2
         )
 
     assert response.status_code == 200
@@ -432,7 +397,7 @@ class TestDeleteJournalTagMCPTool:
     ):
         """An unknown tag id reports not-found, not a generic failure.
 
-        Asserted on the parsed payload rather than the raw SSE envelope so a
+        Asserted on the parsed payload rather than the raw response envelope so a
         success response that merely mentions the phrase cannot pass.
         """
         tag_id = "00000000-0000-0000-0000-000000000000"

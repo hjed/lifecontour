@@ -17,29 +17,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 from tests.integration.tasks.task_seeding import USER_ID
 
 
-async def call_tool(
-    client: Any, session_id: str, name: str, arguments: dict[str, Any]
-) -> Any:
+async def call_tool(client: Any, name: str, arguments: dict[str, Any]) -> Any:
     """Call one MCP tool and return its decoded payload."""
-    response = await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
-    )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
+    return await call_mcp_tool(client, name, arguments)
 
 
 async def simulate_concurrent_write(
@@ -95,10 +80,7 @@ class TestJournalVersions:
         self, authenticated_lifespan_client, journal_id: int
     ):
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
-            )
+            payload = await call_tool(client, "get_journal", {"journal_id": journal_id})
 
         assert payload["version"]
 
@@ -107,14 +89,10 @@ class TestJournalVersions:
         self, authenticated_lifespan_client, journal_id: int
     ):
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            read = await call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
-            )
+            read = await call_tool(client, "get_journal", {"journal_id": journal_id})
 
             payload = await call_tool(
                 client,
-                session_id,
                 "update_journal_entry",
                 {
                     "journal_id": journal_id,
@@ -133,15 +111,11 @@ class TestJournalVersions:
     ):
         """The refusal has to tell the model what to do, not just that it failed."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            read = await call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
-            )
+            read = await call_tool(client, "get_journal", {"journal_id": journal_id})
             await simulate_concurrent_write(clean_database, "journals", journal_id)
 
             payload = await call_tool(
                 client,
-                session_id,
                 "update_journal_entry",
                 {
                     "journal_id": journal_id,
@@ -154,9 +128,7 @@ class TestJournalVersions:
 
             assert payload["code"] == "PRECONDITION_FAILED"
             assert "re-read" in payload["message"].lower()
-            after = await call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
-            )
+            after = await call_tool(client, "get_journal", {"journal_id": journal_id})
 
         # The version to retry with is in the refusal, and nothing was written.
         assert payload["current_version"] == after["version"]
@@ -170,10 +142,8 @@ class TestJournalVersions:
         await simulate_concurrent_write(clean_database, "journals", journal_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_tool(
                 client,
-                session_id,
                 "update_journal_entry",
                 {"journal_id": journal_id, "request": {"title": "Updated title"}},
             )
@@ -191,15 +161,11 @@ class TestJournalVersions:
         any of them are touched.
         """
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            read = await call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
-            )
+            read = await call_tool(client, "get_journal", {"journal_id": journal_id})
             await simulate_concurrent_write(clean_database, "journals", journal_id)
 
             await call_tool(
                 client,
-                session_id,
                 "update_journal_entry",
                 {
                     "journal_id": journal_id,
@@ -210,9 +176,7 @@ class TestJournalVersions:
                 },
             )
 
-            after = await call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
-            )
+            after = await call_tool(client, "get_journal", {"journal_id": journal_id})
 
         assert after["tags"] == []
 
@@ -226,10 +190,7 @@ class TestContactVersions:
         self, authenticated_lifespan_client, contact_id: int
     ):
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await call_tool(
-                client, session_id, "get_contact", {"contact_id": contact_id}
-            )
+            payload = await call_tool(client, "get_contact", {"contact_id": contact_id})
 
         assert payload["version"]
 
@@ -238,14 +199,10 @@ class TestContactVersions:
         self, authenticated_lifespan_client, contact_id: int
     ):
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            read = await call_tool(
-                client, session_id, "get_contact", {"contact_id": contact_id}
-            )
+            read = await call_tool(client, "get_contact", {"contact_id": contact_id})
 
             payload = await call_tool(
                 client,
-                session_id,
                 "update_contact",
                 {
                     "request": {
@@ -263,15 +220,11 @@ class TestContactVersions:
         self, authenticated_lifespan_client, contact_id: int, clean_database
     ):
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            read = await call_tool(
-                client, session_id, "get_contact", {"contact_id": contact_id}
-            )
+            read = await call_tool(client, "get_contact", {"contact_id": contact_id})
             await simulate_concurrent_write(clean_database, "contacts", contact_id)
 
             payload = await call_tool(
                 client,
-                session_id,
                 "update_contact",
                 {
                     "request": {
@@ -282,9 +235,7 @@ class TestContactVersions:
                 },
             )
 
-            after = await call_tool(
-                client, session_id, "get_contact", {"contact_id": contact_id}
-            )
+            after = await call_tool(client, "get_contact", {"contact_id": contact_id})
 
         assert payload["code"] == "PRECONDITION_FAILED"
         assert payload["current_version"] == after["version"]

@@ -22,9 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 # The OAuth client the request arrived through. It names the application, never
@@ -62,34 +60,23 @@ def oauth_authenticated_mcp(test_user: Any) -> Callable[..., Any]:
     return _acting_as
 
 
-async def _create_journal_via_mcp(
-    client: Any, session_id: str, title: str
-) -> dict[str, Any]:
-    response = await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "create_journal_entry",
-                "arguments": {
-                    "request": {
-                        "title": title,
-                        "content": "Created through MCP.",
-                        "event_date_range": {
-                            "start": "2025-10-02",
-                            "end": "2025-10-18",
-                        },
-                        "types": ["NOTE"],
-                    }
+async def _create_journal_via_mcp(client: Any, title: str) -> dict[str, Any]:
+    return await call_mcp_tool(
+        client,
+        "create_journal_entry",
+        {
+            "request": {
+                "title": title,
+                "content": "Created through MCP.",
+                "event_date_range": {
+                    "start": "2025-10-02",
+                    "end": "2025-10-18",
                 },
-            },
+                "types": ["NOTE"],
+            }
         },
-        headers=mcp_headers(session_id),
+        request_id=2,
     )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
 
 
 async def _owner_of(connection: AsyncConnection, journal_id: int) -> str | None:
@@ -112,9 +99,8 @@ class TestMCPWritesBelongToTheAuthenticatedUser:
     ) -> None:
         async with oauth_authenticated_mcp(test_user.id):
             async with authenticated_lifespan_client() as client:
-                session_id = await initialize_mcp_session(client)
                 payload = await _create_journal_via_mcp(
-                    client, session_id, "Owned by the signed-in user"
+                    client, "Owned by the signed-in user"
                 )
 
         assert "error" not in payload, f"Unexpected error: {payload}"
@@ -132,9 +118,8 @@ class TestMCPWritesBelongToTheAuthenticatedUser:
         """The ticket, end to end: detail *and* the activity feed must load."""
         async with oauth_authenticated_mcp(test_user.id):
             async with authenticated_lifespan_client() as client:
-                session_id = await initialize_mcp_session(client)
                 payload = await _create_journal_via_mcp(
-                    client, session_id, "Readable in the web UI"
+                    client, "Readable in the web UI"
                 )
 
         journal_id = int(payload["id"])
@@ -156,9 +141,8 @@ class TestMCPWritesBelongToTheAuthenticatedUser:
         """No identity must fail, not silently resolve to the client id."""
         async with oauth_authenticated_mcp(None):
             async with authenticated_lifespan_client() as client:
-                session_id = await initialize_mcp_session(client)
                 payload = await _create_journal_via_mcp(
-                    client, session_id, "Should never be created"
+                    client, "Should never be created"
                 )
 
         assert "error" in payload, (
@@ -181,9 +165,8 @@ async def test_synthetic_owners_are_never_the_acting_user(
     """No stand-in identity may end up owning an MCP-created journal."""
     async with oauth_authenticated_mcp(test_user.id):
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_journal_via_mcp(
-                client, session_id, f"Not owned by {synthetic_owner}"
+                client, f"Not owned by {synthetic_owner}"
             )
 
     owner = await _owner_of(async_connection, int(payload["id"]))

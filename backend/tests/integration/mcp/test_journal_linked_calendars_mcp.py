@@ -19,29 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.linked_calendar_seeding import USER_ID, seed_shared_event
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 pytestmark = pytest.mark.integration
 
 
-async def _call_tool(
-    client: Any, session_id: str, name: str, arguments: dict[str, Any]
-) -> Any:
-    response = await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
-    )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
+async def _call_tool(client: Any, name: str, arguments: dict[str, Any]) -> Any:
+    return await call_mcp_tool(client, name, arguments)
 
 
 @pytest.fixture
@@ -56,10 +41,8 @@ class TestGetJournalReportsEveryCalendar:
         self, authenticated_lifespan_client, shared_event: dict[str, Any]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _call_tool(
                 client,
-                session_id,
                 "get_journal",
                 {"journal_id": shared_event["journal_id"]},
             )
@@ -73,10 +56,8 @@ class TestGetJournalReportsEveryCalendar:
         self, authenticated_lifespan_client, shared_event: dict[str, Any]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _call_tool(
                 client,
-                session_id,
                 "get_journal",
                 {"journal_id": shared_event["journal_id"]},
             )
@@ -102,9 +83,8 @@ class TestGetJournalReportsEveryCalendar:
         journal_id = int(result.scalar_one())
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
+                client, "get_journal", {"journal_id": journal_id}
             )
 
         assert payload["calendars"] == []

@@ -21,7 +21,7 @@ from tests.integration.journal.outdoor_activity_seeding import (
     Seeder,
 )
 from tests.integration.mcp.http_helpers import (
-    call_mcp_tool_sessionless,
+    call_mcp_tool,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -35,7 +35,7 @@ async def seeder(async_connection: AsyncConnection) -> Seeder:
 async def _call_tool(
     client: Any, name: str, arguments: dict[str, Any], req_id: int = 1
 ) -> dict[str, Any]:
-    return await call_mcp_tool_sessionless(client, name, arguments, request_id=req_id)
+    return await call_mcp_tool(client, name, arguments, request_id=req_id)
 
 
 async def test_outdoor_dashboard_tool_registered() -> None:

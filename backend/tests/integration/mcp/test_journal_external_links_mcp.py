@@ -18,9 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 
@@ -310,23 +308,9 @@ class TestJournalExternalLinksMCP:
     ) -> None:
         """get_journal returns Strava external link with correct URL."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {"journal_id": journal_with_strava},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "get_journal", {"journal_id": journal_with_strava}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert "external_links" in payload
@@ -346,23 +330,9 @@ class TestJournalExternalLinksMCP:
     ) -> None:
         """get_journal returns Google Calendar external link."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {"journal_id": journal_with_google_calendar},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "get_journal", {"journal_id": journal_with_google_calendar}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert "external_links" in payload
@@ -383,23 +353,9 @@ class TestJournalExternalLinksMCP:
     ) -> None:
         """get_journal returns both Strava and Google Calendar links."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {"journal_id": journal_with_multiple_links},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "get_journal", {"journal_id": journal_with_multiple_links}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             links = payload["external_links"]
@@ -426,23 +382,9 @@ class TestJournalExternalLinksMCP:
     ) -> None:
         """get_journal returns empty external_links for plain journal."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {"journal_id": journal_without_links},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "get_journal", {"journal_id": journal_without_links}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert "external_links" in payload
@@ -456,23 +398,9 @@ class TestJournalExternalLinksMCP:
     ) -> None:
         """get_journal returns empty external_links for journal with pending google calendar link."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {"journal_id": journal_with_pending_google_link},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "get_journal", {"journal_id": journal_with_pending_google_link}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert "external_links" in payload
@@ -486,23 +414,9 @@ class TestJournalExternalLinksMCP:
     ) -> None:
         """Fitness data fields are fully populated in MCP response."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {"journal_id": journal_with_strava},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "get_journal", {"journal_id": journal_with_strava}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert "fitness" in payload["types"]
@@ -772,23 +686,9 @@ class TestSearchJournalsIntegrationSourceFilter:
     ) -> None:
         """search_journals with integration_source=strava returns only Strava-linked journals."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "search_journals",
-                        "arguments": {"integration_source": "strava"},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "search_journals", {"integration_source": "strava"}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["total_hits"] == 1
@@ -804,25 +704,11 @@ class TestSearchJournalsIntegrationSourceFilter:
     ) -> None:
         """get_journal returns Immich album and shared external links."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {
-                            "journal_id": journals_with_mixed_sources["immich_album"]
-                        },
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client,
+                "get_journal",
+                {"journal_id": journals_with_mixed_sources["immich_album"]},
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             by_source = {link["source"]: link for link in payload["external_links"]}
@@ -845,23 +731,9 @@ class TestSearchJournalsIntegrationSourceFilter:
     ) -> None:
         """search_journals with integration_source=immich_album returns only albums."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "search_journals",
-                        "arguments": {"integration_source": "immich_album"},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "search_journals", {"integration_source": "immich_album"}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["total_hits"] == 1
@@ -876,23 +748,9 @@ class TestSearchJournalsIntegrationSourceFilter:
     ) -> None:
         """search_journals with integration_source=google_calendar returns only Google-linked journals."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "search_journals",
-                        "arguments": {"integration_source": "google_calendar"},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "search_journals", {"integration_source": "google_calendar"}
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["total_hits"] == 1
@@ -907,25 +765,12 @@ class TestSearchJournalsIntegrationSourceFilter:
     ) -> None:
         """get_journal returns empty external_links for empty/whitespace external_event_id."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_journal",
-                        "arguments": {
-                            "journal_id": journals_with_mixed_sources["empty_gcal"]
-                        },
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client,
+                "get_journal",
+                {"journal_id": journals_with_mixed_sources["empty_gcal"]},
             )
 
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
             assert "error" not in payload
             assert "external_links" in payload
             assert payload["external_links"] == []
@@ -936,22 +781,9 @@ class TestSearchJournalsIntegrationSourceFilter:
     ) -> None:
         """search_journals with invalid integration_source returns error."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "search_journals",
-                        "arguments": {"integration_source": "invalid_source"},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                client, "search_journals", {"integration_source": "invalid_source"}
             )
 
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
             assert payload["error"] == "Validation error"
             assert "Invalid integration_source" in payload["message"]

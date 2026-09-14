@@ -30,7 +30,7 @@ from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
 from tests.integration.mcp.http_helpers import (
-    call_mcp_tool_sessionless,
+    call_mcp_tool,
     post_mcp_tool,
     sessionless_mcp_headers,
     sessionless_mcp_request,
@@ -715,7 +715,7 @@ class TestContactToolsIntegration:
         await tag_repo.save(Tag(name=TagName("colleague")))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client, "list_contact_tags", {"limit": 10}, request_id=2
             )
 
@@ -737,7 +737,7 @@ class TestContactToolsIntegration:
         child = await tag_repo.save(Tag(name=TagName("colleague"), parent_id=parent.id))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client, "list_contact_tags", {"limit": 10}, request_id=2
             )
 
@@ -760,7 +760,7 @@ class TestContactToolsIntegration:
         tag = await tag_repo.save(Tag(name=TagName("friend"), color="#00FF00"))
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "update_contact_tag",
                 {
@@ -795,7 +795,7 @@ class TestContactToolsIntegration:
         fall through to the catch-all.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "update_contact_tag",
                 {"tag_id": "999999", "name": "ghost"},
@@ -820,7 +820,7 @@ class TestContactToolsIntegration:
         rather than letting the int() cast surface as a generic failure.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "update_contact_tag",
                 {"tag_id": "not-a-number", "name": "ghost"},
@@ -932,7 +932,7 @@ class TestContactToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "delete_contact_tag",
                 {"tag_id": str(tag.id)},
@@ -956,7 +956,7 @@ class TestContactToolsIntegration:
     ):
         """An unknown tag id is reported as not-found, not a generic failure."""
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "delete_contact_tag",
                 {"tag_id": "999999"},
@@ -997,7 +997,7 @@ class TestContactToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "merge_contact_tags",
                 {
@@ -1061,7 +1061,7 @@ class TestContactToolsIntegration:
             async def call_mcp(
                 name: str, args: dict[str, typing.Any]
             ) -> dict[str, typing.Any]:
-                return await call_mcp_tool_sessionless(authenticated_client, name, args)
+                return await call_mcp_tool(authenticated_client, name, args)
 
             # 1. Add relationship
             add_payload = await call_mcp(
@@ -1165,7 +1165,7 @@ class TestContactToolsIntegration:
         async with authenticated_lifespan_client() as authenticated_client:
 
             async def call_mcp(name: str, args: dict[str, Any]) -> dict[str, Any]:
-                return await call_mcp_tool_sessionless(authenticated_client, name, args)
+                return await call_mcp_tool(authenticated_client, name, args)
 
             # Happy path: survivor absorbs the source and is returned.
             merged = await call_mcp(
@@ -1227,7 +1227,7 @@ class TestContactToolsIntegration:
         async with authenticated_lifespan_client() as authenticated_client:
 
             async def call_mcp(name: str, args: dict[str, Any]) -> dict[str, Any]:
-                return await call_mcp_tool_sessionless(authenticated_client, name, args)
+                return await call_mcp_tool(authenticated_client, name, args)
 
             merged = await call_mcp(
                 "merge_contacts",
@@ -1613,7 +1613,7 @@ class TestContactConverterAISummaryIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client, "get_contact", {"contact_id": c1.id}
             )
 
@@ -1663,7 +1663,7 @@ class TestContactConverterAISummaryIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client, "get_contact", {"contact_id": c1.id}
             )
 
@@ -1739,7 +1739,7 @@ class TestContactHistoryOverMCPCountsTaskRecords:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "get_contact",
                 {
@@ -1796,7 +1796,7 @@ class TestContactHistoryOverMCPCountsTaskRecords:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "get_contact",
                 {
@@ -1881,7 +1881,7 @@ class TestListUpcomingImportantDatesTool:
 
     @staticmethod
     async def call(client: Any, **arguments: Any) -> dict[str, Any]:
-        return await call_mcp_tool_sessionless(
+        return await call_mcp_tool(
             client, "list_upcoming_important_dates", arguments, request_id=2
         )
 

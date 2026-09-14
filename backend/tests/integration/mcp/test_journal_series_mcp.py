@@ -1,6 +1,7 @@
 """Integration tests for MCP journal series tools."""
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -13,27 +14,16 @@ from app.core.journal.adapters.sql.journal_series_repository import (
 )
 from app.core.journal.models.journal_series import JournalSeries
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 USER_ID = "test-user-123"
 
 
-async def _call_tool(client, session_id: str, name: str, arguments: dict[str, object]):
-    response = await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
-    )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
+async def _call_tool(
+    client: Any, name: str, arguments: dict[str, object]
+) -> dict[str, Any]:
+    return await call_mcp_tool(client, name, arguments)
 
 
 async def _seed_journal(
@@ -72,11 +62,8 @@ class TestJournalSeriesToolsIntegration:
         self, authenticated_lifespan_client, clean_database: AsyncConnection
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             payload = await _call_tool(
                 client,
-                session_id,
                 "create_series",
                 {"name": "Physio appointments", "description": "Weekly physio"},
             )
@@ -98,9 +85,7 @@ class TestJournalSeriesToolsIntegration:
         await _seed_series(clean_database, name="Zebra series")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
-            payload = await _call_tool(client, session_id, "list_series", {})
+            payload = await _call_tool(client, "list_series", {})
 
             assert "error" not in payload
             names = [s["name"] for s in payload["series"]]
@@ -117,11 +102,7 @@ class TestJournalSeriesToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
-            payload = await _call_tool(
-                client, session_id, "get_series", {"series_id": series_id}
-            )
+            payload = await _call_tool(client, "get_series", {"series_id": series_id})
 
             assert "error" not in payload
             assert payload["id"] == series_id
@@ -139,31 +120,27 @@ class TestJournalSeriesToolsIntegration:
         journal_id = await _seed_journal(clean_database)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             add_payload = await _call_tool(
                 client,
-                session_id,
                 "add_journal_to_series",
                 {"series_id": series_id, "journal_id": journal_id},
             )
             assert "error" not in add_payload
 
             get_payload = await _call_tool(
-                client, session_id, "get_series", {"series_id": series_id}
+                client, "get_series", {"series_id": series_id}
             )
             assert [m["id"] for m in get_payload["member_journals"]] == [journal_id]
 
             remove_payload = await _call_tool(
                 client,
-                session_id,
                 "remove_journal_from_series",
                 {"series_id": series_id, "journal_id": journal_id},
             )
             assert "error" not in remove_payload
 
             get_payload = await _call_tool(
-                client, session_id, "get_series", {"series_id": series_id}
+                client, "get_series", {"series_id": series_id}
             )
             assert get_payload["member_journals"] == []
 
@@ -174,11 +151,8 @@ class TestJournalSeriesToolsIntegration:
         series_id = await _seed_series(clean_database, name="Old name")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             update_payload = await _call_tool(
                 client,
-                session_id,
                 "update_series",
                 {"series_id": series_id, "name": "New name"},
             )
@@ -186,7 +160,7 @@ class TestJournalSeriesToolsIntegration:
             assert update_payload["name"] == "New name"
 
             delete_payload = await _call_tool(
-                client, session_id, "delete_series", {"series_id": series_id}
+                client, "delete_series", {"series_id": series_id}
             )
             assert "error" not in delete_payload
 
@@ -200,11 +174,8 @@ class TestJournalSeriesToolsIntegration:
         journal_id = await _seed_journal(clean_database)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             payload = await _call_tool(
                 client,
-                session_id,
                 "add_journal_to_series",
                 {
                     "series_id": "00000000-0000-0000-0000-000000000042",
@@ -225,10 +196,8 @@ class TestJournalSeriesToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             payload = await _call_tool(
-                client, session_id, "get_journal", {"journal_id": journal_id}
+                client, "get_journal", {"journal_id": journal_id}
             )
 
             assert "error" not in payload
@@ -243,11 +212,8 @@ class TestJournalSeriesToolsIntegration:
         series_id = await _seed_series(clean_database, name="Keep this name")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             payload = await _call_tool(
                 client,
-                session_id,
                 "update_series",
                 {"series_id": series_id, "name": "   "},
             )

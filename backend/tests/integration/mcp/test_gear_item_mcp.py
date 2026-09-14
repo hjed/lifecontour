@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.gear_item_repository import SqlGearItemRepository
 from tests.integration.mcp.http_helpers import (
-    call_mcp_tool_sessionless,
+    call_mcp_tool,
 )
 
 
@@ -23,7 +23,7 @@ class TestGearItemToolsIntegration:
     ) -> None:
         """Test creating a gear item via the MCP tool."""
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "create_gear_item",
                 {
@@ -66,9 +66,7 @@ class TestGearItemToolsIntegration:
         await repo.save(item)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
-                authenticated_client, "list_gear_items", {}
-            )
+            payload = await call_mcp_tool(authenticated_client, "list_gear_items", {})
 
             assert "error" not in payload
             assert "gear_items" in payload
@@ -95,7 +93,7 @@ class TestGearItemToolsIntegration:
         assert saved_item.id is not None
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "get_gear_item",
                 {
@@ -124,7 +122,7 @@ class TestGearItemToolsIntegration:
         assert saved_item.id is not None
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "update_gear_item",
                 {

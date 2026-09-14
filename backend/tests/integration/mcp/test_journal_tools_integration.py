@@ -49,8 +49,7 @@ from app.mcp.domains.journals.tools import (
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    post_mcp_tool,
 )
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
@@ -65,25 +64,15 @@ from tests.integration.tasks.task_seeding import (
 
 async def call_delete_journal_tool(client: Any, journal_id: int) -> Any:
     """Ask the MCP ``delete_journal`` tool to delete a journal."""
-    return await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "delete_journal",
-                "arguments": {"journal_id": journal_id},
-            },
-        },
-        headers=mcp_headers(await initialize_mcp_session(client)),
+    return await post_mcp_tool(
+        client, "delete_journal", {"journal_id": journal_id}, request_id=2
     )
 
 
 class JournalTestProvider(Provider):
     """Test provider for journal services with mocked dependencies."""
 
-    def __init__(self, connection: AsyncConnection):
+    def __init__(self, connection: AsyncConnection) -> None:
         super().__init__()
         self.connection = connection
 
@@ -306,21 +295,10 @@ class TestJournalToolsIntegration:
         arguments: dict[str, str],
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {"name": tool_name, "arguments": arguments},
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                authenticated_client, tool_name, arguments, request_id=2
             )
 
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
             assert payload["error"] == "Validation error"
             assert payload["field"] == "Input"
             assert payload["message"] == (
@@ -333,8 +311,6 @@ class TestJournalToolsIntegration:
         self, authenticated_lifespan_client
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             calendar_response = await authenticated_client.post(
                 "/api/calendars",
                 json={
@@ -374,22 +350,13 @@ class TestJournalToolsIntegration:
             )
             assert journal_response.status_code == 201
 
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "delete_calendar",
-                        "arguments": {"calendar_id": calendar_id},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                authenticated_client,
+                "delete_calendar",
+                {"calendar_id": calendar_id},
+                request_id=2,
             )
 
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
             assert payload["error"] == "CONFLICT"
             assert payload["message"] == "Calendar is in use by 1 journal(s)"
 
@@ -419,20 +386,11 @@ class TestJournalToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "delete_journal",
-                        "arguments": {"journal_id": other_journal_id},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            response = await post_mcp_tool(
+                authenticated_client,
+                "delete_journal",
+                {"journal_id": other_journal_id},
+                request_id=2,
             )
 
         assert response.status_code == 200
@@ -461,21 +419,14 @@ class TestJournalToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "update_journal_entry",
-                        "arguments": {
-                            "journal_id": other_journal_id,
-                            "request": {"title": "Rewritten By A Stranger"},
-                        },
-                    },
+            response = await post_mcp_tool(
+                authenticated_client,
+                "update_journal_entry",
+                {
+                    "journal_id": other_journal_id,
+                    "request": {"title": "Rewritten By A Stranger"},
                 },
-                headers=mcp_headers(await initialize_mcp_session(authenticated_client)),
+                request_id=2,
             )
 
         assert response.status_code == 200
@@ -503,22 +454,15 @@ class TestJournalToolsIntegration:
         ).scalar_one()
 
         async with authenticated_lifespan_client() as authenticated_client:
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "link_journal_to_contact",
-                        "arguments": {
-                            "journal_id": other_journal_id,
-                            "contact_id": int(contact_id),
-                            "relationship_type": "PARTICIPANT",
-                        },
-                    },
+            response = await post_mcp_tool(
+                authenticated_client,
+                "link_journal_to_contact",
+                {
+                    "journal_id": other_journal_id,
+                    "contact_id": int(contact_id),
+                    "relationship_type": "PARTICIPANT",
                 },
-                headers=mcp_headers(await initialize_mcp_session(authenticated_client)),
+                request_id=2,
             )
 
         assert response.status_code == 200
@@ -551,18 +495,11 @@ class TestJournalToolsIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_merge_candidates",
-                        "arguments": {"journal_id": other_journal_id},
-                    },
-                },
-                headers=mcp_headers(await initialize_mcp_session(authenticated_client)),
+            response = await post_mcp_tool(
+                authenticated_client,
+                "get_merge_candidates",
+                {"journal_id": other_journal_id},
+                request_id=2,
             )
 
         assert response.status_code == 200
@@ -893,34 +830,22 @@ class TestJournalToolsIntegration:
         self, authenticated_lifespan_client, sample_journal_id: int
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "create_journal_entry",
-                        "arguments": {
-                            "request": {
-                                "title": "Child Journal",
-                                "content": "This is a child journal",
-                                "event_date_range": {
-                                    "start": "2024-01-15T00:00:00Z",
-                                    "end": "2024-01-15T01:00:00Z",
-                                },
-                                "parent_id": sample_journal_id,
-                            }
+            payload = await call_mcp_tool(
+                authenticated_client,
+                "create_journal_entry",
+                {
+                    "request": {
+                        "title": "Child Journal",
+                        "content": "This is a child journal",
+                        "event_date_range": {
+                            "start": "2024-01-15T00:00:00Z",
+                            "end": "2024-01-15T01:00:00Z",
                         },
-                    },
+                        "parent_id": sample_journal_id,
+                    }
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["title"] == "Child Journal"
@@ -937,11 +862,8 @@ class TestJournalToolsIntegration:
         even though it was persisted.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             create_payload = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "create_journal_entry",
                 {
                     "request": {
@@ -960,7 +882,6 @@ class TestJournalToolsIntegration:
 
             read_payload = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "get_journal",
                 {"journal_id": child_id},
             )
@@ -983,11 +904,8 @@ class TestJournalToolsIntegration:
         did not.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "update_journal_entry",
                 {
                     "journal_id": sample_journal_id,
@@ -1005,7 +923,6 @@ class TestJournalToolsIntegration:
 
             payload = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "update_journal_entry",
                 {
                     "journal_id": sample_journal_id,
@@ -1018,7 +935,6 @@ class TestJournalToolsIntegration:
 
             read_back = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "get_journal",
                 {"journal_id": sample_journal_id},
             )
@@ -1042,11 +958,8 @@ class TestJournalToolsIntegration:
         error the tool could only report as a 500. An agent cannot act on that.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             payload = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "update_journal_entry",
                 {
                     "journal_id": sample_journal_id,
@@ -1073,11 +986,8 @@ class TestJournalToolsIntegration:
     ) -> None:
         """A refused composite writes nothing — the content must not survive."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "update_journal_entry",
                 {
                     "journal_id": sample_journal_id,
@@ -1093,7 +1003,6 @@ class TestJournalToolsIntegration:
 
             read_payload = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "get_journal",
                 {"journal_id": sample_journal_id},
             )
@@ -1106,11 +1015,8 @@ class TestJournalToolsIntegration:
     ) -> None:
         """A journal with no parent still reports ``parent`` as null."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             payload = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "get_journal",
                 {"journal_id": sample_journal_id},
             )
@@ -1126,54 +1032,33 @@ class TestJournalToolsIntegration:
     ) -> None:
         # First create a child journal
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
-            create_response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "create_journal_entry",
-                        "arguments": {
-                            "request": {
-                                "title": "Independent Journal",
-                                "content": "Will be moved to under parent",
-                                "event_date_range": {
-                                    "start": "2024-01-15T00:00:00Z",
-                                    "end": "2024-01-15T01:00:00Z",
-                                },
-                            }
+            create_payload = await call_mcp_tool(
+                authenticated_client,
+                "create_journal_entry",
+                {
+                    "request": {
+                        "title": "Independent Journal",
+                        "content": "Will be moved to under parent",
+                        "event_date_range": {
+                            "start": "2024-01-15T00:00:00Z",
+                            "end": "2024-01-15T01:00:00Z",
                         },
-                    },
+                    }
                 },
-                headers=mcp_headers(session_id),
             )
 
-            create_payload = extract_mcp_json_payload(create_response.text)
             child_id = create_payload["id"]
 
             # Now update the parent_id
-            update_response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "update_journal_entry",
-                        "arguments": {
-                            "journal_id": child_id,
-                            "request": {"parent_id": sample_journal_id},
-                        },
-                    },
+            update_payload = await call_mcp_tool(
+                authenticated_client,
+                "update_journal_entry",
+                {
+                    "journal_id": child_id,
+                    "request": {"parent_id": sample_journal_id},
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
-
-            assert update_response.status_code == 200
-            update_payload = extract_mcp_json_payload(update_response.text)
 
             assert "error" not in update_payload
             assert update_payload["title"] == "Independent Journal"
@@ -1184,28 +1069,15 @@ class TestJournalToolsIntegration:
         self, authenticated_lifespan_client, sample_journal_id: int
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             # Try to set the journal as its own parent
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "update_journal_entry",
-                        "arguments": {
-                            "journal_id": sample_journal_id,
-                            "request": {"parent_id": sample_journal_id},
-                        },
-                    },
+            payload = await call_mcp_tool(
+                authenticated_client,
+                "update_journal_entry",
+                {
+                    "journal_id": sample_journal_id,
+                    "request": {"parent_id": sample_journal_id},
                 },
-                headers=mcp_headers(session_id),
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             # Since JournalCycleError maps to 400 Bad Request in API, it should map to Journal error in MCP
             assert payload["error"] == "Journal error"
@@ -1255,24 +1127,12 @@ class TestJournalToolsIntegration:
                 new_callable=AsyncMock,
             ) as mock_get:
                 mock_get.return_value = mock_summary
-                session_id = await initialize_mcp_session(authenticated_client)
 
-                response = await authenticated_client.post(
-                    "/mcp-server/mcp",
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {
-                            "name": "get_daily_summary",
-                            "arguments": {"summary_date": summary_date},
-                        },
-                    },
-                    headers=mcp_headers(session_id),
+                payload = await call_mcp_tool(
+                    authenticated_client,
+                    "get_daily_summary",
+                    {"summary_date": summary_date},
                 )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["summary_date"] == summary_date
@@ -1542,13 +1402,10 @@ class TestActivityMcpToolsMountedIntegration:
     async def _call_tool(
         self,
         authenticated_client: Any,
-        session_id: str,
         tool_name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        return await call_mcp_tool(
-            authenticated_client, session_id, tool_name, arguments
-        )
+        return await call_mcp_tool(authenticated_client, tool_name, arguments)
 
     async def _insert_journal(
         self,
@@ -1780,10 +1637,8 @@ class TestActivityMcpToolsMountedIntegration:
             await index_journal(journal_id)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "search_journals",
                 {"query": "river", "types": "kayaking", "limit": 10},
             )
@@ -1835,10 +1690,8 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_jogging_data(clean_database, journal_id=jogging_journal_id)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "search_activities",
                 {"activity_type": "kayaking", "limit": 10},
             )
@@ -1887,10 +1740,8 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_jogging_data(clean_database, journal_id=later_journal_id)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "search_activities",
                 {
                     "start_date": "2024-03-10T11:00:00Z",
@@ -1941,10 +1792,8 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_jogging_data(clean_database, journal_id=later_journal_id)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "search_activities",
                 {"activity_type": "jogging", "limit": 1},
             )
@@ -2015,10 +1864,8 @@ class TestActivityMcpToolsMountedIntegration:
         await self._insert_kayaking_data(clean_database, journal_id=paddle_id)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_activity_stats",
                 {},
             )
@@ -2073,10 +1920,8 @@ class TestActivityMcpToolsMountedIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_journal_hierarchy",
                 {"start_date": "2024-06-01"},
             )
@@ -2168,10 +2013,8 @@ class TestActivityMcpToolsMountedIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "analyze_activity_trends",
                 {"interval": "month"},
             )
@@ -2219,10 +2062,8 @@ class TestActivityMcpToolsMountedIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_route_history",
                 {"route_id": route_id},
             )
@@ -2265,10 +2106,8 @@ class TestActivityMcpToolsMountedIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_route_history",
                 {"route_id": target_route_id},
             )
@@ -2357,10 +2196,8 @@ class TestActivityMcpToolsMountedIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_journal_history",
                 {"journal_id": journal_id},
             )
@@ -2410,10 +2247,8 @@ class TestActivityMcpToolsMountedIntegration:
             )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_journal_history",
                 {"journal_id": journal_id, "page": 1, "limit": 2},
             )
@@ -2450,10 +2285,8 @@ class TestActivityMcpToolsMountedIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_journal_history",
                 {"journal_id": other_journal_id},
             )
@@ -2467,22 +2300,12 @@ class TestMergeMcpToolsMountedIntegration:
     async def _call_tool(
         self,
         authenticated_client: Any,
-        session_id: str,
         tool_name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": tool_name, "arguments": arguments},
-            },
-            headers=mcp_headers(session_id),
+        return await call_mcp_tool(
+            authenticated_client, tool_name, arguments, request_id=2
         )
-        assert response.status_code == 200
-        return extract_mcp_json_payload(response.text)
 
     @pytest.mark.asyncio
     async def test_merge_journals_repoints_an_anchored_task(
@@ -2534,10 +2357,8 @@ class TestMergeMcpToolsMountedIntegration:
             assert task_response.status_code == 201
             task_id = int(task_response.json()["data"]["id"])
 
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "merge_journals",
                 {
                     "target_journal_id": target_id,
@@ -2623,10 +2444,8 @@ class TestMergeMcpToolsMountedIntegration:
                 authenticated_client, "Source Journal"
             )
 
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "merge_journals",
                 {
                     "target_journal_id": target_id,
@@ -2687,10 +2506,8 @@ class TestMergeMcpToolsMountedIntegration:
             source_id = int(source_response.json()["data"]["id"])
 
             # Merge via MCP
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "merge_journals",
                 {
                     "target_journal_id": target_id,
@@ -2749,10 +2566,8 @@ class TestMergeMcpToolsMountedIntegration:
             assert source_response.status_code == 201
             source_id = int(source_response.json()["data"]["id"])
 
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "merge_journals",
                 {
                     "target_journal_id": target_id,
@@ -2795,10 +2610,8 @@ class TestMergeMcpToolsMountedIntegration:
             assert target_response.status_code == 201
             journal_id = int(target_response.json()["data"]["id"])
 
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "merge_journals",
                 {
                     "target_journal_id": journal_id,
@@ -2839,10 +2652,8 @@ class TestMergeMcpToolsMountedIntegration:
             assert target_response.status_code == 201
             target_id = int(target_response.json()["data"]["id"])
 
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "merge_journals",
                 {
                     "target_journal_id": target_id,
@@ -2919,10 +2730,8 @@ class TestMergeMcpToolsMountedIntegration:
             )
             assert nonoverlap_response.status_code == 201
 
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await self._call_tool(
                 authenticated_client,
-                session_id,
                 "get_merge_candidates",
                 {"journal_id": target_id},
             )

@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from mcp_types.jsonrpc import HEADER_MISMATCH
+from mcp_types.version import LATEST_HANDSHAKE_VERSION
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
@@ -19,9 +20,8 @@ from app.core.journal.models.journal_tag import JournalTag
 from tests.integration.mcp.http_helpers import (
     MCP_PATH,
     call_mcp_tool,
-    call_mcp_tool_sessionless,
     extract_mcp_json_payload,
-    initialize_mcp_session,
+    mcp_headers,
     sessionless_mcp_headers,
     sessionless_mcp_request,
 )
@@ -29,6 +29,56 @@ from tests.integration.mcp.http_helpers import (
 
 async def _save_tag(connection: AsyncConnection, name: str) -> None:
     await SqlJournalTagRepository(connection).save(JournalTag(name=name))
+
+
+async def _initialize_session(client: Any) -> str:
+    """Open a handshake-era session and return its id.
+
+    Asks for the newest handshake version explicitly: the SDK's latest
+    protocol is the sessionless one, which has no ``initialize`` at all.
+    """
+    response = await client.post(
+        MCP_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_HANDSHAKE_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "pytest", "version": "1.0"},
+            },
+        },
+        headers=mcp_headers(),
+    )
+    assert response.status_code == 200, response.text
+    session_id = response.headers.get("mcp-session-id")
+    assert isinstance(session_id, str)
+
+    initialized = await client.post(
+        MCP_PATH,
+        json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        headers={**mcp_headers(), "mcp-session-id": session_id},
+    )
+    assert initialized.status_code in {200, 202, 204}
+    return session_id
+
+
+async def _call_tool_in_session(
+    client: Any, session_id: str, tool_name: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    response = await client.post(
+        MCP_PATH,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
+        },
+        headers={**mcp_headers(), "mcp-session-id": session_id},
+    )
+    assert response.status_code == 200, response.text
+    return extract_mcp_json_payload(response.text)
 
 
 @pytest.mark.integration
@@ -68,7 +118,7 @@ class TestSessionlessProtocol:
         await _save_tag(clean_database, "via-helper")
 
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool_sessionless(client, "list_journal_tags", {})
+            payload = await call_mcp_tool(client, "list_journal_tags", {})
 
         assert payload["total_count"] == 1
 
@@ -117,7 +167,9 @@ class TestHandshakeProtocol:
         await _save_tag(clean_database, "handshake")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await call_mcp_tool(client, session_id, "list_journal_tags", {})
+            session_id = await _initialize_session(client)
+            payload = await _call_tool_in_session(
+                client, session_id, "list_journal_tags", {}
+            )
 
         assert [tag["name"] for tag in payload["tags"]] == ["handshake"]

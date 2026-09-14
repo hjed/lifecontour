@@ -238,6 +238,28 @@ Simply run `pnpm test:e2e` in `frontend/` or `python scripts/run_integration_tes
 - Test validation error handling
 - Use realistic test data
 
+### MCP Integration Testing Guidelines
+
+MCP tools are tested through the mounted app (`authenticated_lifespan_client`),
+speaking the **sessionless `2026-07-28` protocol** that current clients
+negotiate — see [MCP Setup → Protocol Versions](../mcp-setup.md#protocol-versions).
+There is no `initialize` handshake and no `mcp-session-id`; use the helpers in
+`backend/tests/integration/mcp/http_helpers.py`:
+
+- `call_mcp_tool(client, tool_name, arguments)` — call a tool and return its
+  JSON payload. Prefer it for ordinary tool tests.
+- `sessionless_mcp_request(method, params)` with
+  `sessionless_mcp_headers(method, name)` — build a raw request when the test
+  needs the HTTP response itself (status code, headers, an `isError` body).
+  The headers must name the same method and tool as the body, or the server
+  rejects the request.
+- `extract_mcp_json_payload(response.text)` — unwrap the tool's payload from a
+  raw response.
+
+Handshake-era (session-based) requests appear only in
+`tests/integration/mcp/test_mcp_protocol_eras.py`, which pins that older
+clients keep working; don't add session handling to other tests.
+
 ## Frontend Testing with React Testing Library
 
 ### Component Testing Guidelines
