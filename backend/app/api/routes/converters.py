@@ -10,11 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core_shared.models import Route
-from core_shared.models.journals import RouteValidationError
 
 from app.api.common.schemas import JsonApiLinks
 from app.api.routes.schemas import RouteResource, RouteResponseAttributes
-from app.core.journal.utils.route_edits import build_new_route
+from app.core.journal.utils.route_edits import RouteEdit, build_new_route
 
 if TYPE_CHECKING:
     from app.api.routes.schemas import RouteCreateData, RouteUpdateData
@@ -90,67 +89,22 @@ class RouteRequestConverter:
         )
 
     @staticmethod
-    def from_update_request(
-        data: RouteUpdateData, existing_route: Route
-    ) -> tuple[Route, dict[str, tuple[str | None, str | None]]]:
+    def to_route_edit(data: RouteUpdateData) -> RouteEdit:
         """
-        Convert API update request to Route domain entity with changed fields.
+        Convert an API update request to a route edit.
+
+        A PUT replaces every editable field, so all three are set. The route's
+        id comes from the URL, never the request body, so a mismatched id in
+        the body cannot retarget the update.
 
         Args:
             data: The API request data
-            existing_route: The existing route from the database
 
         Returns:
-            Tuple of (updated Route entity, changed fields dict)
-            Changed fields format: {field_name: (old_value, new_value)}
-
-        Raises:
-            RouteValidationError: If route validation fails
+            RouteEdit setting the name, description and GPX data
         """
-        # Calculate changed fields for event tracking
-        changed_fields: dict[str, tuple[str | None, str | None]] = {}
-
-        if data.attributes.name != existing_route.name:
-            changed_fields["name"] = (existing_route.name, data.attributes.name)
-
-        if data.attributes.description != existing_route.description:
-            changed_fields["description"] = (
-                existing_route.description,
-                data.attributes.description,
-            )
-
-        if data.attributes.gpx_data != existing_route.gpx_data:
-            # For GPX data, we don't include the full content in events (too large)
-            # Just track that it changed
-            changed_fields["gpx_data"] = (
-                "present" if existing_route.gpx_data else None,
-                "present" if data.attributes.gpx_data else None,
-            )
-
-        # Create updated route entity
-        # Note: We use existing_route.id to prevent ID mismatch attacks
-        # The path parameter is the authoritative source of the route ID
-        try:
-            updated_route = Route(
-                id=existing_route.id,
-                journal_id=existing_route.journal_id,
-                name=data.attributes.name,
-                description=data.attributes.description,
-                gpx_data=data.attributes.gpx_data,
-                created_at=existing_route.created_at,
-                updated_at=existing_route.updated_at,
-            )
-        except ValueError as e:
-            # Convert ValueError from Route entity to RouteValidationError
-            error_msg = str(e)
-            if "GPX" in error_msg or "gpx" in error_msg:
-                field = "gpx_data"
-            elif "name" in error_msg.lower():
-                field = "name"
-            elif "user" in error_msg.lower():
-                field = "user_id"
-            else:
-                field = "route"
-            raise RouteValidationError(field, error_msg) from e
-
-        return updated_route, changed_fields
+        return RouteEdit(
+            name=data.attributes.name,
+            description=data.attributes.description,
+            gpx_data=data.attributes.gpx_data,
+        )

@@ -158,6 +158,40 @@ class TestRouteRepositoryFindById:
 
 
 @pytest.mark.integration
+class TestRouteRepositoryFindByIdForUpdate:
+    """The locking read ``RouteService.update_route`` merges an edit into.
+
+    The ``FOR UPDATE`` lock itself cannot be exercised here: a second
+    connection would commit outside the test's savepoint.
+    """
+
+    async def test_returns_the_route(
+        self, route_repository: SqlRouteRepository, test_journal: Journal
+    ) -> None:
+        gpx_data = '<?xml version="1.0"?><gpx version="1.1"></gpx>'
+        saved = await route_repository.save(
+            create_test_route(journal_id=test_journal.id, gpx_data=gpx_data)
+        )
+        assert saved.id is not None
+
+        found = await route_repository.find_by_id_for_update(saved.id)
+
+        assert found is not None
+        assert (found.id, found.journal_id, found.name, found.gpx_data) == (
+            saved.id,
+            test_journal.id,
+            "Test Route",
+            gpx_data,
+        )
+        assert found.created_at == saved.created_at
+
+    async def test_returns_none_for_missing(
+        self, route_repository: SqlRouteRepository
+    ) -> None:
+        assert await route_repository.find_by_id_for_update(uuid4()) is None
+
+
+@pytest.mark.integration
 class TestRouteRepositoryDelete:
     """Test route delete operations."""
 
