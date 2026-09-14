@@ -444,20 +444,42 @@ describe('useAnchorDayRefresh', () => {
  */
 describe('isSettledDashboardRead', () => {
   it('is settled once a read has succeeded with nothing in flight', () => {
-    expect(isSettledDashboardRead({ isSuccess: true, isFetching: false })).toBe(
-      true
-    );
+    expect(
+      isSettledDashboardRead({
+        isSuccess: true,
+        isFetching: false,
+        isFetchedAfterMount: true,
+      })
+    ).toBe(true);
   });
 
   it('is not settled while a read is in flight', () => {
-    expect(isSettledDashboardRead({ isSuccess: true, isFetching: true })).toBe(
-      false
-    );
+    expect(
+      isSettledDashboardRead({
+        isSuccess: true,
+        isFetching: true,
+        isFetchedAfterMount: true,
+      })
+    ).toBe(false);
+  });
+
+  it('is not settled on a cached read this mount did not make, however fresh', () => {
+    expect(
+      isSettledDashboardRead({
+        isSuccess: true,
+        isFetching: false,
+        isFetchedAfterMount: false,
+      })
+    ).toBe(false);
   });
 
   it('is not settled when the latest read failed, whatever data is cached', () => {
     expect(
-      isSettledDashboardRead({ isSuccess: false, isFetching: false })
+      isSettledDashboardRead({
+        isSuccess: false,
+        isFetching: false,
+        isFetchedAfterMount: true,
+      })
     ).toBe(false);
   });
 });
@@ -710,13 +732,48 @@ describe('useObtainTodaySummaryOnLoad', () => {
 
     // Straight back, with the fake clock not advanced: the previous read's
     // eviction timer has not run, so a key shared across mounts would answer
-    // from it and this load would read nothing.
+    // from it and this load would read nothing. The dashboard is read again on
+    // the way in, as the page's refetch on mount does, because the decision
+    // waits for a read this mount made.
     const second = renderOnLoad(harness);
+    await act(async () => {
+      await harness.queryClient.invalidateQueries({
+        queryKey: homeDashboardKeys.all,
+      });
+    });
 
     await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(2));
     await waitFor(() =>
       expect(second.result.current.obtain.isObtaining).toBe(false)
     );
+  });
+
+  /**
+   * A remount within the stale time renders a fresh cached payload and fetches
+   * nothing, so this visit has read nothing (Augment review on PR #1470). The
+   * decision waits for a read this mount made — on the page, its refetch on
+   * mount.
+   */
+  it('decides only on a read this mount made, not on a fresh cached one', async () => {
+    const harness = productionHarness();
+    harness.queryClient.setQueryData(
+      homeDashboardKeys.all,
+      withSummary(GENERATING_SECTION)
+    );
+    served = withSummary(GENERATING_SECTION);
+
+    const { queryClient } = renderOnLoad(harness);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+    expect(callsTo(DASHBOARD_URL)).toBe(0);
+    expect(callsTo(SUMMARY_URL)).toBe(0);
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: homeDashboardKeys.all });
+    });
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
   });
 
   it('is obtaining from the first render that holds the read', async () => {

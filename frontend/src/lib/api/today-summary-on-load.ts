@@ -90,7 +90,8 @@ export interface TodaySummaryOnLoad {
 export function useObtainTodaySummaryOnLoad(): TodaySummaryOnLoad {
   const queryClient = useQueryClient();
   const mountId = useId();
-  const { data, isFetching, isSuccess } = useHomeDashboard();
+  const { data, isFetching, isSuccess, isFetchedAfterMount } =
+    useHomeDashboard();
   const [decision, setDecision] = useState<LoadDecision | null>(null);
   const [readBackFor, setReadBackFor] = useState<string | null>(null);
   const taskWritesInFlight = useIsMutating({ predicate: isTaskWrite });
@@ -110,7 +111,7 @@ export function useObtainTodaySummaryOnLoad(): TodaySummaryOnLoad {
   const undecided =
     data !== undefined &&
     liveDate !== undefined &&
-    isSettledDashboardRead({ isSuccess, isFetching }) &&
+    isSettledDashboardRead({ isSuccess, isFetching, isFetchedAfterMount }) &&
     decision?.date !== liveDate;
   if (undecided) {
     setDecision({ date: liveDate, obtain: !hasProse });

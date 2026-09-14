@@ -12,7 +12,10 @@
 
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithProviders } from '@/test-utils';
+import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
+import { AuthProvider } from '@/lib/auth/AuthProvider';
 import HomePage from '@/app/page';
 import { ImportantDateTypeEnum } from '@/types/contacts';
 import {
@@ -403,6 +406,38 @@ describe('HomePage — the dashboard shell', () => {
   });
 
   describe('One round trip', () => {
+    /**
+     * The page is about now, so a visit reads it: with the app's own five-minute
+     * stale time, client-side navigation back would otherwise render the cached
+     * payload and read nothing, and the summary card could not tell this visit's
+     * read from the last one's (Augment review on PR #1470).
+     */
+    it('reads the dashboard again when it mounts over a fresh cache', async () => {
+      freezeOnTheAnchorDay();
+      const client = new QueryClient({
+        defaultOptions: QUERY_CLIENT_DEFAULT_OPTIONS,
+      });
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={client}>
+          <AuthProvider>{children}</AuthProvider>
+        </QueryClientProvider>
+      );
+      const dashboardCalls = () =>
+        mockFetch.mock.calls.filter(
+          ([input]) => String(input) === DASHBOARD_URL
+        ).length;
+
+      const first = renderWithProviders(<HomePage />, { wrapper });
+      await screen.findByTestId('home-dashboard-ready');
+      await waitFor(() => expect(dashboardCalls()).toBe(1));
+      first.unmount();
+
+      renderWithProviders(<HomePage />, { wrapper });
+      await screen.findByTestId('home-dashboard-ready');
+
+      await waitFor(() => expect(dashboardCalls()).toBe(2));
+    });
+
     it('fetches the dashboard once for the whole page', async () => {
       freezeOnTheAnchorDay();
       await renderHomePage();

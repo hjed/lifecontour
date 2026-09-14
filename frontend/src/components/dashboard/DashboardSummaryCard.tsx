@@ -174,7 +174,8 @@ function DashboardSummaryUnavailable() {
 }
 
 function DashboardSummaryCardBody() {
-  const { data, isPending, isFetching, isSuccess } = useHomeDashboard();
+  const { data, isPending, isFetching, isSuccess, isFetchedAfterMount } =
+    useHomeDashboard();
   const { mutate: regenerate, isPending: isRegenerating } =
     useRegenerateDailySummary();
   const { isObtaining } = useObtainTodaySummaryOnLoad();
@@ -198,7 +199,7 @@ function DashboardSummaryCardBody() {
   const shown = useHeldSummary(
     anchor?.date,
     generated,
-    isSettledDashboardRead({ isSuccess, isFetching })
+    isSettledDashboardRead({ isSuccess, isFetching, isFetchedAfterMount })
   );
   const prose = shown?.summary_text ?? null;
   // While the card obtains today's summary, one is being generated, whatever the

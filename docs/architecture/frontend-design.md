@@ -1075,6 +1075,9 @@ elements are numbered **W1**–**W33**.
     missing, invalidated or stale summary — and reads the dashboard back when
     that answer carries a row. It reads and never forces; its read-back waits
     for any *task* write in flight, and settles however the read-back ends.
+    A read counts as settled only once this mount has made it, succeeded and
+    finished (`isSettledDashboardRead`); the page refetches on mount so every
+    visit makes one.
     While it obtains, the card shows **W8** and Regenerate is busy.
   - **A generated summary the card has drawn is held for the visit**: prose,
     key stats and no badge stay when a later read of the same anchor day

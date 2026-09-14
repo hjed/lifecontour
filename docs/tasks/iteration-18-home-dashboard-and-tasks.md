@@ -13653,6 +13653,17 @@ production defaults rather than the shared harness — which is ITER18-004 Phase
 - **While obtaining, the card says *generating*.** A new day's first load has no row, which the section
   reports as unavailable; drawing **W9**'s "No summary today" beside a busy Regenerate would say the opposite
   of what is happening.
+- **Review round four (PR #1470)**: *settled* also requires a read **this mount made**, because inside the
+  five-minute stale time a remount renders a fresh cached payload with no request, and the hold took the
+  previous visit's prose from it. The page now refetches on mount (`useHomeDashboard({ refetchOnMount:
+  'always' })`) so every visit has that read — one request, since the cards keep the defaults. User
+  decision, after the review loop's third Augment round.
+  *One consequence recorded rather than hidden:* round three's per-mount key for the on-load read no longer
+  has a test that fails without it. Waiting for a read this mount made means waiting for a network
+  round trip, by which time `gcTime: 0` has already evicted the previous mount's entry, so the race that
+  key closed is now closed by the settled rule as well. The key stays as a second, cheap guard, and the
+  remount test now asserts the behaviour — a remount reads today's summary again once it has read the
+  dashboard — rather than the key.
 - **Review round three (PR #1470)** closed three more holes, each with a test that failed first. *Settled*
   now means a read that **succeeded** with nothing in flight — one `isSettledDashboardRead` shared by the
   read on load and the hold — because React Query keeps the cached payload when a refetch fails. The read's

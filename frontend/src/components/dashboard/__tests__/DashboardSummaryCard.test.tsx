@@ -11,13 +11,19 @@
  * browser's clock, or that ignores the section's `status`, pass.
  */
 
-import { QueryClient, useQueryClient } from '@tanstack/react-query';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
 import {
   act,
   fireEvent,
   screen,
   waitFor,
   within,
+  render,
 } from '@testing-library/react';
 import { useEffect } from 'react';
 import userEvent from '@testing-library/user-event';
@@ -839,6 +845,42 @@ describe('DashboardSummaryCard — today’s summary across a visit', () => {
       ).not.toBeInTheDocument();
       expect(
         screen.queryByTestId('dashboard-summary-stats')
+      ).not.toBeInTheDocument();
+    });
+
+    /**
+     * With the app's own defaults a remount inside the five-minute stale time
+     * renders the cached payload and fetches nothing, so this visit has drawn
+     * nothing current. Holding that prose would keep it over a later read that
+     * reports today stale (Augment review on PR #1470).
+     */
+    it('holds nothing from a fresh cached read this mount did not make', async () => {
+      const client = new QueryClient({
+        defaultOptions: QUERY_CLIENT_DEFAULT_OPTIONS,
+      });
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      );
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const view = render(<DashboardSummaryCard />, { wrapper });
+      await screen.findByTestId('dashboard-summary-text');
+
+      // Leave and come straight back: the cache is fresh, so nothing is read.
+      view.rerender(<></>);
+      current = dashboardWith(GENERATING_SUMMARY);
+      view.rerender(<DashboardSummaryCard />);
+      expect(dashboardReads()).toBe(1);
+
+      // A later read — a task tick's, say — reports today stale.
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: homeDashboardKeys.all });
+      });
+      await waitFor(() => expect(dashboardReads()).toBe(2));
+
+      expect(await screen.findByText(GENERATING_LINE)).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-summary-text')
       ).not.toBeInTheDocument();
     });
 
