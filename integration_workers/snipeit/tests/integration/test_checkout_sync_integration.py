@@ -91,6 +91,12 @@ class TestCheckoutSyncIntegration:
         )
 
         # Step 2: Mock Snipe-IT checkout POST response
+        # The asset's dates are read before the checkout replaces them.
+        mock_transport.add_response(
+            "/hardware/42",
+            json_data={"id": 42, "asset_tag": "T-42", "last_checkout": None},
+            method="GET",
+        )
         mock_transport.add_response(
             "/hardware/42/checkout",
             json_data={
@@ -312,6 +318,11 @@ class TestCheckoutSyncIntegration:
         )
 
         # Step 2: Mock Snipe-IT checkout POST response
+        mock_transport.add_response(
+            "/hardware/99",
+            json_data={"id": 99, "asset_tag": "T-99"},
+            method="GET",
+        )
         mock_transport.add_response(
             "/hardware/99/checkout",
             json_data={

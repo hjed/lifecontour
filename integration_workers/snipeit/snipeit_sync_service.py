@@ -25,6 +25,7 @@ from sqlalchemy import text
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
 from snipeit_data_transformer import SnipeItDataTransformer
 from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
+from snipeit_models import SnipeItAsset
 from snipeit_rate_limiter import SnipeItRateLimitError
 
 logger = structlog.get_logger(__name__)
@@ -84,6 +85,9 @@ def _format_date_for_snipeit(
 # Snipe-IT's naive ``Y-m-d H:i:s`` datetime format.
 _SNIPEIT_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# ``reference_data`` key of the asset dates read before a checkout.
+_ASSET_DATES_BEFORE = "asset_dates_before"
+
 
 def _snipeit_zone(row: Any) -> str | None:
     """Return the zone every date and time sent to Snipe-IT is read in.
@@ -97,8 +101,10 @@ def _snipeit_zone(row: Any) -> str | None:
     return _resolve_zone(getattr(row, "user_timezone", None))
 
 
-def _snipeit_datetime(value: date | datetime | None, zone: str | None) -> str | None:
-    """Format ``value`` as the naive ``Y-m-d H:i:s`` wall-clock time in ``zone``.
+def _snipeit_wall_clock(
+    value: date | datetime | None, zone: str | None
+) -> datetime | None:
+    """Return ``value`` as a naive wall-clock datetime in ``zone``.
 
     Naive datetimes are UTC (the storage convention); a plain date is its
     midnight. ``zone`` must be loadable (see :func:`_snipeit_zone`).
@@ -106,11 +112,31 @@ def _snipeit_datetime(value: date | datetime | None, zone: str | None) -> str | 
     if value is None:
         return None
     if not isinstance(value, datetime):
-        return datetime.combine(value, time()).strftime(_SNIPEIT_DATETIME_FORMAT)
+        return datetime.combine(value, time())
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
-    local = value.astimezone(ZoneInfo(zone) if zone else UTC)
-    return local.strftime(_SNIPEIT_DATETIME_FORMAT)
+    return value.astimezone(ZoneInfo(zone) if zone else UTC).replace(tzinfo=None)
+
+
+def _format_wall_clock(value: datetime | None) -> str | None:
+    """Format a naive wall-clock datetime the way Snipe-IT stores it."""
+    return value.strftime(_SNIPEIT_DATETIME_FORMAT) if value else None
+
+
+def _parse_wall_clock(value: object) -> datetime | None:
+    """Parse a Snipe-IT ``Y-m-d H:i:s`` string, or ``None`` when it is not one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        # Naive on purpose: Snipe-IT's wall-clock times carry no zone.
+        return datetime.strptime(value, _SNIPEIT_DATETIME_FORMAT)  # noqa: DTZ007
+    except ValueError:
+        return None
+
+
+def _snipeit_datetime(value: date | datetime | None, zone: str | None) -> str | None:
+    """Format ``value`` as the naive ``Y-m-d H:i:s`` wall-clock time in ``zone``."""
+    return _format_wall_clock(_snipeit_wall_clock(value, zone))
 
 
 async def _fetch_journal_row(session: Any, journal_id: int) -> Any:
@@ -1339,13 +1365,14 @@ class SnipeItSyncService:
         external_id = f"snipeit_checkout:{snipeit_asset_id}:{journal_id}"
 
         previous_asset_id: int | None = None
+        asset_dates_before: AssetUsageDates | None = None
 
         # Check if already synced and acquire a distributed lock by marking as pending
         async with session_factory() as session:
             async with session.begin():
                 checkout_meta_result = await session.execute(
                     text("""
-                        SELECT sync_status, external_id,
+                        SELECT sync_status, external_id, reference_data,
                                extract(epoch from (now() - updated_at)) as age_seconds
                         FROM sync_metadata
                         WHERE integration_source = 'snipeit_checkout'
@@ -1372,6 +1399,13 @@ class SnipeItSyncService:
                         )
 
                     previous_asset_id = _checkout_asset_id(row.external_id)
+                    if previous_asset_id == snipeit_asset_id:
+                        # A superseded pair on this asset keeps the dates read
+                        # before its first checkout: the asset now carries that
+                        # pair's dates, not the ones it had before this journal.
+                        asset_dates_before = AssetUsageDates.from_reference(
+                            row.reference_data
+                        )
                     await session.execute(
                         text("""
                             UPDATE sync_metadata
@@ -1474,6 +1508,10 @@ class SnipeItSyncService:
                 session_factory=session_factory,
             )
             if linked_log_id is None:
+                if asset_dates_before is None:
+                    asset_dates_before = AssetUsageDates.from_asset(
+                        await self._api_client.get_asset(snipeit_asset_id)
+                    )
                 await self._api_client.checkout_asset(
                     asset_id=snipeit_asset_id,
                     payload=payload,
@@ -1511,6 +1549,8 @@ class SnipeItSyncService:
         }
         if linked_log_id is not None:
             checkout_reference["snipeit_log_id"] = linked_log_id
+        elif asset_dates_before is not None:
+            checkout_reference[_ASSET_DATES_BEFORE] = asset_dates_before.to_reference()
 
         # Save sync metadata: journal_id → snipeit_checkout
         # Note: Snipe-IT does not support an idempotency key on checkouts.
@@ -1556,6 +1596,9 @@ class SnipeItSyncService:
                 session_factory=session_factory,
                 note=f"Usage period {checkout_at} to {expected_checkin}",
                 checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
+                usage_dates=AssetUsageDates.from_instants(
+                    checkout_date, checkin_date, zone
+                ),
             )
 
     async def _return_previous_asset(
@@ -1848,6 +1891,7 @@ class SnipeItSyncService:
         session_factory: Any,
         note: str | None = None,
         checkin_at: date | None = None,
+        usage_dates: AssetUsageDates | None = None,
     ) -> bool:
         """Return (check in) the asset previously checked out for a GEAR_USAGE journal.
 
@@ -1866,6 +1910,12 @@ class SnipeItSyncService:
             checkin_at: The local date the asset was returned. Sent as Snipe-IT's
                 ``checkin_at`` so the check-in is backdated; ``None`` lets
                 Snipe-IT stamp the check-in now (e.g. on journal deletion).
+            usage_dates: The usage's own checkout and check-in times. Snipe-IT
+                sets the asset's last check-in to now (and a historical checkout
+                replaced its last checkout), so after a posted check-in each is
+                restored to the later of these and the asset's dates from before
+                the checkout. ``None`` leaves the asset's dates as Snipe-IT set
+                them (e.g. on journal deletion, when now is right).
 
         Returns:
             ``True`` only when a check-in was actively performed against Snipe-IT;
@@ -1983,6 +2033,7 @@ class SnipeItSyncService:
         # returned there too; link that check-in rather than POST another.
         checkout_log_id = self._recorded_log_id(checkout_row.reference_data)
         linked_log_id: int | None = None
+        restore_baseline: AssetUsageDates | None = None
         try:
             if checkin_at and checkout_log_id is not None:
                 linked_log_id = await self._find_unlinked_activity(
@@ -1996,6 +2047,10 @@ class SnipeItSyncService:
                     after_log_id=checkout_log_id,
                 )
             if linked_log_id is None:
+                if usage_dates is not None:
+                    restore_baseline = await self._checkin_restore_baseline(
+                        snipeit_asset_id, checkout_row.reference_data
+                    )
                 await self._api_client.checkin_asset(
                     asset_id=snipeit_asset_id,
                     payload=payload,
@@ -2054,7 +2109,62 @@ class SnipeItSyncService:
             journal_id=journal_id,
             snipeit_asset_id=snipeit_asset_id,
         )
+        if usage_dates is not None and restore_baseline is not None:
+            # A checkout linked to existing history left Snipe-IT's own date.
+            await self._restore_asset_dates(
+                snipeit_asset_id,
+                restore_baseline.latest(usage_dates).payload(
+                    include_checkout=checkout_log_id is None
+                ),
+                journal_id=journal_id,
+            )
         return True
+
+    async def _checkin_restore_baseline(
+        self, asset_id: int, checkout_reference: object
+    ) -> AssetUsageDates | None:
+        """Return the asset dates a check-in's restore must not move backwards.
+
+        These are the dates read before the journal's checkout. A checkout
+        recorded without them (before they were kept, or linked to existing
+        history) falls back to the asset as it is now: still checked out, so its
+        last check-in is the one before this usage. ``None`` when that read
+        fails, as restoring against nothing could move a later date back.
+        """
+        kept = AssetUsageDates.from_reference(checkout_reference)
+        if kept is not None:
+            return kept
+        try:
+            asset = await self._api_client.get_asset(asset_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not read Snipe-IT asset dates; they will not be restored",
+                snipeit_asset_id=asset_id,
+                exc_info=True,
+            )
+            return None
+        return AssetUsageDates.from_asset(asset)
+
+    async def _restore_asset_dates(
+        self, asset_id: int, payload: dict[str, str], *, journal_id: int
+    ) -> None:
+        """PATCH an asset's last checkout/check-in after a posted check-in.
+
+        Best-effort: the check-in is already recorded, and a failure only leaves
+        these display dates wrong, whereas raising would retry, and so re-post,
+        a check-in Snipe-IT already has.
+        """
+        if not payload:
+            return
+        try:
+            await self._api_client.update_asset(asset_id, payload)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to restore Snipe-IT asset dates after check-in",
+                journal_id=journal_id,
+                snipeit_asset_id=asset_id,
+                exc_info=True,
+            )
 
     async def _finalize_checkin(
         self,
@@ -2229,6 +2339,9 @@ class SnipeItSyncService:
                 session_factory=session_factory,
                 note=note,
                 checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
+                usage_dates=AssetUsageDates.from_instants(
+                    checkout_date, checkin_date, zone
+                ),
             )
             if checked_in and checkout_date_changed:
                 # That check-in closed a checkout recorded on the old date; with
@@ -2314,6 +2427,90 @@ class SnipeItSyncService:
         return value if isinstance(value, int) else None
 
 
+def _later(first: datetime | None, second: datetime | None) -> datetime | None:
+    """Return the later of two optional datetimes (a missing one loses)."""
+    return max((value for value in (first, second) if value is not None), default=None)
+
+
+@dataclass(frozen=True)
+class AssetUsageDates:
+    """An asset's last checkout and check-in, as Snipe-IT's naive wall-clock times.
+
+    Snipe-IT sets an asset's ``last_checkin`` to the moment a check-in is posted
+    and its ``last_checkout`` to whatever a checkout says, so recording past
+    usage leaves both wrong. The dates read before the worker checks an asset
+    out are kept on the checkout sync row, and after the check-in each is
+    restored to the later of that value and the usage's own date, so importing
+    an older trip never makes an asset look less recently used.
+    """
+
+    last_checkout: datetime | None = None
+    last_checkin: datetime | None = None
+
+    @classmethod
+    def from_asset(cls, asset: SnipeItAsset) -> AssetUsageDates:
+        """Read the dates of a ``GET /hardware/{id}`` response."""
+        return cls(
+            last_checkout=_parse_wall_clock(
+                asset.last_checkout.datetime if asset.last_checkout else None
+            ),
+            last_checkin=_parse_wall_clock(
+                asset.last_checkin.datetime if asset.last_checkin else None
+            ),
+        )
+
+    @classmethod
+    def from_instants(
+        cls,
+        checkout: date | datetime | None,
+        checkin: date | datetime | None,
+        zone: str | None,
+    ) -> AssetUsageDates:
+        """The usage's own checkout and check-in, read in Snipe-IT's zone."""
+        return cls(
+            last_checkout=_snipeit_wall_clock(checkout, zone),
+            last_checkin=_snipeit_wall_clock(checkin, zone),
+        )
+
+    @classmethod
+    def from_reference(cls, reference_data: object) -> AssetUsageDates | None:
+        """Return the dates a checkout sync row kept, or ``None`` if it kept none."""
+        kept = SnipeItSyncService._recorded_reference(reference_data).get(
+            _ASSET_DATES_BEFORE
+        )
+        if not isinstance(kept, dict):
+            return None
+        return cls(
+            last_checkout=_parse_wall_clock(kept.get("last_checkout")),
+            last_checkin=_parse_wall_clock(kept.get("last_checkin")),
+        )
+
+    def to_reference(self) -> dict[str, str | None]:
+        """The dates as kept on a checkout sync row's ``reference_data``."""
+        return {
+            "last_checkout": _format_wall_clock(self.last_checkout),
+            "last_checkin": _format_wall_clock(self.last_checkin),
+        }
+
+    def latest(self, other: AssetUsageDates) -> AssetUsageDates:
+        """Each date as the later of this one and ``other``'s."""
+        return AssetUsageDates(
+            last_checkout=_later(self.last_checkout, other.last_checkout),
+            last_checkin=_later(self.last_checkin, other.last_checkin),
+        )
+
+    def payload(self, *, include_checkout: bool) -> dict[str, str]:
+        """The ``PATCH /hardware/{id}`` fields setting the dates that are known."""
+        fields = {"last_checkin": self.last_checkin}
+        if include_checkout:
+            fields["last_checkout"] = self.last_checkout
+        return {
+            name: value.strftime(_SNIPEIT_DATETIME_FORMAT)
+            for name, value in fields.items()
+            if value is not None
+        }
+
+
 @dataclass(frozen=True)
 class OverdueGearUsage:
     """A checked-out GEAR_USAGE journal whose usage period has ended.
@@ -2325,6 +2522,7 @@ class OverdueGearUsage:
     journal_id: int
     checkout_at: date | None
     checkin_at: date
+    usage_dates: AssetUsageDates | None = None
 
     @property
     def note(self) -> str:
@@ -2383,6 +2581,9 @@ async def fetch_overdue_gear_usage(
                 journal_id=row.journal_id,
                 checkout_at=_local_date(row.checkout_date, zone),
                 checkin_at=checkin_at,
+                usage_dates=AssetUsageDates.from_instants(
+                    row.checkout_date, row.checkin_date, zone
+                ),
             )
         )
     return overdue

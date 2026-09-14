@@ -422,6 +422,7 @@ async def periodic_checkin_all_snipeit_accounts(
                         session_factory=session_factory,
                         note=overdue.note,
                         checkin_at=overdue.snipeit_checkin_at(),
+                        usage_dates=overdue.usage_dates,
                     )
                     if did_checkin:
                         checked_in += 1

@@ -159,9 +159,15 @@ async def _insert_gear_usage_journal(
     return journal_id
 
 
-def _request_body(mock_transport: Any, path: str) -> dict[str, Any]:
+def _request_body(
+    mock_transport: Any, path: str, method: str | None = None
+) -> dict[str, Any]:
     """Return the JSON body of the single request whose URL contains ``path``."""
-    (request,) = [r for r in mock_transport.requests if path in str(r.url)]
+    (request,) = [
+        r
+        for r in mock_transport.requests
+        if path in str(r.url) and method in (None, r.method)
+    ]
     body: dict[str, Any] = json.loads(request.content)
     return body
 
@@ -182,14 +188,62 @@ async def _reference_data(
     return json.loads(row.reference_data)
 
 
-def _queue_checkout_and_checkin(mock_transport: Any, asset_id: str = "42") -> None:
+def _snipeit_datetime_object(value: str | None) -> dict[str, str] | None:
+    """Return a Snipe-IT GET ``datetime`` object for ``value`` (``None`` stays)."""
+    return {"datetime": value, "formatted": value} if value else None
+
+
+def _queue_asset_dates(
+    mock_transport: Any,
+    asset_id: str = "42",
+    *,
+    last_checkout: str | None = None,
+    last_checkin: str | None = None,
+) -> None:
+    """Queue the asset read before a checkout and the PATCH restoring its dates."""
+    mock_transport.add_response(
+        f"/hardware/{asset_id}",
+        json_data={
+            "id": int(asset_id),
+            "asset_tag": f"T-{asset_id}",
+            "last_checkout": _snipeit_datetime_object(last_checkout),
+            "last_checkin": _snipeit_datetime_object(last_checkin),
+        },
+        method="GET",
+    )
+    mock_transport.add_response(
+        f"/hardware/{asset_id}",
+        json_data={
+            "status": "success",
+            "messages": "Updated.",
+            "payload": {"id": int(asset_id), "asset_tag": f"T-{asset_id}"},
+        },
+        method="PATCH",
+    )
+
+
+def _queue_checkout_and_checkin(
+    mock_transport: Any,
+    asset_id: str = "42",
+    *,
+    last_checkout: str | None = None,
+    last_checkin: str | None = None,
+) -> None:
+    _queue_asset_dates(
+        mock_transport,
+        asset_id,
+        last_checkout=last_checkout,
+        last_checkin=last_checkin,
+    )
     mock_transport.add_response(
         f"/hardware/{asset_id}/checkout",
         json_data={"status": "success", "messages": "Checked out."},
+        method="POST",
     )
     mock_transport.add_response(
         f"/hardware/{asset_id}/checkin",
         json_data={"status": "success", "messages": "Checked in."},
+        method="POST",
     )
 
 
@@ -247,7 +301,11 @@ class TestHistoricalDatesIntegration:
         }
         assert await _reference_data(
             async_connection, source="snipeit_checkout", journal_id=journal_id
-        ) == {"checkout_at": checkout_at, "expected_checkin": checkin_at}
+        ) == {
+            "checkout_at": checkout_at,
+            "expected_checkin": checkin_at,
+            "asset_dates_before": {"last_checkout": None, "last_checkin": None},
+        }
         assert await _reference_data(
             async_connection, source="snipeit_checkin", journal_id=journal_id
         ) == {"checkin_at": checkin_at}
@@ -284,7 +342,55 @@ class TestHistoricalDatesIntegration:
         }
         assert await _reference_data(
             async_connection, source="snipeit_checkout", journal_id=journal_id
-        ) == {"checkout_at": "2024-03-29", "expected_checkin": "2024-03-29"}
+        ) == {
+            "checkout_at": "2024-03-29",
+            "expected_checkin": "2024-03-29",
+            "asset_dates_before": {"last_checkout": None, "last_checkin": None},
+        }
+
+    @pytest.mark.asyncio
+    async def test_historical_usage_restores_the_assets_last_dates(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # Snipe-IT stamps the check-in's asset date "now" and the checkout's
+        # replaces an older one; both are restored to the trip's local times.
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2024-03-28T22:44:35+00:00",
+            end="2024-03-29T05:20:30+00:00",
+            user_timezone="Australia/Sydney",
+        )
+        _queue_checkout_and_checkin(
+            mock_transport,
+            last_checkout="2023-12-01 08:00:00",
+            last_checkin="2023-12-02 17:00:00",
+        )
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert len(mock_transport.responses) == 0
+        assert _request_body(mock_transport, "hardware/42", method="PATCH") == {
+            "last_checkout": "2024-03-29 09:44:35",
+            "last_checkin": "2024-03-29 16:20:30",
+        }
+        methods = [(r.method, r.url.path) for r in mock_transport.requests]
+        assert methods.index(("GET", "/api/v1/hardware/42")) < methods.index(
+            ("POST", "/api/v1/hardware/42/checkout")
+        )
+        assert methods[-1] == ("PATCH", "/api/v1/hardware/42")
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert checkout_reference["asset_dates_before"] == {
+            "last_checkout": "2023-12-01 08:00:00",
+            "last_checkin": "2023-12-02 17:00:00",
+        }
 
     @pytest.mark.asyncio
     async def test_user_timezone_is_used_even_when_event_timezone_differs(
@@ -564,14 +670,7 @@ class TestCheckinSyncIntegration:
             end="2000-01-02T00:00:00+00:00",
         )
 
-        mock_transport.add_response(
-            "/hardware/42/checkout",
-            json_data={"status": "success", "messages": "Checked out."},
-        )
-        mock_transport.add_response(
-            "/hardware/42/checkin",
-            json_data={"status": "success", "messages": "Checked in."},
-        )
+        _queue_checkout_and_checkin(mock_transport)
 
         def factory() -> Any:
             return _session_factory(async_connection)
@@ -606,7 +705,11 @@ class TestCheckinSyncIntegration:
         async_connection: AsyncConnection,
     ) -> None:
         """The periodic sweep selects past, not-yet-checked-in usage on local dates."""
-        from snipeit_sync_service import OverdueGearUsage, fetch_overdue_gear_usage
+        from snipeit_sync_service import (
+            AssetUsageDates,
+            OverdueGearUsage,
+            fetch_overdue_gear_usage,
+        )
 
         # Overdue, no check-in → selected, dated in the user's zone (AEDT).
         overdue_id = await _insert_gear_usage_journal(
@@ -661,6 +764,10 @@ class TestCheckinSyncIntegration:
                 journal_id=overdue_id,
                 checkout_at=date(2025, 3, 8),
                 checkin_at=date(2025, 3, 9),
+                usage_dates=AssetUsageDates(
+                    last_checkout=datetime(2025, 3, 8),
+                    last_checkin=datetime(2025, 3, 9),
+                ),
             )
         ]
 
@@ -673,8 +780,9 @@ async def _insert_recorded_sync_row(
     reference_data: dict[str, Any] | None,
     error_message: str | None = None,
     asset_id: str = "42",
+    sync_status: str = "success",
 ) -> None:
-    """Insert a successful checkout/check-in sync row with the dates it recorded."""
+    """Insert a checkout/check-in sync row (successful by default) with its dates."""
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
@@ -683,10 +791,11 @@ async def _insert_recorded_sync_row(
                  error_message, retry_count, created_at, updated_at)
             VALUES
                 (:source, :external_id, :journal_id,
-                 now(), 'hash', 'success', :reference_data,
+                 now(), 'hash', :sync_status, :reference_data,
                  :error_message, 0, now(), now())
         """),
         {
+            "sync_status": sync_status,
             "source": source,
             "external_id": f"{source}:{asset_id}:{journal_id}",
             "journal_id": str(journal_id),
@@ -706,6 +815,236 @@ async def _sydney_trip(async_connection: AsyncConnection) -> int:
         end="2025-03-08T13:00:00+00:00",
         user_timezone="Australia/Sydney",
     )
+
+
+class TestAssetDatesSnapshotIntegration:
+    """The asset dates a checkout replaces are kept and restored after check-in."""
+
+    BEFORE = {
+        "last_checkout": "2024-01-01 08:00:00",
+        "last_checkin": "2024-01-02 17:00:00",
+    }
+
+    @pytest.mark.asyncio
+    async def test_superseded_checkout_reuses_the_original_snapshot(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # The first pair (1-2 March) left its own dates on the asset; the pair
+        # re-recorded for 8-9 March must be restored against the dates before it.
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data={
+                "checkout_at": "2025-03-01",
+                "expected_checkin": "2025-03-02",
+                "asset_dates_before": self.BEFORE,
+            },
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkin",
+            journal_id=journal_id,
+            reference_data={"checkin_at": "2025-03-02"},
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkout",
+            json_data={"status": "success", "messages": "Checked out."},
+            method="POST",
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
+        )
+        mock_transport.add_response(
+            "/hardware/42",
+            json_data={
+                "status": "success",
+                "payload": {"id": 42, "asset_tag": "T-42"},
+            },
+            method="PATCH",
+        )
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert len(mock_transport.responses) == 0
+        assert ("GET", "/api/v1/hardware/42") not in [
+            (r.method, r.url.path) for r in mock_transport.requests
+        ]
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert checkout_reference["asset_dates_before"] == self.BEFORE
+        assert _request_body(mock_transport, "hardware/42", method="PATCH") == {
+            "last_checkout": "2025-03-08 00:00:00",
+            "last_checkin": "2025-03-09 00:00:00",
+        }
+
+    @pytest.mark.asyncio
+    async def test_checkout_moved_to_another_asset_reads_that_assets_dates(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data={"asset_dates_before": self.BEFORE},
+            asset_id="41",
+            sync_status="failed",
+        )
+        mock_transport.add_response(
+            "/hardware/41",
+            json_data={"id": 41, "asset_tag": "T-41", "assigned_to": None},
+            method="GET",
+        )
+        _queue_checkout_and_checkin(
+            mock_transport,
+            last_checkout="2025-01-10 09:00:00",
+            last_checkin=None,
+        )
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert len(mock_transport.responses) == 0
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert checkout_reference["asset_dates_before"] == {
+            "last_checkout": "2025-01-10 09:00:00",
+            "last_checkin": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_older_usage_keeps_the_assets_later_dates(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # Importing a 2024 trip after the asset was used in 2026.
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2024-03-28T22:44:35+00:00",
+            end="2024-03-29T05:20:30+00:00",
+            user_timezone="Australia/Sydney",
+        )
+        _queue_checkout_and_checkin(
+            mock_transport,
+            last_checkout="2026-01-21 23:14:00",
+            last_checkin="2026-02-12 21:26:37",
+        )
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _request_body(mock_transport, "hardware/42", method="PATCH") == {
+            "last_checkout": "2026-01-21 23:14:00",
+            "last_checkin": "2026-02-12 21:26:37",
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "patch_response",
+        [{"status": "error", "messages": {"last_checkin": ["Invalid."]}}, None],
+        ids=["rejected", "transport-error"],
+    )
+    async def test_failed_restore_does_not_fail_the_checkin(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        patch_response: dict[str, Any] | None,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        mock_transport.add_response(
+            "/hardware/42", json_data={"id": 42, "asset_tag": "T-42"}, method="GET"
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkout",
+            json_data={"status": "success", "messages": "Checked out."},
+            method="POST",
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
+        )
+        if patch_response is not None:
+            mock_transport.add_response(
+                "/hardware/42", json_data=patch_response, method="PATCH"
+            )
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert ("PATCH", "/api/v1/hardware/42") in [
+            (r.method, r.url.path) for r in mock_transport.requests
+        ]
+        for source in ("snipeit_checkout", "snipeit_checkin"):
+            result = await async_connection.execute(
+                text("""
+                    SELECT sync_status FROM sync_metadata
+                    WHERE integration_source = :source AND internal_uuid = :journal_id
+                """),
+                {"source": source, "journal_id": str(journal_id)},
+            )
+            row = result.fetchone()
+            assert row is not None, source
+            assert row.sync_status == "success", source
+
+    @pytest.mark.asyncio
+    async def test_checkin_without_usage_dates_leaves_the_asset_dates_alone(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # e.g. the journal was deleted: Snipe-IT's "now" is the right return time.
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data={
+                "checkout_at": "2025-03-08",
+                "expected_checkin": "2025-03-09",
+                "asset_dates_before": self.BEFORE,
+            },
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
+        )
+
+        checked_in = await snipeit_sync_service.push_checkin_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert checked_in is True
+        assert [(r.method, r.url.path) for r in mock_transport.requests] == [
+            ("POST", "/api/v1/hardware/42/checkin")
+        ]
 
 
 class TestReconcileGearUsageIntegration:
@@ -728,9 +1067,17 @@ class TestReconcileGearUsageIntegration:
                 "expected_checkin": "2099-01-01",
             },
         )
+        # Recorded before asset dates were kept: they are read before the
+        # check-in instead, while the asset still shows the check-in before it.
+        _queue_asset_dates(
+            mock_transport,
+            last_checkout="2025-03-08 00:00:00",
+            last_checkin="2025-02-01 18:00:00",
+        )
         mock_transport.add_response(
             "/hardware/42/checkin",
             json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
         )
 
         await snipeit_sync_service.reconcile_gear_usage(
@@ -738,9 +1085,17 @@ class TestReconcileGearUsageIntegration:
             session_factory=lambda: _session_factory(async_connection),
         )
 
-        (request,) = mock_transport.requests
-        assert "hardware/42/checkin" in str(request.url)
-        assert json.loads(request.content)["checkin_at"] == "2025-03-09"
+        assert [(r.method, r.url.path) for r in mock_transport.requests] == [
+            ("GET", "/api/v1/hardware/42"),
+            ("POST", "/api/v1/hardware/42/checkin"),
+            ("PATCH", "/api/v1/hardware/42"),
+        ]
+        checkin_body = _request_body(mock_transport, "hardware/42/checkin")
+        assert checkin_body["checkin_at"] == "2025-03-09"
+        assert _request_body(mock_transport, "hardware/42", method="PATCH") == {
+            "last_checkout": "2025-03-08 00:00:00",
+            "last_checkin": "2025-03-09 00:00:00",
+        }
 
     @pytest.mark.asyncio
     async def test_changed_checkout_date_after_checkin_records_a_new_pair(
@@ -783,7 +1138,11 @@ class TestReconcileGearUsageIntegration:
         )
         assert await _reference_data(
             async_connection, source="snipeit_checkout", journal_id=journal_id
-        ) == {"checkout_at": "2025-03-08", "expected_checkin": "2025-03-09"}
+        ) == {
+            "checkout_at": "2025-03-08",
+            "expected_checkin": "2025-03-09",
+            "asset_dates_before": {"last_checkout": None, "last_checkin": None},
+        }
         assert await _reference_data(
             async_connection, source="snipeit_checkin", journal_id=journal_id
         ) == {"checkin_at": "2025-03-09"}
@@ -970,6 +1329,39 @@ class TestLinkExistingActivityIntegration:
         assert await _reference_data(
             async_connection, source="snipeit_checkin", journal_id=journal_id
         ) == {"checkin_at": "2025-03-09", "snipeit_log_id": 101}
+
+    @pytest.mark.asyncio
+    async def test_linked_checkout_restores_only_the_last_checkin(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # The checkout was entered by hand, so Snipe-IT's last checkout is its
+        # own; only the check-in the worker posts overwrites a date.
+        journal_id = await _sydney_trip(async_connection)
+        _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
+        _queue_asset_dates(
+            mock_transport,
+            last_checkout="2025-03-08 07:30:00",
+            last_checkin="2025-02-01 18:00:00",
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
+        )
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == [_CHECKIN_POST]
+        assert len(mock_transport.responses) == 0
+        assert _request_body(mock_transport, "hardware/42", method="PATCH") == {
+            "last_checkin": "2025-03-09 00:00:00"
+        }
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1420,6 +1812,8 @@ class TestLateCheckinRerecordIntegration:
             mock_transport.add_response(
                 path, json_data={"status": "success", "messages": "Done."}
             )
+        _queue_asset_dates(mock_transport)
+        _queue_asset_dates(mock_transport)
 
         await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id,
@@ -1433,7 +1827,11 @@ class TestLateCheckinRerecordIntegration:
         ]
         assert await _reference_data(
             async_connection, source="snipeit_checkout", journal_id=journal_id
-        ) == {"checkout_at": "2025-03-08", "expected_checkin": "2025-03-09"}
+        ) == {
+            "checkout_at": "2025-03-08",
+            "expected_checkin": "2025-03-09",
+            "asset_dates_before": {"last_checkout": None, "last_checkin": None},
+        }
         assert await _reference_data(
             async_connection, source="snipeit_checkin", journal_id=journal_id
         ) == {"checkin_at": "2025-03-09"}
