@@ -1,6 +1,6 @@
 # Pinned so the image does not change under us between CI runs; Dependabot
 # (package-ecosystem: docker for this directory) bumps it.
-FROM node:26.8.1-alpine3.24
+FROM node:26.8.2-alpine3.24
 
 WORKDIR /app
 
