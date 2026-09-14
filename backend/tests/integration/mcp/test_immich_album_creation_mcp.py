@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
-    call_mcp_tool_sessionless,
+    call_mcp_tool,
 )
 
 USER_ID = "test-user-123"
@@ -58,7 +58,7 @@ async def _seed_journal(connection: AsyncConnection) -> int:
 async def _call_tool(
     client: object, name: str, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    return await call_mcp_tool_sessionless(client, name, arguments)
+    return await call_mcp_tool(client, name, arguments)
 
 
 @pytest.mark.asyncio

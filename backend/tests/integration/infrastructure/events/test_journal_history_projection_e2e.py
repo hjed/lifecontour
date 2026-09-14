@@ -64,9 +64,7 @@ from tests.integration.infrastructure.events.projection_harness import (
     replay_stream_through_projection,
 )
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 
@@ -1202,29 +1200,15 @@ class TestMcpTypeDataHistoryProjectionE2E:
         journal_id = await self._seed_mood_journal(async_connection)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             # Edit the MOOD_RATING type data through the MCP update tool.
-            update_response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "update_journal_entry",
-                        "arguments": {
-                            "journal_id": journal_id,
-                            "request": {
-                                "type_data": {"MOOD_RATING": {"mood_value": 8}}
-                            },
-                        },
-                    },
+            payload = await call_mcp_tool(
+                client,
+                "update_journal_entry",
+                {
+                    "journal_id": journal_id,
+                    "request": {"type_data": {"MOOD_RATING": {"mood_value": 8}}},
                 },
-                headers=mcp_headers(session_id),
             )
-            assert update_response.status_code == 200
-            payload = extract_mcp_json_payload(update_response.text)
             assert "error" not in payload, payload
 
             # Relay the outbox JournalUpdated event and project it into history.

@@ -9,6 +9,8 @@ Reproduces production bugs where:
 - Parent_id was not reflected when the transaction rolled back
 """
 
+from typing import Any
+
 import pytest
 from core_shared.models.journals import JournalType
 from sqlalchemy import text
@@ -17,9 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
 )
 from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_journal
 
@@ -29,25 +28,16 @@ def _create_journal_via_mcp():
     """Helper to create a journal via the MCP create_journal_entry tool."""
 
     async def _create(
-        authenticated_client, session_id: str, journal_data: dict[str, object]
-    ):
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "create_journal_entry",
-                    "arguments": {
-                        "request": journal_data,
-                    },
-                },
+        authenticated_client: Any, journal_data: dict[str, object]
+    ) -> dict[str, Any]:
+        return await call_mcp_tool(
+            authenticated_client,
+            "create_journal_entry",
+            {
+                "request": journal_data,
             },
-            headers=mcp_headers(session_id),
+            request_id=2,
         )
-        assert response.status_code == 200
-        return extract_mcp_json_payload(response.text)
 
     return _create
 
@@ -57,29 +47,19 @@ def _update_journal_via_mcp():
     """Helper to update a journal via the MCP update_journal_entry tool."""
 
     async def _update(
-        authenticated_client,
-        session_id: str,
+        authenticated_client: Any,
         journal_id: int,
         journal_data: dict[str, object],
-    ):
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {
-                    "name": "update_journal_entry",
-                    "arguments": {
-                        "journal_id": journal_id,
-                        "request": journal_data,
-                    },
-                },
+    ) -> dict[str, Any]:
+        return await call_mcp_tool(
+            authenticated_client,
+            "update_journal_entry",
+            {
+                "journal_id": journal_id,
+                "request": journal_data,
             },
-            headers=mcp_headers(session_id),
+            request_id=3,
         )
-        assert response.status_code == 200
-        return extract_mcp_json_payload(response.text)
 
     return _update
 
@@ -89,31 +69,21 @@ def _link_contact_via_mcp():
     """Helper to link a contact to a journal via MCP link_journal_to_contact tool."""
 
     async def _link(
-        authenticated_client,
-        session_id: str,
+        authenticated_client: Any,
         journal_id: int,
         contact_id: int,
         relationship_type: str = "PARTICIPANT",
-    ):
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 4,
-                "method": "tools/call",
-                "params": {
-                    "name": "link_journal_to_contact",
-                    "arguments": {
-                        "journal_id": journal_id,
-                        "contact_id": contact_id,
-                        "relationship_type": relationship_type,
-                    },
-                },
+    ) -> dict[str, Any]:
+        return await call_mcp_tool(
+            authenticated_client,
+            "link_journal_to_contact",
+            {
+                "journal_id": journal_id,
+                "contact_id": contact_id,
+                "relationship_type": relationship_type,
             },
-            headers=mcp_headers(session_id),
+            request_id=4,
         )
-        assert response.status_code == 200
-        return extract_mcp_json_payload(response.text)
 
     return _link
 
@@ -132,10 +102,8 @@ class TestCreateJournalWithTypes:
         Reproduces: InFailedSQLTransactionError when creating with types=["NOTE"]
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Utah Trip 2025",
                     "content": "Road trip to Utah.",
@@ -164,10 +132,8 @@ class TestCreateJournalWithTypes:
         a transaction failure.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Utah Trip 2025",
                     "content": "Road trip to Utah.",
@@ -199,10 +165,8 @@ class TestCreateJournalWithTypes:
         The AI agent was not informed of the failure and could not correct the input.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Utah Trip 2025",
                     "content": "Road trip to Utah.",
@@ -220,21 +184,12 @@ class TestCreateJournalWithTypes:
             assert "TRIP" in payload.get("message", "")
 
             # Verify no journal was persisted (no partial commit)
-            search_response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "search_journals",
-                        "arguments": {"query": "Utah Trip 2025"},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            search_payload = await call_mcp_tool(
+                authenticated_client,
+                "search_journals",
+                {"query": "Utah Trip 2025"},
+                request_id=3,
             )
-            assert search_response.status_code == 200
-            search_payload = extract_mcp_json_payload(search_response.text)
             journals = search_payload.get("journals", [])
             assert not any(j.get("title") == "Utah Trip 2025" for j in journals), (
                 "Journal should not be persisted when types are invalid"
@@ -251,10 +206,8 @@ class TestCreateJournalWithTypes:
         Reproduces: Second attempt with ISO format also failed due to transaction error.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Meeting Notes",
                     "content": "Team sync discussion.",
@@ -283,10 +236,8 @@ class TestCreateJournalWithTypes:
         requires OUTDOOR_ACTIVITY + FITNESS).
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Blue Mountains Walk",
                     "content": "Grand Canyon track.",
@@ -336,10 +287,8 @@ class TestCreateJournalWithContacts:
         contact_id = int(contact_row[0])
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Utah Trip 2025",
                     "content": "Road trip with Sarah-Jane.",
@@ -387,12 +336,9 @@ class TestCreateJournalWithContacts:
         contact_id = int(contact_row[0])
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             # First create a journal
             create_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Utah Trip 2025",
                     "content": "Road trip.",
@@ -408,7 +354,6 @@ class TestCreateJournalWithContacts:
             # Link contact
             link_payload = await _link_contact_via_mcp(
                 authenticated_client,
-                session_id,
                 journal_id,
                 contact_id,
                 "PARTICIPANT",
@@ -431,12 +376,9 @@ class TestCreateJournalWithParent:
         creation itself failed silently due to InFailedSQLTransactionError.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             # Create parent journal
             parent_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Utah Trip 2025",
                     "content": "Multi-day road trip.",
@@ -454,7 +396,6 @@ class TestCreateJournalWithParent:
             # Create child journal under parent
             child_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Day 1 - Zion National Park",
                     "content": "Hiked Angels Landing.",
@@ -491,10 +432,8 @@ class TestCreateJournalWithParent:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Day 1 - Under Their Trip",
                     "content": "Should never be written.",
@@ -508,7 +447,6 @@ class TestCreateJournalWithParent:
             )
             absent_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Day 1 - Under Nothing",
                     "content": "Should never be written.",
@@ -552,10 +490,8 @@ class TestCreateJournalWithParent:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             mine = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "My Own Trip",
                     "content": "Mine.",
@@ -570,7 +506,6 @@ class TestCreateJournalWithParent:
 
             payload = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 mine["id"],
                 {"parent_id": theirs},
             )
@@ -597,12 +532,9 @@ class TestUpdateJournalWithTypesAndTags:
     ) -> None:
         """Updating a journal to add tags should persist them."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             # Create journal without tags
             create_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Trip Notes",
                     "content": "Some notes.",
@@ -618,7 +550,6 @@ class TestUpdateJournalWithTypesAndTags:
             # Update with tags
             update_payload = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 journal_id,
                 {"tags": ["utah", "road-trip"]},
             )
@@ -635,12 +566,9 @@ class TestUpdateJournalWithTypesAndTags:
     ) -> None:
         """Updating a journal with an invalid type name should return an error."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             # Create journal
             create_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Trip Notes",
                     "content": "Some notes.",
@@ -656,7 +584,6 @@ class TestUpdateJournalWithTypesAndTags:
             # Update with invalid type
             update_payload = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 journal_id,
                 {"types": ["CANYON"]},
             )
@@ -687,12 +614,9 @@ class TestUpdateJournalWithTypesAndTags:
         contact_id = int(contact_row[0])
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             # Create journal without contacts
             create_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Trip Notes",
                     "content": "Some notes.",
@@ -708,7 +632,6 @@ class TestUpdateJournalWithTypesAndTags:
             # Update with contacts
             update_payload = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 journal_id,
                 {
                     "contact_relationships": [
@@ -735,23 +658,9 @@ class TestListJournalTypes:
     ) -> None:
         """list_journal_types should return all valid type names with metadata."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "list_journal_types",
-                        "arguments": {},
-                    },
-                },
-                headers=mcp_headers(session_id),
+            payload = await call_mcp_tool(
+                authenticated_client, "list_journal_types", {}, request_id=2
             )
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             # Should have journal_types list
             assert "journal_types" in payload
@@ -820,22 +729,13 @@ class TestCreateJournalServicifiedParity:
     tag reuse.
     """
 
-    async def _create_gear_item(self, authenticated_client, session_id: str) -> str:
-        response = await authenticated_client.post(
-            "/mcp-server/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 10,
-                "method": "tools/call",
-                "params": {
-                    "name": "create_gear_item",
-                    "arguments": {"name": "Test Harness", "model": "Altitude"},
-                },
-            },
-            headers=mcp_headers(session_id),
+    async def _create_gear_item(self, authenticated_client: Any) -> str:
+        payload = await call_mcp_tool(
+            authenticated_client,
+            "create_gear_item",
+            {"name": "Test Harness", "model": "Altitude"},
+            request_id=10,
         )
-        assert response.status_code == 200
-        payload = extract_mcp_json_payload(response.text)
         assert "error" not in payload, f"gear item create failed: {payload}"
         return str(payload["id"])
 
@@ -847,14 +747,10 @@ class TestCreateJournalServicifiedParity:
     ) -> None:
         """GEAR_USAGE type_data round-trips through the servicified create path."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-            gear_item_id = await self._create_gear_item(
-                authenticated_client, session_id
-            )
+            gear_item_id = await self._create_gear_item(authenticated_client)
 
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Harness check-out",
                     "content": "Borrowed the harness for the weekend.",
@@ -883,10 +779,8 @@ class TestCreateJournalServicifiedParity:
     ) -> None:
         """Adding GEAR_USAGE without type_data is rejected (validation in the tool)."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Bad gear usage",
                     "content": "No gear data.",
@@ -910,12 +804,9 @@ class TestCreateJournalServicifiedParity:
     ) -> None:
         """Two journals sharing a tag name reuse one tag row (find-or-create)."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
             for title in ("First entry", "Second entry"):
                 payload = await _create_journal_via_mcp(
                     authenticated_client,
-                    session_id,
                     {
                         "title": title,
                         "content": "shared tag content",
@@ -951,10 +842,8 @@ class TestUpdateJournalServicifiedParity:
     ) -> None:
         """Omitted associations (None) are untouched by a core-field-only update."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             create_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Original",
                     "content": "c",
@@ -968,7 +857,6 @@ class TestUpdateJournalServicifiedParity:
 
             update_payload = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 journal_id,
                 {"title": "Renamed"},
             )
@@ -987,10 +875,8 @@ class TestUpdateJournalServicifiedParity:
     ) -> None:
         """tags=[] clears all tags (distinct from omitting tags)."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             create_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Tagged",
                     "content": "c",
@@ -1003,7 +889,6 @@ class TestUpdateJournalServicifiedParity:
 
             update_payload = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 journal_id,
                 {"tags": []},
             )
@@ -1020,10 +905,8 @@ class TestUpdateJournalServicifiedParity:
     ) -> None:
         """Replacing types removes the old type (and its data) and adds the new one."""
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             create_payload = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Mood entry",
                     "content": "c",
@@ -1038,7 +921,6 @@ class TestUpdateJournalServicifiedParity:
 
             update_payload = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 journal_id,
                 {"types": ["FITNESS"]},
             )
@@ -1059,10 +941,8 @@ class TestRetypePreservesSharedTypeData:
         _update_journal_via_mcp,
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             created = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Imlay",
                     "content": "Walk in.",
@@ -1084,7 +964,6 @@ class TestRetypePreservesSharedTypeData:
 
             updated = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 created["id"],
                 {"types": ["CANYONING"]},
             )
@@ -1109,10 +988,8 @@ class TestRetypePreservesSharedTypeData:
         _update_journal_via_mcp,
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             created = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Imlay",
                     "content": "Walk in.",
@@ -1130,7 +1007,6 @@ class TestRetypePreservesSharedTypeData:
 
             updated = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 created["id"],
                 {"types": ["MOOD_RATING"]},
             )
@@ -1173,10 +1049,8 @@ class TestEveryTypeRoundTrips:
         journal_type: JournalType,
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             created = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": f"{journal_type.value} round trip",
                     "content": "x",
@@ -1192,7 +1066,6 @@ class TestEveryTypeRoundTrips:
 
             read_back = await call_mcp_tool(
                 authenticated_client,
-                session_id,
                 "get_journal",
                 {"journal_id": created["id"]},
             )
@@ -1206,10 +1079,8 @@ class TestEveryTypeRoundTrips:
         _create_journal_via_mcp,
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             created = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Goblin Valley -> Moab",
                     "content": "x",
@@ -1236,10 +1107,8 @@ class TestExternalLinksOnWriteResponses:
         _update_journal_via_mcp,
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             created = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Echo Canyon",
                     "content": "x",
@@ -1263,7 +1132,6 @@ class TestExternalLinksOnWriteResponses:
 
             updated = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 created["id"],
                 {"title": "Echo Canyon — Zion"},
             )
@@ -1279,10 +1147,8 @@ class TestExternalLinksOnWriteResponses:
         _update_journal_via_mcp,
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
             created = await _create_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 {
                     "title": "Echo Canyon",
                     "content": "x",
@@ -1298,7 +1164,6 @@ class TestExternalLinksOnWriteResponses:
 
             updated = await _update_journal_via_mcp(
                 authenticated_client,
-                session_id,
                 created["id"],
                 {"types": ["MOOD_RATING"]},
             )

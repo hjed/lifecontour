@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
-    call_mcp_tool_sessionless,
+    call_mcp_tool,
 )
 
 
@@ -36,7 +36,7 @@ async def test_trigger_sync_mcp_tool(
     ) as mock_enqueue:
         mock_enqueue.return_value = "test_job_123"
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client, "trigger_sync", {"integration_id": "strava"}
             )
 
@@ -69,7 +69,7 @@ async def test_trigger_sync_mcp_tool_immich(
     ) as mock_enqueue:
         mock_enqueue.return_value = "test_immich_job_123"
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client, "trigger_sync", {"integration_id": "immich"}
             )
 
@@ -107,7 +107,7 @@ async def test_get_strava_athlete_mappings_mcp_tool(
     )
 
     async with authenticated_lifespan_client() as authenticated_client:
-        payload = await call_mcp_tool_sessionless(
+        payload = await call_mcp_tool(
             authenticated_client, "get_strava_athlete_mappings", {}
         )
 
@@ -118,7 +118,7 @@ async def test_get_strava_athlete_mappings_mcp_tool(
         assert payload["mappings"][0]["strava_athlete_name"] == "Athlete One"
 
         # Test filtering by strava_athlete_id
-        payload2 = await call_mcp_tool_sessionless(
+        payload2 = await call_mcp_tool(
             authenticated_client,
             "get_strava_athlete_mappings",
             {"strava_athlete_id": "999999"},

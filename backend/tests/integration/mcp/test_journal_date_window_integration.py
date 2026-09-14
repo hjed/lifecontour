@@ -7,9 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 
@@ -88,26 +86,14 @@ class TestBrowseJournalsByDateWindowIntegration:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": today.isoformat(),
-                        },
-                    },
+            payload = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": today.isoformat(),
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["total_count"] == 1
@@ -121,28 +107,16 @@ class TestBrowseJournalsByDateWindowIntegration:
     ) -> None:
         """Querying a window with no journals returns empty results."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": "2020-01-15",
-                            "days_back": 1,
-                            "days_forward": 1,
-                        },
-                    },
+            payload = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": "2020-01-15",
+                    "days_back": 1,
+                    "days_forward": 1,
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["total_count"] == 0
@@ -167,29 +141,17 @@ class TestBrowseJournalsByDateWindowIntegration:
             )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
             # First page (limit=2, offset=0)
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": anchor.isoformat(),
-                            "limit": 2,
-                            "offset": 0,
-                        },
-                    },
+            payload = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": anchor.isoformat(),
+                    "limit": 2,
+                    "offset": 0,
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["total_count"] == 5
@@ -197,48 +159,32 @@ class TestBrowseJournalsByDateWindowIntegration:
             assert payload["has_more"] is True
 
             # Second page (limit=2, offset=2)
-            response2 = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": anchor.isoformat(),
-                            "limit": 2,
-                            "offset": 2,
-                        },
-                    },
+            payload2 = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": anchor.isoformat(),
+                    "limit": 2,
+                    "offset": 2,
                 },
-                headers=mcp_headers(session_id),
+                request_id=3,
             )
 
-            payload2 = extract_mcp_json_payload(response2.text)
             assert len(payload2["results"]) == 2
             assert payload2["has_more"] is True
 
             # Last page (limit=2, offset=4)
-            response3 = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": anchor.isoformat(),
-                            "limit": 2,
-                            "offset": 4,
-                        },
-                    },
+            payload3 = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": anchor.isoformat(),
+                    "limit": 2,
+                    "offset": 4,
                 },
-                headers=mcp_headers(session_id),
+                request_id=4,
             )
 
-            payload3 = extract_mcp_json_payload(response3.text)
             assert len(payload3["results"]) == 1
             assert payload3["has_more"] is False
 
@@ -248,26 +194,15 @@ class TestBrowseJournalsByDateWindowIntegration:
     ) -> None:
         """Invalid anchor_date returns a validation error payload."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": "not-a-date",
-                        },
-                    },
+            payload = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": "not-a-date",
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
 
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
             assert payload["error"] == "Validation error"
             assert "anchor_date" in payload["message"]
 
@@ -277,28 +212,16 @@ class TestBrowseJournalsByDateWindowIntegration:
     ) -> None:
         """Verifies window_start and window_end in the response."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": "2026-04-02",
-                            "days_back": 2,
-                            "days_forward": 4,
-                        },
-                    },
+            payload = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": "2026-04-02",
+                    "days_back": 2,
+                    "days_forward": 4,
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert payload["anchor_date"] == "2026-04-02"
             assert payload["window_start"] == "2026-03-31"
@@ -329,28 +252,16 @@ class TestBrowseJournalsByDateWindowIntegration:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-
-            response = await client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "browse_journals_by_date_window",
-                        "arguments": {
-                            "anchor_date": anchor.isoformat(),
-                            "days_back": 2,
-                            "days_forward": 4,
-                        },
-                    },
+            payload = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {
+                    "anchor_date": anchor.isoformat(),
+                    "days_back": 2,
+                    "days_forward": 4,
                 },
-                headers=mcp_headers(session_id),
+                request_id=2,
             )
-
-            assert response.status_code == 200
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["total_count"] == 1

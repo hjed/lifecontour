@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
 from tests.integration.mcp.http_helpers import (
-    call_mcp_tool_sessionless,
+    call_mcp_tool,
 )
 
 
@@ -87,7 +87,7 @@ class TestReviewItemsToolsIntegration:
         await repo.create(item)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "list_review_items",
                 {
@@ -136,7 +136,7 @@ class TestReviewItemsToolsIntegration:
         item_id = created_item.id
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool_sessionless(
+            payload = await call_mcp_tool(
                 authenticated_client,
                 "dismiss_review_item",
                 {

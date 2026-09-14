@@ -14,9 +14,7 @@ from typing import Any
 import pytest
 
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 # Each abseiling-derived journal type paired with a same-typed template.
@@ -29,26 +27,14 @@ _DERIVED_TYPES = [
 
 
 async def _call_tool(
-    client, session_id: str, name: str, arguments: dict[str, Any], req_id: int = 1
+    client: Any, name: str, arguments: dict[str, Any], req_id: int = 1
 ) -> dict[str, Any]:
-    response = await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
-    )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
+    return await call_mcp_tool(client, name, arguments, request_id=req_id)
 
 
-async def _create_template(client, session_id: str, template_type: str) -> str:
+async def _create_template(client: Any, template_type: str) -> str:
     payload = await _call_tool(
         client,
-        session_id,
         "create_template",
         {
             "name": f"{template_type.title()} Template",
@@ -64,14 +50,12 @@ async def _create_template(client, session_id: str, template_type: str) -> str:
 
 
 async def _create_journal_with_template(
-    client,
-    session_id: str,
+    client: Any,
     journal_type: str,
     template_id: str,
 ) -> int:
     payload = await _call_tool(
         client,
-        session_id,
         "create_journal_entry",
         {
             "request": {
@@ -102,14 +86,13 @@ async def test_mcp_create_persists_consolidated_template_id(
 ) -> None:
     """create_journal_entry persists template_id for every abseiling-derived type."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        template_id = await _create_template(client, session_id, template_type)
+        template_id = await _create_template(client, template_type)
         journal_id = await _create_journal_with_template(
-            client, session_id, journal_type, template_id
+            client, journal_type, template_id
         )
 
         result = await _call_tool(
-            client, session_id, "get_journal_template", {"journal_id": journal_id}
+            client, "get_journal_template", {"journal_id": journal_id}
         )
         assert "error" not in result, result
         assert result["has_template"] is True
@@ -122,15 +105,13 @@ async def test_mcp_pitch_only_update_preserves_template_id(
 ) -> None:
     """A pitch-only update_journal_entry must not clear the template reference."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        template_id = await _create_template(client, session_id, "canyoning")
+        template_id = await _create_template(client, "canyoning")
         journal_id = await _create_journal_with_template(
-            client, session_id, "CANYONING", template_id
+            client, "CANYONING", template_id
         )
 
         update = await _call_tool(
             client,
-            session_id,
             "update_journal_entry",
             {
                 "journal_id": journal_id,
@@ -150,7 +131,7 @@ async def test_mcp_pitch_only_update_preserves_template_id(
         assert "error" not in update, update
 
         result = await _call_tool(
-            client, session_id, "get_journal_template", {"journal_id": journal_id}
+            client, "get_journal_template", {"journal_id": journal_id}
         )
         assert result["has_template"] is True
         assert result["template"]["id"] == template_id
@@ -162,16 +143,14 @@ async def test_mcp_get_journal_template_returns_standard_pitches(
 ) -> None:
     """Retrieval returns the template's standard pitches despite edited journal pitches."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        template_id = await _create_template(client, session_id, "canyoning")
+        template_id = await _create_template(client, "canyoning")
         journal_id = await _create_journal_with_template(
-            client, session_id, "CANYONING", template_id
+            client, "CANYONING", template_id
         )
 
         # Edit the journal's own pitches away from the template's single 30m pitch.
         await _call_tool(
             client,
-            session_id,
             "update_journal_entry",
             {
                 "journal_id": journal_id,
@@ -191,7 +170,7 @@ async def test_mcp_get_journal_template_returns_standard_pitches(
         )
 
         result = await _call_tool(
-            client, session_id, "get_journal_template", {"journal_id": journal_id}
+            client, "get_journal_template", {"journal_id": journal_id}
         )
         assert result["has_template"] is True
         # The template keeps its single standard 30m pitch, not the journal's 3.
@@ -205,11 +184,8 @@ async def test_mcp_template_pitch_notes_round_trip(
 ) -> None:
     """Template pitch notes survive create_template, get_template, update_template."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-
         created = await _call_tool(
             client,
-            session_id,
             "create_template",
             {
                 "name": "Notes Canyon",
@@ -230,14 +206,13 @@ async def test_mcp_template_pitch_notes_round_trip(
         assert created["pitches"][0]["pitch_type"] == "jump"
 
         fetched = await _call_tool(
-            client, session_id, "get_template", {"template_id": template_id}, req_id=2
+            client, "get_template", {"template_id": template_id}, req_id=2
         )
         assert fetched["pitches"][0]["notes"] == "Awkward start over the chockstone"
         assert fetched["pitches"][0]["pitch_type"] == "jump"
 
         updated = await _call_tool(
             client,
-            session_id,
             "update_template",
             {
                 "template_id": template_id,
@@ -263,10 +238,8 @@ async def test_mcp_get_journal_template_when_none_set(
 ) -> None:
     """A journal with no template reference returns a clean has_template=False."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
         payload = await _call_tool(
             client,
-            session_id,
             "create_journal_entry",
             {
                 "request": {
@@ -288,7 +261,7 @@ async def test_mcp_get_journal_template_when_none_set(
         journal_id = payload["id"]
 
         result = await _call_tool(
-            client, session_id, "get_journal_template", {"journal_id": journal_id}
+            client, "get_journal_template", {"journal_id": journal_id}
         )
         assert "error" not in result, result
         assert result["has_template"] is False
@@ -303,13 +276,10 @@ async def test_mcp_get_journal_template_when_none_set(
 # ``template_id``, so an agent does not have to copy any of it by hand.
 
 
-async def _create_rich_template(
-    client, session_id: str, template_type: str, **fields
-) -> str:
+async def _create_rich_template(client: Any, template_type: str, **fields: Any) -> str:
     """Create a template with two pitches plus any type-specific fields."""
     payload = await _call_tool(
         client,
-        session_id,
         "create_template",
         {
             "name": f"Applied {template_type.title()} Template",
@@ -327,8 +297,7 @@ async def _create_rich_template(
 
 
 async def _create_from_template(
-    client,
-    session_id: str,
+    client: Any,
     journal_type: str,
     template_id: str,
     *,
@@ -350,11 +319,11 @@ async def _create_from_template(
     if type_data is not None:
         request["type_data"] = type_data
     return await _call_tool(
-        client, session_id, "create_journal_entry", {"request": request}, req_id=req_id
+        client, "create_journal_entry", {"request": request}, req_id=req_id
     )
 
 
-async def _read_type_data(client, journal_id: int) -> dict[str, Any]:
+async def _read_type_data(client: Any, journal_id: int) -> dict[str, Any]:
     """Read a journal's persisted type data over REST (it carries the pitches)."""
     response = await client.get(f"/api/journals/{journal_id}")
     assert response.status_code == 200, response.text
@@ -368,12 +337,9 @@ async def test_mcp_create_applies_template_pitches(
 ) -> None:
     """A top-level template_id seeds pitches and counts for every derived type."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        template_id = await _create_rich_template(client, session_id, template_type)
+        template_id = await _create_rich_template(client, template_type)
 
-        created = await _create_from_template(
-            client, session_id, journal_type, template_id
-        )
+        created = await _create_from_template(client, journal_type, template_id)
         assert "error" not in created, created
 
         type_data = await _read_type_data(client, int(created["id"]))
@@ -387,7 +353,6 @@ async def test_mcp_create_applies_template_pitches(
 
         reference = await _call_tool(
             client,
-            session_id,
             "get_journal_template",
             {"journal_id": created["id"]},
             req_id=3,
@@ -402,19 +367,15 @@ async def test_mcp_create_applies_canyoning_fields(
 ) -> None:
     """A canyoning template also seeds the canyoning block."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
         template_id = await _create_rich_template(
             client,
-            session_id,
             "canyoning",
             french_grade="v4a3IV",
             canyon_type="vertical",
             water_gauge_name="Kanangra Creek",
         )
 
-        created = await _create_from_template(
-            client, session_id, "CANYONING", template_id
-        )
+        created = await _create_from_template(client, "CANYONING", template_id)
         assert "error" not in created, created
 
         canyoning = (await _read_type_data(client, int(created["id"])))["canyoning"]
@@ -429,14 +390,11 @@ async def test_mcp_create_applies_climbing_fields(
 ) -> None:
     """A climbing template also seeds the climbing block."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
         template_id = await _create_rich_template(
-            client, session_id, "climbing", climbing_type="sport", grade=21, length=30
+            client, "climbing", climbing_type="sport", grade=21, length=30
         )
 
-        created = await _create_from_template(
-            client, session_id, "CLIMBING", template_id
-        )
+        created = await _create_from_template(client, "CLIMBING", template_id)
         assert "error" not in created, created
 
         climbing = (await _read_type_data(client, int(created["id"])))["climbing"]
@@ -451,14 +409,12 @@ async def test_mcp_create_lets_supplied_type_data_win(
 ) -> None:
     """Explicit type_data beats the template, and counts follow the caller's pitches."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
         template_id = await _create_rich_template(
-            client, session_id, "canyoning", french_grade="v4a3IV"
+            client, "canyoning", french_grade="v4a3IV"
         )
 
         created = await _create_from_template(
             client,
-            session_id,
             "CANYONING",
             template_id,
             type_data={
@@ -485,11 +441,8 @@ async def test_mcp_create_rejects_an_unknown_template(
 ) -> None:
     """An unknown template id fails validation and writes no journal."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-
         created = await _create_from_template(
             client,
-            session_id,
             "CANYONING",
             "00000000-0000-4000-8000-000000000000",
             title="Should not exist",
@@ -509,11 +462,7 @@ async def test_mcp_create_rejects_a_malformed_template_id(
 ) -> None:
     """A template id that is not a UUID is a validation error, not a 500."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-
-        created = await _create_from_template(
-            client, session_id, "CANYONING", "not-a-uuid"
-        )
+        created = await _create_from_template(client, "CANYONING", "not-a-uuid")
         assert "error" in created, created
         assert "template_id" in created["message"]
 
@@ -524,9 +473,7 @@ async def test_mcp_create_rejects_an_empty_template_id(
 ) -> None:
     """An empty template_id is malformed, not "no template"."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-
-        created = await _create_from_template(client, session_id, "CANYONING", "")
+        created = await _create_from_template(client, "CANYONING", "")
         assert "error" in created, created
         assert "template_id" in created["message"]
 
@@ -537,9 +484,8 @@ async def test_mcp_create_rejects_a_template_on_a_non_abseiling_journal(
 ) -> None:
     """A template cannot silently turn a note into an abseiling trip."""
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        template_id = await _create_rich_template(client, session_id, "canyoning")
+        template_id = await _create_rich_template(client, "canyoning")
 
-        created = await _create_from_template(client, session_id, "NOTE", template_id)
+        created = await _create_from_template(client, "NOTE", template_id)
         assert "error" in created, created
         assert "template_id" in created["message"]

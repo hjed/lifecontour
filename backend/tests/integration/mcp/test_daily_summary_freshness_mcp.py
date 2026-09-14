@@ -33,9 +33,7 @@ from app.core.journal.services import (
 )
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool,
 )
 
 USER_ID = "test-user-123"  # the id ``test_user`` authenticates as
@@ -90,22 +88,9 @@ async def seed_todays_summary(
 
 
 async def call_get_daily_summary(client: Any) -> dict[str, Any]:
-    session_id = await initialize_mcp_session(client)
-    response = await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "get_daily_summary",
-                "arguments": {"summary_date": TODAY.isoformat()},
-            },
-        },
-        headers=mcp_headers(session_id),
+    return await call_mcp_tool(
+        client, "get_daily_summary", {"summary_date": TODAY.isoformat()}
     )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
 
 
 @pytest.mark.integration

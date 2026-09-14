@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
-from tests.integration.mcp.http_helpers import call_mcp_tool, initialize_mcp_session
+from tests.integration.mcp.http_helpers import (
+    call_mcp_tool,
+)
 from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_journal
 
 VALID_GPX = (
@@ -61,8 +63,7 @@ async def _route_event_payloads(
 
 
 async def _call(client: Any, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    session_id = await initialize_mcp_session(client)
-    return await call_mcp_tool(client, session_id, tool, arguments)
+    return await call_mcp_tool(client, tool, arguments)
 
 
 class TestCreateJournalRoute:
@@ -172,7 +173,6 @@ class TestListJournalRoutes:
         journal_id = await create_journal(SqlJournalRepository(clean_database))
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             for name, gpx_data in [
                 ("Harbour Loop", VALID_GPX),
                 ("Headland Walk", None),
@@ -181,17 +181,14 @@ class TestListJournalRoutes:
                 arguments: dict[str, Any] = {"journal_id": journal_id, "name": name}
                 if gpx_data is not None:
                     arguments["gpx_data"] = gpx_data
-                created = await call_mcp_tool(
-                    client, session_id, "create_journal_route", arguments
-                )
+                created = await call_mcp_tool(client, "create_journal_route", arguments)
                 assert "error" not in created, created
 
             everything = await call_mcp_tool(
-                client, session_id, "list_journal_routes", {"journal_id": journal_id}
+                client, "list_journal_routes", {"journal_id": journal_id}
             )
             harbour_page = await call_mcp_tool(
                 client,
-                session_id,
                 "list_journal_routes",
                 {"journal_id": journal_id, "name": "harbour", "limit": 1, "offset": 1},
             )
@@ -296,17 +293,14 @@ class TestUpdateJournalRoute:
         route_id = await _seed_route(clean_database, journal_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             renamed = await call_mcp_tool(
                 client,
-                session_id,
                 "update_journal_route",
                 {"journal_id": journal_id, "route_id": route_id, "name": "Renamed"},
             )
             rows_after_rename = await _route_rows(clean_database, journal_id)
             cleared = await call_mcp_tool(
                 client,
-                session_id,
                 "update_journal_route",
                 {
                     "journal_id": journal_id,

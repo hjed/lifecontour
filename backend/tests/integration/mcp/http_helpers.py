@@ -14,7 +14,7 @@ from mcp.types import (
     CLIENT_INFO_META_KEY,
     PROTOCOL_VERSION_META_KEY,
 )
-from mcp_types.version import LATEST_HANDSHAKE_VERSION, MODERN_PROTOCOL_VERSIONS
+from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 MCP_PATH = "/mcp-server/mcp"
 
@@ -99,81 +99,13 @@ def extract_mcp_json_payload(response_body: Any) -> dict[str, Any]:
     )
 
 
-def mcp_headers(session_id: str | None = None) -> dict[str, str]:
-    headers = {
+def mcp_headers() -> dict[str, str]:
+    """The streamable-HTTP headers every MCP request sends, whatever its era."""
+    return {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "Host": "localhost",
     }
-    if session_id is not None:
-        headers["mcp-session-id"] = session_id
-    return headers
-
-
-async def initialize_mcp_session(authenticated_client: Any) -> str:
-    """Initialize a handshake-era streamable HTTP session and return its id.
-
-    Asks for the newest handshake version explicitly: the SDK's latest
-    protocol is the sessionless one, which has no ``initialize`` at all.
-    """
-    initialize_response = await authenticated_client.post(
-        MCP_PATH,
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": LATEST_HANDSHAKE_VERSION,
-                "capabilities": {},
-                "clientInfo": _CLIENT_INFO,
-            },
-        },
-        headers=mcp_headers(),
-    )
-    assert initialize_response.status_code == 200
-
-    session_id = initialize_response.headers.get("mcp-session-id")
-    assert isinstance(session_id, str)
-
-    initialized_response = await authenticated_client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {},
-        },
-        headers=mcp_headers(session_id),
-    )
-    assert initialized_response.status_code in {200, 202, 204}
-
-    return session_id
-
-
-async def call_mcp_tool(
-    authenticated_client: Any,
-    session_id: str,
-    tool_name: str,
-    arguments: dict[str, Any],
-    *,
-    request_id: int = 2,
-) -> dict[str, Any]:
-    """Call one MCP tool over HTTP and return its application payload.
-
-    Every mounted-MCP test builds the same ``tools/call`` envelope, so it lives
-    here rather than being copied per test.
-    """
-    response = await authenticated_client.post(
-        MCP_PATH,
-        json={
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
-    )
-    assert response.status_code == 200, response.text
-    return extract_mcp_json_payload(response.text)
 
 
 def sessionless_mcp_headers(method: str, name: str | None = None) -> dict[str, str]:
@@ -223,7 +155,7 @@ async def post_mcp_tool(
 
     For tests that inspect the HTTP response itself — a refusal's text, an
     ``isError`` body. Tests that only need the tool's payload use
-    ``call_mcp_tool_sessionless``.
+    ``call_mcp_tool``.
     """
     return await authenticated_client.post(
         MCP_PATH,
@@ -236,14 +168,18 @@ async def post_mcp_tool(
     )
 
 
-async def call_mcp_tool_sessionless(
+async def call_mcp_tool(
     authenticated_client: Any,
     tool_name: str,
     arguments: dict[str, Any],
     *,
     request_id: int = 1,
 ) -> dict[str, Any]:
-    """Call one MCP tool as a sessionless client and return its payload."""
+    """Call one MCP tool as a sessionless client and return its payload.
+
+    Every mounted-MCP test builds the same ``tools/call`` request, so it lives
+    here rather than being copied per test.
+    """
     response = await post_mcp_tool(
         authenticated_client, tool_name, arguments, request_id=request_id
     )

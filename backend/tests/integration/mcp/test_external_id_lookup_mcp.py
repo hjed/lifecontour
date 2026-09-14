@@ -7,7 +7,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from tests.integration.mcp.http_helpers import call_mcp_tool, initialize_mcp_session
+from tests.integration.mcp.http_helpers import (
+    call_mcp_tool,
+)
 
 USER_ID = "test-user-123"
 
@@ -77,10 +79,8 @@ class TestGetJournalByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_journal_by_external_id",
                 {"source": "strava", "external_id": "16152597201"},
             )
@@ -103,10 +103,8 @@ class TestGetJournalByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_journal_by_external_id",
                 {"source": "immich_album", "external_id": album_id},
             )
@@ -158,19 +156,16 @@ class TestGetJournalByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_journal_by_external_id",
                 {"source": "snipeit", "external_id": "42"},
             )
             listing = await call_mcp_tool(
-                client, session_id, "search_journals", {"integration_source": "snipeit"}
+                client, "search_journals", {"integration_source": "snipeit"}
             )
             empty = await call_mcp_tool(
                 client,
-                session_id,
                 "search_journals",
                 {"integration_source": "snipeit", "types": "mood_rating"},
             )
@@ -194,10 +189,8 @@ class TestGetJournalByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_journal_by_external_id",
                 {"source": "strava", "external_id": "999"},
             )
@@ -212,10 +205,8 @@ class TestGetJournalByExternalId:
         self, authenticated_lifespan_client
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_journal_by_external_id",
                 {"source": "garmin", "external_id": "1"},
             )
@@ -248,10 +239,8 @@ class TestGetContactByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_contact_by_external_id",
                 {"source": "google", "external_id": "people/c123"},
             )
@@ -283,14 +272,12 @@ class TestGetContactByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             shown = await call_mcp_tool(
-                client, session_id, "get_contact", {"contact_id": contact_id}
+                client, "get_contact", {"contact_id": contact_id}
             )
             link = shown["external_links"][0]
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_contact_by_external_id",
                 {"source": link["source"], "external_id": link["external_id"]},
             )
@@ -301,10 +288,8 @@ class TestGetContactByExternalId:
     @pytest.mark.asyncio
     async def test_unknown_id_is_not_found(self, authenticated_lifespan_client) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_contact_by_external_id",
                 {"source": "immich", "external_id": "nobody"},
             )
@@ -317,10 +302,8 @@ class TestGetContactByExternalId:
         self, authenticated_lifespan_client
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await call_mcp_tool(
                 client,
-                session_id,
                 "get_contact_by_external_id",
                 {"source": "strava", "external_id": "1"},
             )
