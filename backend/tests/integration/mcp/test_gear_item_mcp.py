@@ -8,9 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.gear_item_repository import SqlGearItemRepository
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    sessionless_mcp_headers,
-    sessionless_mcp_request,
+    call_mcp_tool_sessionless,
 )
 
 
@@ -25,25 +23,16 @@ class TestGearItemToolsIntegration:
     ) -> None:
         """Test creating a gear item via the MCP tool."""
         async with authenticated_lifespan_client() as authenticated_client:
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json=sessionless_mcp_request(
-                    "tools/call",
-                    {
-                        "name": "create_gear_item",
-                        "arguments": {
-                            "name": "Test Rope",
-                            "model": "Model X",
-                            "purchase_date": "2024-01-01",
-                        },
-                    },
-                ),
-                headers=sessionless_mcp_headers("tools/call", "create_gear_item"),
+            payload = await call_mcp_tool_sessionless(
+                authenticated_client,
+                "create_gear_item",
+                {
+                    "name": "Test Rope",
+                    "model": "Model X",
+                    "purchase_date": "2024-01-01",
+                },
             )
 
-            assert response.status_code == 200
-
-            payload = extract_mcp_json_payload(response.text)
             assert "error" not in payload
 
             item_data = payload
@@ -77,21 +66,10 @@ class TestGearItemToolsIntegration:
         await repo.save(item)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json=sessionless_mcp_request(
-                    "tools/call",
-                    {
-                        "name": "list_gear_items",
-                        "arguments": {},
-                    },
-                ),
-                headers=sessionless_mcp_headers("tools/call", "list_gear_items"),
+            payload = await call_mcp_tool_sessionless(
+                authenticated_client, "list_gear_items", {}
             )
 
-            assert response.status_code == 200
-
-            payload = extract_mcp_json_payload(response.text)
             assert "error" not in payload
             assert "gear_items" in payload
 
@@ -117,23 +95,14 @@ class TestGearItemToolsIntegration:
         assert saved_item.id is not None
 
         async with authenticated_lifespan_client() as authenticated_client:
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json=sessionless_mcp_request(
-                    "tools/call",
-                    {
-                        "name": "get_gear_item",
-                        "arguments": {
-                            "gear_item_id": saved_item.id,
-                        },
-                    },
-                ),
-                headers=sessionless_mcp_headers("tools/call", "get_gear_item"),
+            payload = await call_mcp_tool_sessionless(
+                authenticated_client,
+                "get_gear_item",
+                {
+                    "gear_item_id": saved_item.id,
+                },
             )
 
-            assert response.status_code == 200
-
-            payload = extract_mcp_json_payload(response.text)
             assert "error" not in payload
 
             assert payload["id"] == saved_item.id
@@ -155,25 +124,16 @@ class TestGearItemToolsIntegration:
         assert saved_item.id is not None
 
         async with authenticated_lifespan_client() as authenticated_client:
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json=sessionless_mcp_request(
-                    "tools/call",
-                    {
-                        "name": "update_gear_item",
-                        "arguments": {
-                            "gear_item_id": saved_item.id,
-                            "name": "New Name",
-                            "model": "New Model",
-                        },
-                    },
-                ),
-                headers=sessionless_mcp_headers("tools/call", "update_gear_item"),
+            payload = await call_mcp_tool_sessionless(
+                authenticated_client,
+                "update_gear_item",
+                {
+                    "gear_item_id": saved_item.id,
+                    "name": "New Name",
+                    "model": "New Model",
+                },
             )
 
-            assert response.status_code == 200
-
-            payload = extract_mcp_json_payload(response.text)
             assert "error" not in payload
 
             assert payload["id"] == saved_item.id

@@ -212,6 +212,30 @@ def sessionless_mcp_request(
     }
 
 
+async def post_mcp_tool(
+    authenticated_client: Any,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    request_id: int = 1,
+) -> Any:
+    """Call one MCP tool as a sessionless client and return the raw response.
+
+    For tests that inspect the HTTP response itself — a refusal's text, an
+    ``isError`` body. Tests that only need the tool's payload use
+    ``call_mcp_tool_sessionless``.
+    """
+    return await authenticated_client.post(
+        MCP_PATH,
+        json=sessionless_mcp_request(
+            "tools/call",
+            {"name": tool_name, "arguments": arguments},
+            request_id=request_id,
+        ),
+        headers=sessionless_mcp_headers("tools/call", tool_name),
+    )
+
+
 async def call_mcp_tool_sessionless(
     authenticated_client: Any,
     tool_name: str,
@@ -220,14 +244,8 @@ async def call_mcp_tool_sessionless(
     request_id: int = 1,
 ) -> dict[str, Any]:
     """Call one MCP tool as a sessionless client and return its payload."""
-    response = await authenticated_client.post(
-        MCP_PATH,
-        json=sessionless_mcp_request(
-            "tools/call",
-            {"name": tool_name, "arguments": arguments},
-            request_id=request_id,
-        ),
-        headers=sessionless_mcp_headers("tools/call", tool_name),
+    response = await post_mcp_tool(
+        authenticated_client, tool_name, arguments, request_id=request_id
     )
     assert response.status_code == 200, response.text
     return extract_mcp_json_payload(response.text)

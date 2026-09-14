@@ -26,9 +26,7 @@ from tests.integration.journal.outdoor_activity_seeding import (
     Seeder,
 )
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    sessionless_mcp_headers,
-    sessionless_mcp_request,
+    call_mcp_tool_sessionless,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -42,15 +40,7 @@ async def seeder(async_connection: AsyncConnection) -> Seeder:
 async def _call_tool(
     client: Any, name: str, arguments: dict[str, Any], req_id: int = 1
 ) -> dict[str, Any]:
-    response = await client.post(
-        "/mcp-server/mcp",
-        json=sessionless_mcp_request(
-            "tools/call", {"name": name, "arguments": arguments}, request_id=req_id
-        ),
-        headers=sessionless_mcp_headers("tools/call", name),
-    )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
+    return await call_mcp_tool_sessionless(client, name, arguments, request_id=req_id)
 
 
 async def _fetch_dismissal_provenance(
