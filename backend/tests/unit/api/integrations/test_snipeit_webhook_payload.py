@@ -7,7 +7,11 @@ test message has no attachments at all.
 
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from app.api.integrations.snipeit_webhook_payload import (
+    MAX_WEBHOOK_ATTACHMENTS,
     SnipeItSlackWebhookPayload,
     SnipeItWebhookEvent,
     extract_webhook_events,
@@ -139,6 +143,27 @@ def test_repeated_asset_links_produce_one_event() -> None:
     assert extract_webhook_events(payload) == [
         SnipeItWebhookEvent(action=CHECKOUT_TEXT, asset_id=42)
     ]
+
+
+def test_attachments_up_to_limit_are_accepted() -> None:
+    """A notification at the attachment cap still yields one event per asset."""
+    links = [
+        f"https://snipe.example/hardware/{asset_id}"
+        for asset_id in range(1, MAX_WEBHOOK_ATTACHMENTS + 1)
+    ]
+
+    assert len(_asset_ids(_notification(*links))) == MAX_WEBHOOK_ATTACHMENTS
+
+
+def test_attachments_over_limit_are_rejected() -> None:
+    """More attachments than Snipe-IT ever sends fails validation."""
+    links = [
+        f"https://snipe.example/hardware/{asset_id}"
+        for asset_id in range(1, MAX_WEBHOOK_ATTACHMENTS + 2)
+    ]
+
+    with pytest.raises(ValidationError):
+        _notification(*links)
 
 
 def test_missing_text_defaults_to_empty_action() -> None:

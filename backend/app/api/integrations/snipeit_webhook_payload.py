@@ -15,7 +15,12 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+# Snipe-IT sends one attachment per notification. The endpoint is
+# unauthenticated, so the cap bounds how many events (and worker syncs) a
+# single request can cause.
+MAX_WEBHOOK_ATTACHMENTS = 10
 
 # Snipe-IT asset ids are positive database ids; the length cap keeps a hostile
 # link from reaching int()'s digit limit.
@@ -36,7 +41,9 @@ class SnipeItSlackWebhookPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     text: str = ""
-    attachments: list[SnipeItSlackAttachment] = []
+    attachments: list[SnipeItSlackAttachment] = Field(
+        default_factory=list, max_length=MAX_WEBHOOK_ATTACHMENTS
+    )
 
 
 @dataclass(frozen=True)

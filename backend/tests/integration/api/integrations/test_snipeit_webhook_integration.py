@@ -17,6 +17,7 @@ from httpx import AsyncClient
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
+from app.api.integrations.snipeit_webhook_payload import MAX_WEBHOOK_ATTACHMENTS
 from app.infrastructure.config import Settings
 
 WEBHOOK_URL = "/api/integrations/snipeit/webhook"
@@ -154,6 +155,18 @@ async def test_non_asset_notification_publishes_nothing(
         pytest.param(b"not json", id="invalid-json"),
         pytest.param(b"[1, 2]", id="json-array"),
         pytest.param(b'{"attachments": "nope"}', id="invalid-attachments"),
+        pytest.param(
+            json.dumps(
+                {
+                    "text": CHECKOUT_TEXT,
+                    "attachments": [
+                        {"title_link": f"https://snipe.example/hardware/{asset_id}"}
+                        for asset_id in range(1, MAX_WEBHOOK_ATTACHMENTS + 2)
+                    ],
+                }
+            ).encode(),
+            id="too-many-attachments",
+        ),
     ],
 )
 async def test_malformed_body_is_rejected(
