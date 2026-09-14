@@ -8,9 +8,7 @@ handled via the integration API.
 import pytest
 
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool_sessionless,
 )
 
 
@@ -23,24 +21,11 @@ async def test_important_dates_via_mounted_http_session(
     import typing
 
     async with authenticated_lifespan_client() as authenticated_client:
-        session_id = await initialize_mcp_session(authenticated_client)
 
-        async def call_mcp(name: str, args: dict[str, typing.Any]):
-            resp = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": name,
-                        "arguments": args,
-                    },
-                },
-                headers=mcp_headers(session_id),
-            )
-            assert resp.status_code == 200
-            return extract_mcp_json_payload(resp.text)
+        async def call_mcp(
+            name: str, args: dict[str, typing.Any]
+        ) -> dict[str, typing.Any]:
+            return await call_mcp_tool_sessionless(authenticated_client, name, args)
 
         # 1. Create a new contact without important dates
 

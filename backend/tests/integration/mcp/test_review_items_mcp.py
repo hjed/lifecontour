@@ -14,9 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool_sessionless,
 )
 
 
@@ -89,31 +87,18 @@ class TestReviewItemsToolsIntegration:
         await repo.create(item)
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "list_review_items",
-                        "arguments": {
-                            # Setting user_id_override since in tests the context might not be fully populated
-                            # Wait, the mcp http helper in `authenticated_lifespan_client` sets user auth
-                            # However, to be completely sure it matches the inserted data we can pass override.
-                            "user_id_override": "current_user"
-                        },
-                    },
+            payload = await call_mcp_tool_sessionless(
+                authenticated_client,
+                "list_review_items",
+                {
+                    # Setting user_id_override since in tests the context might not be fully populated
+                    # Wait, the mcp http helper in `authenticated_lifespan_client` sets user auth
+                    # However, to be completely sure it matches the inserted data we can pass override.
+                    "user_id_override": "current_user"
                 },
-                headers=mcp_headers(session_id),
             )
 
-            assert response.status_code == 200
-
             # extract_mcp_json_payload unwraps the text content from the MCP JSON-RPC response
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert "data" in payload
@@ -151,28 +136,14 @@ class TestReviewItemsToolsIntegration:
         item_id = created_item.id
 
         async with authenticated_lifespan_client() as authenticated_client:
-            session_id = await initialize_mcp_session(authenticated_client)
-
-            response = await authenticated_client.post(
-                "/mcp-server/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "dismiss_review_item",
-                        "arguments": {
-                            "item_id": item_id,
-                            "user_id_override": "current_user",
-                        },
-                    },
+            payload = await call_mcp_tool_sessionless(
+                authenticated_client,
+                "dismiss_review_item",
+                {
+                    "item_id": item_id,
+                    "user_id_override": "current_user",
                 },
-                headers=mcp_headers(session_id),
             )
-
-            assert response.status_code == 200
-
-            payload = extract_mcp_json_payload(response.text)
 
             assert "error" not in payload
             assert payload["success"] is True

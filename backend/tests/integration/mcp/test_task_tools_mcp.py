@@ -37,8 +37,8 @@ from tests.integration.core.integrations.journal_sync_seeding import (
 )
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    sessionless_mcp_headers,
+    sessionless_mcp_request,
 )
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS,
@@ -67,51 +67,40 @@ from tests.integration.tasks.task_seeding import (
 )
 
 
-async def _raw_call(client: Any, session_id: str, tool: str, arguments: dict[str, Any]):
+async def _raw_call(client: Any, tool: str, arguments: dict[str, Any]) -> Any:
     return await client.post(
         "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": tool, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
+        json=sessionless_mcp_request(
+            "tools/call", {"name": tool, "arguments": arguments}
+        ),
+        headers=sessionless_mcp_headers("tools/call", tool),
     )
 
 
-async def _raw_tool_call(client: Any, session_id: str, arguments: dict[str, Any]):
-    return await _raw_call(client, session_id, "create_task", arguments)
+async def _raw_tool_call(client: Any, arguments: dict[str, Any]) -> Any:
+    return await _raw_call(client, "create_task", arguments)
 
 
-async def _create_task(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_tool_call(client, session_id, arguments)
+async def _create_task(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_tool_call(client, arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
 
-async def _set_task_status(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "set_task_status", arguments)
+async def _set_task_status(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "set_task_status", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
 
-async def _update_task_text(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "update_task_text", arguments)
+async def _update_task_text(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "update_task_text", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
 
-async def _delete_task(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "delete_task", arguments)
+async def _delete_task(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "delete_task", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -129,10 +118,8 @@ class TestCreateTaskTool:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="print the permit",
@@ -156,10 +143,8 @@ class TestCreateTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=journal_id,
                 due_journal_id=journal_id,
                 text="pack the ropes",
@@ -180,10 +165,8 @@ class TestCreateTaskTool:
         second = await create_contact(clean_database, first_name="Tom")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="split the gear",
@@ -207,10 +190,8 @@ class TestUnreachableAnchors:
         creating_id, _ = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=999_999,
                 text="print the permit",
@@ -238,17 +219,14 @@ class TestUnreachableAnchors:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             foreign = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=foreign_id,
                 text="print the permit",
             )
             absent = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=999_999,
                 text="print the permit",
@@ -273,10 +251,8 @@ class TestUnreachableAnchors:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=foreign_id,
                 due_journal_id=due_id,
                 text="print the permit",
@@ -304,10 +280,8 @@ class TestTheFutureDatedRuleReachesTheTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=past_id,
                 text="too late",
@@ -343,10 +317,8 @@ class TestTheFutureDatedRuleReachesTheTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=past_id,
                 text="too late",
@@ -368,10 +340,8 @@ class TestRejectedArguments:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="split the gear",
@@ -391,10 +361,8 @@ class TestRejectedArguments:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="   ",
@@ -418,10 +386,8 @@ class TestRejectedArguments:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_tool_call(
                 client,
-                session_id,
                 {
                     "creating_journal_id": creating_id,
                     "due_journal_id": due_id,
@@ -475,10 +441,7 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _set_task_status(
-                client, session_id, task_id=task_id, status=target
-            )
+            payload = await _set_task_status(client, task_id=task_id, status=target)
 
         assert "error" not in payload
         assert payload["id"] == task_id
@@ -498,9 +461,8 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _set_task_status(
-                client, session_id, task_id=task_id, status="cancelled"
+                client, task_id=task_id, status="cancelled"
             )
 
         assert "error" not in payload
@@ -527,9 +489,8 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _set_task_status(
-                client, session_id, task_id=task_id, status="cancelled"
+                client, task_id=task_id, status="cancelled"
             )
 
         assert "error" not in payload
@@ -554,10 +515,7 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _set_task_status(
-                client, session_id, task_id=task_id, status=target
-            )
+            payload = await _set_task_status(client, task_id=task_id, status=target)
 
         assert payload["error"] == "Task error"
         assert "retarget" in payload["message"].lower()
@@ -584,13 +542,10 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             foreign = await _set_task_status(
-                client, session_id, task_id=foreign_task, status="done"
+                client, task_id=foreign_task, status="done"
             )
-            absent = await _set_task_status(
-                client, session_id, task_id=999_999, status="done"
-            )
+            absent = await _set_task_status(client, task_id=999_999, status="done")
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -611,10 +566,8 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "set_task_status",
                 {"task_id": task_id, "status": "in_progress"},
             )
@@ -623,20 +576,14 @@ class TestSetTaskStatusTool:
         assert await stored_status(clean_database, task_id) == "not_done"
 
 
-async def _link_contact(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "link_task_to_contact", arguments)
+async def _link_contact(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "link_task_to_contact", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
 
-async def _unlink_contact(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(
-        client, session_id, "unlink_task_from_contact", arguments
-    )
+async def _unlink_contact(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "unlink_task_from_contact", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -668,10 +615,7 @@ class TestContactLinkTools:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _link_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
+            payload = await _link_contact(client, task_id=task_id, contact_id=sarah)
 
         assert "error" not in payload
         assert payload["linked"] is True
@@ -691,13 +635,8 @@ class TestContactLinkTools:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            first = await _link_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
-            second = await _link_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
+            first = await _link_contact(client, task_id=task_id, contact_id=sarah)
+            second = await _link_contact(client, task_id=task_id, contact_id=sarah)
 
         assert (first["changed"], second["changed"]) == (True, False)
         assert second["linked"] is True
@@ -722,10 +661,7 @@ class TestContactLinkTools:
         await link_contact(clean_database, task_id=task_id, contact_id=sarah)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _unlink_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
+            payload = await _unlink_contact(client, task_id=task_id, contact_id=sarah)
 
         assert "error" not in payload
         assert payload["linked"] is False
@@ -746,13 +682,8 @@ class TestContactLinkTools:
         await link_contact(clean_database, task_id=task_id, contact_id=sarah)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            first = await _unlink_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
-            second = await _unlink_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
+            first = await _unlink_contact(client, task_id=task_id, contact_id=sarah)
+            second = await _unlink_contact(client, task_id=task_id, contact_id=sarah)
 
         assert (first["changed"], second["changed"]) == (True, False)
         assert second["linked"] is False
@@ -776,13 +707,8 @@ class TestContactLinkTools:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            linked = await _link_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
-            unlinked = await _unlink_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
+            linked = await _link_contact(client, task_id=task_id, contact_id=sarah)
+            unlinked = await _unlink_contact(client, task_id=task_id, contact_id=sarah)
 
         assert linked["linked"] is True
         assert unlinked["linked"] is False
@@ -802,8 +728,7 @@ class TestContactLinkTools:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            await _link_contact(client, session_id, task_id=task_id, contact_id=sarah)
+            await _link_contact(client, task_id=task_id, contact_id=sarah)
 
         assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
 
@@ -831,10 +756,7 @@ class TestContactLinkToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _link_contact(
-                client, session_id, task_id=task_id, contact_id=999_999
-            )
+            payload = await _link_contact(client, task_id=task_id, contact_id=999_999)
 
         assert payload["error"] == "Contact not found"
         assert "999999" in payload["message"]
@@ -861,13 +783,10 @@ class TestContactLinkToolRejections:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             foreign = await _link_contact(
-                client, session_id, task_id=foreign_task, contact_id=sarah
+                client, task_id=foreign_task, contact_id=sarah
             )
-            absent = await _link_contact(
-                client, session_id, task_id=999_999, contact_id=sarah
-            )
+            absent = await _link_contact(client, task_id=999_999, contact_id=sarah)
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -897,9 +816,8 @@ class TestContactLinkToolRejections:
         await link_contact(clean_database, task_id=foreign_task, contact_id=sarah)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _unlink_contact(
-                client, session_id, task_id=foreign_task, contact_id=sarah
+                client, task_id=foreign_task, contact_id=sarah
             )
 
         assert payload["error"] == "Not found"
@@ -925,10 +843,8 @@ class TestContactLinkToolRejections:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "link_task_to_contact",
                 {
                     "task_id": task_id,
@@ -959,10 +875,8 @@ class TestIdsOutsideTheColumnsRange:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "link_task_to_contact",
                 {"task_id": 2_147_483_648, "contact_id": sarah},
             )
@@ -981,10 +895,8 @@ class TestIdsOutsideTheColumnsRange:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "unlink_task_from_contact",
                 {"task_id": task_id, "contact_id": 2_147_483_648},
             )
@@ -1015,10 +927,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _update_task_text(
-                client, session_id, task_id=task_id, text="reworded"
-            )
+            payload = await _update_task_text(client, task_id=task_id, text="reworded")
 
         assert "error" not in payload
         assert payload["id"] == task_id
@@ -1042,10 +951,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _update_task_text(
-                client, session_id, task_id=task_id, text="reworded"
-            )
+            payload = await _update_task_text(client, task_id=task_id, text="reworded")
 
         assert "error" not in payload
         assert await stored_text(clean_database, task_id) == "reworded"
@@ -1063,10 +969,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _update_task_text(
-                client, session_id, task_id=task_id, text="reworded"
-            )
+            payload = await _update_task_text(client, task_id=task_id, text="reworded")
 
         assert "error" not in payload
         assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
@@ -1087,10 +990,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _update_task_text(
-                client, session_id, task_id=task_id, text="   "
-            )
+            payload = await _update_task_text(client, task_id=task_id, text="   ")
 
         assert "text" in payload["message"]
         assert await stored_text(clean_database, task_id) == "print the permit"
@@ -1117,13 +1017,10 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             foreign = await _update_task_text(
-                client, session_id, task_id=foreign_task, text="reworded"
+                client, task_id=foreign_task, text="reworded"
             )
-            absent = await _update_task_text(
-                client, session_id, task_id=999_999, text="reworded"
-            )
+            absent = await _update_task_text(client, task_id=999_999, text="reworded")
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -1149,10 +1046,8 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "update_task_text",
                 {"task_id": task_id, "text": "reworded", "status": "done"},
             )
@@ -1186,8 +1081,7 @@ class TestDeleteTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _delete_task(client, session_id, task_id=task_id)
+            payload = await _delete_task(client, task_id=task_id)
 
         assert "error" not in payload
         assert payload["deleted"] is True
@@ -1216,8 +1110,7 @@ class TestDeleteTaskTool:
         await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _delete_task(client, session_id, task_id=task_id)
+            payload = await _delete_task(client, task_id=task_id)
 
         assert "error" not in payload
         assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
@@ -1246,9 +1139,8 @@ class TestDeleteTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            first = await _delete_task(client, session_id, task_id=task_id)
-            second = await _delete_task(client, session_id, task_id=task_id)
+            first = await _delete_task(client, task_id=task_id)
+            second = await _delete_task(client, task_id=task_id)
 
         assert first["deleted"] is True
         assert second["error"] == "Not found"
@@ -1274,9 +1166,8 @@ class TestDeleteTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            foreign = await _delete_task(client, session_id, task_id=foreign_task)
-            absent = await _delete_task(client, session_id, task_id=999_999)
+            foreign = await _delete_task(client, task_id=foreign_task)
+            absent = await _delete_task(client, task_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -1303,8 +1194,7 @@ class TestDeleteTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _delete_task(client, session_id, task_id=doomed)
+            payload = await _delete_task(client, task_id=doomed)
 
         assert "error" not in payload
         assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 1
@@ -1331,10 +1221,8 @@ class TestTheToolsRecordMcpProvenance:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="print the permit",
@@ -1358,8 +1246,7 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _delete_task(client, session_id, task_id=task_id)
+            payload = await _delete_task(client, task_id=task_id)
 
         assert "error" not in payload
         (event,) = await task_events(clean_database, task_id=task_id)
@@ -1382,10 +1269,8 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _update_task_text(
                 client,
-                session_id,
                 task_id=task_id,
                 text="print the permit and the map",
             )
@@ -1417,10 +1302,7 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _set_task_status(
-                client, session_id, task_id=task_id, status="done"
-            )
+            payload = await _set_task_status(client, task_id=task_id, status="done")
 
         assert "error" not in payload
         (event,) = await task_events(clean_database, task_id=task_id)
@@ -1452,9 +1334,8 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=later_id
+                client, task_id=task_id, due_journal_id=later_id
             )
 
         assert "error" not in payload
@@ -1496,10 +1377,8 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
                 client,
-                session_id,
                 task_id=task_id,
                 due_journal_id=later_id,
                 acknowledge_reopen=True,
@@ -1532,9 +1411,8 @@ class TestTheToolsRecordMcpProvenance:
         mentioned = await create_journal(journal_repository, title="Came up again")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
 
         assert "error" not in payload
@@ -1559,12 +1437,11 @@ class TestTheToolsRecordMcpProvenance:
         mentioned = await create_journal(journal_repository, title="Came up again")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             attached = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
             payload = await _detach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
 
         assert "error" not in attached
@@ -1595,10 +1472,7 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _link_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
+            payload = await _link_contact(client, task_id=task_id, contact_id=sarah)
 
         assert "error" not in payload
         (event,) = await task_events(clean_database, task_id=task_id)
@@ -1629,13 +1503,8 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            linked = await _link_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
-            payload = await _unlink_contact(
-                client, session_id, task_id=task_id, contact_id=sarah
-            )
+            linked = await _link_contact(client, task_id=task_id, contact_id=sarah)
+            payload = await _unlink_contact(client, task_id=task_id, contact_id=sarah)
 
         assert "error" not in linked
         assert "error" not in payload
@@ -1663,10 +1532,7 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _set_task_status(
-                client, session_id, task_id=task_id, status="done"
-            )
+            payload = await _set_task_status(client, task_id=task_id, status="done")
 
         assert "error" in payload
         assert await task_events(clean_database, task_id=task_id) == []
@@ -1695,17 +1561,14 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _delete_task(client, session_id, task_id=foreign_task_id)
+            payload = await _delete_task(client, task_id=foreign_task_id)
 
         assert "error" in payload
         assert await task_events(clean_database) == []
 
 
-async def _retarget_task(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "retarget_task", arguments)
+async def _retarget_task(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "retarget_task", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -1747,10 +1610,8 @@ class TestRetargetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
                 client,
-                session_id,
                 task_id=task_id,
                 due_journal_id=later_id,
                 acknowledge_reopen=True,
@@ -1786,9 +1647,8 @@ class TestRetargetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=later_id
+                client, task_id=task_id, due_journal_id=later_id
             )
 
         assert payload["intermediate_journal_ids"] == [due_id]
@@ -1810,13 +1670,10 @@ class TestRetargetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             for target in (second, due_id):
-                await _retarget_task(
-                    client, session_id, task_id=task_id, due_journal_id=target
-                )
+                await _retarget_task(client, task_id=task_id, due_journal_id=target)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=second
+                client, task_id=task_id, due_journal_id=second
             )
 
         assert sorted(payload["intermediate_journal_ids"]) == sorted([due_id, second])
@@ -1844,9 +1701,8 @@ class TestRetargetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=future_id
+                client, task_id=task_id, due_journal_id=future_id
             )
 
         assert payload["due_journal_id"] == future_id
@@ -1877,9 +1733,8 @@ class TestRetargetTaskTool:
         backdated = await backdate_updated_at(clean_database, task_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=due_id
+                client, task_id=task_id, due_journal_id=due_id
             )
 
         assert "error" not in payload
@@ -1910,10 +1765,8 @@ class TestEveryTaskReturningToolAnswersTheSameShape:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _create_task(
                 client,
-                session_id,
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="print the permit",
@@ -1945,10 +1798,7 @@ class TestEveryTaskReturningToolAnswersTheSameShape:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _set_task_status(
-                client, session_id, task_id=task_id, status="done"
-            )
+            payload = await _set_task_status(client, task_id=task_id, status="done")
 
         assert payload["intermediate_journal_ids"] == [passed_id]
 
@@ -1982,9 +1832,8 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=later_id
+                client, task_id=task_id, due_journal_id=later_id
             )
 
         assert payload["error"] == "Task error"
@@ -2010,10 +1859,7 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=later_id
-            )
+            await _retarget_task(client, task_id=task_id, due_journal_id=later_id)
 
         assert await stored_status(clean_database, task_id) == "done"
         assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
@@ -2038,10 +1884,8 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
                 client,
-                session_id,
                 task_id=task_id,
                 due_journal_id=later_id,
                 acknowledge_reopen=True,
@@ -2075,9 +1919,8 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=later_id
+                client, task_id=task_id, due_journal_id=later_id
             )
 
         assert "error" not in payload
@@ -2111,9 +1954,8 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=past_id
+                client, task_id=task_id, due_journal_id=past_id
             )
 
         assert payload["error"] == "Task error"
@@ -2148,10 +1990,8 @@ class TestTheRetargetToolRevalidatesTheJournalRules:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _retarget_task(
                 client,
-                session_id,
                 task_id=task_id,
                 due_journal_id=past_id,
                 acknowledge_reopen=True,
@@ -2182,12 +2022,11 @@ class TestTheRetargetToolRevalidatesTheJournalRules:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             foreign = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=foreign_id
+                client, task_id=task_id, due_journal_id=foreign_id
             )
             absent = await _retarget_task(
-                client, session_id, task_id=task_id, due_journal_id=999_999
+                client, task_id=task_id, due_journal_id=999_999
             )
 
         assert foreign["error"] == absent["error"] == "Not found"
@@ -2219,12 +2058,11 @@ class TestTheRetargetToolRevalidatesTheJournalRules:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             foreign = await _retarget_task(
-                client, session_id, task_id=foreign_task, due_journal_id=due_id
+                client, task_id=foreign_task, due_journal_id=due_id
             )
             absent = await _retarget_task(
-                client, session_id, task_id=999_999, due_journal_id=due_id
+                client, task_id=999_999, due_journal_id=due_id
             )
 
         assert foreign["error"] == absent["error"] == "Not found"
@@ -2274,10 +2112,8 @@ class TestRejectedRetargetArguments:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "retarget_task",
                 {"task_id": task_id, "due_journal_id": later_id, **extra},
             )
@@ -2313,10 +2149,8 @@ class TestRejectedRetargetArguments:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "retarget_task",
                 {
                     "task_id": task_id,
@@ -2346,28 +2180,21 @@ class TestRejectedRetargetArguments:
         arguments[field] = 2_147_483_648
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            response = await _raw_call(client, session_id, "retarget_task", arguments)
+            response = await _raw_call(client, "retarget_task", arguments)
 
         assert '"isError":true' in response.text
         assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
 
 
-async def _attach_journal(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(
-        client, session_id, "attach_intermediate_journal_to_task", arguments
-    )
+async def _attach_journal(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "attach_intermediate_journal_to_task", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
 
-async def _detach_journal(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
+async def _detach_journal(client: Any, **arguments: Any) -> dict[str, Any]:
     response = await _raw_call(
-        client, session_id, "detach_intermediate_journal_from_task", arguments
+        client, "detach_intermediate_journal_from_task", arguments
     )
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
@@ -2396,9 +2223,8 @@ class TestIntermediateJournalTools:
         mentioned = await create_journal(journal_repository, title="Came up again")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
 
         assert "error" not in payload
@@ -2420,12 +2246,9 @@ class TestIntermediateJournalTools:
         mentioned = await create_journal(journal_repository, title="Came up again")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            first = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
-            )
+            first = await _attach_journal(client, task_id=task_id, journal_id=mentioned)
             second = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
 
         assert (first["changed"], second["changed"]) == (True, False)
@@ -2449,9 +2272,8 @@ class TestIntermediateJournalTools:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _detach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
 
         assert payload["attached"] is False
@@ -2475,12 +2297,9 @@ class TestIntermediateJournalTools:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            first = await _detach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
-            )
+            first = await _detach_journal(client, task_id=task_id, journal_id=mentioned)
             second = await _detach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
 
         assert (first["changed"], second["changed"]) == (True, False)
@@ -2505,9 +2324,8 @@ class TestIntermediateJournalTools:
         mentioned = await create_journal(journal_repository, title="Came up again")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
+                client, task_id=task_id, journal_id=mentioned
             )
 
         assert payload["changed"] is True
@@ -2529,10 +2347,7 @@ class TestIntermediateJournalTools:
         mentioned = await create_journal(journal_repository, title="Came up again")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=mentioned
-            )
+            await _attach_journal(client, task_id=task_id, journal_id=mentioned)
 
         assert await count(clean_database, COUNT_CONTACT_LINKS, {}) == 0
 
@@ -2562,9 +2377,8 @@ class TestIntermediateJournalToolRejections:
         journal_id = creating_id if anchor == "creating" else due_id
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=journal_id
+                client, task_id=task_id, journal_id=journal_id
             )
 
         assert payload["error"] == "Task error"
@@ -2586,9 +2400,8 @@ class TestIntermediateJournalToolRejections:
         journal_id = creating_id if anchor == "creating" else due_id
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _detach_journal(
-                client, session_id, task_id=task_id, journal_id=journal_id
+                client, task_id=task_id, journal_id=journal_id
             )
 
         assert payload["error"] == "Task error"
@@ -2611,13 +2424,8 @@ class TestIntermediateJournalToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            anchor = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=due_id
-            )
-            missing = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=999_999
-            )
+            anchor = await _attach_journal(client, task_id=task_id, journal_id=due_id)
+            missing = await _attach_journal(client, task_id=task_id, journal_id=999_999)
 
         assert anchor["error"] != missing["error"]
         assert missing["error"] == "Journal not found"
@@ -2639,10 +2447,7 @@ class TestIntermediateJournalToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=999_999
-            )
+            payload = await _attach_journal(client, task_id=task_id, journal_id=999_999)
 
         assert payload["error"] == "Journal not found"
         assert "999999" in payload["message"]
@@ -2664,13 +2469,8 @@ class TestIntermediateJournalToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            foreign = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=theirs
-            )
-            absent = await _attach_journal(
-                client, session_id, task_id=task_id, journal_id=999_999
-            )
+            foreign = await _attach_journal(client, task_id=task_id, journal_id=theirs)
+            absent = await _attach_journal(client, task_id=task_id, journal_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Journal not found"
         assert foreign["message"].replace(str(theirs), "X") == absent[
@@ -2703,18 +2503,17 @@ class TestIntermediateJournalToolRejections:
         mine = await create_journal(journal_repository, title="Mine")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             foreign_attach = await _attach_journal(
-                client, session_id, task_id=their_task, journal_id=mine
+                client, task_id=their_task, journal_id=mine
             )
             absent_attach = await _attach_journal(
-                client, session_id, task_id=999_999, journal_id=mine
+                client, task_id=999_999, journal_id=mine
             )
             foreign_detach = await _detach_journal(
-                client, session_id, task_id=their_task, journal_id=their_mention
+                client, task_id=their_task, journal_id=their_mention
             )
             absent_detach = await _detach_journal(
-                client, session_id, task_id=999_999, journal_id=their_mention
+                client, task_id=999_999, journal_id=their_mention
             )
 
         # Compared with each other rather than each against a constant, which is
@@ -2749,10 +2548,8 @@ class TestIntermediateJournalToolRejections:
         mentioned = await create_journal(journal_repository, title="Came up again")
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "attach_intermediate_journal_to_task",
                 {
                     "task_id": task_id,
@@ -2776,10 +2573,8 @@ class TestIntermediateJournalToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "attach_intermediate_journal_to_task",
                 {"task_id": task_id, "journal_id": 2_147_483_648},
             )
@@ -2788,16 +2583,14 @@ class TestIntermediateJournalToolRejections:
         assert await intermediate_journal_ids(clean_database, task_id) == []
 
 
-async def _get_task(client: Any, session_id: str, **arguments: Any) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "get_task", arguments)
+async def _get_task(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "get_task", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
 
-async def _list_journal_tasks(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "list_journal_tasks", arguments)
+async def _list_journal_tasks(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "list_journal_tasks", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -2835,8 +2628,7 @@ class TestGetTaskTool:
         await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task(client, session_id, task_id=task_id)
+            payload = await _get_task(client, task_id=task_id)
 
         assert "error" not in payload
         assert payload["text"] == "print the permit"
@@ -2868,8 +2660,7 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task(client, session_id, task_id=task_id)
+            payload = await _get_task(client, task_id=task_id)
 
         assert payload["intermediate_journal_ids"] == [mention_id]
         assert payload["creating_journal_id"] == creating_id
@@ -2900,8 +2691,7 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task(client, session_id, task_id=task_id)
+            payload = await _get_task(client, task_id=task_id)
 
         assert payload["due_journal"]["date"] == "2020-01-02"
 
@@ -2931,8 +2721,7 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task(client, session_id, task_id=task_id)
+            payload = await _get_task(client, task_id=task_id)
 
         assert payload["lapsed"] is True
         assert payload["lapse_reason"] == "due_journal_cancelled"
@@ -2985,8 +2774,7 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task(client, session_id, task_id=task_id)
+            payload = await _get_task(client, task_id=task_id)
 
         assert payload["lapsed"] is True
         assert payload["lapse_reason"] == "due_journal_cancelled"
@@ -3008,8 +2796,7 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task(client, session_id, task_id=task_id)
+            payload = await _get_task(client, task_id=task_id)
 
         assert payload["lapse_reason"] == "date_passed"
 
@@ -3025,8 +2812,7 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task(client, session_id, task_id=task_id)
+            payload = await _get_task(client, task_id=task_id)
 
         assert payload["lapsed"] is False
         assert payload["lapse_reason"] is None
@@ -3054,9 +2840,8 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            foreign = await _get_task(client, session_id, task_id=theirs)
-            absent = await _get_task(client, session_id, task_id=999_999)
+            foreign = await _get_task(client, task_id=theirs)
+            absent = await _get_task(client, task_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(theirs), "X") == absent[
@@ -3100,10 +2885,7 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         assert payload["journal_id"] == viewed_id
         assert [task["id"] for task in payload["groups"]["due"]] == [due_here]
@@ -3129,10 +2911,7 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         assert [task["id"] for task in payload["groups"]["due"]] == [task_id]
         assert [task["id"] for task in payload["groups"]["created"]] == [task_id]
@@ -3156,10 +2935,7 @@ class TestListJournalTasksTool:
         await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         (task,) = payload["groups"]["created"]
         assert task["text"] == "return Sarah's book"
@@ -3187,9 +2963,8 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id, role="due"
+                client, journal_id=viewed_id, role="due"
             )
 
         assert [task["id"] for task in payload["groups"]["due"]] == [due_here]
@@ -3206,10 +2981,8 @@ class TestListJournalTasksTool:
         viewed_id, _ = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "list_journal_tasks",
                 {"journal_id": viewed_id, "role": "overdue"},
             )
@@ -3239,10 +3012,7 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         listed = {task["id"]: task for task in payload["groups"]["created"]}
         assert set(listed) == {lapsed, done}
@@ -3275,10 +3045,7 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         (task,) = payload["groups"]["created"]
         assert task["id"] == task_id
@@ -3295,10 +3062,7 @@ class TestListJournalTasksTool:
         viewed_id, _ = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         assert payload["groups"] == {"due": [], "created": [], "mentioned": []}
 
@@ -3323,9 +3087,8 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            foreign = await _list_journal_tasks(client, session_id, journal_id=theirs)
-            absent = await _list_journal_tasks(client, session_id, journal_id=999_999)
+            foreign = await _list_journal_tasks(client, journal_id=theirs)
+            absent = await _list_journal_tasks(client, journal_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Journal not found"
         assert foreign["message"].replace(str(theirs), "X") == absent[
@@ -3357,10 +3120,7 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         assert [task["id"] for task in payload["groups"]["due"]] == [mine]
         assert payload["groups"]["mentioned"] == []
@@ -3384,10 +3144,7 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_journal_tasks(
-                client, session_id, journal_id=viewed_id
-            )
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
 
         assert [task["id"] for task in payload["groups"]["created"]] == [
             near_task,
@@ -3395,10 +3152,8 @@ class TestListJournalTasksTool:
         ]
 
 
-async def _list_upcoming_tasks(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "list_upcoming_tasks", arguments)
+async def _list_upcoming_tasks(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "list_upcoming_tasks", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -3436,8 +3191,7 @@ class TestListUpcomingTasksTool:
         await link_contact(clean_database, task_id=task_id, contact_id=contact_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_upcoming_tasks(client, session_id)
+            payload = await _list_upcoming_tasks(client)
 
         assert payload["window"]["days_ahead"] == 7
         assert payload["total"] == 1
@@ -3468,8 +3222,7 @@ class TestListUpcomingTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_upcoming_tasks(client, session_id, days_ahead=2)
+            payload = await _list_upcoming_tasks(client, days_ahead=2)
 
         assert [task["id"] for task in payload["tasks"]] == [near_task]
         assert payload["window"]["days_ahead"] == 2
@@ -3489,8 +3242,7 @@ class TestListUpcomingTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_upcoming_tasks(client, session_id)
+            payload = await _list_upcoming_tasks(client)
 
         assert [task["id"] for task in payload["tasks"]] == [task_id]
 
@@ -3514,8 +3266,7 @@ class TestListUpcomingTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_upcoming_tasks(client, session_id)
+            payload = await _list_upcoming_tasks(client)
 
         assert payload["tasks"] == []
         assert payload["total"] == 0
@@ -3546,11 +3297,8 @@ class TestListUpcomingTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            upcoming = await _list_upcoming_tasks(client, session_id)
-            on_its_journal = await _list_journal_tasks(
-                client, session_id, journal_id=due_id
-            )
+            upcoming = await _list_upcoming_tasks(client)
+            on_its_journal = await _list_journal_tasks(client, journal_id=due_id)
 
         assert upcoming["tasks"] == []
         (listed,) = on_its_journal["groups"]["due"]
@@ -3586,8 +3334,7 @@ class TestListUpcomingTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_upcoming_tasks(client, session_id)
+            payload = await _list_upcoming_tasks(client)
 
         assert [task["id"] for task in payload["tasks"]] == [mine]
 
@@ -3612,8 +3359,7 @@ class TestListUpcomingTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_upcoming_tasks(client, session_id)
+            payload = await _list_upcoming_tasks(client)
 
         assert [task["id"] for task in payload["tasks"]] == [near_task, far_task]
 
@@ -3622,8 +3368,7 @@ class TestListUpcomingTasksTool:
     ):
         """The answer an agent turns into "nothing due until Tuesday"."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _list_upcoming_tasks(client, session_id)
+            payload = await _list_upcoming_tasks(client)
 
         assert payload["tasks"] == []
         assert payload["total"] == 0
@@ -3636,18 +3381,15 @@ class TestListUpcomingTasksTool:
     ):
         """The bound that keeps this from becoming an every-task browser."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
-                client, session_id, "list_upcoming_tasks", {"days_ahead": days_ahead}
+                client, "list_upcoming_tasks", {"days_ahead": days_ahead}
             )
 
         assert '"isError":true' in response.text
 
 
-async def _get_task_history(
-    client: Any, session_id: str, **arguments: Any
-) -> dict[str, Any]:
-    response = await _raw_call(client, session_id, "get_task_history", arguments)
+async def _get_task_history(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "get_task_history", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -3745,8 +3487,7 @@ class TestGetTaskHistoryTool:
         await _seed_a_life(clean_database, task_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task_history(client, session_id, task_id=task_id)
+            payload = await _get_task_history(client, task_id=task_id)
 
         assert "error" not in payload
         assert payload["task_id"] == task_id
@@ -3775,8 +3516,7 @@ class TestGetTaskHistoryTool:
         await _seed_a_life(clean_database, task_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task_history(client, session_id, task_id=task_id)
+            payload = await _get_task_history(client, task_id=task_id)
 
         by_field = {entry["field_name"]: entry for entry in payload["entries"]}
         assert by_field["__created__"]["source"] == "ui"
@@ -3800,13 +3540,8 @@ class TestGetTaskHistoryTool:
         await _seed_a_life(clean_database, task_id)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            first = await _get_task_history(
-                client, session_id, task_id=task_id, page=1, limit=2
-            )
-            third = await _get_task_history(
-                client, session_id, task_id=task_id, page=3, limit=2
-            )
+            first = await _get_task_history(client, task_id=task_id, page=1, limit=2)
+            third = await _get_task_history(client, task_id=task_id, page=3, limit=2)
 
         assert first["page"] == 1
         assert first["limit"] == 2
@@ -3837,8 +3572,7 @@ class TestGetTaskHistoryTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task_history(client, session_id, task_id=task_id)
+            payload = await _get_task_history(client, task_id=task_id)
 
         assert "error" not in payload
         assert payload["entries"] == []
@@ -3864,10 +3598,9 @@ class TestGetTaskHistoryTool:
         await _seed_history(clean_database, task_id, "__deleted__", minutes=10)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            deleted = await _delete_task(client, session_id, task_id=task_id)
-            payload = await _get_task_history(client, session_id, task_id=task_id)
-            gone = await _get_task(client, session_id, task_id=task_id)
+            deleted = await _delete_task(client, task_id=task_id)
+            payload = await _get_task_history(client, task_id=task_id)
+            gone = await _get_task(client, task_id=task_id)
 
         assert deleted["deleted"] is True
         assert not await task_exists(clean_database, task_id)
@@ -3900,9 +3633,8 @@ class TestGetTaskHistoryTool:
         await _seed_a_life(clean_database, foreign_task, user_id=OTHER_USER_ID)
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            foreign = await _get_task_history(client, session_id, task_id=foreign_task)
-            absent = await _get_task_history(client, session_id, task_id=999_999)
+            foreign = await _get_task_history(client, task_id=foreign_task)
+            absent = await _get_task_history(client, task_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -3941,8 +3673,7 @@ class TestGetTaskHistoryTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
-            payload = await _get_task_history(client, session_id, task_id=foreign_task)
+            payload = await _get_task_history(client, task_id=foreign_task)
 
         assert payload["error"] == "Not found"
 
@@ -3956,10 +3687,8 @@ class TestGetTaskHistoryTool:
         can act on. Raised by the pull request's automated review.
         """
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
                 client,
-                session_id,
                 "get_task_history",
                 {"task_id": 1, "page": 99999999999999999999999},
             )
@@ -3972,9 +3701,8 @@ class TestGetTaskHistoryTool:
         """The cap keeps this from becoming a bulk export, and the schema is
         where an agent finds out rather than by burning a call."""
         async with authenticated_lifespan_client() as client:
-            session_id = await initialize_mcp_session(client)
             response = await _raw_call(
-                client, session_id, "get_task_history", {"task_id": 1, "limit": 1000}
+                client, "get_task_history", {"task_id": 1, "limit": 1000}
             )
 
         assert '"isError":true' in response.text

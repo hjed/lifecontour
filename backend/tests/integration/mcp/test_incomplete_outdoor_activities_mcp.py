@@ -26,9 +26,7 @@ from tests.integration.journal.outdoor_activity_seeding import (
     Seeder,
 )
 from tests.integration.mcp.http_helpers import (
-    extract_mcp_json_payload,
-    initialize_mcp_session,
-    mcp_headers,
+    call_mcp_tool_sessionless,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -40,20 +38,9 @@ async def seeder(async_connection: AsyncConnection) -> Seeder:
 
 
 async def _call_tool(
-    client: Any, session_id: str, name: str, arguments: dict[str, Any], req_id: int = 1
+    client: Any, name: str, arguments: dict[str, Any], req_id: int = 1
 ) -> dict[str, Any]:
-    response = await client.post(
-        "/mcp-server/mcp",
-        json={
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-        headers=mcp_headers(session_id),
-    )
-    assert response.status_code == 200
-    return extract_mcp_json_payload(response.text)
+    return await call_mcp_tool_sessionless(client, name, arguments, request_id=req_id)
 
 
 async def _fetch_dismissal_provenance(
@@ -91,10 +78,7 @@ async def test_list_incomplete_via_mcp(
     journal_id = await seeder.create_incomplete_canyoning_journal()
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        payload = await _call_tool(
-            client, session_id, "list_incomplete_outdoor_activities", {}
-        )
+        payload = await _call_tool(client, "list_incomplete_outdoor_activities", {})
 
     assert "error" not in payload, payload
     assert payload["total_count"] == 1
@@ -118,24 +102,20 @@ async def test_list_incomplete_include_dismissed_via_mcp(
     journal_id = await seeder.create_incomplete_canyoning_journal()
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-
         dismissed = await _call_tool(
             client,
-            session_id,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": journal_id},
         )
         assert dismissed["dismissed"] is True
 
         default_listing = await _call_tool(
-            client, session_id, "list_incomplete_outdoor_activities", {}, req_id=2
+            client, "list_incomplete_outdoor_activities", {}, req_id=2
         )
         assert default_listing["total_count"] == 0
 
         listing = await _call_tool(
             client,
-            session_id,
             "list_incomplete_outdoor_activities",
             {"include_dismissed": True},
             req_id=3,
@@ -162,10 +142,7 @@ async def test_list_incomplete_via_mcp_excludes_future_activities(
     )
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-        payload = await _call_tool(
-            client, session_id, "list_incomplete_outdoor_activities", {}
-        )
+        payload = await _call_tool(client, "list_incomplete_outdoor_activities", {})
 
     assert "error" not in payload, payload
     assert payload["total_count"] == 1
@@ -180,10 +157,8 @@ async def test_dismiss_via_mcp_records_mcp_provenance_and_removes_entry(
     journal_id = await seeder.create_incomplete_canyoning_journal()
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
         payload = await _call_tool(
             client,
-            session_id,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": journal_id},
         )
@@ -193,7 +168,7 @@ async def test_dismiss_via_mcp_records_mcp_provenance_and_removes_entry(
         assert payload["provenance"] == "mcp"
 
         listing = await _call_tool(
-            client, session_id, "list_incomplete_outdoor_activities", {}, req_id=2
+            client, "list_incomplete_outdoor_activities", {}, req_id=2
         )
 
     assert listing["total_count"] == 0
@@ -216,10 +191,8 @@ async def test_redismiss_via_mcp_refreshes_provenance(
     )
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
         payload = await _call_tool(
             client,
-            session_id,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": journal_id},
         )
@@ -242,11 +215,8 @@ async def test_dismiss_unknown_and_foreign_journal_returns_not_found(
     )
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-
         unknown = await _call_tool(
             client,
-            session_id,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": 999999},
         )
@@ -254,7 +224,6 @@ async def test_dismiss_unknown_and_foreign_journal_returns_not_found(
 
         foreign = await _call_tool(
             client,
-            session_id,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": foreign_journal_id},
             req_id=2,
@@ -263,7 +232,6 @@ async def test_dismiss_unknown_and_foreign_journal_returns_not_found(
 
         unknown_undismiss = await _call_tool(
             client,
-            session_id,
             "undismiss_incomplete_outdoor_activity",
             {"journal_id": 999999},
             req_id=3,
@@ -272,7 +240,6 @@ async def test_dismiss_unknown_and_foreign_journal_returns_not_found(
 
         foreign_undismiss = await _call_tool(
             client,
-            session_id,
             "undismiss_incomplete_outdoor_activity",
             {"journal_id": foreign_journal_id},
             req_id=4,
@@ -291,11 +258,8 @@ async def test_undismiss_via_mcp_restores_entry_and_is_idempotent(
     journal_id = await seeder.create_incomplete_canyoning_journal()
 
     async with authenticated_lifespan_client() as client:
-        session_id = await initialize_mcp_session(client)
-
         dismissed = await _call_tool(
             client,
-            session_id,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": journal_id},
         )
@@ -303,7 +267,6 @@ async def test_undismiss_via_mcp_restores_entry_and_is_idempotent(
 
         restored = await _call_tool(
             client,
-            session_id,
             "undismiss_incomplete_outdoor_activity",
             {"journal_id": journal_id},
             req_id=2,
@@ -314,13 +277,12 @@ async def test_undismiss_via_mcp_restores_entry_and_is_idempotent(
         assert restored["was_dismissed"] is True
 
         listing = await _call_tool(
-            client, session_id, "list_incomplete_outdoor_activities", {}, req_id=3
+            client, "list_incomplete_outdoor_activities", {}, req_id=3
         )
         assert [entry["journal_id"] for entry in listing["activities"]] == [journal_id]
 
         noop = await _call_tool(
             client,
-            session_id,
             "undismiss_incomplete_outdoor_activity",
             {"journal_id": journal_id},
             req_id=4,
