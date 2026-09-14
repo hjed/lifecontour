@@ -6,6 +6,7 @@ using Dishka dependency injection patterns.
 """
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -36,7 +37,9 @@ from tests.integration.mcp.http_helpers import (
 )
 
 
-async def _update_contact_tag(authenticated_lifespan_client, arguments):
+async def _update_contact_tag(
+    authenticated_lifespan_client: Any, arguments: dict[str, Any]
+) -> Any:
     """Call ``update_contact_tag`` and return the raw HTTP response.
 
     The tag tests inspect the response itself (a refusal's text) or only the
@@ -1875,7 +1878,7 @@ class TestListUpcomingImportantDatesTool:
         )
 
     @staticmethod
-    async def call(client, **arguments):
+    async def call(client: Any, **arguments: Any) -> dict[str, Any]:
         return await call_mcp_tool_sessionless(
             client, "list_upcoming_important_dates", arguments, request_id=2
         )

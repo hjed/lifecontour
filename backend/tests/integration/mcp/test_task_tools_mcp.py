@@ -67,7 +67,7 @@ from tests.integration.tasks.task_seeding import (
 )
 
 
-async def _raw_call(client: Any, tool: str, arguments: dict[str, Any]):
+async def _raw_call(client: Any, tool: str, arguments: dict[str, Any]) -> Any:
     return await client.post(
         "/mcp-server/mcp",
         json=sessionless_mcp_request(
@@ -77,7 +77,7 @@ async def _raw_call(client: Any, tool: str, arguments: dict[str, Any]):
     )
 
 
-async def _raw_tool_call(client: Any, arguments: dict[str, Any]):
+async def _raw_tool_call(client: Any, arguments: dict[str, Any]) -> Any:
     return await _raw_call(client, "create_task", arguments)
 
 
