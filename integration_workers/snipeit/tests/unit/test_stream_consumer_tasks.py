@@ -401,6 +401,38 @@ async def test_handle_event_processes_journal_updated_gear_maintenance(
 
 
 @pytest.mark.asyncio
+async def test_handle_event_skips_journal_updated_applied_by_inbound_maintenance_sync(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """An update the Snipe-IT import applied is already Snipe-IT's state; pushing
+    it back would echo the record to where it came from."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalUpdated",
+        aggregate_id=100,
+        event_data={
+            "journal_id": 100,
+            "changed_fields": {"title": ["Old", "New"]},
+            "source": "system",
+            "changed_by": "snipeit_maintenance",
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+    with patch("worker._create_sync_service") as mock_create_sync_service:
+        await consumer._handle_event(event)
+
+        mock_session_factory.assert_not_called()
+        mock_create_sync_service.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_handle_event_processes_journal_created_gear_usage(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,

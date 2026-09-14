@@ -12,6 +12,7 @@ import hashlib
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -758,13 +759,14 @@ class TestMaintenanceEchoPrevention:
         assert pushed.fetchall() == []
 
     @pytest.mark.asyncio
-    async def test_echoed_journal_update_does_not_patch_snipeit(
+    async def test_echoed_import_update_patches_the_original_not_the_echo(
         self,
         snipeit_sync_service: Any,
         mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
-        """An import already echoed carries the echo's push row; updates must not use it."""
+        """An import already echoed carries the echo's push row; its edits go to the
+        record it was imported from."""
         gear_item_id = await _seed_synced_asset(async_connection, 51)
         journal_id = await _seed_maintenance_journal(
             async_connection,
@@ -775,6 +777,7 @@ class TestMaintenanceEchoPrevention:
         await _seed_push_record(
             async_connection, journal_id=journal_id, maintenance_id=20
         )
+        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
         mock_transport.add_response("/maintenances/20", json_data=_write_response(20))
 
         await snipeit_sync_service.push_maintenance_update(
@@ -782,7 +785,7 @@ class TestMaintenanceEchoPrevention:
             session_factory=_joined_session_factory(async_connection),
         )
 
-        assert _snipeit_writes(mock_transport) == []
+        assert _snipeit_writes(mock_transport) == ["PATCH /api/v1/maintenances/17"]
 
     @pytest.mark.asyncio
     async def test_inbound_sync_skips_maintenance_pushed_from_journal(
@@ -966,3 +969,131 @@ class TestInboundMaintenanceTypeIsLossless:
         assert (
             await _updated_event_maintenance_type(async_connection) == "upgrading gear"
         )
+
+
+def _patch_bodies(mock_transport: Any) -> list[dict[str, Any]]:
+    """The JSON body of every PATCH sent to Snipe-IT, in order."""
+    return [
+        json.loads(request.content)
+        for request in mock_transport.requests
+        if request.method == "PATCH"
+    ]
+
+
+async def _imported_event_dates(
+    async_connection: AsyncConnection,
+) -> tuple[datetime, datetime]:
+    """The date range the one ``journal_event.created`` imports a record with."""
+    row = (
+        await async_connection.execute(
+            text("""
+                SELECT event_data FROM outbox_events
+                WHERE event_type = 'journal_event.created'
+            """)
+        )
+    ).one()
+    event_data = row.event_data
+    if isinstance(event_data, str):
+        event_data = json.loads(event_data)
+    journal_data = event_data["journal_data"]
+    return (
+        datetime.fromisoformat(journal_data["event_date_range_start"]),
+        datetime.fromisoformat(journal_data["event_date_range_end"]),
+    )
+
+
+class TestImportedMaintenanceEditsArePushed:
+    """A user's edit to an imported maintenance journal updates the record it
+    was imported from."""
+
+    @pytest.mark.asyncio
+    async def test_edit_patches_the_imported_record_with_its_own_kind(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15 (checked)",
+            imported_from=17,
+            maintenance_type="configuration change",
+        )
+        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
+
+        await snipeit_sync_service.push_maintenance_update(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == ["PATCH /api/v1/maintenances/17"]
+        assert _patch_bodies(mock_transport) == [
+            {
+                "name": "Split Canyoneroo 50 -> 34 + 15 (checked)",
+                "notes": "",
+                "asset_maintenance_type": "Configuration Change",
+                "start_date": "2026-09-11",
+                "completion_date": "2026-09-11",
+            }
+        ]
+        pushed = await async_connection.execute(
+            text("""
+                SELECT 1 FROM sync_metadata
+                WHERE integration_source = 'snipeit_maintenance'
+                  AND internal_uuid = :journal_id
+            """),
+            {"journal_id": str(journal_id)},
+        )
+        assert pushed.fetchall() == []
+
+    @pytest.mark.asyncio
+    async def test_imported_dates_round_trip_for_a_user_west_of_utc(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Pushing an untouched date must not move it a day earlier."""
+        session_factory = _joined_session_factory(async_connection)
+        await async_connection.execute(
+            text("""
+                INSERT INTO user_settings (user_id, timezone)
+                VALUES ('user-123', 'America/Los_Angeles')
+            """)
+        )
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_SNIPEIT_MAINTENANCE_17
+        )
+        await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17], session_factory=session_factory
+        )
+        # The backend turns the import into this journal, with the event's dates.
+        journal_id = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15",
+            imported_from=17,
+            maintenance_type="configuration change",
+        )
+        start, end = await _imported_event_dates(async_connection)
+        await async_connection.execute(
+            text("""
+                UPDATE journals
+                SET event_date_range_start = :start,
+                    event_date_range_end = :end
+                WHERE id = :journal_id
+            """),
+            {"start": start, "end": end, "journal_id": journal_id},
+        )
+        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
+
+        await snipeit_sync_service.push_maintenance_update(
+            journal_id=journal_id, session_factory=session_factory
+        )
+
+        [body] = _patch_bodies(mock_transport)
+        assert body["start_date"] == "2026-09-11"
+        assert body["completion_date"] == "2026-09-11"

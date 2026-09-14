@@ -260,6 +260,67 @@ class TestMaintenanceVersionHash:
 
         assert result.version_hash != legacy_hash
 
+    def test_hash_changes_with_the_zone_dates_are_anchored_in(self) -> None:
+        """A user who changes timezone gets their imports re-anchored."""
+        maintenance = SnipeItMaintenance.model_validate(_DATED_MAINTENANCE)
+
+        sydney = SnipeItMaintenanceTransformer.transform(
+            maintenance,
+            user_id="u1",
+            gear_item_id=_GEAR_ITEM_ID,
+            zone="Australia/Sydney",
+        )
+        utc = SnipeItMaintenanceTransformer.transform(
+            maintenance, user_id="u1", gear_item_id=_GEAR_ITEM_ID, zone=None
+        )
+
+        assert sydney.version_hash != utc.version_hash
+
+
+_GEAR_ITEM_ID = "00000000-0000-0000-0000-000000000001"
+
+_DATED_MAINTENANCE: dict[str, object] = {
+    "id": 1,
+    "asset": {"id": 10, "name": "Test Asset"},
+    "title": "Test",
+    "asset_maintenance_type": "Repair",
+    "start_date": {"date": "2025-09-09"},
+    "completion_date": {"date": "2025-09-10"},
+}
+
+
+class TestMaintenanceDatesAreLocalMidnights:
+    """Snipe-IT dates are calendar dates; a journal stores the UTC instant of the
+    local midnight they start at, so a push reads back the same date."""
+
+    @pytest.mark.parametrize(
+        ("zone", "expected_start", "expected_end"),
+        [
+            (
+                "Australia/Sydney",
+                "2025-09-08T14:00:00+00:00",
+                "2025-09-09T14:00:00+00:00",
+            ),
+            (
+                "America/Los_Angeles",
+                "2025-09-09T07:00:00+00:00",
+                "2025-09-10T07:00:00+00:00",
+            ),
+            (None, "2025-09-09T00:00:00+00:00", "2025-09-10T00:00:00+00:00"),
+        ],
+    )
+    def test_dates_are_anchored_at_midnight_in_the_zone(
+        self, zone: str | None, expected_start: str, expected_end: str
+    ) -> None:
+        maintenance = SnipeItMaintenance.model_validate(_DATED_MAINTENANCE)
+
+        result = SnipeItMaintenanceTransformer.transform(
+            maintenance, user_id="u1", gear_item_id=_GEAR_ITEM_ID, zone=zone
+        )
+
+        assert result.journal_data["event_date_range_start"] == expected_start
+        assert result.journal_data["event_date_range_end"] == expected_end
+
 
 class TestResolveInboundMaintenanceType:
     """A re-import keeps a local type Snipe-IT cannot tell apart from its own."""

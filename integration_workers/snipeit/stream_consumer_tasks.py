@@ -15,7 +15,7 @@ import structlog
 from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
 from core_shared.stream_consumer import EventRoute, StreamConsumer
 
-from snipeit_sync_service import IN_FLIGHT_LOCK_SECONDS
+from snipeit_sync_service import IN_FLIGHT_LOCK_SECONDS, INBOUND_SYNC_CHANGED_BY
 
 logger = structlog.get_logger()
 
@@ -343,6 +343,15 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         journal_id = event.event_data.get("journal_id")
         if not journal_id:
             logger.debug("Skipping journal event: missing journal_id")
+            return
+
+        if event.event_data.get("changed_by") == INBOUND_SYNC_CHANGED_BY:
+            # The inbound sync applied this from Snipe-IT; pushing it back
+            # would send the record to where it came from.
+            logger.debug(
+                "Skipping journal event: applied by the inbound Snipe-IT sync",
+                journal_id=journal_id,
+            )
             return
 
         from sqlalchemy import text
