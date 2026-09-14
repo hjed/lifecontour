@@ -24,6 +24,7 @@ Reverse mapping (App → Snipe-IT):
 from __future__ import annotations
 
 import hashlib
+import html
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -104,11 +105,14 @@ class SnipeItMaintenanceTransformer:
         # Map maintenance type
         maintenance_type = _map_maintenance_type(maintenance.asset_maintenance_type)
 
-        # Title
-        title = maintenance.title or _generate_fallback_title(maintenance_type)
-
-        # Content from notes
-        content = maintenance.notes or ""
+        # Snipe-IT HTML-escapes text on output but stores and accepts it raw,
+        # so decode exactly once; ``reverse_transform`` sends the raw text back.
+        title = (
+            html.unescape(maintenance.title)
+            if maintenance.title
+            else _generate_fallback_title(maintenance_type)
+        )
+        content = html.unescape(maintenance.notes or "")
 
         # Date range
         start_date = _parse_date(maintenance.start_date_str)

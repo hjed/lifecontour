@@ -58,8 +58,12 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
 - **Two-Way Sync**:
   - Creating a maintenance record in Snipe-IT creates a journal.
   - Creating a `GEAR_MAINTENANCE` journal in the personal management system creates a maintenance record in Snipe-IT.
-  - Edits in either system are synchronized.
+  - Edits to a journal created in the personal management system are pushed to its Snipe-IT record. Edits to a journal imported from Snipe-IT are not yet pushed back.
 - **Deduplication**: Uses the `SyncMetadata` table to map the internal journal ID to the external Snipe-IT maintenance ID.
+- **Loop Prevention**: A record must never travel back to the system it came from.
+  - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created or updated in Snipe-IT.
+  - A Snipe-IT record created from a journal is skipped by the inbound sync rather than imported as a second journal.
+- **Text Encoding**: Snipe-IT HTML-escapes text in API responses but stores what it is sent, so titles and notes are decoded once on import and sent unescaped.
 
 ---
 

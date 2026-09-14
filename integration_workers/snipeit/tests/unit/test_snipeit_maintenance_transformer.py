@@ -128,6 +128,28 @@ class TestMaintenanceFieldMapping:
         assert result.snipeit_maintenance_id == 101
         assert len(result.version_hash) == 64  # SHA-256 hex
 
+    def test_html_entities_are_decoded_once(self) -> None:
+        """Snipe-IT HTML-escapes text on output; the journal gets the raw text."""
+        maintenance = SnipeItMaintenance.model_validate(
+            {
+                "id": 17,
+                "asset": {"id": 51, "name": "Canyoneroo 50m"},
+                "title": "Split Canyoneroo 50 -&gt; 34 + 15",
+                "notes": "Clean &amp; re apply, then write &amp;amp; literally",
+            }
+        )
+        result = SnipeItMaintenanceTransformer.transform(
+            maintenance,
+            user_id="user-1",
+            gear_item_id="00000000-0000-0000-0000-000000000001",
+        )
+
+        assert result.journal_data["title"] == "Split Canyoneroo 50 -> 34 + 15"
+        assert (
+            result.journal_data["content"]
+            == "Clean & re apply, then write &amp; literally"
+        )
+
     def test_missing_optional_fields(self) -> None:
         """Minimal maintenance with only required fields maps correctly."""
         maintenance = SnipeItMaintenance.model_validate(
@@ -265,6 +287,16 @@ class TestReverseTransformPayload:
         assert result["start_date"] == "2024-06-01"
         assert result["completion_date"] == "2024-06-02"
         assert result["asset_maintenance_type"] == "PAT Test"
+
+    def test_text_is_sent_unescaped(self) -> None:
+        """Snipe-IT escapes on output, so escaping here would double-escape."""
+        result = SnipeItMaintenanceTransformer.reverse_transform(
+            title="Split Canyoneroo 50 -> 34 + 15",
+            content="Clean & re apply",
+            maintenance_type="routine maintenance",
+        )
+        assert result["name"] == "Split Canyoneroo 50 -> 34 + 15"
+        assert result["notes"] == "Clean & re apply"
 
     def test_minimal_payload(self) -> None:
         """Minimal reverse transform with only title and type."""

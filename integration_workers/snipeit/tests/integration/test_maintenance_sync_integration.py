@@ -9,71 +9,16 @@ GEAR_MAINTENANCE journal entries in the database.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from snipeit_api_client import SnipeItAPIClient
-from snipeit_sync_service import SnipeItSyncService
-
-
-class MockTransport(httpx.AsyncBaseTransport):
-    def __init__(self) -> None:
-        self.responses: list[tuple[str, int, object, dict[str, str]]] = []
-
-    def add_response(
-        self,
-        url_pattern: str,
-        status_code: int = 200,
-        json_data: object = None,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.responses.append((url_pattern, status_code, json_data, headers or {}))
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        for i, (pattern, status, data, hdrs) in enumerate(self.responses):
-            if pattern in url:
-                self.responses.pop(i)
-                content = json.dumps(data).encode() if data is not None else b""
-                return httpx.Response(
-                    status_code=status,
-                    content=content,
-                    headers={**hdrs, "content-type": "application/json"},
-                    request=request,
-                )
-        raise ValueError(f"No mock response configured for {url}")
-
-
-@pytest.fixture
-def mock_transport() -> MockTransport:
-    return MockTransport()
-
-
-@pytest.fixture
-def integration_client(mock_transport: MockTransport) -> SnipeItAPIClient:
-    client = SnipeItAPIClient.create(
-        base_url="https://snipeit.example.com/api/v1/",
-        api_key="test-api-key",
-    )
-    client._client = httpx.AsyncClient(
-        transport=mock_transport,
-        base_url="https://snipeit.example.com/api/v1/",
-        headers={"Authorization": "Bearer test-api-key"},
-    )
-    return client
-
-
-@pytest.fixture
-def sync_service(integration_client: SnipeItAPIClient) -> SnipeItSyncService:
-    return SnipeItSyncService(
-        api_client=integration_client,
-        user_id="user-123",
-    )
+# ``mock_transport``, ``integration_client`` and ``snipeit_sync_service`` are
+# shared fixtures defined in ``conftest.py``.
 
 
 class TestMaintenanceSyncIntegration:
@@ -82,8 +27,8 @@ class TestMaintenanceSyncIntegration:
     @pytest.mark.asyncio
     async def test_sync_maintenance_creates_outbox_event(
         self,
-        sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify that syncing a maintenance record creates an outbox event.
@@ -153,7 +98,7 @@ class TestMaintenanceSyncIntegration:
             ) as session:
                 yield session
 
-        result = await sync_service.sync_maintenance_batch(
+        result = await snipeit_sync_service.sync_maintenance_batch(
             maintenance_ids=[maintenance_id],
             session_factory=mock_session_factory,
         )
@@ -213,8 +158,8 @@ class TestMaintenanceSyncIntegration:
     @pytest.mark.asyncio
     async def test_sync_maintenance_dedup_skips_unchanged(
         self,
-        sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify idempotency: syncing the same maintenance twice is skipped."""
@@ -264,7 +209,7 @@ class TestMaintenanceSyncIntegration:
         # First sync
         mock_transport.add_response("/maintenances/200", json_data=maintenance_data)
 
-        result1 = await sync_service.sync_maintenance_batch(
+        result1 = await snipeit_sync_service.sync_maintenance_batch(
             maintenance_ids=[200],
             session_factory=mock_session_factory,
         )
@@ -273,7 +218,7 @@ class TestMaintenanceSyncIntegration:
         # Second sync with same data — should be skipped
         mock_transport.add_response("/maintenances/200", json_data=maintenance_data)
 
-        result2 = await sync_service.sync_maintenance_batch(
+        result2 = await snipeit_sync_service.sync_maintenance_batch(
             maintenance_ids=[200],
             session_factory=mock_session_factory,
         )
@@ -283,8 +228,8 @@ class TestMaintenanceSyncIntegration:
     @pytest.mark.asyncio
     async def test_sync_maintenance_skips_unsynced_asset(
         self,
-        sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify maintenance is skipped when the asset has not been synced yet."""
@@ -309,7 +254,7 @@ class TestMaintenanceSyncIntegration:
             ) as session:
                 yield session
 
-        result = await sync_service.sync_maintenance_batch(
+        result = await snipeit_sync_service.sync_maintenance_batch(
             maintenance_ids=[300],
             session_factory=mock_session_factory,
         )
@@ -320,8 +265,8 @@ class TestMaintenanceSyncIntegration:
     @pytest.mark.asyncio
     async def test_sync_maintenance_skips_when_no_asset_id(
         self,
-        sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify maintenance is skipped when API response has no asset_id or asset object."""
@@ -343,7 +288,7 @@ class TestMaintenanceSyncIntegration:
             ) as session:
                 yield session
 
-        result = await sync_service.sync_maintenance_batch(
+        result = await snipeit_sync_service.sync_maintenance_batch(
             maintenance_ids=[400],
             session_factory=mock_session_factory,
         )
@@ -358,8 +303,8 @@ class TestOutboundMaintenanceSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_maintenance_create_posts_to_snipeit(
         self,
-        sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify push_maintenance_create POSTs a new maintenance record to Snipe-IT.
@@ -451,7 +396,7 @@ class TestOutboundMaintenanceSyncIntegration:
             ) as session:
                 yield session
 
-        await sync_service.push_maintenance_create(
+        await snipeit_sync_service.push_maintenance_create(
             journal_id=journal_id,
             session_factory=mock_session_factory,
         )
@@ -476,8 +421,8 @@ class TestOutboundMaintenanceSyncIntegration:
     @pytest.mark.asyncio
     async def test_push_maintenance_update_patches_snipeit(
         self,
-        sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         """Verify push_maintenance_update PATCHes an existing Snipe-IT maintenance record.
@@ -583,10 +528,317 @@ class TestOutboundMaintenanceSyncIntegration:
             ) as session:
                 yield session
 
-        await sync_service.push_maintenance_update(
+        await snipeit_sync_service.push_maintenance_update(
             journal_id=journal_id,
             session_factory=mock_session_factory,
         )
 
         # Step 4: All mock responses consumed (PATCH was made)
         assert len(mock_transport.responses) == 0
+
+
+# Synthetic calendar every Snipe-IT maintenance journal is imported into.
+_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
+
+# Maintenance 17 as production Snipe-IT returns it: text HTML-escaped on output.
+_SNIPEIT_MAINTENANCE_17: dict[str, Any] = {
+    "id": 17,
+    "asset": {"id": 51, "name": "Canyoneroo 50m"},
+    "title": "Split Canyoneroo 50 -&gt; 34 + 15",
+    "asset_maintenance_type": "Configuration Change",
+    "start_date": {"date": "2026-09-11", "formatted": "2026-09-11"},
+    "completion_date": {"date": "2026-09-11", "formatted": "2026-09-11"},
+    "notes": None,
+}
+
+
+def _joined_session_factory(async_connection: AsyncConnection) -> Any:
+    """Sessions that join the test transaction through a savepoint."""
+
+    @asynccontextmanager
+    async def session_factory() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(
+            async_connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        ) as session:
+            yield session
+
+    return session_factory
+
+
+async def _seed_synced_asset(async_connection: AsyncConnection, asset_id: int) -> str:
+    """A gear item already imported from Snipe-IT asset ``asset_id``."""
+    result = await async_connection.execute(
+        text("""
+            INSERT INTO gear_items (name, user_id)
+            VALUES ('Canyoneroo 50m', 'user-123')
+            RETURNING id
+        """)
+    )
+    gear_item_id = str(result.scalar_one())
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (integration_source, external_id, internal_uuid, last_synced_at,
+                 version_hash, sync_status, retry_count, created_at, updated_at)
+            VALUES
+                ('snipeit', :external_id, :gear_item_id, now(),
+                 'asset-hash', 'success', 0, now(), now())
+        """),
+        {"external_id": str(asset_id), "gear_item_id": gear_item_id},
+    )
+    return gear_item_id
+
+
+async def _seed_maintenance_journal(
+    async_connection: AsyncConnection,
+    *,
+    gear_item_id: str,
+    title: str,
+    imported_from: int | None = None,
+) -> int:
+    """A GEAR_MAINTENANCE journal, written as the backend's outbox processor does.
+
+    With ``imported_from`` the journal is the import of that Snipe-IT maintenance:
+    it sits on the synthetic maintenance calendar and carries the external event
+    link the processor creates. Without it the journal was entered by the user.
+    """
+    result = await async_connection.execute(
+        text("""
+            INSERT INTO journals (title, content, user_id,
+                event_date_range_start, event_date_range_end)
+            VALUES (:title, '', 'user-123', '2026-09-11', '2026-09-11')
+            RETURNING id
+        """),
+        {"title": title},
+    )
+    journal_id = int(result.scalar_one())
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_gear_maintenance_data
+                (journal_id, gear_item_id, maintenance_type)
+            VALUES (:journal_id, :gear_item_id, 'routine maintenance')
+        """),
+        {"journal_id": journal_id, "gear_item_id": gear_item_id},
+    )
+    if imported_from is not None:
+        await async_connection.execute(
+            text("""
+                INSERT INTO calendars (id, user_id, name, color)
+                VALUES (:calendar_id, 'user-123', 'Snipeit_Maintenance Calendar',
+                        '#808080')
+                ON CONFLICT (id) DO NOTHING
+            """),
+            {"calendar_id": _MAINTENANCE_CALENDAR_ID},
+        )
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                    (journal_id, calendar_id, external_event_id,
+                     sync_capability, sync_status)
+                VALUES (:journal_id, :calendar_id, :external_event_id,
+                        'bidirectional', 'synced')
+            """),
+            {
+                "journal_id": journal_id,
+                "calendar_id": _MAINTENANCE_CALENDAR_ID,
+                "external_event_id": f"snipeit_maint:{imported_from}",
+            },
+        )
+    return journal_id
+
+
+async def _seed_push_record(
+    async_connection: AsyncConnection, *, journal_id: int, maintenance_id: int
+) -> None:
+    """The sync row a push writes after creating a Snipe-IT maintenance."""
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (internal_uuid, integration_source, external_id, last_synced_at,
+                 version_hash, sync_status, retry_count, created_at, updated_at)
+            VALUES
+                (:journal_id, 'snipeit_maintenance', :external_id, now(),
+                 'payload-hash', 'success', 0, now(), now())
+        """),
+        {
+            "journal_id": str(journal_id),
+            "external_id": f"snipeit_maint:{maintenance_id}",
+        },
+    )
+
+
+def _snipeit_writes(mock_transport: Any) -> list[str]:
+    """Every request that would have changed Snipe-IT, as ``METHOD path``."""
+    return [
+        f"{request.method} {request.url.path}"
+        for request in mock_transport.requests
+        if request.method != "GET"
+    ]
+
+
+def _write_response(maintenance_id: int) -> dict[str, Any]:
+    """A successful POST/PATCH response, queued so a stray write cannot error out."""
+    return {
+        "status": "success",
+        "payload": {"id": maintenance_id, "asset_id": 51, "title": "echo"},
+    }
+
+
+class TestMaintenanceEchoPrevention:
+    """An inbound maintenance must never come back to Snipe-IT as a new record."""
+
+    @pytest.mark.asyncio
+    async def test_imported_maintenance_journal_is_not_pushed_back(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        session_factory = _joined_session_factory(async_connection)
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_SNIPEIT_MAINTENANCE_17
+        )
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17], session_factory=session_factory
+        )
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+
+        event_row = (
+            await async_connection.execute(
+                text("""
+                    SELECT event_data FROM outbox_events
+                    WHERE event_type = 'journal_event.created'
+                """)
+            )
+        ).one()
+        event_data = event_row.event_data
+        if isinstance(event_data, str):
+            event_data = json.loads(event_data)
+        imported_title = event_data["journal_data"]["title"]
+        # Decoded once on the way in, so a write-back could not double-escape it.
+        assert imported_title == "Split Canyoneroo 50 -> 34 + 15"
+
+        # The backend turns the event into this journal and publishes JournalCreated.
+        journal_id = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title=imported_title,
+            imported_from=17,
+        )
+        mock_transport.add_response("/maintenances", json_data=_write_response(20))
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id, session_factory=session_factory
+        )
+
+        assert _snipeit_writes(mock_transport) == []
+        pushed = await async_connection.execute(
+            text("""
+                SELECT external_id FROM sync_metadata
+                WHERE integration_source = 'snipeit_maintenance'
+                  AND internal_uuid = :journal_id
+            """),
+            {"journal_id": str(journal_id)},
+        )
+        assert pushed.fetchall() == []
+
+    @pytest.mark.asyncio
+    async def test_echoed_journal_update_does_not_patch_snipeit(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """An import already echoed carries the echo's push row; updates must not use it."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15",
+            imported_from=17,
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=20
+        )
+        mock_transport.add_response("/maintenances/20", json_data=_write_response(20))
+
+        await snipeit_sync_service.push_maintenance_update(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == []
+
+    @pytest.mark.asyncio
+    async def test_inbound_sync_skips_maintenance_pushed_from_journal(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A record we created from a user's journal is that journal, not a new import."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=8
+        )
+        mock_transport.add_response(
+            "/maintenances/8",
+            json_data={**_SNIPEIT_MAINTENANCE_17, "id": 8, "title": "Retire Harness"},
+        )
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[8],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 0, "skipped": 1, "failed": 0}
+        events = await async_connection.execute(
+            text("SELECT 1 FROM outbox_events WHERE event_type LIKE 'journal_event.%'")
+        )
+        assert events.fetchall() == []
+
+    @pytest.mark.asyncio
+    async def test_resync_after_import_makes_no_snipeit_writes(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        session_factory = _joined_session_factory(async_connection)
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_SNIPEIT_MAINTENANCE_17
+        )
+        await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17], session_factory=session_factory
+        )
+        journal_id = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15",
+            imported_from=17,
+        )
+        # Responses match by URL substring, so the re-sync's GET is queued ahead
+        # of the write response a regressed push would consume.
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_SNIPEIT_MAINTENANCE_17
+        )
+        mock_transport.add_response("/maintenances", json_data=_write_response(20))
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id, session_factory=session_factory
+        )
+
+        second = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17], session_factory=session_factory
+        )
+
+        assert second == {"synced": 0, "skipped": 1, "failed": 0}
+        assert _snipeit_writes(mock_transport) == []
