@@ -13653,6 +13653,10 @@ production defaults rather than the shared harness — which is ITER18-004 Phase
 - **While obtaining, the card says *generating*.** A new day's first load has no row, which the section
   reports as unavailable; drawing **W9**'s "No summary today" beside a busy Regenerate would say the opposite
   of what is happening.
+- **Only a settled read establishes the hold** (review on PR #1470). On client-side navigation back to the
+  page, React Query renders the previous visit's cached payload while the mount refetch replaces it; a
+  summary seen only there was never current on this visit, and holding it would keep yesterday's prose
+  over the server's answer that today is stale.
 - **The hold.** `DashboardSummaryCard` keeps the last generated summary it drew for the payload's anchor
   day — prose, **W10** and no badge — when a later read withholds it, takes a newer generated read, and
   lets go when the anchor day moves on. That is the half of criterion 4 the server cannot provide: a tick
@@ -13665,8 +13669,9 @@ has no summary, none when it has prose, none for an ended anchor, none when a la
 generating, none on refocus, a stale cached read defers to the refetch, busy from the first render with
 data, settles after the read-back, no retry and no throw on failure, no read-back for an answer with no
 row, settles when the read-back fails, holds the read-back for a task write and reads back once it settles,
-and does not hold it for a write that is not a task's. Card (`DashboardSummaryCard.test.tsx`, 9): holds
-prose, stats and no badge over *generating* and over *unavailable*, draws a newer summary, lets go on a new
+and does not hold it for a write that is not a task's. Card (`DashboardSummaryCard.test.tsx`, 10): holds
+prose, stats and no badge over *generating* and over *unavailable*, holds nothing from a stale cached read
+that a remount's refetch replaces, draws a newer summary, lets go on a new
 anchor day, busy while reading, *generating* rather than **W9** while obtaining a missing summary, draws what
 it obtained and frees Regenerate, reads and never posts, announces nothing; one existing test now waits for
 the read to settle before asserting Regenerate enabled. Page (`page.test.tsx`, 1): a tick whose refetch

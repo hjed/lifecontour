@@ -815,6 +815,33 @@ describe('DashboardSummaryCard — today’s summary across a visit', () => {
       expect(screen.queryByText(GENERATING_LINE)).not.toBeInTheDocument();
     });
 
+    /**
+     * Client-side navigation back to the page renders the previous visit's
+     * cached payload while the mount refetch replaces it. A summary seen only in
+     * that stale cache was never drawn as current on this visit, so it must not
+     * be held over the server's answer that today is stale (review on PR #1470).
+     */
+    it('holds nothing from a stale cached read that a remount refetch replaces', async () => {
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const view = renderWithProviders(<DashboardSummaryCard />);
+      await screen.findByTestId('dashboard-summary-text');
+
+      // Leave the page, then come back after today's summary went stale.
+      view.rerender(<></>);
+      current = dashboardWith(GENERATING_SUMMARY);
+      view.rerender(<DashboardSummaryCard />);
+
+      await waitFor(() => expect(dashboardReads()).toBe(2));
+      expect(await screen.findByText(GENERATING_LINE)).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-summary-text')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-summary-stats')
+      ).not.toBeInTheDocument();
+    });
+
     it('keeps it when a later read of the day reports no summary', async () => {
       let current = dashboardWith(GENERATED_SUMMARY);
       routeFetch({ dashboard: () => jsonResponse(current) });

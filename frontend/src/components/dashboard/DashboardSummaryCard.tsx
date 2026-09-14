@@ -173,7 +173,7 @@ function DashboardSummaryUnavailable() {
 }
 
 function DashboardSummaryCardBody() {
-  const { data, isPending } = useHomeDashboard();
+  const { data, isPending, isFetching } = useHomeDashboard();
   const { mutate: regenerate, isPending: isRegenerating } =
     useRegenerateDailySummary();
   const { isObtaining } = useObtainTodaySummaryOnLoad();
@@ -194,7 +194,7 @@ function DashboardSummaryCardBody() {
     summary?.state === DashboardSummaryState.GENERATED && summary.summary_text
       ? summary
       : null;
-  const shown = useHeldSummary(anchor?.date, generated);
+  const shown = useHeldSummary(anchor?.date, generated, !isFetching);
   const prose = shown?.summary_text ?? null;
   // While the card obtains today's summary, one is being generated, whatever the
   // first read said: a new day's first load has no row at all, which reads as
@@ -302,17 +302,30 @@ function DashboardSummaryCardBody() {
  * a previous render: what the reader has already been shown. Keyed on the
  * payload's anchor day, so a summary drawn for yesterday is never held over a
  * page that has moved on to today.
+ *
+ * **Only a settled read establishes it.** On client-side navigation back to the
+ * page, React Query renders the previous visit's cached payload while the mount
+ * refetch replaces it; a summary seen only there was never current on this
+ * visit, and holding it would keep that prose over the server's answer that
+ * today is stale. A hold established earlier is untouched while a later read is
+ * in flight — which is exactly a task tick's refetch.
  */
 function useHeldSummary(
   day: string | undefined,
-  generated: HomeDashboardSummary | null
+  generated: HomeDashboardSummary | null,
+  settled: boolean
 ): HomeDashboardSummary | null {
   const [held, setHeld] = useState<{
     readonly day: string;
     readonly summary: HomeDashboardSummary;
   } | null>(null);
 
-  if (day && generated && (held?.day !== day || held.summary !== generated)) {
+  if (
+    settled &&
+    day &&
+    generated &&
+    (held?.day !== day || held.summary !== generated)
+  ) {
     setHeld({ day, summary: generated });
   }
 
