@@ -225,6 +225,28 @@ _RETRY_BACKOFF_BASE = 2.0
 _SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
 
 
+async def _is_imported_from_snipeit(session: Any, journal_id: int) -> bool:
+    """Return ``True`` if the journal is the import of a Snipe-IT maintenance.
+
+    The backend links every imported maintenance journal to the synthetic
+    maintenance calendar in the transaction that publishes its
+    ``JournalCreated``, so the link is visible to any push that event triggers.
+    Such a journal already is a Snipe-IT record: pushing it would create a copy,
+    or overwrite a record with the copy it was once echoed as.
+    """
+    result = await session.execute(
+        text("""
+            SELECT 1
+            FROM journal_external_event_links
+            WHERE journal_id = :journal_id
+              AND calendar_id = :calendar_id
+            LIMIT 1
+        """),
+        {"journal_id": journal_id, "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID},
+    )
+    return result.fetchone() is not None
+
+
 class SnipeItSyncService:
     """Orchestrates Snipe-IT asset import into gear_items.
 
@@ -731,7 +753,7 @@ class SnipeItSyncService:
                 # Check existing metadata for dedup
                 meta_result = await session.execute(
                     text("""
-                        SELECT version_hash
+                        SELECT version_hash, internal_uuid
                         FROM sync_metadata
                         WHERE integration_source = 'snipeit_maintenance'
                           AND external_id = :external_id
@@ -770,6 +792,20 @@ class SnipeItSyncService:
                     )
                     link_row = link_result.fetchone()
                     existing_journal_id = link_row.journal_id if link_row else None
+
+                if (
+                    existing_meta
+                    and existing_journal_id is None
+                    and existing_meta.internal_uuid
+                ):
+                    # Only a push records the journal: this record was created
+                    # from that user's journal, so it is not a new import.
+                    logger.debug(
+                        "Skipping Snipe-IT maintenance pushed from a journal",
+                        maintenance_id=maintenance_id,
+                        journal_id=existing_meta.internal_uuid,
+                    )
+                    raise _MaintenanceSkipped
 
                 if existing_meta and existing_journal_id is None:
                     # An outbox event for creation was enqueued but hasn't been processed
@@ -853,7 +889,8 @@ class SnipeItSyncService:
         """Fetch journal, gear-maintenance, and asset-sync data for outbound push.
 
         Returns a ``(journal_row, maintenance_data_row, asset_sync_meta_row)``
-        tuple, or ``None`` if any prerequisite is missing (logged and skipped).
+        tuple, or ``None`` when the push must be skipped (logged): a
+        prerequisite is missing, or the journal was imported from Snipe-IT.
         """
         async with session_factory() as session:
             # 1. Get journal data
@@ -899,6 +936,14 @@ class SnipeItSyncService:
                     "Skipping outbound maintenance push: gear item not synced to Snipe-IT",
                     journal_id=journal_id,
                     gear_item_id=gear_item_id,
+                )
+                return None
+
+            # 4. A journal imported from Snipe-IT must not be written back to it
+            if await _is_imported_from_snipeit(session, journal_id):
+                logger.debug(
+                    "Skipping outbound maintenance push: journal was imported from Snipe-IT",
+                    journal_id=journal_id,
                 )
                 return None
 

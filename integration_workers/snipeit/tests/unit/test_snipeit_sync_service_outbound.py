@@ -232,6 +232,7 @@ class TestPushMaintenanceCreate:
             MagicMock(fetchone=MagicMock(return_value=journal_row)),
             MagicMock(fetchone=MagicMock(return_value=maintenance_data_row)),
             MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            MagicMock(fetchone=MagicMock(return_value=None)),  # not imported
         ]
         first_session.execute = AsyncMock(side_effect=fetch_results)
 
@@ -402,6 +403,7 @@ class TestPushMaintenanceCreate:
                 MagicMock(fetchone=MagicMock(return_value=journal_row)),
                 MagicMock(fetchone=MagicMock(return_value=maintenance_data_row)),
                 MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+                MagicMock(fetchone=MagicMock(return_value=None)),  # not imported
             ]
         )
 
@@ -485,6 +487,7 @@ class TestPushMaintenanceUpdate:
             MagicMock(
                 fetchone=MagicMock(return_value=asset_sync_meta_row)
             ),  # asset sync
+            MagicMock(fetchone=MagicMock(return_value=None)),  # not imported
             MagicMock(
                 fetchone=MagicMock(return_value=maint_sync_row)
             ),  # maintenance sync
@@ -517,8 +520,8 @@ class TestPushMaintenanceUpdate:
         assert payload["name"] == "Updated Inspection"
         assert payload["asset_maintenance_type"] == "Repair"
 
-        # Verify sync metadata was updated (5th execute call)
-        assert mock_session.execute.call_count == 5
+        # Verify sync metadata was updated (6th execute call)
+        assert mock_session.execute.call_count == 6
 
     @pytest.mark.asyncio
     async def test_skips_when_no_maintenance_sync_metadata(self) -> None:
@@ -547,6 +550,7 @@ class TestPushMaintenanceUpdate:
             MagicMock(fetchone=MagicMock(return_value=journal_row)),
             MagicMock(fetchone=MagicMock(return_value=maintenance_data_row)),
             MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            MagicMock(fetchone=MagicMock(return_value=None)),  # not imported
             MagicMock(fetchone=MagicMock(return_value=None)),  # no maint sync
         ]
         mock_session.execute = AsyncMock(side_effect=results)
@@ -601,6 +605,7 @@ class TestPushMaintenanceUpdate:
             MagicMock(fetchone=MagicMock(return_value=journal_row)),
             MagicMock(fetchone=MagicMock(return_value=maintenance_data_row)),
             MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            MagicMock(fetchone=MagicMock(return_value=None)),  # not imported
             MagicMock(fetchone=MagicMock(return_value=maint_sync_row)),
         ]
         mock_session.execute = AsyncMock(side_effect=results)
@@ -622,6 +627,84 @@ class TestPushMaintenanceUpdate:
             journal_id=100,
             session_factory=session_factory,
         )
+
+
+def _sql_routed_session_factory(rows: dict[str, object]) -> MagicMock:
+    """A session factory whose queries return the row mapped to a SQL fragment.
+
+    Each ``execute`` returns the row of the first key found in the statement
+    text, or ``None``. Routing by statement rather than call order means a query
+    added or reordered cannot hand another query's row to the code under test.
+    """
+
+    async def execute(
+        statement: object, *_args: object, **_kwargs: object
+    ) -> MagicMock:
+        sql = str(statement)
+        row = next((value for key, value in rows.items() if key in sql), None)
+        return MagicMock(fetchone=MagicMock(return_value=row))
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=execute)
+    begin = MagicMock()
+    begin.__aenter__ = AsyncMock(return_value=None)
+    begin.__aexit__ = AsyncMock(return_value=False)
+    session.begin = MagicMock(return_value=begin)
+    session_ctx = MagicMock()
+    session_ctx.__aenter__ = AsyncMock(return_value=session)
+    session_ctx.__aexit__ = AsyncMock(return_value=False)
+    return MagicMock(return_value=session_ctx)
+
+
+class TestPushMaintenanceSkipsImportedJournals:
+    """A journal imported from Snipe-IT must never be written back to it."""
+
+    @staticmethod
+    def _imported_journal_rows(**extra: object) -> dict[str, object]:
+        return {
+            "FROM journals j": MagicMock(
+                title="Split Canyoneroo 50 -> 34 + 15",
+                content="",
+                event_date_range_start=datetime(2026, 9, 11, tzinfo=UTC),
+                event_date_range_end=datetime(2026, 9, 11, tzinfo=UTC),
+            ),
+            "FROM journal_gear_maintenance_data": MagicMock(
+                gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                maintenance_type="routine maintenance",
+            ),
+            "integration_source = 'snipeit'\n": MagicMock(external_id="51"),
+            "journal_external_event_links": (1,),
+            **extra,
+        }
+
+    @pytest.mark.asyncio
+    async def test_create_does_not_post(self) -> None:
+        api_client = _mock_api_client()
+        api_client.create_maintenance.return_value = MagicMock(id=20)
+        service = SnipeItSyncService(api_client=api_client, user_id="user-1")
+
+        await service.push_maintenance_create(
+            journal_id=215032,
+            session_factory=_sql_routed_session_factory(self._imported_journal_rows()),
+        )
+
+        api_client.create_maintenance.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_does_not_patch_an_echo(self) -> None:
+        """An already-echoed journal carries a push row, yet must not PATCH it."""
+        api_client = _mock_api_client()
+        service = SnipeItSyncService(api_client=api_client, user_id="user-1")
+        rows = self._imported_journal_rows(
+            **{"'snipeit_maintenance'": MagicMock(external_id="snipeit_maint:20")}
+        )
+
+        await service.push_maintenance_update(
+            journal_id=215032,
+            session_factory=_sql_routed_session_factory(rows),
+        )
+
+        api_client.update_maintenance.assert_not_called()
 
 
 class TestPushCheckoutCreate:
