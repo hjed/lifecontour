@@ -2,8 +2,12 @@
  * @jest-environment jsdom
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+} from '@tanstack/react-query';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import React, { ReactNode } from 'react';
@@ -26,6 +30,7 @@ import {
   useTask,
   useUnlinkTaskContact,
   useUpdateTask,
+  useTaskWriteInFlight,
 } from '../tasks';
 import { journalKeys } from '../journals';
 import { DashboardSectionStatus, homeDashboardKeys } from '../home-dashboard';
@@ -701,6 +706,54 @@ describe('Task API client', () => {
     });
   });
 
+  /**
+   * A task write is the mutation a task hook started — recognised by its key,
+   * not by the shape of its input (Augment review on PR #1470). Any bare string
+   * used to count as a task id, which is also what a journal, tag or series
+   * deletion and a daily-summary regeneration pass, so an unrelated write could
+   * lock a task's actions and hold the dashboard's refreshes back.
+   */
+  describe('identifying task writes', () => {
+    it('does not count an unrelated mutation that takes a string id', async () => {
+      const { result } = renderHook(
+        () => ({
+          inFlight: useTaskWriteInFlight('55'),
+          unrelated: useMutation({
+            mutationFn: (_journalId: string) => new Promise<void>(() => {}),
+          }),
+        }),
+        { wrapper: createWrapper }
+      );
+
+      act(() => {
+        result.current.unrelated.mutate('55');
+      });
+
+      await waitFor(() => expect(queryClient.isMutating()).toBe(1));
+      expect(result.current.inFlight).toBe(false);
+    });
+
+    it('counts a task hook’s write against that task', async () => {
+      mockFetch.mockImplementation(() => new Promise<Response>(() => {}));
+      const { result } = renderHook(
+        () => ({
+          inFlight: useTaskWriteInFlight('55'),
+          update: useUpdateTask(),
+        }),
+        { wrapper: createWrapper }
+      );
+
+      act(() => {
+        result.current.update.mutate({
+          taskId: '55',
+          status: TaskStatus.DONE,
+        });
+      });
+
+      await waitFor(() => expect(result.current.inFlight).toBe(true));
+    });
+  });
+
   describe('useUpdateTask', () => {
     it('sends only the status when only the status changed', async () => {
       mockFetch.mockResolvedValueOnce(
@@ -1176,6 +1229,63 @@ describe('Task API client', () => {
       });
       await new Promise(resolve => setTimeout(resolve, 50));
       expect(dashboardRequestCount()).toBe(2);
+    });
+
+    /**
+     * A creation is not a write against an existing task, and does not refresh
+     * what a status update changes (Greptile review on PR #1470). Counting one
+     * as a task write made \`isLastTaskWrite\` skip the update's refresh while
+     * the creation was pending, leaving the dashboard, due counts and history
+     * stale — for good, if the creation then failed.
+     */
+    it('refreshes after an update even while a task creation is still pending', async () => {
+      mockFetch.mockImplementation(
+        (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === DASHBOARD_URL) {
+            return Promise.resolve(
+              jsonResponse(dashboardWithTasks([dashboardTask(1)]))
+            );
+          }
+          if (init?.method === 'POST') {
+            // The creation never answers.
+            return new Promise<Response>(() => {});
+          }
+          return Promise.resolve(
+            jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+          );
+        }
+      );
+
+      const dashboard = renderHook(() => useHomeDashboard(), {
+        wrapper: createWrapper,
+      });
+      await waitFor(() => {
+        expect(dashboard.result.current.isSuccess).toBe(true);
+      });
+      expect(dashboardRequestCount()).toBe(1);
+
+      const creation = renderHook(() => useCreateTask(), {
+        wrapper: createWrapper,
+      }).result;
+      act(() => {
+        creation.current.mutate({
+          journalId: '10',
+          text: 'Draft the invoice',
+          due_journal_id: 20,
+        });
+      });
+      await waitFor(() => expect(queryClient.isMutating()).toBe(1));
+
+      const update = updateHook();
+      await update.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      await waitFor(() => {
+        expect(dashboardRequestCount()).toBe(2);
+      });
     });
 
     it('leaves the other sections of the payload untouched', async () => {

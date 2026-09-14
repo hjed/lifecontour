@@ -279,6 +279,21 @@ because `playwright.config.ts` pins `workers: 1`. Do not reach for it from a spe
 that could run beside another, and prefer building the state you need over clearing
 the state you don't.
 
+### Today's AI daily summary is shared by the whole run
+
+The stack answers summaries with a stub (`ENABLE_TEST_DAILY_SUMMARY_STUB`), so a
+generated summary is creatable — but there is **one summary row per user per day**,
+and every spec that seeds a journal or a task today invalidates it. A test that
+asserts on the summary establishes that state itself (press Regenerate until the
+regeneration's response says `generated`) and reads the server's state from
+`GET /api/home-dashboard`, never from the daily-summary `GET`, which regenerates.
+A test that asserts the summary's journal count clears the day first with
+`clearJournalsOn(day)`: specs that create journals through the UI leave today's
+behind, so a full run always holds some. It is destructive in the way
+`clearFutureJournals()` is, and safe for the same reason.
+See [Testing Strategy → The AI Daily Summary in E2E](../../../docs/architecture/testing-strategy.md#the-ai-daily-summary-in-e2e)
+and `home-dashboard.spec.ts`'s _generated end to end_ block.
+
 ## 🏭 Data Factories
 
 ### Contact Factory

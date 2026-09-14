@@ -66,6 +66,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger = structlog.get_logger()
 
     logger.info("Starting Personal Management System Backend", version="0.1.0")
+    if settings.enabled_test_only_switches:
+        logger.warning(
+            "Test-only switches are enabled; they must never be set outside test/CI",
+            switches=settings.enabled_test_only_switches,
+        )
 
     # Initialize database
     get_database_engine()

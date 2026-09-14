@@ -30,6 +30,7 @@ import {
   useQuery,
   useQueryClient,
   type QueryClient,
+  type Mutation,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -527,9 +528,13 @@ function taskFilters(taskId: string) {
  * journal lists are named with, applied to the same rule.
  *
  * The dashboard's *summary* is deliberately not a second concern here. The
- * dashboard read regenerates nothing server-side (ITER18-004 Phase 2), so this
- * refetch cannot produce a summary the user did not ask for — which is the
- * client half of the contract ITER18-005 Phase 7 relies on.
+ * dashboard read regenerates nothing server-side (ITER18-004 Phase 2), and the
+ * summary card reads today's summary only on a page load's first read, never
+ * on a refetch like this one (ITER18-005 Phase 8) — so this refetch cannot
+ * produce a summary the user did not ask for, which is the client half of the
+ * contract ITER18-005 Phase 7 relies on. What it *can* do is report today's
+ * summary stale, since the write invalidated it; the card holds the summary it
+ * has already drawn, and the next load brings the refreshed one.
  */
 const REFRESH_HOME_DASHBOARD = { queryKey: homeDashboardKeys.all };
 
@@ -988,18 +993,13 @@ function leavesDashboardSection(status: TaskStatus | undefined): boolean {
  * refetches on the failure path too.
  */
 function isLastTaskWrite(queryClient: QueryClient): boolean {
-  return (
-    queryClient.isMutating({
-      predicate: mutation =>
-        mutatingTaskId(mutation.state.variables) !== undefined,
-    }) <= 1
-  );
+  return queryClient.isMutating({ predicate: isTaskWrite }) <= 1;
 }
 
 /**
  * Task mutations do not retry.
  *
- * The app-wide default (`lib/providers.tsx`) retries a failed mutation once
+ * The app-wide default (`lib/query-client-options.ts`) retries a failed mutation once
  * after a second, which is wrong for this surface twice over:
  *
  * - **Creating a task is not idempotent.** A `POST` that succeeded on the
@@ -1016,6 +1016,21 @@ function isLastTaskWrite(queryClient: QueryClient): boolean {
  */
 const NO_RETRY = { retry: false } as const;
 
+/**
+ * The mutation key every task write carries, and the only thing that makes a
+ * mutation a task write.
+ *
+ * A task write used to be recognised by the shape of its input — any bare
+ * string counted as a task id — and a journal, tag or series deletion and a
+ * daily-summary regeneration all pass a bare string too, so an unrelated write
+ * could lock a task's actions and hold the dashboard's refreshes back (Augment
+ * review on PR #1470). Keyed, the identity is the hook that started the write.
+ */
+export const TASK_WRITE_KEY = ['task-write'] as const;
+
+/** Options every task write shares: no retry, and the task-write key. */
+const TASK_WRITE = { ...NO_RETRY, mutationKey: TASK_WRITE_KEY } as const;
+
 // What is being written to a task right now
 //
 // Read from the mutation cache rather than from a hook instance, because a
@@ -1024,6 +1039,25 @@ const NO_RETRY = { retry: false } as const;
 // independent `useUpdateTask`s for one commitment; a guard that only knows its
 // own instance leaves the twin live, and a second click races the first write
 // with the server's ordering deciding which move survives.
+
+/**
+ * Whether a mutation in the cache is a write against a task.
+ *
+ * The one answer {@link isLastTaskWrite} counts with, exported for the
+ * dashboard's read of today's summary on load (ITER18-005 Phase 8), which holds
+ * its dashboard read-back for exactly the writes whose optimistic removal that
+ * read could undo — and for no other mutation.
+ */
+export function isTaskWrite(mutation: Mutation): boolean {
+  // Keyed *and* acting on an existing task. A creation carries the key but no
+  // task id: it changes nothing a status update's refresh covers, so counting it
+  // made `isLastTaskWrite` skip that refresh while the creation was pending, and
+  // leave it skipped if the creation then failed (Greptile review on PR #1470).
+  return (
+    mutation.options.mutationKey?.[0] === TASK_WRITE_KEY[0] &&
+    mutatingTaskId(mutation.state.variables) !== undefined
+  );
+}
 
 /** The task a pending mutation is acting on, whatever shape its input takes. */
 function mutatingTaskId(variables: unknown): string | undefined {
@@ -1060,6 +1094,7 @@ export function useTaskWriteInFlight(taskId: string): boolean {
     filters: {
       status: 'pending',
       predicate: mutation =>
+        isTaskWrite(mutation) &&
         mutatingTaskId(mutation.state.variables) === taskId,
     },
     select: mutation => mutation.state.variables,
@@ -1146,7 +1181,7 @@ export function useCreateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: createTask,
     onSuccess: () => {
       void refreshTaskCollections(queryClient);
@@ -1174,7 +1209,7 @@ export function useUpdateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: updateTask,
     onMutate: async ({ taskId, status, text }) => {
       // Every namespace under `all`: the same attributes are embedded in the
@@ -1246,7 +1281,7 @@ export function useRetargetTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: retargetTask,
     onSuccess: (_, { taskId }) => {
       // A retarget moves the count on **two** journals — one down, one up — and
@@ -1276,7 +1311,7 @@ export function useDeleteTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: deleteTask,
     onSuccess: (_, taskId) => {
       forgetTask(queryClient, taskId);
@@ -1292,7 +1327,7 @@ export function useLinkTaskContact() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: linkTaskContact,
     onSuccess: (_, { taskId }) => {
       void refreshTask(queryClient, taskId);
@@ -1307,7 +1342,7 @@ export function useUnlinkTaskContact() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: unlinkTaskContact,
     onSuccess: (_, { taskId }) => {
       void refreshTask(queryClient, taskId);
@@ -1327,7 +1362,7 @@ export function useAttachTaskIntermediateJournal() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: attachTaskIntermediateJournal,
     onSuccess: (_, { taskId }) => {
       void refreshTaskJournalLinks(queryClient, taskId);
@@ -1342,7 +1377,7 @@ export function useDetachTaskIntermediateJournal() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: detachTaskIntermediateJournal,
     onSuccess: (_, { taskId }) => {
       void refreshTaskJournalLinks(queryClient, taskId);

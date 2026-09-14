@@ -1,6 +1,7 @@
 """Unit tests for DailySummaryService."""
 
 import json
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, MagicMock
@@ -71,6 +72,27 @@ def mock_summary_repo() -> AsyncMock:
     return repo
 
 
+def _build_service(
+    mock_input_assembler: AsyncMock,
+    mock_eligibility_checker: MagicMock,
+    mock_prompt_builder: MagicMock,
+    mock_summary_repo: AsyncMock,
+    *,
+    gemini_api_key: str,
+    response_override: str | None,
+) -> DailySummaryService:
+    """The service over the shared mocks, with the model configuration a test needs."""
+    return DailySummaryService(
+        input_assembler=mock_input_assembler,
+        eligibility_checker=mock_eligibility_checker,
+        prompt_builder=mock_prompt_builder,
+        summary_repo=mock_summary_repo,
+        gemini_api_key=gemini_api_key,
+        gemini_model="gemini-2.5-pro",
+        _gemini_response_override=response_override,
+    )
+
+
 @pytest.fixture
 def service(
     mock_input_assembler: AsyncMock,
@@ -78,17 +100,38 @@ def service(
     mock_prompt_builder: MagicMock,
     mock_summary_repo: AsyncMock,
 ) -> DailySummaryService:
-    return DailySummaryService(
-        input_assembler=mock_input_assembler,
-        eligibility_checker=mock_eligibility_checker,
-        prompt_builder=mock_prompt_builder,
-        summary_repo=mock_summary_repo,
+    return _build_service(
+        mock_input_assembler,
+        mock_eligibility_checker,
+        mock_prompt_builder,
+        mock_summary_repo,
         gemini_api_key="test-key",
-        gemini_model="gemini-2.5-pro",
-        _gemini_response_override=json.dumps(
+        response_override=json.dumps(
             {"summary_text": "A productive day with meetings and exercise."}
         ),
     )
+
+
+@pytest.fixture
+def keyless_service(
+    mock_input_assembler: AsyncMock,
+    mock_eligibility_checker: MagicMock,
+    mock_prompt_builder: MagicMock,
+    mock_summary_repo: AsyncMock,
+) -> Callable[[str | None], DailySummaryService]:
+    """Build a service with no Gemini key, optionally answering from an override."""
+
+    def build(response_override: str | None) -> DailySummaryService:
+        return _build_service(
+            mock_input_assembler,
+            mock_eligibility_checker,
+            mock_prompt_builder,
+            mock_summary_repo,
+            gemini_api_key="",
+            response_override=response_override,
+        )
+
+    return build
 
 
 class TestDailySummaryServiceGeneration:
@@ -789,27 +832,32 @@ class TestDailySummaryServiceFailure:
     @pytest.mark.asyncio
     async def test_no_api_key_returns_none(
         self,
+        keyless_service: Callable[[str | None], DailySummaryService],
         mock_input_assembler: AsyncMock,
-        mock_eligibility_checker: MagicMock,
-        mock_prompt_builder: MagicMock,
-        mock_summary_repo: AsyncMock,
     ) -> None:
         """When no API key is configured, returns None."""
-        service = DailySummaryService(
-            input_assembler=mock_input_assembler,
-            eligibility_checker=mock_eligibility_checker,
-            prompt_builder=mock_prompt_builder,
-            summary_repo=mock_summary_repo,
-            gemini_api_key="",
-            gemini_model="gemini-2.5-pro",
-        )
-
-        result = await service.get_or_generate(
+        result = await keyless_service(None).get_or_generate(
             "user123", date(2026, 4, 27), transaction=_NO_TXN
         )
 
         assert result is None
         mock_input_assembler.assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_response_override_generates_without_an_api_key(
+        self,
+        keyless_service: Callable[[str | None], DailySummaryService],
+    ) -> None:
+        """An override is a configured model: the e2e stack has no key, only it."""
+        service = keyless_service(json.dumps({"summary_text": "Stubbed."}))
+
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == "Stubbed."
 
 
 class TestDailySummaryServiceRegenerate:

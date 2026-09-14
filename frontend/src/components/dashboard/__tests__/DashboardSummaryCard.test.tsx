@@ -11,7 +11,21 @@
  * browser's clock, or that ignores the section's `status`, pass.
  */
 
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+  render,
+} from '@testing-library/react';
+import { useEffect } from 'react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { renderWithProviders } from '@/test-utils';
@@ -20,6 +34,7 @@ import { todayIn } from '@/lib/date-utils';
 import {
   DashboardSectionStatus,
   DashboardSummaryState,
+  homeDashboardKeys,
 } from '@/lib/api/home-dashboard';
 import type {
   HomeDashboardResponse,
@@ -67,7 +82,8 @@ const NOW = new Date('2026-07-31T03:00:00Z');
  * 2020 is stale by construction.
  */
 const ANCHOR_DATE = todayIn(ANCHOR_TIMEZONE, NOW);
-const REGENERATE_URL = `/api/journals/daily-summary/${ANCHOR_DATE}/regenerate`;
+const SUMMARY_URL = `/api/journals/daily-summary/${ANCHOR_DATE}`;
+const REGENERATE_URL = `${SUMMARY_URL}/regenerate`;
 
 const UNAVAILABLE_LINE = /no summary today/i;
 const GENERATING_LINE = 'Summary is being generated...';
@@ -155,6 +171,8 @@ function dashboardDocument(
 interface RouteHandlers {
   readonly dashboard: () => Promise<Response>;
   readonly regenerate?: () => Promise<Response>;
+  /** The summary read the card makes on load; unconfigured by default. */
+  readonly summary?: () => Promise<Response>;
 }
 
 /**
@@ -162,11 +180,14 @@ interface RouteHandlers {
  * handlers, and everything else — the `AuthProvider`'s session check — gets an
  * authenticated user.
  */
-function routeFetch({ dashboard, regenerate }: RouteHandlers) {
+function routeFetch({ dashboard, regenerate, summary }: RouteHandlers) {
   mockFetch.mockImplementation((input: RequestInfo | URL) => {
     const url = String(input);
     if (url === DASHBOARD_URL) {
       return dashboard();
+    }
+    if (url === SUMMARY_URL) {
+      return summary ? summary() : jsonResponse({ data: null });
     }
     if (url === REGENERATE_URL && regenerate) {
       return regenerate();
@@ -598,17 +619,19 @@ describe('DashboardSummaryCard', () => {
     });
 
     /**
-     * The generating state is the one a user can otherwise be stuck in:
-     * nothing currently moves a journal daily summary out of `pending`, so the
-     * control that resolves it must not be the one the state disables.
+     * The generating state is the one a user can otherwise be stuck in: the
+     * card's own read on load cannot move a summary out of `pending` when the AI
+     * is unconfigured or failing, so once that read has settled the control
+     * that resolves it must not be the one the state disables.
      */
-    it('stays enabled while the summary reports itself generating', async () => {
+    it('is usable again inside the generating state once its read on load has settled', async () => {
       servingDashboard(dashboardWith(GENERATING_SUMMARY));
 
       await renderCard();
 
       await screen.findByText(GENERATING_LINE);
-      expect(regenerateButton()).toBeEnabled();
+      await waitFor(() => expect(regenerateButton()).toBeEnabled());
+      expect(screen.getByText(GENERATING_LINE)).toBeInTheDocument();
     });
 
     it('is disabled until the anchor day it would post to is known', async () => {
@@ -713,6 +736,307 @@ describe('DashboardSummaryCard', () => {
         GENERATED_SUMMARY.summary_text!
       );
       await waitFor(() => expect(regenerateButton()).toBeEnabled());
+    });
+  });
+});
+
+/**
+ * Reach the client the providers built, so a test can make the page read the
+ * dashboard again the way a task write does.
+ */
+function ClientProbe({
+  onClient,
+}: {
+  readonly onClient: (client: QueryClient) => void;
+}) {
+  const client = useQueryClient();
+  useEffect(() => onClient(client), [client, onClient]);
+  return null;
+}
+
+async function renderCardWithClient(): Promise<() => QueryClient> {
+  let captured: QueryClient | undefined;
+  const capture = (client: QueryClient) => {
+    captured = client;
+  };
+  renderWithProviders(
+    <>
+      <ClientProbe onClient={capture} />
+      <DashboardSummaryCard />
+    </>
+  );
+  await screen.findByTestId('dashboard-summary-card');
+  return () => {
+    expect(captured).toBeDefined();
+    return captured!;
+  };
+}
+
+function dashboardReads(): number {
+  return mockFetch.mock.calls.filter(
+    ([input]) => String(input) === DASHBOARD_URL
+  ).length;
+}
+
+/**
+ * ITER18-005 Phase 8: the card obtains today's summary on load, and keeps a
+ * summary it has drawn for the rest of the visit.
+ *
+ * A task tick invalidates today's summary on the server, and the tick's own
+ * refetch then reports it generating. Without the hold that refetch would take
+ * the prose off the screen under a reader who only ticked a task — the
+ * specification's "never regenerated underneath the user", from the other
+ * side. The summary refreshes on the next load instead.
+ */
+describe('DashboardSummaryCard — today’s summary across a visit', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+    jest.clearAllMocks();
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  describe('Holding a drawn summary', () => {
+    it('keeps the summary and its key stats when a later read of the day reports it generating', async () => {
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const client = await renderCardWithClient();
+      await screen.findByTestId('dashboard-summary-text');
+
+      current = dashboardWith(GENERATING_SUMMARY);
+      await act(async () => {
+        await client().invalidateQueries({ queryKey: homeDashboardKeys.all });
+      });
+      await waitFor(() => expect(dashboardReads()).toBe(2));
+
+      expect(screen.getByTestId('dashboard-summary-text')).toHaveTextContent(
+        GENERATED_SUMMARY.summary_text!
+      );
+      expect(screen.getByTestId('dashboard-summary-stats')).toBeInTheDocument();
+      expect(screen.queryByText('Generating...')).not.toBeInTheDocument();
+      expect(screen.queryByText(GENERATING_LINE)).not.toBeInTheDocument();
+    });
+
+    /**
+     * Client-side navigation back to the page renders the previous visit's
+     * cached payload while the mount refetch replaces it. A summary seen only in
+     * that stale cache was never drawn as current on this visit, so it must not
+     * be held over the server's answer that today is stale (review on PR #1470).
+     */
+    it('holds nothing from a stale cached read that a remount refetch replaces', async () => {
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const view = renderWithProviders(<DashboardSummaryCard />);
+      await screen.findByTestId('dashboard-summary-text');
+
+      // Leave the page, then come back after today's summary went stale.
+      view.rerender(<></>);
+      current = dashboardWith(GENERATING_SUMMARY);
+      view.rerender(<DashboardSummaryCard />);
+
+      await waitFor(() => expect(dashboardReads()).toBe(2));
+      expect(await screen.findByText(GENERATING_LINE)).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-summary-text')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-summary-stats')
+      ).not.toBeInTheDocument();
+    });
+
+    /**
+     * With the app's own defaults a remount inside the five-minute stale time
+     * renders the cached payload and fetches nothing, so this visit has drawn
+     * nothing current. Holding that prose would keep it over a later read that
+     * reports today stale (Augment review on PR #1470).
+     */
+    it('holds nothing from a fresh cached read this mount did not make', async () => {
+      const client = new QueryClient({
+        defaultOptions: QUERY_CLIENT_DEFAULT_OPTIONS,
+      });
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      );
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const view = render(<DashboardSummaryCard />, { wrapper });
+      await screen.findByTestId('dashboard-summary-text');
+
+      // Leave and come straight back: the cache is fresh, so nothing is read.
+      view.rerender(<></>);
+      current = dashboardWith(GENERATING_SUMMARY);
+      view.rerender(<DashboardSummaryCard />);
+      expect(dashboardReads()).toBe(1);
+
+      // A later read — a task tick's, say — reports today stale.
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: homeDashboardKeys.all });
+      });
+      await waitFor(() => expect(dashboardReads()).toBe(2));
+
+      expect(await screen.findByText(GENERATING_LINE)).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-summary-text')
+      ).not.toBeInTheDocument();
+    });
+
+    it('keeps it when a later read of the day reports no summary', async () => {
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const client = await renderCardWithClient();
+      await screen.findByTestId('dashboard-summary-text');
+
+      current = dashboardWithoutSummary();
+      await act(async () => {
+        await client().invalidateQueries({ queryKey: homeDashboardKeys.all });
+      });
+      await waitFor(() => expect(dashboardReads()).toBe(2));
+
+      expect(screen.getByTestId('dashboard-summary-text')).toHaveTextContent(
+        GENERATED_SUMMARY.summary_text!
+      );
+      expect(screen.queryByText(UNAVAILABLE_LINE)).not.toBeInTheDocument();
+    });
+
+    it('draws a newer summary when a later read brings one', async () => {
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const client = await renderCardWithClient();
+      await screen.findByTestId('dashboard-summary-text');
+
+      current = dashboardWith({
+        ...GENERATED_SUMMARY,
+        summary_text: 'A busier Wednesday after all.',
+        journal_count: 9,
+      });
+      await act(async () => {
+        await client().invalidateQueries({ queryKey: homeDashboardKeys.all });
+      });
+
+      expect(
+        await screen.findByText('A busier Wednesday after all.')
+      ).toBeInTheDocument();
+      expect(
+        within(screen.getByTestId('dashboard-summary-stats')).getByText('9')
+      ).toBeInTheDocument();
+    });
+
+    it('lets a held summary go once the day it was drawn for has passed', async () => {
+      let current = dashboardWith(GENERATED_SUMMARY);
+      routeFetch({ dashboard: () => jsonResponse(current) });
+      const client = await renderCardWithClient();
+      await screen.findByTestId('dashboard-summary-text');
+
+      current = dashboardWith(GENERATING_SUMMARY);
+      current.meta.anchor.date = '2026-08-01';
+      await act(async () => {
+        await client().invalidateQueries({ queryKey: homeDashboardKeys.all });
+      });
+
+      expect(await screen.findByText(GENERATING_LINE)).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-summary-text')
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Obtaining today’s summary on load', () => {
+    it('marks Regenerate busy while it reads today’s summary', async () => {
+      routeFetch({
+        dashboard: () => jsonResponse(dashboardWith(GENERATING_SUMMARY)),
+        summary: () => new Promise<Response>(() => {}),
+      });
+
+      await renderCard();
+      await screen.findByText(GENERATING_LINE);
+
+      expect(regenerateButton()).toBeDisabled();
+      expect(regenerateButton()).toHaveAttribute('aria-busy', 'true');
+    });
+
+    /**
+     * The first load of a new day has no row at all, which the section reports
+     * as unavailable. Drawing W9's "No summary today" beside a busy Regenerate
+     * for the whole of the generation would say the opposite of what is
+     * happening, so while the card is obtaining one it says it is generating.
+     */
+    it('says it is generating, not that there is no summary, while it obtains a missing one', async () => {
+      routeFetch({
+        dashboard: () => jsonResponse(dashboardWithoutSummary()),
+        summary: () => new Promise<Response>(() => {}),
+      });
+
+      const card = await renderCard();
+
+      expect(await screen.findByText(GENERATING_LINE)).toBeInTheDocument();
+      expect(within(card).getByText('Generating...')).toBeInTheDocument();
+      expect(screen.queryByText(UNAVAILABLE_LINE)).not.toBeInTheDocument();
+    });
+
+    it('draws the summary it obtained and frees Regenerate again', async () => {
+      let current = dashboardWith(GENERATING_SUMMARY);
+      routeFetch({
+        dashboard: () => jsonResponse(current),
+        summary: () => {
+          current = dashboardWith(GENERATED_SUMMARY);
+          return jsonResponse({
+            data: {
+              type: 'journal-daily-summaries',
+              id: ANCHOR_DATE,
+              attributes: {
+                summary_date: ANCHOR_DATE,
+                summary_text: GENERATED_SUMMARY.summary_text,
+                journal_count: 3,
+                event_count: 2,
+                contact_count: 4,
+                mood_average: 7.5,
+                status: 'generated',
+              },
+            },
+          });
+        },
+      });
+
+      await renderCard();
+
+      expect(
+        await screen.findByTestId('dashboard-summary-text')
+      ).toHaveTextContent(GENERATED_SUMMARY.summary_text!);
+      await waitFor(() => expect(regenerateButton()).toBeEnabled());
+      expect(regenerateButton()).toHaveAttribute('aria-busy', 'false');
+    });
+
+    it('reads, and never posts a regeneration for itself', async () => {
+      routeFetch({
+        dashboard: () => jsonResponse(dashboardWith(GENERATING_SUMMARY)),
+        regenerate: () => jsonResponse({ data: null }),
+      });
+
+      await renderCard();
+      await waitFor(() => expect(regenerateButton()).toBeEnabled());
+
+      const summaryCalls = mockFetch.mock.calls.filter(([input]) =>
+        String(input).startsWith(SUMMARY_URL)
+      );
+      expect(summaryCalls.map(([input]) => String(input))).toEqual([
+        SUMMARY_URL,
+      ]);
+    });
+
+    it('announces nothing of its own when it obtains a summary', async () => {
+      routeFetch({
+        dashboard: () => jsonResponse(dashboardWith(GENERATING_SUMMARY)),
+      });
+
+      await renderCard();
+      await waitFor(() => expect(regenerateButton()).toBeEnabled());
+
+      expect(toast.success).not.toHaveBeenCalled();
+      expect(toast.info).not.toHaveBeenCalled();
     });
   });
 });

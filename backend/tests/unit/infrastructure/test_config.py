@@ -99,3 +99,46 @@ class TestLogbookTileThrottle:
     def test_rejects_a_negative_rate(self):
         with pytest.raises(ValidationError):
             Settings(logbook_tile_throttle_per_second=-1)
+
+
+class TestTestOnlySwitches:
+    """Switches that exist for the e2e stack are refused or announced, never silent."""
+
+    def test_the_summary_stub_is_refused_beside_a_real_gemini_key(self):
+        with pytest.raises(ValidationError, match="ENABLE_TEST_DAILY_SUMMARY_STUB"):
+            Settings(  # pyright: ignore[reportCallIssue]
+                _env_file=None,
+                enable_test_daily_summary_stub=True,
+                gemini_api_key="a-real-key",
+            )
+
+    def test_the_summary_stub_is_accepted_without_a_key(self):
+        settings = Settings(  # pyright: ignore[reportCallIssue]
+            _env_file=None, enable_test_daily_summary_stub=True, gemini_api_key=""
+        )
+
+        assert settings.enable_test_daily_summary_stub is True
+
+    def test_a_real_key_without_the_stub_is_accepted(self):
+        settings = Settings(  # pyright: ignore[reportCallIssue]
+            _env_file=None, gemini_api_key="a-real-key"
+        )
+
+        assert settings.gemini_api_key == "a-real-key"
+
+    def test_names_every_test_only_switch_that_is_on(self):
+        settings = Settings(  # pyright: ignore[reportCallIssue]
+            _env_file=None,
+            enable_test_review_items=True,
+            enable_test_daily_summary_stub=True,
+        )
+
+        assert settings.enabled_test_only_switches == [
+            "ENABLE_TEST_REVIEW_ITEMS",
+            "ENABLE_TEST_DAILY_SUMMARY_STUB",
+        ]
+
+    def test_names_none_by_default(self):
+        settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+
+        assert settings.enabled_test_only_switches == []

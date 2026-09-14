@@ -470,11 +470,18 @@ rather than this API's taste:
   specification's freshness rule says today's summary must have been generated
   today in the user's timezone, so yesterday evening's prose is withheld this
   morning rather than served. The dashboard judges that from the row's
-  `generated_at` and never writes — but note that **nothing on this path moves
-  a journal daily summary out of `generating`**: only the daily-summary
-  endpoints (and the MCP tool) generate, and this one does not call them. A
-  client that renders `generating` should therefore offer the regeneration
-  action rather than waiting for the state to change on its own.
+  `generated_at` and never writes — so **nothing on this path moves a journal
+  daily summary out of `generating`**: only the daily-summary endpoints (and the
+  MCP tool) generate, and this one does not call them. The dashboard's client
+  closes that gap itself (ITER18-005 Phase 8): once per mount of the card
+  and anchor day, when the first settled read of today has no prose, the summary
+  card calls `GET /api/journals/daily-summary/{date}` — the read that regenerates
+  a missing, invalidated or stale summary — and reads this endpoint back when
+  that answer carries a row.
+  It reads and never forces, and a later read of the same day (a task tick's
+  refetch, say) never triggers it again, so a summary is not regenerated
+  underneath a reader acting on the page. Any other client that renders
+  `generating` needs the same read, or the regeneration action.
   The payload is
   `{state, summary_text, journal_count, event_count, contact_count,
   mood_average}`: `summary_text` comes from the entity's `get_display_text`, so

@@ -190,7 +190,8 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     prevent, so ITER18-004 Phase 4 renders `grid-cols-2 sm:grid-cols-4`. The row is exactly as drawn from
     `sm` up. Recorded here because it is a layout decision the wireframe could not have shown: it depicts
     one viewport.
-15. **The summary card's Regenerate never fires itself.** W6 draws the control and W8 draws the
+15. **The summary card's Regenerate never fires itself — and, since ITER18-005 Phase 8, the card reads
+    today's summary on load.** W6 draws the control and W8 draws the
     generating state, but nothing in the wireframe says what happens when a summary reports itself
     generating with nothing generating it — which is today's real behaviour, since no consumer moves a
     journal daily summary out of `pending`. ITER18-004 Phase 4 resolves it by **keeping the control
@@ -198,6 +199,12 @@ Recorded so implementation does not have to guess. Each is resolved in the itera
     two mutations on this page, the inline task action and a *user-requested* regeneration, and the page
     every sign-in lands on must not start a multi-second AI write on load. Making the state honest on
     read belongs to ITER18-005, which owns summary freshness.
+    **Revised in ITER18-005 Phase 8.** Still never *fires* a regeneration: the card now *reads* today's
+    summary once per mount and anchor day when the first settled read has no prose — `GET /api/journals/daily-summary/{date}`,
+    which regenerates a missing, invalidated or stale summary — and reads the dashboard back, with W6's
+    control busy while it does. That is the specification's "the summary refreshes on the next load", and
+    what makes **W8** honest on read. A summary the card has drawn is also held for the visit, so a task
+    ticked off beneath it never turns **W7** into **W8** in place.
 16. **W14's second glyph — the journal's type or calendar — is not drawn.** The wireframe shows a
     calendar glyph before every title and, "where the journal has one, a second glyph for the journal's
     type or calendar", while saying the glyph mapping itself is unspecified. The agenda payload carries

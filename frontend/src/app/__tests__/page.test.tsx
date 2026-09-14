@@ -12,7 +12,10 @@
 
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithProviders } from '@/test-utils';
+import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
+import { AuthProvider } from '@/lib/auth/AuthProvider';
 import HomePage from '@/app/page';
 import { ImportantDateTypeEnum } from '@/types/contacts';
 import {
@@ -403,6 +406,38 @@ describe('HomePage — the dashboard shell', () => {
   });
 
   describe('One round trip', () => {
+    /**
+     * The page is about now, so a visit reads it: with the app's own five-minute
+     * stale time, client-side navigation back would otherwise render the cached
+     * payload and read nothing, and the summary card could not tell this visit's
+     * read from the last one's (Augment review on PR #1470).
+     */
+    it('reads the dashboard again when it mounts over a fresh cache', async () => {
+      freezeOnTheAnchorDay();
+      const client = new QueryClient({
+        defaultOptions: QUERY_CLIENT_DEFAULT_OPTIONS,
+      });
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={client}>
+          <AuthProvider>{children}</AuthProvider>
+        </QueryClientProvider>
+      );
+      const dashboardCalls = () =>
+        mockFetch.mock.calls.filter(
+          ([input]) => String(input) === DASHBOARD_URL
+        ).length;
+
+      const first = renderWithProviders(<HomePage />, { wrapper });
+      await screen.findByTestId('home-dashboard-ready');
+      await waitFor(() => expect(dashboardCalls()).toBe(1));
+      first.unmount();
+
+      renderWithProviders(<HomePage />, { wrapper });
+      await screen.findByTestId('home-dashboard-ready');
+
+      await waitFor(() => expect(dashboardCalls()).toBe(2));
+    });
+
     it('fetches the dashboard once for the whole page', async () => {
       freezeOnTheAnchorDay();
       await renderHomePage();
@@ -1058,6 +1093,63 @@ describe('HomePage — the dashboard shell', () => {
         ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH'
       );
       expect(String(write[0])).toBe('/api/tasks/31');
+    });
+
+    /**
+     * ITER18-005 Phase 8: a tick invalidates today's summary on the server, so
+     * the tick's own refetch reports it generating. The summary on screen stays
+     * where it is — it refreshes on the next load — and nothing reads it.
+     */
+    it('leaves the summary in place when a tick’s refetch reports it generating', async () => {
+      let current = populatedDashboard();
+      routeFetch(() =>
+        Promise.resolve({ ok: true, json: async () => current } as Response)
+      );
+      const user = userOnTheAnchorDay();
+
+      await renderHomePage();
+      await screen.findByTestId('dashboard-summary-text');
+
+      const afterTheTick = populatedDashboard();
+      afterTheTick.data.attributes.summary = {
+        status: DashboardSectionStatus.READY,
+        data: {
+          state: DashboardSummaryState.GENERATING,
+          summary_text: null,
+          journal_count: 3,
+          event_count: 2,
+          contact_count: 4,
+          mood_average: 7.5,
+        },
+      };
+      afterTheTick.data.attributes.tasks = {
+        status: DashboardSectionStatus.READY,
+        data: EMPTY_TASKS,
+      };
+      current = afterTheTick;
+      await user.click(await screen.findByTestId('dashboard-task-action-done'));
+
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.filter(
+            ([input]) => String(input) === DASHBOARD_URL
+          )
+        ).toHaveLength(2)
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByTestId('dashboard-task-31')
+        ).not.toBeInTheDocument()
+      );
+      expect(screen.getByTestId('dashboard-summary-text')).toHaveTextContent(
+        'A quiet Wednesday.'
+      );
+      expect(screen.queryByText('Generating...')).not.toBeInTheDocument();
+      expect(
+        mockFetch.mock.calls.filter(([input]) =>
+          String(input).includes('/daily-summary/')
+        )
+      ).toEqual([]);
     });
 
     it('writes once, and only the summary, when Regenerate is pressed', async () => {

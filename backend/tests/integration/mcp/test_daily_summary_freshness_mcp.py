@@ -32,6 +32,7 @@ from app.core.journal.services import (
     daily_summary_service,
 )
 from app.core.journal.services.daily_summary_service import DailySummaryService
+from app.infrastructure.di.journal import DAILY_SUMMARY_STUB_TEXT
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
@@ -134,3 +135,52 @@ class TestGetDailySummaryInheritsFreshness:
         assert payload["status"] == "generated"
         assert payload["summary_text"] == OLD_TEXT
         gemini_stub.assert_not_awaited()
+
+
+@pytest.fixture
+def daily_summary_stub(test_settings) -> None:
+    """The e2e stack's model: no key, only the settings-driven stub.
+
+    Nothing is patched here, so these tests also prove the flag reaches the
+    service through the container MCP resolves it from.
+    """
+    test_settings.gemini_api_key = ""
+    test_settings.enable_test_daily_summary_stub = True
+
+
+@pytest.mark.integration
+@pytest.mark.usefixtures("pinned_clock", "daily_summary_stub")
+class TestGetDailySummaryInheritsEligibilityAndInvalidation:
+    """Today is always eligible, and an invalidated today regenerates on read."""
+
+    @pytest.mark.asyncio
+    async def test_a_quiet_today_is_generated_not_disabled(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            payload = await call_get_daily_summary(client)
+
+        assert "error" not in payload
+        assert payload["status"] == "generated"
+        assert payload["summary_text"] == DAILY_SUMMARY_STUB_TEXT
+        assert payload["journal_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_an_invalidated_today_is_regenerated_on_read(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+    ) -> None:
+        await seed_todays_summary(clean_database, EARLY_TODAY)
+        await SqlJournalDailySummaryRepository(clean_database).invalidate_for_date(
+            USER_ID, TODAY
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_get_daily_summary(client)
+
+        assert "error" not in payload
+        assert payload["status"] == "generated"
+        assert payload["summary_text"] == DAILY_SUMMARY_STUB_TEXT

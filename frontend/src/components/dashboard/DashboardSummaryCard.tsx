@@ -2,11 +2,10 @@
  * DashboardSummaryCard — the dashboard's headline (**W5**–**W10**).
  *
  * Today's AI daily summary: the **same** entity the journals view shows for
- * today, read from the dashboard payload the page already fetched rather than
- * from the daily-summary endpoint. That is deliberate — the journals view goes
- * through `DailySummaryService.get_or_generate`, which writes and can hold an
- * AI call open for seconds, and the specification makes this page a read-only
- * projection. The summary section is a plain read of the same row.
+ * today, read from the dashboard payload the page already fetched. The summary
+ * section is a plain read of that row; the one time the card goes to the
+ * daily-summary endpoint itself is to obtain a summary the payload does not
+ * have, below.
  *
  * The card is drawn apart from the three evidence cards below it (**W5**): a
  * primary tint and a primary accent bar down its left edge, so the headline
@@ -16,7 +15,8 @@
  * (**W8**), and unavailable (**W9**) — which covers "there is none today" as
  * well as "it could not be read", because a summary is not a list and so has no
  * empty state. **W6**'s Regenerate control sits *outside* all three branches
- * and stays enabled in every one of them.
+ * and is usable in every one of them whenever a summary is not already on its
+ * way.
  *
  * There is one rendering the wireframe does not declare: what the card shows
  * while the page's query is still in flight. Wireframe gap 9 anticipates it —
@@ -25,20 +25,29 @@
  * fourth *state*, since nothing on the wire produces it: **W9** still covers
  * every way the card can end up with no summary once the read has landed.
  *
- * **Regeneration is never automatic.** Nothing currently moves a journal daily
- * summary out of `pending`, so a user who edits today's journal can see **W8**
- * with nothing generating behind it — and the tempting fix is for this card to
- * fire the regenerate endpoint when it sees `generating`. It does not: the page
- * every sign-in lands on must not start a multi-second AI write on load, and
- * the specification allows exactly two mutations here, the inline task action
- * and a *user-requested* regeneration. The Regenerate control is what resolves
- * that state, which is why it stays enabled inside it. Making the state honest
- * on read belongs to ITER18-005, which owns summary freshness.
+ * **The card reads today's summary on load, and never forces one.** The
+ * dashboard's own read does not generate, so after an invalidation or on a new
+ * day it reports *generating* with nothing generating it. Once per mount and anchor day,
+ * when that first settled read has no prose, the card reads today's summary —
+ * the read that regenerates a missing, invalidated or stale one — and reads the
+ * dashboard back (`useObtainTodaySummaryOnLoad`, ITER18-005 Phase 8). That is
+ * the specification's "the summary refreshes on the next load". Regenerate is
+ * busy while it happens, and pressing it stays the only way to *force* one.
+ *
+ * **A summary the card has drawn is held for the visit.** A task ticked off
+ * here invalidates today's summary on the server, so the tick's own refetch
+ * reports it *generating*; taking the prose off the screen then would be
+ * regenerating underneath a reader who only ticked a task. So a generated
+ * summary stays drawn — prose, key stats and no badge — until a newer one
+ * arrives or the anchor day moves on, and the next load brings the refreshed
+ * one. Withholding stale prose is still the rule for what a *load* receives:
+ * the hold only keeps what this visit has already drawn as current.
  */
 
 'use client';
 
 import { RefreshCw, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -48,9 +57,12 @@ import { SummaryKeyStats } from './SummaryKeyStats';
 import {
   DashboardSectionStatus,
   DashboardSummaryState,
+  isSettledDashboardRead,
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
+import type { HomeDashboardSummary } from '@/lib/api/home-dashboard';
 import { useRegenerateDailySummary } from '@/lib/api/journals';
+import { useObtainTodaySummaryOnLoad } from '@/lib/api/today-summary-on-load';
 import { isAnchorStillToday } from '@/lib/dashboard-anchor';
 import { cn } from '@/lib/utils';
 
@@ -162,9 +174,11 @@ function DashboardSummaryUnavailable() {
 }
 
 function DashboardSummaryCardBody() {
-  const { data, isPending } = useHomeDashboard();
+  const { data, isPending, isFetching, isSuccess, isFetchedAfterMount } =
+    useHomeDashboard();
   const { mutate: regenerate, isPending: isRegenerating } =
     useRegenerateDailySummary();
+  const { isObtaining } = useObtainTodaySummaryOnLoad();
 
   const anchor = data?.meta.anchor;
   // Only regenerate a day the anchor still agrees is today — a dashboard held
@@ -178,11 +192,26 @@ function DashboardSummaryCardBody() {
 
   // A generated summary with no text is not a state the wire declares, so it
   // falls through to W9 rather than drawing an empty paragraph.
-  const prose =
-    summary?.state === DashboardSummaryState.GENERATED
-      ? summary.summary_text
+  const generated =
+    summary?.state === DashboardSummaryState.GENERATED && summary.summary_text
+      ? summary
       : null;
-  const isGenerating = summary?.state === DashboardSummaryState.GENERATING;
+  const shown = useHeldSummary(
+    anchor?.date,
+    generated,
+    isSettledDashboardRead({ isSuccess, isFetching, isFetchedAfterMount })
+  );
+  const prose = shown?.summary_text ?? null;
+  // While the card obtains today's summary, one is being generated, whatever the
+  // first read said: a new day's first load has no row at all, which reads as
+  // unavailable, and W9's "No summary today" beside a busy Regenerate would say
+  // the opposite of what is happening.
+  const isGenerating =
+    !shown &&
+    (isObtaining || summary?.state === DashboardSummaryState.GENERATING);
+  // Busy for the reader's own regeneration and for the card's read on load
+  // alike: either way a summary is on its way, and a press would ask twice.
+  const isBusy = isRegenerating || isObtaining;
 
   const handleRegenerate = () => {
     // Re-checked at click time, not just at render. The button's disabled state
@@ -204,7 +233,8 @@ function DashboardSummaryCardBody() {
             {/* Outside the state branches below, per W6: it is the action that
                 resolves W8's dead end and W9's absence alike.
 
-                Disabled only while it is already running, or while there is no
+                Disabled while a summary is already on its way — the reader's own
+                regeneration or the card's read on load — or while there is no
                 anchor day to post to. The second case is the page's first load
                 — but it is also a dashboard request that *failed*, where the
                 card shows W9 beside a control it cannot use. That is the least
@@ -225,12 +255,15 @@ function DashboardSummaryCardBody() {
               size='sm'
               className='text-muted-foreground hover:text-primary shrink-0 gap-2'
               onClick={handleRegenerate}
-              disabled={!anchorDate || isRegenerating}
-              aria-busy={isRegenerating}
+              disabled={!anchorDate || isBusy}
+              aria-busy={isBusy}
               data-testid='dashboard-summary-regenerate'
             >
               <RefreshCw
-                className={cn('h-4 w-4', isRegenerating && 'animate-spin')}
+                className={cn(
+                  'h-4 w-4 motion-reduce:animate-none',
+                  isBusy && 'animate-spin'
+                )}
                 aria-hidden='true'
               />
               {SUMMARY_COPY.regenerate}
@@ -255,16 +288,57 @@ function DashboardSummaryCardBody() {
 
       {/* W10 renders in the generated state only. The counters ride in the
           payload either way; where they are drawn is the card's call. */}
-      {prose && summary && (
+      {shown && (
         <SummaryKeyStats
-          journalCount={summary.journal_count}
-          eventCount={summary.event_count}
-          contactCount={summary.contact_count}
-          moodAverage={summary.mood_average}
+          journalCount={shown.journal_count}
+          eventCount={shown.event_count}
+          contactCount={shown.contact_count}
+          moodAverage={shown.mood_average}
         />
       )}
     </SummaryCardFrame>
   );
+}
+
+/**
+ * The generated summary to draw: this read's, or — when this read withholds
+ * one — the last one drawn for the same anchor day.
+ *
+ * Held in state, and updated while rendering, because it *is* information from
+ * a previous render: what the reader has already been shown. Keyed on the
+ * payload's anchor day, so a summary drawn for yesterday is never held over a
+ * page that has moved on to today.
+ *
+ * **Only a settled read establishes it.** On client-side navigation back to the
+ * page, React Query renders the previous visit's cached payload while the mount
+ * refetch replaces it; a summary seen only there was never current on this
+ * visit, and holding it would keep that prose over the server's answer that
+ * today is stale. A hold established earlier is untouched while a later read is
+ * in flight — which is exactly a task tick's refetch.
+ */
+function useHeldSummary(
+  day: string | undefined,
+  generated: HomeDashboardSummary | null,
+  settled: boolean
+): HomeDashboardSummary | null {
+  const [held, setHeld] = useState<{
+    readonly day: string;
+    readonly summary: HomeDashboardSummary;
+  } | null>(null);
+
+  if (
+    settled &&
+    day &&
+    generated &&
+    (held?.day !== day || held.summary !== generated)
+  ) {
+    setHeld({ day, summary: generated });
+  }
+
+  if (generated) {
+    return generated;
+  }
+  return held && held.day === day ? held.summary : null;
 }
 
 /**

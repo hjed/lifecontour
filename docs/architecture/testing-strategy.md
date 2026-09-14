@@ -318,6 +318,32 @@ clients keep working; don't add session handling to other tests.
 - Test responsive design across different screen sizes
 - Include accessibility testing in E2E flows
 
+### The AI Daily Summary in E2E
+
+The e2e stack has no Gemini key. It sets `ENABLE_TEST_DAILY_SUMMARY_STUB=true` (`.env.test`,
+passed through `docker-compose.yml`), which makes `DailySummaryService` answer with the fixed
+sentence `DAILY_SUMMARY_STUB_TEXT` (`backend/app/infrastructure/di/journal.py`) instead of calling a
+model — so a *generated* summary can be created from fixtures. The flag reaches daily summaries only:
+contact summaries and similarity assessment still see an unconfigured AI. It defaults to `false` and
+must never be set outside test/CI.
+
+Three rules follow from a summary being **one row per user per day**, shared by the whole run:
+
+- **Establish the summary state a test asserts; never inherit it.** Press Regenerate until the
+  regeneration's own response says `generated` — a journal or task seeded moments before invalidates
+  the day asynchronously, and an invalidation landing mid-generation makes the persist guard keep the
+  row pending, so a single press is not deterministic.
+- **Read the server's summary state from `GET /api/home-dashboard`**, which never writes. The
+  daily-summary `GET` regenerates what it reads, so polling it changes the thing being observed.
+- **Clear the day before asserting its journal count.** The summary counts every journal on the day,
+  and specs that create journals through the UI leave today's behind, so a full run always holds
+  some. `TestDataManager.clearJournalsOn(day)` deletes them — destructively, which `workers: 1` makes
+  safe, as it does for `clearFutureJournals()`.
+
+"AI unconfigured" cannot be created on a stack with the stub on; serve the unconfigured wire answer
+(an unavailable summary section, `data: null` from the summary endpoints) at the route level, over a
+real page, and pin the backend branch with unit and integration tests.
+
 ### Cross-Browser Reliability Patterns
 
 The E2E suite runs across Firefox and Mobile Chrome. Firefox is notably more sensitive to timing — it processes click events, DOM state changes, and navigations slightly slower than the chromium engine. The following patterns prevent Firefox-specific flakes.

@@ -13,6 +13,7 @@ import type {
   HomeDashboardUpcomingDates,
 } from '../../src/lib/api/home-dashboard';
 import type { ImportantDateTypeEnum } from '../../src/types/contacts';
+import type { DailySummaryResponse } from '../../src/types/journals';
 import { TestDataManager } from './data-management';
 import {
   test,
@@ -96,6 +97,16 @@ async function openDashboard(page: Page) {
   ]) {
     await expect(page.getByTestId(loading)).toHaveCount(0);
   }
+
+  // And for the summary card's own read on load (ITER18-005 Phase 8) to have
+  // settled. When the first read of today has no prose the card reads today's
+  // summary and then the dashboard again, so the card can still grow — and a
+  // test counting requests would count that one. Regenerate is busy from the
+  // first render that holds the payload until the read-back has landed, which
+  // is what makes this a level to wait on rather than an event to race.
+  await expect(
+    page.getByRole('button', { name: /regenerate/i })
+  ).toHaveAttribute('aria-busy', 'false');
 }
 
 /**
@@ -328,19 +339,19 @@ test.describe('Home Dashboard — page shell', () => {
  * the Regenerate control that sits outside all three state branches.
  *
  * The dashboard payload is route-mocked here rather than driven from fixtures,
- * and deliberately so: `generated` and `generating` are produced by an AI
- * provider the e2e stack does not configure, so neither can be *created*
- * deterministically — only served. Each test installs its own mock for exactly
- * one state before navigating, which is what keeps every assertion
- * single-outcome; `journals-daily-summary.spec.ts` sets the same precedent for
- * the journals view's copy of this card.
+ * and deliberately so. The e2e stack's model is a stub
+ * (`ENABLE_TEST_DAILY_SUMMARY_STUB`), so `generated` *can* be created — the
+ * *generated end to end* block at the foot of this file does — but today's
+ * summary is one row shared by the whole run, and `generating` is transient by
+ * nature. Each test here installs its own mock for exactly one state before
+ * navigating, which is what keeps every assertion single-outcome;
+ * `journals-daily-summary.spec.ts` sets the same precedent for the journals
+ * view's copy of this card.
  *
- * `unavailable` is the exception, and is mocked for a different reason: with no
- * AI configured it is the stack's *natural* answer, so an unmocked test would
- * pass — until another spec in the run leaves a summary row on the anchor day,
- * at which point it would fail for a reason that has nothing to do with this
- * card. Serving it keeps the state under the test's own control rather than the
- * suite's ordering. Proving the real endpoint reaches this rendering is the
+ * `unavailable` is served for the same reason: whether the anchor day has a
+ * summary row depends on what else the run has done, so an unmocked test would
+ * pass or fail on suite ordering rather than on this card. Serving it keeps the
+ * state under the test's own control. Proving the real endpoint reaches this rendering is the
  * backend's 69 unit and integration tests plus ITER18-005 Phase 8's e2e, which
  * owns the summary end to end.
  */
@@ -447,7 +458,8 @@ const MOCK_EMPTY_TASKS: HomeDashboardTasks = {
   tasks: [],
 };
 
-const REGENERATE_PATH = `**/api/journals/daily-summary/${SUMMARY_ANCHOR}/regenerate`;
+const SUMMARY_PATH = `**/api/journals/daily-summary/${SUMMARY_ANCHOR}`;
+const REGENERATE_PATH = `${SUMMARY_PATH}/regenerate`;
 
 const SUMMARY_PROSE = 'A quiet Wednesday. Two journals and one long walk.';
 const REGENERATED_PROSE = 'A busier Wednesday after all. Three journals.';
@@ -511,8 +523,12 @@ type DashboardSections = Partial<HomeDashboardAttributes>;
  * found one here serving a payload the API cannot produce — so building them
  * through `HomeDashboardResponse` is what puts `tsc` in front of that claim.
  *
- * A section a test does not name is the quiet default: the summary
- * unavailable, and the three evidence sections ready and empty.
+ * A section a test does not name is the quiet default: the summary generated,
+ * and the three evidence sections ready and empty. **Generated**, not
+ * unavailable, since ITER18-005 Phase 8: a summary with no prose makes the card
+ * read today's summary and the dashboard again on load, and a test about the
+ * tasks or the dates would then count a read it never caused. The summary tests
+ * that want *generating* or *unavailable* name it.
  */
 function dashboardDocument(
   sections: DashboardSections = {}
@@ -522,7 +538,7 @@ function dashboardDocument(
       type: 'home-dashboards',
       id: 'e2e-user',
       attributes: {
-        summary: unavailableSection,
+        summary: generatedSection(SUMMARY_PROSE),
         // `tomorrow` rides on every ready agenda (Phase 6). Omitting it
         // served a payload the API cannot produce, and the tomorrow
         // disclosure beneath today's list is drawn from it.
@@ -560,6 +576,13 @@ async function mockDashboardSections(
       body: JSON.stringify(dashboardDocument(sectionsFor())),
     });
   });
+  // The card's read of today's summary on load, answered as an unconfigured
+  // backend answers it, so a served state is never regenerated for real on the
+  // shared account behind it. A test that watches this read routes it again;
+  // the later route wins.
+  await page.route(SUMMARY_PATH, route =>
+    route.fulfill({ json: { data: null } satisfies DailySummaryResponse })
+  );
   return { served: () => served };
 }
 
@@ -631,9 +654,9 @@ test.describe('Home Dashboard — the AI daily summary card', () => {
     });
 
     /**
-     * The state this phase's central ruling rests on: nothing moves a summary
-     * out of `pending`, so the card deliberately does **not** regenerate for
-     * the reader — which only works if the control they would press is live.
+     * The card's read on load cannot always move a summary out of `pending` —
+     * an AI that is unconfigured or failing leaves it there — so the control
+     * the reader would press must still be live once that read has settled.
      */
     test('keeps Regenerate offered and usable inside this state', async ({
       authenticatedPage: page,
@@ -651,39 +674,37 @@ test.describe('Home Dashboard — the AI daily summary card', () => {
     });
 
     /**
-     * The other half of the ruling, and the half an enabled-button assertion
-     * cannot see: the card must not regenerate **for** the reader.
-     *
-     * A regression that fired the endpoint on seeing `generating` while leaving
-     * the button enabled would satisfy every other test in this block. This one
-     * watches the network instead — the count of regenerate requests must stay
-     * at zero for as long as the card is simply sitting there in the state that
-     * would tempt it.
+     * ITER18-005 Phase 8 revised ITER18-004 Phase 4's ruling that the card never
+     * asks for a summary for itself: it now *reads* today's summary once on
+     * load — the read that regenerates a stale one — and it still never
+     * *forces* one. Both halves are asserted against the network, because an
+     * enabled button looks the same whether or not the card posted.
      */
-    test('never regenerates for itself while the summary reports generating', async ({
+    test('reads today’s summary once on load, and never forces a regeneration', async ({
       authenticatedPage: page,
     }) => {
-      const regenerateCalls: string[] = [];
+      const summaryCalls: string[] = [];
       await mockDashboard(page, () => generatingSection);
+      await page.route(SUMMARY_PATH, async route => {
+        summaryCalls.push(`read ${route.request().method()}`);
+        await route.fulfill({
+          json: { data: null } satisfies DailySummaryResponse,
+        });
+      });
       await page.route(REGENERATE_PATH, async route => {
-        regenerateCalls.push(route.request().method());
-        await route.fulfill({ status: 200, body: '{}' });
+        summaryCalls.push(`regenerate ${route.request().method()}`);
+        await route.fulfill({
+          json: { data: null } satisfies DailySummaryResponse,
+        });
       });
 
       await page.setViewportSize(DESKTOP);
       await openDashboard(page);
+
       await expect(
         page.getByText('Summary is being generated...')
       ).toBeVisible();
-
-      // Give the card room to misbehave: an effect-driven POST would have
-      // fired well inside this, and the dashboard query's own refetch on focus
-      // is another chance for it.
-      await page.waitForTimeout(2000);
-      await page.getByRole('heading', { level: 1 }).click();
-      await page.waitForTimeout(500);
-
-      expect(regenerateCalls).toEqual([]);
+      expect(summaryCalls).toEqual(['read GET']);
     });
 
     test('draws no key-stats footer', async ({ authenticatedPage: page }) => {
@@ -1637,9 +1658,10 @@ test.describe('Home Dashboard — the tasks card', () => {
 
     // AC6: the summary is not regenerated underneath the user — it refreshes
     // on the next load, which is the contract ITER18-005 Phase 7 relies on.
-    // Asserted against the *requests* rather than against the card's text: the
-    // e2e account has no AI configured, so the card reads the same either way
-    // and comparing its words would pass however the page behaved.
+    // Asserted against the *requests* rather than against the card's text:
+    // nothing here establishes a summary before the tick, so comparing its words
+    // would pass however the page behaved. The *generated end to end* block
+    // establishes one and asserts the words as well.
     const summaryRequests: string[] = [];
     page.on('request', request => {
       if (request.url().includes('daily-summary')) {
@@ -2203,5 +2225,460 @@ test.describe('Home Dashboard — mobile layout (W3)', () => {
       clientWidth: node.clientWidth,
     }));
     expect(clipped.scrollWidth).toBeLessThanOrEqual(clipped.clientWidth);
+  });
+});
+
+/**
+ * Home Dashboard — the summary, generated end to end (ITER18-005 Phase 8)
+ *
+ * The card's three states from real data rather than served payloads. The e2e
+ * stack's model is a stub: `ENABLE_TEST_DAILY_SUMMARY_STUB` makes
+ * `DailySummaryService` answer with one fixed sentence instead of calling
+ * Gemini, so a *generated* summary is reachable from a fixture.
+ *
+ * **Today's summary is one row shared by the whole run** — one e2e user, one
+ * worker, one row per day — so no test inherits a state; each establishes the
+ * one it asserts. Two consequences shape the helpers below:
+ *
+ * - A generation can be *refused*. Seeding a journal or a task invalidates the
+ *   day asynchronously (outbox → relay → consumer), and an invalidation landing
+ *   while a generation is running makes the persist guard keep the row pending
+ *   (ITER18-005 Phase 7c). So a regeneration is pressed until its own response
+ *   says `generated`, which is idempotent and level-triggered.
+ * - The server's state is read from `GET /api/home-dashboard`, which never
+ *   writes. The daily-summary read would *regenerate* what it was asked about.
+ */
+
+/** The sentence the stub model writes (`DAILY_SUMMARY_STUB_TEXT`). */
+const STUB_SUMMARY_TEXT =
+  'A stubbed daily summary: the end-to-end stack answers without an AI model.';
+
+/** One W10 value, found by its label rather than by its position. */
+function summaryStat(page: Page, label: string) {
+  return page
+    .getByTestId('dashboard-summary-stats')
+    .locator('div')
+    .filter({ has: page.locator('dt', { hasText: new RegExp(`^${label}$`) }) })
+    .locator('dd');
+}
+
+/**
+ * Press Regenerate until a regeneration comes back generated for
+ * `journalCount` journals, and the card shows it.
+ *
+ * The response is what is asserted first, because the card can already be
+ * showing an earlier generated summary: only the regeneration's own answer
+ * says this press produced what the card then draws.
+ */
+async function regenerateUntilGenerated(page: Page, journalCount: number) {
+  const button = page.getByRole('button', { name: /regenerate/i });
+  await expect(async () => {
+    await expect(button).toBeEnabled({ timeout: 5000 });
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        candidate =>
+          candidate.url().includes('/api/journals/daily-summary/') &&
+          candidate.url().endsWith('/regenerate') &&
+          candidate.request().method() === 'POST',
+        { timeout: 15000 }
+      ),
+      button.click({ timeout: 5000 }),
+    ]);
+    const body = (await response.json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    expect(body.data?.attributes.journal_count).toBe(journalCount);
+
+    await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
+      STUB_SUMMARY_TEXT,
+      { timeout: 5000 }
+    );
+    await expect(summaryStat(page, 'Journals')).toHaveText(
+      String(journalCount),
+      { timeout: 5000 }
+    );
+  }).toPass({ timeout: 90000 });
+}
+
+/**
+ * Today holding exactly one journal — a task's creating journal — with that task
+ * due `dueInDays` out.
+ *
+ * Cleared first, because the day's journal count is part of what these tests
+ * assert and a full run holds journals dated today that specs creating them
+ * through the UI leave behind.
+ */
+async function seedOneJournalDay(
+  dataManager: TestDataManager,
+  day: string,
+  taskText: string
+) {
+  await dataManager.clearJournalsOn(day);
+  return createDashboardTask(dataManager, day, taskText);
+}
+
+/**
+ * The next page read of the dashboard, as its response.
+ *
+ * Armed before the action that causes the read. A query's refetch *is* a
+ * request on the wire, so waiting on it is safe here; what an always-mounted
+ * observer can silence is a *new* observer's fetch, which this never waits for.
+ */
+function dashboardRead(page: Page) {
+  return page.waitForResponse(
+    response =>
+      new URL(response.url()).pathname === '/api/home-dashboard' &&
+      response.request().method() === 'GET'
+  );
+}
+
+/**
+ * The next page read of today's summary — the card's read on load — as its
+ * response, or a rejection when a load reads none within `timeout`.
+ */
+function summaryRead(page: Page, timeout = 15000) {
+  return page.waitForResponse(
+    response =>
+      /^\/api\/journals\/daily-summary\/\d{4}-\d{2}-\d{2}$/.test(
+        new URL(response.url()).pathname
+      ) && response.request().method() === 'GET',
+    { timeout }
+  );
+}
+
+/**
+ * Regenerate today's summary through the API until a regeneration answers
+ * generated for `journalCount` journals.
+ *
+ * Setup, not the behaviour under test: seeding invalidates the day
+ * asynchronously, and a regeneration that an invalidation overtakes is refused
+ * (Phase 7c), so this is where that timing is absorbed — before the test starts
+ * observing the page.
+ */
+async function regenerateThroughApi(page: Page, journalCount: number) {
+  const day = await anchorDay(page);
+  await expect(async () => {
+    const response = await page.request.post(
+      `/api/journals/daily-summary/${day}/regenerate`
+    );
+    expect(response.ok()).toBe(true);
+    const body = (await response.json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    expect(body.data?.attributes.journal_count).toBe(journalCount);
+  }).toPass({ timeout: 90000 });
+}
+
+/**
+ * Make today's summary stale with one last task write, and wait until the
+ * read-only dashboard endpoint reports it.
+ *
+ * The task is due inside today's window, so its update invalidates today. It is
+ * the last thing the test publishes, so the load that follows starts from a
+ * known stale row rather than from whatever the seeding left in flight.
+ */
+async function staleTodayWithLastTaskWrite(
+  page: Page,
+  dataManager: TestDataManager,
+  task: TestTask
+) {
+  await dataManager.updateTaskText(task.id, `${task.text} (edited)`);
+  await expect
+    .poll(() => servedSummaryState(page), { timeout: 30000 })
+    .toBe(GENERATING);
+}
+
+/** Today's summary state as the read-only dashboard endpoint reports it. */
+async function servedSummaryState(page: Page) {
+  const response = await page.request.get('/api/home-dashboard');
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as HomeDashboardResponse;
+  return body.data.attributes.summary.data?.state;
+}
+
+/**
+ * What an AI-unconfigured backend says about the summary, over a real page.
+ *
+ * One stack cannot be configured and unconfigured at once, and this one has
+ * the stub on. So the three answers an unconfigured backend gives — an
+ * unavailable summary section, and `data: null` from both the summary read and
+ * the regeneration, which `test_daily_summary_stub_api.py` pins against the
+ * real endpoints — are served here, while the agenda, tasks and upcoming dates
+ * pass through from the real dashboard untouched.
+ */
+async function serveUnconfiguredSummary(page: Page) {
+  await page.route('**/api/home-dashboard', async route => {
+    const response = await route.fetch();
+    const body = (await response.json()) as HomeDashboardResponse;
+    body.data.attributes.summary = unavailableSection;
+    await route.fulfill({ response, json: body });
+  });
+  const unconfigured = { data: null } satisfies DailySummaryResponse;
+  await page.route('**/api/journals/daily-summary/**', route =>
+    route.fulfill({ json: unconfigured })
+  );
+}
+
+test.describe('Home Dashboard — the summary, generated end to end', () => {
+  test('shows a generated summary on a quiet day with a task due when the dashboard loads, not the unavailable line (W7, W10)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    // One journal today and the task due two days out: below the two journals
+    // any other day needs for a summary.
+    const { task } = await seedOneJournalDay(
+      dataManager,
+      day,
+      'Summary quiet day confirm the booking'
+    );
+
+    // Today holds a summary, then one last task write makes it stale: the load
+    // below starts from a known row with nothing seeded still in flight.
+    await regenerateThroughApi(page, 1);
+    await staleTodayWithLastTaskWrite(page, dataManager, task);
+
+    const summaryRequests: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/journals/daily-summary/')) {
+        summaryRequests.push(request.method());
+      }
+    });
+    await page.setViewportSize(DESKTOP);
+
+    // No Regenerate, and one load: the dashboard obtains today's summary itself,
+    // reading it on a load whose first read has none — and that read is what
+    // generates it, for this one journal.
+    const read = summaryRead(page);
+    await page.goto('/');
+    const body = (await (await read).json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    expect(body.data?.attributes.journal_count).toBe(1);
+
+    await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
+      STUB_SUMMARY_TEXT
+    );
+    await expect(summaryStat(page, 'Journals')).toHaveText('1');
+    await expect(page.getByTestId('dashboard-summary-unavailable')).toHaveCount(
+      0
+    );
+    expect(summaryRequests).toEqual(['GET']);
+  });
+
+  test('updates the card when a regeneration is requested (W6)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    await seedOneJournalDay(
+      dataManager,
+      day,
+      'Summary regenerate water the garden'
+    );
+
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+    await regenerateUntilGenerated(page, 1);
+    const urlBefore = page.url();
+
+    // A second journal today changes the summary's inputs. Waiting for the
+    // server to report today stale is what makes the invalidation it causes
+    // land *before* the regeneration rather than during it.
+    await dataManager.createJournal({
+      title: 'Summary regenerate second journal today',
+      content: 'Seeded to move the summary card key stats.',
+      event_date_range: {
+        start: atUtc(day, '14:00:00'),
+        end: atUtc(day, '15:00:00'),
+      },
+    });
+    await expect
+      .poll(() => servedSummaryState(page), { timeout: 30000 })
+      .toBe(GENERATING);
+
+    await regenerateUntilGenerated(page, 2);
+    expect(page.url()).toBe(urlBefore);
+  });
+
+  test('with AI unconfigured, says so in one quiet line while the agenda, tasks and dates still work (W9)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    const [calendar] = await dataManager.createCalendars([
+      { name: 'Summary Unconfigured Cal', color: '#0EA5E9' },
+    ]);
+    const standup = await createAgendaEvent(dataManager, day, {
+      title: 'Summary unconfigured standup',
+      startTime: '09:00:00',
+      endTime: '09:30:00',
+      calendarId: calendar.id,
+    });
+    const { task } = await createDashboardTask(
+      dataManager,
+      day,
+      'Summary unconfigured post the parcel'
+    );
+    const [friend] = await dataManager.createContacts([
+      {
+        firstName: 'Summary',
+        lastName: 'Unconfigured',
+        importantDates: [
+          {
+            date_type: BIRTHDAY,
+            precision: 'day_month',
+            ...monthAndDay(daysAfter(day, 3)),
+          },
+        ],
+      },
+    ]);
+
+    await serveUnconfiguredSummary(page);
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+
+    await expect(page.getByTestId('dashboard-summary-unavailable')).toHaveText(
+      'No summary today — everything below still works.'
+    );
+    await expect(
+      page.getByRole('button', { name: /regenerate/i })
+    ).toBeEnabled();
+    await expect(page.getByTestId('dashboard-summary-stats')).toHaveCount(0);
+
+    // The three evidence sections, each drawing what was seeded for it.
+    await expect(agendaRow(page, standup)).toBeVisible();
+    await expect(upcomingRowFor(page, friend)).toBeVisible();
+    const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
+    await expect(row).toBeVisible();
+
+    // And working, not merely drawn: the one action the page offers still acts,
+    // and the dashboard it reads back afterwards still says there is no summary.
+    const write = writeFor(page, task);
+    const readBack = page.waitForResponse(
+      response =>
+        new URL(response.url()).pathname === '/api/home-dashboard' &&
+        response.request().method() === 'GET'
+    );
+    await row.getByRole('button', { name: 'Mark done' }).click();
+    await expect(row).toHaveCount(0);
+    await write;
+    await readBack;
+    await expect(
+      page.getByTestId('dashboard-summary-unavailable')
+    ).toBeVisible();
+
+    // The pass-through route awaits a real response; one still in flight when
+    // the context closes must not fail the test after its assertions passed.
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  test('leaves the summary in place while tasks are ticked off, and refreshes it on the next load', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    // The day's journal count is part of what is asserted, and a full run holds
+    // journals dated today that specs creating them through the UI leave behind.
+    await dataManager.clearJournalsOn(day);
+
+    // Two tasks, so two creating journals today.
+    const first = await createDashboardTask(
+      dataManager,
+      day,
+      'Summary in place send the invoice'
+    );
+    const second = await createDashboardTask(
+      dataManager,
+      day,
+      'Summary in place book the plumber',
+      3
+    );
+
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+    await regenerateUntilGenerated(page, 2);
+
+    const summaryRequests: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/journals/daily-summary/')) {
+        summaryRequests.push(
+          `${request.method()} ${new URL(request.url()).pathname}`
+        );
+      }
+    });
+
+    // The first tick, and the dashboard read it causes.
+    const firstRow = tasksList(page).getByTestId(
+      `dashboard-task-${first.task.id}`
+    );
+    const firstWrite = writeFor(page, first.task);
+    const firstRead = dashboardRead(page);
+    await firstRow.getByRole('button', { name: 'Mark done' }).click();
+    await expect(firstRow).toHaveCount(0);
+    await firstWrite;
+    await firstRead;
+
+    // The tick has reached the server's summary: today is stale there now, and
+    // stays so, because nothing on the dashboard regenerates it.
+    await expect
+      .poll(() => servedSummaryState(page), { timeout: 30000 })
+      .toBe(GENERATING);
+
+    // The second tick's read is the one observed — armed after the first read
+    // landed, so it cannot be that one — and it tells the page today is stale.
+    const secondRow = tasksList(page).getByTestId(
+      `dashboard-task-${second.task.id}`
+    );
+    const secondWrite = writeFor(page, second.task);
+    const secondRead = dashboardRead(page);
+    await secondRow.getByRole('button', { name: 'Mark done' }).click();
+    await expect(secondRow).toHaveCount(0);
+    await secondWrite;
+    const stale = (await (await secondRead).json()) as HomeDashboardResponse;
+    expect(stale.data.attributes.summary.data?.state).toBe(GENERATING);
+    // React commits the query's new data a frame or two after its response.
+    await page.evaluate(
+      () =>
+        new Promise<void>(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
+    );
+
+    await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
+      STUB_SUMMARY_TEXT
+    );
+    await expect(summaryStat(page, 'Journals')).toHaveText('2');
+    await expect(summaryCard(page).getByText('Generating...')).toHaveCount(0);
+    expect(summaryRequests).toEqual([]);
+
+    // The next load refreshes it. Today is regenerated through the API and then
+    // made stale by one last task write, so the reload starts from a known stale
+    // row with no tick's invalidation still in flight.
+    await regenerateThroughApi(page, 2);
+    await staleTodayWithLastTaskWrite(page, dataManager, first.task);
+
+    // One reload: the card reads today's summary — which regenerates it — and
+    // never forces one.
+    summaryRequests.length = 0;
+    const read = summaryRead(page);
+    await page.reload();
+    const body = (await (await read).json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
+      STUB_SUMMARY_TEXT
+    );
+    expect(summaryRequests.map(request => request.split(' ')[0])).toEqual([
+      'GET',
+    ]);
   });
 });

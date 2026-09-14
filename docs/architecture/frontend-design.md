@@ -1067,12 +1067,23 @@ elements are numbered **W1**–**W33**.
   left edge. It is a `<section aria-labelledby>` named by a **visible** `h2`
   ("AI Daily Summary"), so the outline runs `h1` → the card's `h2` → the
   sections' `sr-only` `h2`s → the card headings.
-  - It reads the summary from the **dashboard payload**, not from
-    `useDailySummary`. The journals view's hook goes through
-    `DailySummaryService.get_or_generate`, which writes and can hold an AI call
-    open for seconds; the dashboard is a read-only projection, so it takes the
-    same row through the section envelope instead. "The same entity the
-    journals view shows" is satisfied by the entity, not by the code path.
+  - It reads the summary from the **dashboard payload**, which is a plain read
+    of the same row the journals view shows. **It obtains one the payload does
+    not have** (ITER18-005 Phase 8, `useObtainTodaySummaryOnLoad`): once per
+    mount and anchor day, when the first settled read of today has no prose, it
+    reads `GET /api/journals/daily-summary/{date}` — the read that regenerates a
+    missing, invalidated or stale summary — and reads the dashboard back when
+    that answer carries a row. It reads and never forces; its read-back waits
+    for any *task* write in flight, and settles however the read-back ends.
+    A read counts as settled only once this mount has made it, succeeded and
+    finished (`isSettledDashboardRead`); the page refetches on mount so every
+    visit makes one.
+    While it obtains, the card shows **W8** and Regenerate is busy.
+  - **A generated summary the card has drawn is held for the visit**: prose,
+    key stats and no badge stay when a later read of the same anchor day
+    withholds them — a task tick invalidates today, so the tick's own refetch
+    reports it generating — until a newer generated read arrives or the anchor
+    day moves on. The next load brings the refreshed one.
   - **Three declared states**: generated (**W7**), generating (a `secondary`
     "Generating..." badge beside the label and one muted line — **W8**), and
     unavailable (one quiet line — **W9**), which a failed dashboard request
@@ -1098,15 +1109,14 @@ elements are numbered **W1**–**W33**.
     day that simply has no summary yet, which is the ordinary case; the card
     names no cause it cannot know and keeps the reassurance verbatim
     (wireframe gap 13).
-  - **Regenerate (W6) sits outside all three state branches** and stays enabled
-    in every one of them, including *generating* — nothing currently moves a
-    journal daily summary out of `pending`, so that control is the only way out
-    of the state. The card never fires it automatically: the page every sign-in
-    lands on must not start a multi-second AI write on load, and the
-    specification allows exactly two mutations here, the inline task action and
-    a user-requested regeneration. It is disabled only while the mutation is in
-    flight — where it carries `aria-busy` — and while there is no anchor day to
-    post to. That second case is the page's first load **and** a dashboard
+  - **Regenerate (W6) sits outside all three state branches** and is usable in
+    every one of them whenever a summary is not already on its way, including
+    *generating* — the card's read on load cannot move a summary out of
+    `pending` when the AI is unconfigured or failing. The card never *posts* it
+    automatically; its read on load is the only request it makes for itself. It
+    is disabled while its own regeneration or that read is in flight — where it
+    carries `aria-busy`, and its spinner respects `prefers-reduced-motion` — and
+    while there is no anchor day to post to. That second case is the page's first load **and** a dashboard
     request that failed, where **W9** is drawn beside a control that cannot be
     used: the day to regenerate is the server's today in the user's configured
     zone, and posting the browser's would regenerate the wrong day for anyone

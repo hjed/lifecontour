@@ -13,6 +13,7 @@ import { ThemeProvider } from 'next-themes';
 import { useState } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
+import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
 
 interface ProvidersProps {
   children: React.ReactNode;
@@ -21,32 +22,7 @@ interface ProvidersProps {
 export function Providers({ children }: ProvidersProps) {
   // Create QueryClient with optimized settings for AI assistant understanding
   const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            // Stale time: 5 minutes for most data
-            staleTime: 5 * 60 * 1000,
-            // Cache time: 10 minutes
-            gcTime: 10 * 60 * 1000,
-            // Retry failed requests 3 times
-            retry: 3,
-            // Retry delay with exponential backoff
-            retryDelay: attemptIndex =>
-              Math.min(1000 * 2 ** attemptIndex, 30000),
-            // Refetch on window focus for fresh data
-            refetchOnWindowFocus: true,
-            // Don't refetch on reconnect to avoid excessive requests
-            refetchOnReconnect: false,
-          },
-          mutations: {
-            // Retry mutations once on failure
-            retry: 1,
-            // Retry delay for mutations
-            retryDelay: 1000,
-          },
-        },
-      })
+    () => new QueryClient({ defaultOptions: QUERY_CLIENT_DEFAULT_OPTIONS })
   );
 
   return (

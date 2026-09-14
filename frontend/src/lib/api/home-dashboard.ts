@@ -366,11 +366,37 @@ async function fetchHomeDashboard(): Promise<HomeDashboardResponse> {
  * one caller, so a section is free to mount, unmount and render on its own —
  * and they still cost one request between them.
  */
-export function useHomeDashboard() {
+export function useHomeDashboard(
+  options: { readonly refetchOnMount?: 'always' } = {}
+) {
   return useQuery({
     queryKey: homeDashboardKeys.all,
     queryFn: fetchHomeDashboard,
+    ...(options.refetchOnMount
+      ? { refetchOnMount: options.refetchOnMount }
+      : {}),
   });
+}
+
+/**
+ * Whether this visit has a settled read of the dashboard: one this mount made,
+ * that succeeded, with nothing in flight.
+ *
+ * The one answer the summary card's read on load and its hold share (Augment
+ * review on PR #1470). Data alone says nothing about *this* visit: on
+ * client-side navigation back, the previous visit's cached payload renders while
+ * the mount refetch runs, React Query keeps that payload when the refetch
+ * fails, and inside the stale time it renders a fresh cached payload with no
+ * request at all — so a read counts only once this mount has made it. The page
+ * refetches on mount (`useHomeDashboard({ refetchOnMount: 'always' })`), which
+ * is what gives every visit that read.
+ */
+export function isSettledDashboardRead(read: {
+  readonly isSuccess: boolean;
+  readonly isFetching: boolean;
+  readonly isFetchedAfterMount: boolean;
+}): boolean {
+  return read.isSuccess && !read.isFetching && read.isFetchedAfterMount;
 }
 
 /**

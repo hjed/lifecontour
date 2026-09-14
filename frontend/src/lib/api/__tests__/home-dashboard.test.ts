@@ -2,9 +2,24 @@
  * @jest-environment jsdom
  */
 
+import {
+  QueryClient,
+  QueryClientProvider,
+  focusManager,
+  useMutation,
+} from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement } from 'react';
 import { createQueryTestHarness } from '@/test-utils';
-import { useAnchorDayRefresh, useHomeDashboard } from '../home-dashboard';
+import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
+import {
+  homeDashboardKeys,
+  isSettledDashboardRead,
+  useAnchorDayRefresh,
+  useHomeDashboard,
+} from '../home-dashboard';
+import { TASK_WRITE_KEY } from '../tasks';
+import { useObtainTodaySummaryOnLoad } from '../today-summary-on-load';
 import type { HomeDashboardResponse } from '../home-dashboard';
 import {
   DashboardSectionStatus,
@@ -406,5 +421,572 @@ describe('useAnchorDayRefresh', () => {
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The card's one automatic request (ITER18-005 Phase 8): once per mount and anchor day,
+ * when the first settled read of today has no prose, read today's summary —
+ * which is what generates a missing, invalidated or stale one — and read the
+ * dashboard back.
+ *
+ * Run against a client built from the **production** defaults. The shared test
+ * harness turns retries off, and so would hide the two ways this hook could
+ * regenerate underneath a reader: a retried read, and a query refetched on
+ * focus.
+ */
+/**
+ * One answer to "has this visit read the dashboard?", shared by the card's
+ * read on load and its hold (Augment review on PR #1470). A read with a fetch in
+ * flight is not settled, and neither is one whose refetch failed: React Query
+ * keeps the cached payload on an error, so data alone says nothing about this
+ * visit.
+ */
+describe('isSettledDashboardRead', () => {
+  it('is settled once a read has succeeded with nothing in flight', () => {
+    expect(
+      isSettledDashboardRead({
+        isSuccess: true,
+        isFetching: false,
+        isFetchedAfterMount: true,
+      })
+    ).toBe(true);
+  });
+
+  it('is not settled while a read is in flight', () => {
+    expect(
+      isSettledDashboardRead({
+        isSuccess: true,
+        isFetching: true,
+        isFetchedAfterMount: true,
+      })
+    ).toBe(false);
+  });
+
+  it('is not settled on a cached read this mount did not make, however fresh', () => {
+    expect(
+      isSettledDashboardRead({
+        isSuccess: true,
+        isFetching: false,
+        isFetchedAfterMount: false,
+      })
+    ).toBe(false);
+  });
+
+  it('is not settled when the latest read failed, whatever data is cached', () => {
+    expect(
+      isSettledDashboardRead({
+        isSuccess: false,
+        isFetching: false,
+        isFetchedAfterMount: true,
+      })
+    ).toBe(false);
+  });
+});
+
+describe('useObtainTodaySummaryOnLoad', () => {
+  const ANCHOR = '2026-07-29';
+  const SUMMARY_URL = `/api/journals/daily-summary/${ANCHOR}`;
+  // 13:00 in Sydney on the anchor day, so the anchor is live.
+  const ON_THE_ANCHOR_DAY = new Date(`${ANCHOR}T03:00:00Z`);
+
+  const GENERATING_SECTION = {
+    status: DashboardSectionStatus.READY,
+    data: {
+      state: DashboardSummaryState.GENERATING,
+      summary_text: null,
+      journal_count: 3,
+      event_count: 2,
+      contact_count: 4,
+      mood_average: 7.5,
+    },
+  } as const;
+  const UNAVAILABLE_SECTION = {
+    status: DashboardSectionStatus.UNAVAILABLE,
+    data: null,
+  } as const;
+
+  /** What `GET /api/journals/daily-summary/{date}` answers when it has a row. */
+  const SUMMARY_ROW = {
+    data: {
+      type: 'journal-daily-summaries',
+      id: `user-1:${ANCHOR}`,
+      attributes: {
+        summary_date: ANCHOR,
+        summary_text: 'Obtained on load.',
+        journal_count: 1,
+        event_count: 0,
+        contact_count: 0,
+        mood_average: null,
+        status: 'generated',
+      },
+    },
+  };
+
+  function summaryRowResponse(): Response {
+    return { ok: true, json: async () => SUMMARY_ROW } as Response;
+  }
+
+  let served: HomeDashboardResponse;
+  let summaryResponse: () => Promise<Response>;
+
+  function withSummary(
+    summary: HomeDashboardResponse['data']['attributes']['summary']
+  ): HomeDashboardResponse {
+    const document = makeDashboardResponse();
+    document.data.attributes.summary = summary;
+    return document;
+  }
+
+  function callsTo(url: string): number {
+    return mockFetch.mock.calls.filter(([input]) => String(input) === url)
+      .length;
+  }
+
+  function productionHarness() {
+    const queryClient = new QueryClient({
+      defaultOptions: QUERY_CLIENT_DEFAULT_OPTIONS,
+    });
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    return { queryClient, wrapper };
+  }
+
+  function renderOnLoad(harness = productionHarness()) {
+    const view = renderHook(
+      () => ({
+        dashboard: useHomeDashboard(),
+        obtain: useObtainTodaySummaryOnLoad(),
+      }),
+      { wrapper: harness.wrapper }
+    );
+    return { ...view, queryClient: harness.queryClient };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(ON_THE_ANCHOR_DAY);
+    mockFetch.mockReset();
+    served = makeDashboardResponse();
+    summaryResponse = () => Promise.resolve(summaryRowResponse());
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === DASHBOARD_URL) {
+        const document = served;
+        return Promise.resolve({
+          ok: true,
+          json: async () => document,
+        } as Response);
+      }
+      if (url === SUMMARY_URL) {
+        return summaryResponse();
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('reads today’s summary once when the first read is generating, then reads the dashboard back', async () => {
+    served = withSummary(GENERATING_SECTION);
+
+    renderOnLoad();
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));
+    expect(mockFetch).toHaveBeenCalledWith(SUMMARY_URL, {
+      credentials: 'include',
+    });
+  });
+
+  it('reads it once when the first read has no summary at all', async () => {
+    served = withSummary(UNAVAILABLE_SECTION);
+
+    renderOnLoad();
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+  });
+
+  it('reads nothing when the first read already has prose', async () => {
+    const { result } = renderOnLoad();
+
+    await waitFor(() => expect(result.current.dashboard.isSuccess).toBe(true));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(callsTo(SUMMARY_URL)).toBe(0);
+    expect(result.current.obtain.isObtaining).toBe(false);
+  });
+
+  it('reads nothing for an anchor day that has already ended', async () => {
+    served = withSummary(GENERATING_SECTION);
+    served.meta.anchor.date = '2026-07-28';
+
+    const { result } = renderOnLoad();
+
+    await waitFor(() => expect(result.current.dashboard.isSuccess).toBe(true));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(callsTo(SUMMARY_URL)).toBe(0);
+    expect(result.current.obtain.isObtaining).toBe(false);
+  });
+
+  it('does not read again when a later read of the same day reports it generating', async () => {
+    const { result, queryClient } = renderOnLoad();
+    await waitFor(() => expect(result.current.dashboard.isSuccess).toBe(true));
+
+    // What a task tick's refetch looks like once the tick has invalidated today.
+    served = withSummary(GENERATING_SECTION);
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: homeDashboardKeys.all });
+    });
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(callsTo(SUMMARY_URL)).toBe(0);
+  });
+
+  it('does not refetch the summary when the window regains focus', async () => {
+    served = withSummary(GENERATING_SECTION);
+    renderOnLoad();
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(callsTo(SUMMARY_URL)).toBe(1);
+  });
+
+  it('decides on a read fetched after mount, not on a stale cached one', async () => {
+    const harness = productionHarness();
+    harness.queryClient.setQueryData(
+      homeDashboardKeys.all,
+      makeDashboardResponse(),
+      { updatedAt: Date.now() - 10 * 60 * 1000 }
+    );
+    served = withSummary(GENERATING_SECTION);
+
+    renderOnLoad(harness);
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+  });
+
+  it('reads nothing from a stale cached read whose refetch fails', async () => {
+    const harness = productionHarness();
+    harness.queryClient.setQueryData(
+      homeDashboardKeys.all,
+      withSummary(GENERATING_SECTION),
+      { updatedAt: Date.now() - 10 * 60 * 1000 }
+    );
+    // Every read of the dashboard fails, retries included, so the only data this
+    // visit holds is the previous visit's.
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === DASHBOARD_URL) {
+        return Promise.resolve({
+          ok: false,
+          json: async () => ({ errors: [{ detail: 'Dashboard unavailable' }] }),
+        } as Response);
+      }
+      if (url === SUMMARY_URL) {
+        return summaryResponse();
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const { result } = renderOnLoad(harness);
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBeGreaterThan(0));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60 * 1000);
+    });
+
+    expect(result.current.dashboard.isError).toBe(true);
+    expect(callsTo(SUMMARY_URL)).toBe(0);
+    expect(result.current.obtain.isObtaining).toBe(false);
+  });
+
+  it('reads again on a remount that comes back before the last read is evicted', async () => {
+    served = withSummary(GENERATING_SECTION);
+    const harness = productionHarness();
+
+    const first = renderOnLoad(harness);
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+    await waitFor(() =>
+      expect(first.result.current.obtain.isObtaining).toBe(false)
+    );
+    first.unmount();
+
+    // Straight back, with the fake clock not advanced: the previous read's
+    // eviction timer has not run, so a key shared across mounts would answer
+    // from it and this load would read nothing. The dashboard is read again on
+    // the way in, as the page's refetch on mount does, because the decision
+    // waits for a read this mount made.
+    const second = renderOnLoad(harness);
+    await act(async () => {
+      await harness.queryClient.invalidateQueries({
+        queryKey: homeDashboardKeys.all,
+      });
+    });
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(2));
+    await waitFor(() =>
+      expect(second.result.current.obtain.isObtaining).toBe(false)
+    );
+  });
+
+  /**
+   * A remount within the stale time renders a fresh cached payload and fetches
+   * nothing, so this visit has read nothing (Augment review on PR #1470). The
+   * decision waits for a read this mount made — on the page, its refetch on
+   * mount.
+   */
+  it('decides only on a read this mount made, not on a fresh cached one', async () => {
+    const harness = productionHarness();
+    harness.queryClient.setQueryData(
+      homeDashboardKeys.all,
+      withSummary(GENERATING_SECTION)
+    );
+    served = withSummary(GENERATING_SECTION);
+
+    const { queryClient } = renderOnLoad(harness);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+    expect(callsTo(DASHBOARD_URL)).toBe(0);
+    expect(callsTo(SUMMARY_URL)).toBe(0);
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: homeDashboardKeys.all });
+    });
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+  });
+
+  it('is obtaining from the first render that holds the read', async () => {
+    served = withSummary(GENERATING_SECTION);
+    summaryResponse = () => new Promise<Response>(() => {});
+    const renders: { hasData: boolean; isObtaining: boolean }[] = [];
+
+    renderHook(
+      () => {
+        const dashboard = useHomeDashboard();
+        const { isObtaining } = useObtainTodaySummaryOnLoad();
+        renders.push({ hasData: dashboard.data !== undefined, isObtaining });
+      },
+      { wrapper: productionHarness().wrapper }
+    );
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+    const withData = renders.filter(render => render.hasData);
+    expect(withData.length).toBeGreaterThan(0);
+    expect(withData.every(render => render.isObtaining)).toBe(true);
+  });
+
+  it('settles once the dashboard has been read back after the summary', async () => {
+    served = withSummary(GENERATING_SECTION);
+
+    const { result } = renderOnLoad();
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));
+    await waitFor(() => expect(result.current.obtain.isObtaining).toBe(false));
+  });
+
+  it('neither retries nor throws when the summary read fails', async () => {
+    served = withSummary(GENERATING_SECTION);
+    summaryResponse = () =>
+      Promise.resolve({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'AI provider unavailable' }] }),
+      } as Response);
+
+    const { result } = renderOnLoad();
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60 * 1000);
+    });
+
+    expect(callsTo(SUMMARY_URL)).toBe(1);
+    expect(result.current.obtain.isObtaining).toBe(false);
+  });
+
+  it('settles without reading the dashboard back when there is no summary to read', async () => {
+    served = withSummary(UNAVAILABLE_SECTION);
+    // An unconfigured AI answers with no row: nothing changed, so a read-back
+    // would cost a request and draw the same page.
+    summaryResponse = () =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({ data: null }),
+      } as Response);
+
+    const { result } = renderOnLoad();
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+    await waitFor(() => expect(result.current.obtain.isObtaining).toBe(false));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(callsTo(DASHBOARD_URL)).toBe(1);
+  });
+
+  it('settles even when reading the dashboard back fails', async () => {
+    served = withSummary(GENERATING_SECTION);
+    let dashboardReads = 0;
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === DASHBOARD_URL) {
+        dashboardReads += 1;
+        const document = served;
+        // The first read succeeds; every read after it fails, retries included.
+        return Promise.resolve(
+          dashboardReads === 1
+            ? ({ ok: true, json: async () => document } as Response)
+            : ({
+                ok: false,
+                json: async () => ({
+                  errors: [{ detail: 'Dashboard unavailable' }],
+                }),
+              } as Response)
+        );
+      }
+      if (url === SUMMARY_URL) {
+        return summaryResponse();
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const { result } = renderOnLoad();
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBeGreaterThan(1));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60 * 1000);
+    });
+
+    await waitFor(() => expect(result.current.obtain.isObtaining).toBe(false));
+  });
+
+  it('holds the read-back while a task write is in flight, then reads back once it settles', async () => {
+    served = withSummary(GENERATING_SECTION);
+    let resolveSummary: (response: Response) => void = () => {};
+    summaryResponse = () =>
+      new Promise<Response>(resolve => {
+        resolveSummary = resolve;
+      });
+    let settleWrite: () => void = () => {};
+
+    const { result } = renderHook(
+      () => ({
+        obtain: useObtainTodaySummaryOnLoad(),
+        write: useMutation({
+          mutationKey: TASK_WRITE_KEY,
+          mutationFn: (_variables: { taskId: string }) =>
+            new Promise<void>(resolve => {
+              settleWrite = resolve;
+            }),
+        }),
+      }),
+      { wrapper: productionHarness().wrapper }
+    );
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+
+    // A tick in flight: a read-back landing before it settles would answer from
+    // a server that has not processed it, and put back the row it removed.
+    act(() => {
+      result.current.write.mutate({ taskId: '31' });
+    });
+    await act(async () => {
+      resolveSummary(summaryRowResponse());
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(callsTo(DASHBOARD_URL)).toBe(1);
+    expect(result.current.obtain.isObtaining).toBe(true);
+
+    await act(async () => {
+      settleWrite();
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));
+    await waitFor(() => expect(result.current.obtain.isObtaining).toBe(false));
+  });
+
+  it('does not hold the read-back for an unrelated mutation that takes a string id', async () => {
+    served = withSummary(GENERATING_SECTION);
+    let resolveSummary: (response: Response) => void = () => {};
+    summaryResponse = () =>
+      new Promise<Response>(resolve => {
+        resolveSummary = resolve;
+      });
+
+    // A journal, tag or series deletion takes a bare id, exactly as deleting a
+    // task does — and is not a task write.
+    const { result } = renderHook(
+      () => ({
+        obtain: useObtainTodaySummaryOnLoad(),
+        write: useMutation({
+          mutationFn: (_journalId: string) => new Promise<void>(() => {}),
+        }),
+      }),
+      { wrapper: productionHarness().wrapper }
+    );
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+
+    act(() => {
+      result.current.write.mutate('55');
+    });
+    await act(async () => {
+      resolveSummary(summaryRowResponse());
+    });
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));
+    await waitFor(() => expect(result.current.obtain.isObtaining).toBe(false));
+  });
+
+  it('does not hold the read-back for a write that is not a task’s', async () => {
+    served = withSummary(GENERATING_SECTION);
+    let resolveSummary: (response: Response) => void = () => {};
+    summaryResponse = () =>
+      new Promise<Response>(resolve => {
+        resolveSummary = resolve;
+      });
+
+    const { result } = renderHook(
+      () => ({
+        obtain: useObtainTodaySummaryOnLoad(),
+        write: useMutation({
+          mutationFn: (_variables: { contactId: string }) =>
+            new Promise<void>(() => {}),
+        }),
+      }),
+      { wrapper: productionHarness().wrapper }
+    );
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+
+    act(() => {
+      result.current.write.mutate({ contactId: 'contact-7' });
+    });
+    await act(async () => {
+      resolveSummary(summaryRowResponse());
+    });
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));
+    await waitFor(() => expect(result.current.obtain.isObtaining).toBe(false));
   });
 });

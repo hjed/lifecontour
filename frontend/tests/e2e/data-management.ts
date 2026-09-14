@@ -1431,17 +1431,69 @@ export class TestDataManager {
     }
   }
 
+  /**
+   * Delete every journal whose date range touches `day` (a UTC `YYYY-MM-DD`),
+   * together with any task anchored to it.
+   *
+   * For a test whose assertion *is* a day's journal count — today's AI summary
+   * counts them — on an account where specs that create journals through the UI
+   * leave today's behind: a full run holds several, and a test counting from an
+   * assumed zero fails for a reason that has nothing to do with it.
+   *
+   * **Destructive to the shared account** in exactly the way
+   * {@link clearFutureJournals} is, and safe for the same reason: `workers: 1`.
+   * Bounded by progress: a journal still listed after this call already deleted
+   * it means something is recreating it, and that is raised rather than looped.
+   */
+  async clearJournalsOn(day: string): Promise<void> {
+    console.debug(`🧹 [Data Manager] Clearing journals on ${day}...`);
+    const deleted = new Set<string>();
+
+    for (;;) {
+      const journals = await this.listJournalsOn(day);
+      if (journals.length === 0) {
+        return;
+      }
+      for (const journal of journals) {
+        const id = String(journal.id);
+        if (deleted.has(id)) {
+          throw new Error(
+            `Journal ${id} on ${day} survived its own deletion; something is recreating it`
+          );
+        }
+        await this.deleteJournalAndItsTasks(id);
+        deleted.add(id);
+      }
+    }
+  }
+
+  /** One page of the journals whose date range touches `day`. */
+  private listJournalsOn(day: string): Promise<Array<{ id: string | number }>> {
+    return this.listJournalsWhere(
+      `start_date=${day}&end_date=${day}`,
+      `on ${day}`
+    );
+  }
+
   /** One page of the journals whose date range has not ended before `from`. */
-  private async listJournalsFrom(
+  private listJournalsFrom(
     from: string
   ): Promise<Array<{ id: string | number }>> {
+    return this.listJournalsWhere(`start_date=${from}`, `from ${from}`);
+  }
+
+  /** One page of `/api/journals` under a date filter, raising when it fails. */
+  private async listJournalsWhere(
+    filter: string,
+    described: string
+  ): Promise<Array<{ id: string | number }>> {
     const response = await this.page.request.get(
-      `/api/journals?start_date=${from}&limit=100`,
+      `/api/journals?${filter}&limit=100`,
       { headers: { Accept: 'application/vnd.api+json' } }
     );
     if (!response.ok()) {
       throw new Error(
-        `Failed to list journals from ${from}: ${response.status()} ${await response.text()}`
+        `Failed to list journals ${described}: ${response.status()} ${await response.text()}`
       );
     }
     return (await response.json()).data ?? [];
@@ -1460,6 +1512,27 @@ export class TestDataManager {
    * task — its history, or where it appears — does not depend on the creation
    * dialog to arrange it.
    */
+  /**
+   * Change a task's text through the API.
+   *
+   * A task write the test can place last in the event stream: its invalidation
+   * of the day the task is due in follows every earlier one, so a test that
+   * waits to see it knows nothing seeded before it is still on its way.
+   */
+  async updateTaskText(taskId: string, text: string): Promise<void> {
+    const response = await this.page.request.patch(`/api/tasks/${taskId}`, {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: { type: 'tasks', id: taskId, attributes: { text } },
+      }),
+    });
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to update task ${taskId}: ${response.status()} ${await response.text()}`
+      );
+    }
+  }
+
   async createTask(taskData: TaskCreateRequest): Promise<TestTask> {
     console.debug(
       `📋 [Data Manager] Creating task "${taskData.text}" in journal ${taskData.creatingJournalId}`

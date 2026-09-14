@@ -45,7 +45,11 @@ import {
 } from '@/lib/api/home-dashboard';
 
 function HomeDashboard() {
-  const { data } = useHomeDashboard();
+  // Every visit reads the page — it is about now. Inside the stale time a
+  // remount would otherwise render the last visit's cached payload and read
+  // nothing, and the summary card waits for a read this visit made. The cards'
+  // own calls keep the defaults, so this is still one request.
+  const { data } = useHomeDashboard({ refetchOnMount: 'always' });
 
   // Once, here, rather than in each card: every card reads the same query key,
   // so four schedulers would be four timers invalidating one query. See
