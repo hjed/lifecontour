@@ -2279,6 +2279,23 @@ async function regenerateUntilGenerated(page: Page, journalCount: number) {
   }).toPass({ timeout: 90000 });
 }
 
+/**
+ * Today holding exactly one journal — a task's creating journal — with that task
+ * due `dueInDays` out.
+ *
+ * Cleared first, because the day's journal count is part of what these tests
+ * assert and a full run holds journals dated today that specs creating them
+ * through the UI leave behind.
+ */
+async function seedOneJournalDay(
+  dataManager: TestDataManager,
+  day: string,
+  taskText: string
+) {
+  await dataManager.clearJournalsOn(day);
+  return createDashboardTask(dataManager, day, taskText);
+}
+
 /** Today's summary state as the read-only dashboard endpoint reports it. */
 async function servedSummaryState(page: Page) {
   const response = await page.request.get('/api/home-dashboard');
@@ -2319,13 +2336,9 @@ test.describe('Home Dashboard — the summary, generated end to end', () => {
     testCleanup(() => dataManager.cleanup());
     const day = await anchorDay(page);
 
-    // The day's journal count is part of what is asserted, and a full run holds
-    // journals dated today that specs creating them through the UI leave behind.
-    await dataManager.clearJournalsOn(day);
-
-    // One journal today — the task's creating journal — and the task due two
-    // days out: below the two journals any other day needs for a summary.
-    await createDashboardTask(
+    // One journal today and the task due two days out: below the two journals
+    // any other day needs for a summary.
+    await seedOneJournalDay(
       dataManager,
       day,
       'Summary quiet day confirm the booking'
@@ -2349,11 +2362,7 @@ test.describe('Home Dashboard — the summary, generated end to end', () => {
     testCleanup(() => dataManager.cleanup());
     const day = await anchorDay(page);
 
-    // The day's journal count is part of what is asserted, and a full run holds
-    // journals dated today that specs creating them through the UI leave behind.
-    await dataManager.clearJournalsOn(day);
-
-    await createDashboardTask(
+    await seedOneJournalDay(
       dataManager,
       day,
       'Summary regenerate water the garden'
@@ -2437,13 +2446,24 @@ test.describe('Home Dashboard — the summary, generated end to end', () => {
     const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
     await expect(row).toBeVisible();
 
-    // And working, not merely drawn: the one action the page offers still acts.
+    // And working, not merely drawn: the one action the page offers still acts,
+    // and the dashboard it reads back afterwards still says there is no summary.
     const write = writeFor(page, task);
+    const readBack = page.waitForResponse(
+      response =>
+        new URL(response.url()).pathname === '/api/home-dashboard' &&
+        response.request().method() === 'GET'
+    );
     await row.getByRole('button', { name: 'Mark done' }).click();
     await expect(row).toHaveCount(0);
     await write;
+    await readBack;
     await expect(
       page.getByTestId('dashboard-summary-unavailable')
     ).toBeVisible();
+
+    // The pass-through route awaits a real response; one still in flight when
+    // the context closes must not fail the test after its assertions passed.
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 });

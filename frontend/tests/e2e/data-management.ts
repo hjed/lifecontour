@@ -1468,32 +1468,32 @@ export class TestDataManager {
   }
 
   /** One page of the journals whose date range touches `day`. */
-  private async listJournalsOn(
-    day: string
-  ): Promise<Array<{ id: string | number }>> {
-    const response = await this.page.request.get(
-      `/api/journals?start_date=${day}&end_date=${day}&limit=100`,
-      { headers: { Accept: 'application/vnd.api+json' } }
+  private listJournalsOn(day: string): Promise<Array<{ id: string | number }>> {
+    return this.listJournalsWhere(
+      `start_date=${day}&end_date=${day}`,
+      `on ${day}`
     );
-    if (!response.ok()) {
-      throw new Error(
-        `Failed to list journals on ${day}: ${response.status()} ${await response.text()}`
-      );
-    }
-    return (await response.json()).data ?? [];
   }
 
   /** One page of the journals whose date range has not ended before `from`. */
-  private async listJournalsFrom(
+  private listJournalsFrom(
     from: string
   ): Promise<Array<{ id: string | number }>> {
+    return this.listJournalsWhere(`start_date=${from}`, `from ${from}`);
+  }
+
+  /** One page of `/api/journals` under a date filter, raising when it fails. */
+  private async listJournalsWhere(
+    filter: string,
+    described: string
+  ): Promise<Array<{ id: string | number }>> {
     const response = await this.page.request.get(
-      `/api/journals?start_date=${from}&limit=100`,
+      `/api/journals?${filter}&limit=100`,
       { headers: { Accept: 'application/vnd.api+json' } }
     );
     if (!response.ok()) {
       throw new Error(
-        `Failed to list journals from ${from}: ${response.status()} ${await response.text()}`
+        `Failed to list journals ${described}: ${response.status()} ${await response.text()}`
       );
     }
     return (await response.json()).data ?? [];

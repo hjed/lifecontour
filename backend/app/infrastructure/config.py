@@ -8,9 +8,10 @@ application settings including database, security, and external services.
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Default on-disk cache location for outdoor-logbook basemap tiles. Resolved
@@ -158,8 +159,10 @@ class Settings(BaseSettings):
         description="Answer daily summary generation with a fixed stub response "
         "instead of calling Gemini, so the E2E stack can produce a generated "
         "summary without a model. Daily summaries only — contact summaries and "
-        "similarity assessment still need GEMINI_API_KEY. Disabled by default — "
-        "set ENABLE_TEST_DAILY_SUMMARY_STUB=true only in test/CI environments.",
+        "similarity assessment still need GEMINI_API_KEY. Refused beside a "
+        "configured GEMINI_API_KEY, which it would otherwise silently replace. "
+        "Disabled by default — set ENABLE_TEST_DAILY_SUMMARY_STUB=true only in "
+        "test/CI environments; the backend logs a warning at startup when it is on.",
     )
 
     # Outdoor-logbook PDF basemap-tile settings (ITER16-004)
@@ -342,6 +345,40 @@ class Settings(BaseSettings):
         default="",
         description="Public HTTPS base URL for receiving webhook callbacks (e.g. https://example.com)",
     )
+
+    @model_validator(mode="after")
+    def refuse_the_summary_stub_beside_a_real_model(self) -> Self:
+        """Refuse the daily-summary test stub on a backend configured for Gemini.
+
+        ``enable_test_daily_summary_stub`` answers every daily summary with a
+        fixed sentence and takes precedence over ``gemini_api_key``. Settings
+        carry no notion of the environment they run in, so "outside test/CI"
+        cannot be checked directly; but a configured Gemini key is the one
+        signal that a backend is meant to call a real model — the e2e stack has
+        none — so the two together can only be a misconfiguration, and it is
+        refused at startup rather than served to a user as their summary.
+        """
+        if self.enable_test_daily_summary_stub and self.gemini_api_key:
+            raise ValueError(
+                "ENABLE_TEST_DAILY_SUMMARY_STUB cannot be combined with "
+                "GEMINI_API_KEY: the stub would replace every real daily summary. "
+                "Unset it outside test/CI."
+            )
+        return self
+
+    @property
+    def enabled_test_only_switches(self) -> list[str]:
+        """The test-only switches that are on, by their environment names.
+
+        Each exists for the e2e stack and changes what real users would see —
+        a create endpoint for review items, a stubbed AI summary — so startup
+        logs them loudly rather than leaving a stray one to be discovered.
+        """
+        switches = (
+            ("ENABLE_TEST_REVIEW_ITEMS", self.enable_test_review_items),
+            ("ENABLE_TEST_DAILY_SUMMARY_STUB", self.enable_test_daily_summary_stub),
+        )
+        return [name for name, enabled in switches if enabled]
 
     @field_validator("log_level")
     @classmethod

@@ -13557,6 +13557,12 @@ ITER18-004 Phase 17 found the generated state unreachable from a fixture.
   response override when the flag is on, and `get_or_generate`'s unconfigured guard now reads *no key **and**
   no override* — an override without a key used to return `None` before it was ever consulted, which is the
   second reason the seam was unreachable.
+- **The flag cannot sit beside a real model** (review on PR #1461). `Settings` refuses
+  `ENABLE_TEST_DAILY_SUMMARY_STUB` together with a configured `GEMINI_API_KEY`: settings carry no notion of
+  the environment they run in, so "outside test/CI" has nothing to check against, but a real key is the one
+  signal that a backend is meant to call a model and the e2e stack has none. Startup also logs every
+  test-only switch that is on (`Settings.enabled_test_only_switches`), which covers the older
+  `ENABLE_TEST_REVIEW_ITEMS` too.
 - **Tests.** Unit: an override generates with no key (the existing no-key-no-override guard is kept).
   Integration, over the real container: flag on → `POST …/regenerate` returns the stub and the dashboard
   reads it `generated`; flag off → both summary endpoints answer `data: null` and the section is
