@@ -1512,6 +1512,27 @@ export class TestDataManager {
    * task — its history, or where it appears — does not depend on the creation
    * dialog to arrange it.
    */
+  /**
+   * Change a task's text through the API.
+   *
+   * A task write the test can place last in the event stream: its invalidation
+   * of the day the task is due in follows every earlier one, so a test that
+   * waits to see it knows nothing seeded before it is still on its way.
+   */
+  async updateTaskText(taskId: string, text: string): Promise<void> {
+    const response = await this.page.request.patch(`/api/tasks/${taskId}`, {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: { type: 'tasks', id: taskId, attributes: { text } },
+      }),
+    });
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to update task ${taskId}: ${response.status()} ${await response.text()}`
+      );
+    }
+  }
+
   async createTask(taskData: TaskCreateRequest): Promise<TestTask> {
     console.debug(
       `📋 [Data Manager] Creating task "${taskData.text}" in journal ${taskData.creatingJournalId}`

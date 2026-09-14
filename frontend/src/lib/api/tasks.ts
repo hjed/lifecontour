@@ -1016,6 +1016,21 @@ function isLastTaskWrite(queryClient: QueryClient): boolean {
  */
 const NO_RETRY = { retry: false } as const;
 
+/**
+ * The mutation key every task write carries, and the only thing that makes a
+ * mutation a task write.
+ *
+ * A task write used to be recognised by the shape of its input — any bare
+ * string counted as a task id — and a journal, tag or series deletion and a
+ * daily-summary regeneration all pass a bare string too, so an unrelated write
+ * could lock a task's actions and hold the dashboard's refreshes back (Augment
+ * review on PR #1470). Keyed, the identity is the hook that started the write.
+ */
+export const TASK_WRITE_KEY = ['task-write'] as const;
+
+/** Options every task write shares: no retry, and the task-write key. */
+const TASK_WRITE = { ...NO_RETRY, mutationKey: TASK_WRITE_KEY } as const;
+
 // What is being written to a task right now
 //
 // Read from the mutation cache rather than from a hook instance, because a
@@ -1034,7 +1049,7 @@ const NO_RETRY = { retry: false } as const;
  * read could undo — and for no other mutation.
  */
 export function isTaskWrite(mutation: Mutation): boolean {
-  return mutatingTaskId(mutation.state.variables) !== undefined;
+  return mutation.options.mutationKey?.[0] === TASK_WRITE_KEY[0];
 }
 
 /** The task a pending mutation is acting on, whatever shape its input takes. */
@@ -1072,6 +1087,7 @@ export function useTaskWriteInFlight(taskId: string): boolean {
     filters: {
       status: 'pending',
       predicate: mutation =>
+        isTaskWrite(mutation) &&
         mutatingTaskId(mutation.state.variables) === taskId,
     },
     select: mutation => mutation.state.variables,
@@ -1158,7 +1174,7 @@ export function useCreateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: createTask,
     onSuccess: () => {
       void refreshTaskCollections(queryClient);
@@ -1186,7 +1202,7 @@ export function useUpdateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: updateTask,
     onMutate: async ({ taskId, status, text }) => {
       // Every namespace under `all`: the same attributes are embedded in the
@@ -1258,7 +1274,7 @@ export function useRetargetTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: retargetTask,
     onSuccess: (_, { taskId }) => {
       // A retarget moves the count on **two** journals — one down, one up — and
@@ -1288,7 +1304,7 @@ export function useDeleteTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: deleteTask,
     onSuccess: (_, taskId) => {
       forgetTask(queryClient, taskId);
@@ -1304,7 +1320,7 @@ export function useLinkTaskContact() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: linkTaskContact,
     onSuccess: (_, { taskId }) => {
       void refreshTask(queryClient, taskId);
@@ -1319,7 +1335,7 @@ export function useUnlinkTaskContact() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: unlinkTaskContact,
     onSuccess: (_, { taskId }) => {
       void refreshTask(queryClient, taskId);
@@ -1339,7 +1355,7 @@ export function useAttachTaskIntermediateJournal() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: attachTaskIntermediateJournal,
     onSuccess: (_, { taskId }) => {
       void refreshTaskJournalLinks(queryClient, taskId);
@@ -1354,7 +1370,7 @@ export function useDetachTaskIntermediateJournal() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    ...NO_RETRY,
+    ...TASK_WRITE,
     mutationFn: detachTaskIntermediateJournal,
     onSuccess: (_, { taskId }) => {
       void refreshTaskJournalLinks(queryClient, taskId);

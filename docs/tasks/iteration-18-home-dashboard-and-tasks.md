@@ -13653,6 +13653,13 @@ production defaults rather than the shared harness — which is ITER18-004 Phase
 - **While obtaining, the card says *generating*.** A new day's first load has no row, which the section
   reports as unavailable; drawing **W9**'s "No summary today" beside a busy Regenerate would say the opposite
   of what is happening.
+- **A task write is recognised by its mutation key** (Augment review on PR #1470). `isTaskWrite` had
+  inherited `mutatingTaskId`'s rule that any bare-string input is a task id, which a journal, tag or series
+  deletion and a regeneration also pass, so an unrelated write could hold the summary read-back — and
+  `isLastTaskWrite` and `useTaskWriteInFlight` had the same flaw. Every task hook now carries
+  `TASK_WRITE_KEY`, and all three answer from it. The same review moved tests A and D off retried
+  navigation: setup regenerates through the API, one last task write makes today stale, and the page loads
+  exactly once.
 - **Only a settled read establishes the hold** (review on PR #1470). On client-side navigation back to the
   page, React Query renders the previous visit's cached payload while the mount refetch replaces it; a
   summary seen only there was never current on this visit, and holding it would keep yesterday's prose

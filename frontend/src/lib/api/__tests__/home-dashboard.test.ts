@@ -17,6 +17,7 @@ import {
   useAnchorDayRefresh,
   useHomeDashboard,
 } from '../home-dashboard';
+import { TASK_WRITE_KEY } from '../tasks';
 import { useObtainTodaySummaryOnLoad } from '../today-summary-on-load';
 import type { HomeDashboardResponse } from '../home-dashboard';
 import {
@@ -751,6 +752,7 @@ describe('useObtainTodaySummaryOnLoad', () => {
       () => ({
         obtain: useObtainTodaySummaryOnLoad(),
         write: useMutation({
+          mutationKey: TASK_WRITE_KEY,
           mutationFn: (_variables: { taskId: string }) =>
             new Promise<void>(resolve => {
               settleWrite = resolve;
@@ -777,6 +779,38 @@ describe('useObtainTodaySummaryOnLoad', () => {
     await act(async () => {
       settleWrite();
       await jest.advanceTimersByTimeAsync(1000);
+    });
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));
+    await waitFor(() => expect(result.current.obtain.isObtaining).toBe(false));
+  });
+
+  it('does not hold the read-back for an unrelated mutation that takes a string id', async () => {
+    served = withSummary(GENERATING_SECTION);
+    let resolveSummary: (response: Response) => void = () => {};
+    summaryResponse = () =>
+      new Promise<Response>(resolve => {
+        resolveSummary = resolve;
+      });
+
+    // A journal, tag or series deletion takes a bare id, exactly as deleting a
+    // task does — and is not a task write.
+    const { result } = renderHook(
+      () => ({
+        obtain: useObtainTodaySummaryOnLoad(),
+        write: useMutation({
+          mutationFn: (_journalId: string) => new Promise<void>(() => {}),
+        }),
+      }),
+      { wrapper: productionHarness().wrapper }
+    );
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+
+    act(() => {
+      result.current.write.mutate('55');
+    });
+    await act(async () => {
+      resolveSummary(summaryRowResponse());
     });
 
     await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBe(2));

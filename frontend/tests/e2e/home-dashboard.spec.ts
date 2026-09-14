@@ -2345,6 +2345,47 @@ function summaryRead(page: Page, timeout = 15000) {
   );
 }
 
+/**
+ * Regenerate today's summary through the API until a regeneration answers
+ * generated for `journalCount` journals.
+ *
+ * Setup, not the behaviour under test: seeding invalidates the day
+ * asynchronously, and a regeneration that an invalidation overtakes is refused
+ * (Phase 7c), so this is where that timing is absorbed — before the test starts
+ * observing the page.
+ */
+async function regenerateThroughApi(page: Page, journalCount: number) {
+  const day = await anchorDay(page);
+  await expect(async () => {
+    const response = await page.request.post(
+      `/api/journals/daily-summary/${day}/regenerate`
+    );
+    expect(response.ok()).toBe(true);
+    const body = (await response.json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    expect(body.data?.attributes.journal_count).toBe(journalCount);
+  }).toPass({ timeout: 90000 });
+}
+
+/**
+ * Make today's summary stale with one last task write, and wait until the
+ * read-only dashboard endpoint reports it.
+ *
+ * The task is due inside today's window, so its update invalidates today. It is
+ * the last thing the test publishes, so the load that follows starts from a
+ * known stale row rather than from whatever the seeding left in flight.
+ */
+async function staleTodayWithLastTaskWrite(
+  page: Page,
+  dataManager: TestDataManager,
+  task: TestTask
+) {
+  await dataManager.updateTaskText(task.id, `${task.text} (edited)`);
+  await expect
+    .poll(() => servedSummaryState(page), { timeout: 30000 })
+    .toBe(GENERATING);
+}
+
 /** Today's summary state as the read-only dashboard endpoint reports it. */
 async function servedSummaryState(page: Page) {
   const response = await page.request.get('/api/home-dashboard');
@@ -2387,38 +2428,42 @@ test.describe('Home Dashboard — the summary, generated end to end', () => {
 
     // One journal today and the task due two days out: below the two journals
     // any other day needs for a summary.
-    await seedOneJournalDay(
+    const { task } = await seedOneJournalDay(
       dataManager,
       day,
       'Summary quiet day confirm the booking'
     );
 
+    // Today holds a summary, then one last task write makes it stale: the load
+    // below starts from a known row with nothing seeded still in flight.
+    await regenerateThroughApi(page, 1);
+    await staleTodayWithLastTaskWrite(page, dataManager, task);
+
+    const summaryRequests: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/journals/daily-summary/')) {
+        summaryRequests.push(request.method());
+      }
+    });
     await page.setViewportSize(DESKTOP);
 
-    // No Regenerate: the dashboard obtains today's summary itself, reading it on
-    // a load whose first read has none — and that read is what generates it.
-    // Loaded until a load's own read comes back generated for this one journal,
-    // because the seeding invalidates the day asynchronously: a load that still
-    // sees an earlier summary as current reads nothing, and a generation an
-    // invalidation overtakes is refused (Phase 7c).
-    await expect(async () => {
-      const read = summaryRead(page);
-      await page.goto('/');
-      const body = (await (await read).json()) as DailySummaryResponse;
-      expect(body.data?.attributes.status).toBe('generated');
-      expect(body.data?.attributes.journal_count).toBe(1);
+    // No Regenerate, and one load: the dashboard obtains today's summary itself,
+    // reading it on a load whose first read has none — and that read is what
+    // generates it, for this one journal.
+    const read = summaryRead(page);
+    await page.goto('/');
+    const body = (await (await read).json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    expect(body.data?.attributes.journal_count).toBe(1);
 
-      await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
-        STUB_SUMMARY_TEXT,
-        { timeout: 10000 }
-      );
-      await expect(summaryStat(page, 'Journals')).toHaveText('1', {
-        timeout: 5000,
-      });
-    }).toPass({ timeout: 120000 });
+    await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
+      STUB_SUMMARY_TEXT
+    );
+    await expect(summaryStat(page, 'Journals')).toHaveText('1');
     await expect(page.getByTestId('dashboard-summary-unavailable')).toHaveCount(
       0
     );
+    expect(summaryRequests).toEqual(['GET']);
   });
 
   test('updates the card when a regeneration is requested (W6)', async ({
@@ -2616,23 +2661,24 @@ test.describe('Home Dashboard — the summary, generated end to end', () => {
     await expect(summaryCard(page).getByText('Generating...')).toHaveCount(0);
     expect(summaryRequests).toEqual([]);
 
-    // The next load refreshes it: the stored summary is stale, so the card reads
-    // it — which regenerates it — and never forces one. Reloaded until a load's
-    // own read answers generated, since a late invalidation can refuse one
-    // generation (Phase 7c).
-    await expect(async () => {
-      summaryRequests.length = 0;
-      const read = summaryRead(page);
-      await page.reload();
-      const body = (await (await read).json()) as DailySummaryResponse;
-      expect(body.data?.attributes.status).toBe('generated');
-      await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
-        STUB_SUMMARY_TEXT,
-        { timeout: 10000 }
-      );
-      expect(
-        summaryRequests.filter(request => request.startsWith('POST '))
-      ).toEqual([]);
-    }).toPass({ timeout: 90000 });
+    // The next load refreshes it. Today is regenerated through the API and then
+    // made stale by one last task write, so the reload starts from a known stale
+    // row with no tick's invalidation still in flight.
+    await regenerateThroughApi(page, 2);
+    await staleTodayWithLastTaskWrite(page, dataManager, first.task);
+
+    // One reload: the card reads today's summary — which regenerates it — and
+    // never forces one.
+    summaryRequests.length = 0;
+    const read = summaryRead(page);
+    await page.reload();
+    const body = (await (await read).json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
+      STUB_SUMMARY_TEXT
+    );
+    expect(summaryRequests.map(request => request.split(' ')[0])).toEqual([
+      'GET',
+    ]);
   });
 });

@@ -2,8 +2,12 @@
  * @jest-environment jsdom
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+} from '@tanstack/react-query';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import React, { ReactNode } from 'react';
@@ -26,6 +30,7 @@ import {
   useTask,
   useUnlinkTaskContact,
   useUpdateTask,
+  useTaskWriteInFlight,
 } from '../tasks';
 import { journalKeys } from '../journals';
 import { DashboardSectionStatus, homeDashboardKeys } from '../home-dashboard';
@@ -698,6 +703,54 @@ describe('Task API client', () => {
       expect(toast.error).toHaveBeenCalledWith(
         'Journal 42 is dated 2026-08-01, which is not after today'
       );
+    });
+  });
+
+  /**
+   * A task write is the mutation a task hook started — recognised by its key,
+   * not by the shape of its input (Augment review on PR #1470). Any bare string
+   * used to count as a task id, which is also what a journal, tag or series
+   * deletion and a daily-summary regeneration pass, so an unrelated write could
+   * lock a task's actions and hold the dashboard's refreshes back.
+   */
+  describe('identifying task writes', () => {
+    it('does not count an unrelated mutation that takes a string id', async () => {
+      const { result } = renderHook(
+        () => ({
+          inFlight: useTaskWriteInFlight('55'),
+          unrelated: useMutation({
+            mutationFn: (_journalId: string) => new Promise<void>(() => {}),
+          }),
+        }),
+        { wrapper: createWrapper }
+      );
+
+      act(() => {
+        result.current.unrelated.mutate('55');
+      });
+
+      await waitFor(() => expect(queryClient.isMutating()).toBe(1));
+      expect(result.current.inFlight).toBe(false);
+    });
+
+    it('counts a task hook’s write against that task', async () => {
+      mockFetch.mockImplementation(() => new Promise<Response>(() => {}));
+      const { result } = renderHook(
+        () => ({
+          inFlight: useTaskWriteInFlight('55'),
+          update: useUpdateTask(),
+        }),
+        { wrapper: createWrapper }
+      );
+
+      act(() => {
+        result.current.update.mutate({
+          taskId: '55',
+          status: TaskStatus.DONE,
+        });
+      });
+
+      await waitFor(() => expect(result.current.inFlight).toBe(true));
     });
   });
 
