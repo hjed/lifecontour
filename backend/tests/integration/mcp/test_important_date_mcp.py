@@ -22,7 +22,9 @@ async def test_important_dates_via_mounted_http_session(
 
     async with authenticated_lifespan_client() as authenticated_client:
 
-        async def call_mcp(name: str, args: dict[str, typing.Any]):
+        async def call_mcp(
+            name: str, args: dict[str, typing.Any]
+        ) -> dict[str, typing.Any]:
             return await call_mcp_tool_sessionless(authenticated_client, name, args)
 
         # 1. Create a new contact without important dates

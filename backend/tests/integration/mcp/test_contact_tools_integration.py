@@ -54,7 +54,7 @@ async def _update_contact_tag(
 class ContactTestProvider(Provider):
     """Test provider for contact services with mocked dependencies."""
 
-    def __init__(self, connection: AsyncConnection):
+    def __init__(self, connection: AsyncConnection) -> None:
         super().__init__()
         self.connection = connection
 
@@ -1058,7 +1058,9 @@ class TestContactToolsIntegration:
         async with authenticated_lifespan_client() as authenticated_client:
             import typing
 
-            async def call_mcp(name: str, args: dict[str, typing.Any]):
+            async def call_mcp(
+                name: str, args: dict[str, typing.Any]
+            ) -> dict[str, typing.Any]:
                 return await call_mcp_tool_sessionless(authenticated_client, name, args)
 
             # 1. Add relationship
@@ -1162,7 +1164,7 @@ class TestContactToolsIntegration:
 
         async with authenticated_lifespan_client() as authenticated_client:
 
-            async def call_mcp(name, args):
+            async def call_mcp(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 return await call_mcp_tool_sessionless(authenticated_client, name, args)
 
             # Happy path: survivor absorbs the source and is returned.
@@ -1224,7 +1226,7 @@ class TestContactToolsIntegration:
 
         async with authenticated_lifespan_client() as authenticated_client:
 
-            async def call_mcp(name, args):
+            async def call_mcp(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 return await call_mcp_tool_sessionless(authenticated_client, name, args)
 
             merged = await call_mcp(
