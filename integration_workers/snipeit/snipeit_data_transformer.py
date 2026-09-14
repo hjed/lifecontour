@@ -11,11 +11,15 @@ Field mapping (Snipe-IT → GearItem):
 - ``model.name`` → ``model``
 - ``manufacturer.name`` → ``manufacturer``
 - ``purchase_date.date`` → ``purchase_date`` (parsed to ``datetime.date``)
+
+Snipe-IT HTML-escapes text on output but stores and accepts it raw, so text
+fields are decoded exactly once, before the name fallback and truncation.
 """
 
 from __future__ import annotations
 
 import hashlib
+import html
 from dataclasses import dataclass
 from datetime import date
 
@@ -71,18 +75,22 @@ class SnipeItDataTransformer:
         # Snipe-IT assets often have no name and only a model, so the model
         # name is a more useful label than the opaque asset_tag. asset_tag is
         # required, so it is the final guaranteed fallback.
-        raw_name = _first_non_blank(asset.name, asset.model_name) or asset.asset_tag
+        # Decode before truncating so an entity is never cut in half.
+        decoded_model_name = _decode(asset.model_name)
+        raw_name = _first_non_blank(
+            _decode(asset.name), decoded_model_name
+        ) or html.unescape(asset.asset_tag)
         name = raw_name[:MAX_GEAR_ITEM_NAME_LENGTH]
 
         # Serial number
-        serial_number = _truncate(asset.serial, MAX_GEAR_ITEM_FIELD_LENGTH)
+        serial_number = _truncate(_decode(asset.serial), MAX_GEAR_ITEM_FIELD_LENGTH)
 
         # Model name from nested object
-        model_name = _truncate(asset.model_name, MAX_GEAR_ITEM_FIELD_LENGTH)
+        model_name = _truncate(decoded_model_name, MAX_GEAR_ITEM_FIELD_LENGTH)
 
         # Manufacturer name from nested object
         manufacturer_name = _truncate(
-            asset.manufacturer_name, MAX_GEAR_ITEM_FIELD_LENGTH
+            _decode(asset.manufacturer_name), MAX_GEAR_ITEM_FIELD_LENGTH
         )
 
         # Purchase date parsing
@@ -105,6 +113,13 @@ class SnipeItDataTransformer:
             snipeit_asset_id=asset.id,
             version_hash=version_hash,
         )
+
+
+def _decode(value: str | None) -> str | None:
+    """HTML-decode a Snipe-IT text value once, returning None for None input."""
+    if value is None:
+        return None
+    return html.unescape(value)
 
 
 def _first_non_blank(*values: str | None) -> str | None:

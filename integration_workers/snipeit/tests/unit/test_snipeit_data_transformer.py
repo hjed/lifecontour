@@ -1,5 +1,6 @@
 """Tests for Snipe-IT data transformer (Asset → GearItem mapping)."""
 
+import hashlib
 from datetime import date
 
 from core_shared.models.journals.gear_item import GearItem
@@ -186,3 +187,62 @@ class TestTransformerFieldTruncation:
         result = SnipeItDataTransformer.transform(asset, user_id="u")
         assert result.gear_item.manufacturer is not None
         assert len(result.gear_item.manufacturer) <= 200
+
+
+class TestTransformerHtmlDecoding:
+    """Snipe-IT HTML-escapes text on output but stores and accepts it raw."""
+
+    def test_name_is_decoded(self) -> None:
+        """An escaped asset name is stored as the raw text."""
+        asset = _make_asset(name="Split Canyoneroo 50 -&gt; 34 + 15")
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "Split Canyoneroo 50 -> 34 + 15"
+
+    def test_model_and_manufacturer_are_decoded(self) -> None:
+        """Nested model and manufacturer names are decoded."""
+        asset = _make_asset(
+            model=SnipeItNestedObject(id=10, name="&lt;Rope&gt; 60m"),
+            manufacturer=SnipeItNestedObject(id=5, name="Black &amp; Decker"),
+        )
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.model == "<Rope> 60m"
+        assert result.gear_item.manufacturer == "Black & Decker"
+
+    def test_serial_is_decoded(self) -> None:
+        """Quote entities in the serial are decoded."""
+        asset = _make_asset(serial="SN &quot;A&quot; &#039;B&#039;")
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.serial_number == "SN \"A\" 'B'"
+
+    def test_name_falling_back_to_model_is_decoded(self) -> None:
+        """The model-name fallback for a missing name is decoded."""
+        asset = _make_asset(
+            name=None, model=SnipeItNestedObject(id=10, name="Rope &amp; Harness")
+        )
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "Rope & Harness"
+
+    def test_name_falling_back_to_asset_tag_is_decoded(self) -> None:
+        """The asset_tag fallback for a missing name and model is decoded."""
+        asset = _make_asset(name=None, model=None, asset_tag="GEAR&amp;001")
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "GEAR&001"
+
+    def test_text_is_decoded_only_once(self) -> None:
+        """A literal entity in the source text survives a single decode."""
+        asset = _make_asset(name="Tom &amp;amp; Jerry")
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "Tom &amp; Jerry"
+
+    def test_text_is_decoded_before_truncation(self) -> None:
+        """Truncation counts decoded characters, so an entity is never split."""
+        asset = _make_asset(name="A" * 196 + "&amp;" + "BBB")
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        assert result.gear_item.name == "A" * 196 + "&BBB"
+
+    def test_version_hash_uses_raw_asset(self) -> None:
+        """The hash stays on the raw payload, so decoding needs no re-hash."""
+        asset = _make_asset(name="Split Canyoneroo 50 -&gt; 34 + 15")
+        result = SnipeItDataTransformer.transform(asset, user_id="u")
+        expected = hashlib.sha256(asset.model_dump_json().encode()).hexdigest()
+        assert result.version_hash == expected
