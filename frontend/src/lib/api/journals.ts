@@ -1176,11 +1176,21 @@ export async function fetchDailySummary(
   const response = await fetch(`/api/journals/daily-summary/${date}`, {
     credentials: 'include',
   });
+  return readDailySummaryResponse(response, 'Failed to load daily summary');
+}
+
+/**
+ * A daily-summary endpoint's answer, or the JSON:API error detail it failed with.
+ *
+ * Shared by the read and the regeneration, which answer in the same shape.
+ */
+async function readDailySummaryResponse(
+  response: Response,
+  failureMessage: string
+): Promise<DailySummaryResponse> {
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || 'Failed to load daily summary'
-    );
+    throw new Error(errorData.errors?.[0]?.detail || failureMessage);
   }
   return response.json();
 }
@@ -1209,13 +1219,10 @@ export function useRegenerateDailySummary() {
           credentials: 'include',
         }
       );
-      if (!response.ok) {
-        const errorData: JsonApiErrorResponse = await response.json();
-        throw new Error(
-          errorData.errors?.[0]?.detail || 'Failed to regenerate daily summary'
-        );
-      }
-      return response.json();
+      return readDailySummaryResponse(
+        response,
+        'Failed to regenerate daily summary'
+      );
     },
     onSuccess: (data, date) => {
       queryClient.setQueryData(

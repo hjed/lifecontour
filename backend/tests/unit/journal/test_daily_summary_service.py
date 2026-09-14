@@ -72,6 +72,27 @@ def mock_summary_repo() -> AsyncMock:
     return repo
 
 
+def _build_service(
+    mock_input_assembler: AsyncMock,
+    mock_eligibility_checker: MagicMock,
+    mock_prompt_builder: MagicMock,
+    mock_summary_repo: AsyncMock,
+    *,
+    gemini_api_key: str,
+    response_override: str | None,
+) -> DailySummaryService:
+    """The service over the shared mocks, with the model configuration a test needs."""
+    return DailySummaryService(
+        input_assembler=mock_input_assembler,
+        eligibility_checker=mock_eligibility_checker,
+        prompt_builder=mock_prompt_builder,
+        summary_repo=mock_summary_repo,
+        gemini_api_key=gemini_api_key,
+        gemini_model="gemini-2.5-pro",
+        _gemini_response_override=response_override,
+    )
+
+
 @pytest.fixture
 def service(
     mock_input_assembler: AsyncMock,
@@ -79,14 +100,13 @@ def service(
     mock_prompt_builder: MagicMock,
     mock_summary_repo: AsyncMock,
 ) -> DailySummaryService:
-    return DailySummaryService(
-        input_assembler=mock_input_assembler,
-        eligibility_checker=mock_eligibility_checker,
-        prompt_builder=mock_prompt_builder,
-        summary_repo=mock_summary_repo,
+    return _build_service(
+        mock_input_assembler,
+        mock_eligibility_checker,
+        mock_prompt_builder,
+        mock_summary_repo,
         gemini_api_key="test-key",
-        gemini_model="gemini-2.5-pro",
-        _gemini_response_override=json.dumps(
+        response_override=json.dumps(
             {"summary_text": "A productive day with meetings and exercise."}
         ),
     )
@@ -102,14 +122,13 @@ def keyless_service(
     """Build a service with no Gemini key, optionally answering from an override."""
 
     def build(response_override: str | None) -> DailySummaryService:
-        return DailySummaryService(
-            input_assembler=mock_input_assembler,
-            eligibility_checker=mock_eligibility_checker,
-            prompt_builder=mock_prompt_builder,
-            summary_repo=mock_summary_repo,
+        return _build_service(
+            mock_input_assembler,
+            mock_eligibility_checker,
+            mock_prompt_builder,
+            mock_summary_repo,
             gemini_api_key="",
-            gemini_model="gemini-2.5-pro",
-            _gemini_response_override=response_override,
+            response_override=response_override,
         )
 
     return build
