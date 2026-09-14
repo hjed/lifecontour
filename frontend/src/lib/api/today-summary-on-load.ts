@@ -23,8 +23,10 @@
  * Five properties are load-bearing, and each is what a naive version gets wrong:
  *
  * - **Decided once per anchor day, on the first settled read.** "Settled"
- *   means no fetch in flight, so a stale cached payload shown on client-side
- *   navigation cannot decide for the refetch that replaces it. Later reads of
+ *   means a read that succeeded with no fetch in flight
+ *   (`isSettledDashboardRead`), so neither a stale cached payload shown on
+ *   client-side navigation nor one left behind by a failed refetch can decide
+ *   for this visit. Later reads of
  *   the same day never decide again: a task tick's refetch reports today
  *   generating, and re-reading then would regenerate underneath the reader.
  * - **A query that can never refetch itself.** No retry, no refetch on focus,
@@ -48,21 +50,30 @@
  *   busy from its first paint rather than one effect later.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAnchorStillToday } from '@/lib/dashboard-anchor';
 import {
   DashboardSectionStatus,
   DashboardSummaryState,
   homeDashboardKeys,
+  isSettledDashboardRead,
   useHomeDashboard,
 } from './home-dashboard';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { fetchDailySummary } from './journals';
 import { isTaskWrite } from './tasks';
 
+/**
+ * Keyed per mount as well as per day. `gcTime: 0` evicts a query on a timer
+ * rather than at once, so a card that remounts before that timer runs would
+ * otherwise be answered from the previous visit's read, which never goes stale
+ * and never refetches on mount — and a load that must read today's summary
+ * would read nothing (Augment review on PR #1470).
+ */
 const todaySummaryOnLoadKeys = {
-  day: (date: string) => ['today-summary-on-load', date] as const,
+  day: (mountId: string, date: string) =>
+    ['today-summary-on-load', mountId, date] as const,
 };
 
 /** What the first settled read of an anchor day decided. */
@@ -78,7 +89,8 @@ export interface TodaySummaryOnLoad {
 
 export function useObtainTodaySummaryOnLoad(): TodaySummaryOnLoad {
   const queryClient = useQueryClient();
-  const { data, isFetching } = useHomeDashboard();
+  const mountId = useId();
+  const { data, isFetching, isSuccess } = useHomeDashboard();
   const [decision, setDecision] = useState<LoadDecision | null>(null);
   const [readBackFor, setReadBackFor] = useState<string | null>(null);
   const taskWritesInFlight = useIsMutating({ predicate: isTaskWrite });
@@ -98,7 +110,7 @@ export function useObtainTodaySummaryOnLoad(): TodaySummaryOnLoad {
   const undecided =
     data !== undefined &&
     liveDate !== undefined &&
-    !isFetching &&
+    isSettledDashboardRead({ isSuccess, isFetching }) &&
     decision?.date !== liveDate;
   if (undecided) {
     setDecision({ date: liveDate, obtain: !hasProse });
@@ -108,8 +120,8 @@ export function useObtainTodaySummaryOnLoad(): TodaySummaryOnLoad {
     decision?.obtain && decision.date === liveDate ? decision.date : undefined;
 
   const obtained = useQuery({
-    queryKey: todaySummaryOnLoadKeys.day(obtainFor ?? ''),
-    queryFn: ({ queryKey: [, date] }) => fetchDailySummary(date),
+    queryKey: todaySummaryOnLoadKeys.day(mountId, obtainFor ?? ''),
+    queryFn: ({ queryKey: [, , date] }) => fetchDailySummary(date),
     enabled: obtainFor !== undefined,
     retry: false,
     staleTime: Infinity,

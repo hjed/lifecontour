@@ -14,6 +14,7 @@ import { createQueryTestHarness } from '@/test-utils';
 import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
 import {
   homeDashboardKeys,
+  isSettledDashboardRead,
   useAnchorDayRefresh,
   useHomeDashboard,
 } from '../home-dashboard';
@@ -434,6 +435,33 @@ describe('useAnchorDayRefresh', () => {
  * regenerate underneath a reader: a retried read, and a query refetched on
  * focus.
  */
+/**
+ * One answer to "has this visit read the dashboard?", shared by the card's
+ * read on load and its hold (Augment review on PR #1470). A read with a fetch in
+ * flight is not settled, and neither is one whose refetch failed: React Query
+ * keeps the cached payload on an error, so data alone says nothing about this
+ * visit.
+ */
+describe('isSettledDashboardRead', () => {
+  it('is settled once a read has succeeded with nothing in flight', () => {
+    expect(isSettledDashboardRead({ isSuccess: true, isFetching: false })).toBe(
+      true
+    );
+  });
+
+  it('is not settled while a read is in flight', () => {
+    expect(isSettledDashboardRead({ isSuccess: true, isFetching: true })).toBe(
+      false
+    );
+  });
+
+  it('is not settled when the latest read failed, whatever data is cached', () => {
+    expect(
+      isSettledDashboardRead({ isSuccess: false, isFetching: false })
+    ).toBe(false);
+  });
+});
+
 describe('useObtainTodaySummaryOnLoad', () => {
   const ANCHOR = '2026-07-29';
   const SUMMARY_URL = `/api/journals/daily-summary/${ANCHOR}`;
@@ -632,6 +660,63 @@ describe('useObtainTodaySummaryOnLoad', () => {
     renderOnLoad(harness);
 
     await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+  });
+
+  it('reads nothing from a stale cached read whose refetch fails', async () => {
+    const harness = productionHarness();
+    harness.queryClient.setQueryData(
+      homeDashboardKeys.all,
+      withSummary(GENERATING_SECTION),
+      { updatedAt: Date.now() - 10 * 60 * 1000 }
+    );
+    // Every read of the dashboard fails, retries included, so the only data this
+    // visit holds is the previous visit's.
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === DASHBOARD_URL) {
+        return Promise.resolve({
+          ok: false,
+          json: async () => ({ errors: [{ detail: 'Dashboard unavailable' }] }),
+        } as Response);
+      }
+      if (url === SUMMARY_URL) {
+        return summaryResponse();
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const { result } = renderOnLoad(harness);
+
+    await waitFor(() => expect(callsTo(DASHBOARD_URL)).toBeGreaterThan(0));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60 * 1000);
+    });
+
+    expect(result.current.dashboard.isError).toBe(true);
+    expect(callsTo(SUMMARY_URL)).toBe(0);
+    expect(result.current.obtain.isObtaining).toBe(false);
+  });
+
+  it('reads again on a remount that comes back before the last read is evicted', async () => {
+    served = withSummary(GENERATING_SECTION);
+    const harness = productionHarness();
+
+    const first = renderOnLoad(harness);
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(1));
+    await waitFor(() =>
+      expect(first.result.current.obtain.isObtaining).toBe(false)
+    );
+    first.unmount();
+
+    // Straight back, with the fake clock not advanced: the previous read's
+    // eviction timer has not run, so a key shared across mounts would answer
+    // from it and this load would read nothing.
+    const second = renderOnLoad(harness);
+
+    await waitFor(() => expect(callsTo(SUMMARY_URL)).toBe(2));
+    await waitFor(() =>
+      expect(second.result.current.obtain.isObtaining).toBe(false)
+    );
   });
 
   it('is obtaining from the first render that holds the read', async () => {

@@ -57,6 +57,7 @@ import { SummaryKeyStats } from './SummaryKeyStats';
 import {
   DashboardSectionStatus,
   DashboardSummaryState,
+  isSettledDashboardRead,
   useHomeDashboard,
 } from '@/lib/api/home-dashboard';
 import type { HomeDashboardSummary } from '@/lib/api/home-dashboard';
@@ -173,7 +174,7 @@ function DashboardSummaryUnavailable() {
 }
 
 function DashboardSummaryCardBody() {
-  const { data, isPending, isFetching } = useHomeDashboard();
+  const { data, isPending, isFetching, isSuccess } = useHomeDashboard();
   const { mutate: regenerate, isPending: isRegenerating } =
     useRegenerateDailySummary();
   const { isObtaining } = useObtainTodaySummaryOnLoad();
@@ -194,7 +195,11 @@ function DashboardSummaryCardBody() {
     summary?.state === DashboardSummaryState.GENERATED && summary.summary_text
       ? summary
       : null;
-  const shown = useHeldSummary(anchor?.date, generated, !isFetching);
+  const shown = useHeldSummary(
+    anchor?.date,
+    generated,
+    isSettledDashboardRead({ isSuccess, isFetching })
+  );
   const prose = shown?.summary_text ?? null;
   // While the card obtains today's summary, one is being generated, whatever the
   // first read said: a new day's first load has no row at all, which reads as

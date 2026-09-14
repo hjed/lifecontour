@@ -13653,6 +13653,12 @@ production defaults rather than the shared harness — which is ITER18-004 Phase
 - **While obtaining, the card says *generating*.** A new day's first load has no row, which the section
   reports as unavailable; drawing **W9**'s "No summary today" beside a busy Regenerate would say the opposite
   of what is happening.
+- **Review round three (PR #1470)** closed three more holes, each with a test that failed first. *Settled*
+  now means a read that **succeeded** with nothing in flight — one `isSettledDashboardRead` shared by the
+  read on load and the hold — because React Query keeps the cached payload when a refetch fails. The read's
+  query is keyed **per mount** as well as per day, because `gcTime: 0` evicts on a timer and a quick
+  remount was answered from the previous visit's read. And a **creation** is not a task write: it carries
+  the key but no task id, and counting it made `isLastTaskWrite` skip a status update's refresh.
 - **A task write is recognised by its mutation key** (Augment review on PR #1470). `isTaskWrite` had
   inherited `mutatingTaskId`'s rule that any bare-string input is a task id, which a journal, tag or series
   deletion and a regeneration also pass, so an unrelated write could hold the summary read-back — and

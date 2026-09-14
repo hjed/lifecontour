@@ -1049,7 +1049,14 @@ const TASK_WRITE = { ...NO_RETRY, mutationKey: TASK_WRITE_KEY } as const;
  * read could undo — and for no other mutation.
  */
 export function isTaskWrite(mutation: Mutation): boolean {
-  return mutation.options.mutationKey?.[0] === TASK_WRITE_KEY[0];
+  // Keyed *and* acting on an existing task. A creation carries the key but no
+  // task id: it changes nothing a status update's refresh covers, so counting it
+  // made `isLastTaskWrite` skip that refresh while the creation was pending, and
+  // leave it skipped if the creation then failed (Greptile review on PR #1470).
+  return (
+    mutation.options.mutationKey?.[0] === TASK_WRITE_KEY[0] &&
+    mutatingTaskId(mutation.state.variables) !== undefined
+  );
 }
 
 /** The task a pending mutation is acting on, whatever shape its input takes. */

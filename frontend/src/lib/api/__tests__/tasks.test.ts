@@ -1231,6 +1231,63 @@ describe('Task API client', () => {
       expect(dashboardRequestCount()).toBe(2);
     });
 
+    /**
+     * A creation is not a write against an existing task, and does not refresh
+     * what a status update changes (Greptile review on PR #1470). Counting one
+     * as a task write made \`isLastTaskWrite\` skip the update's refresh while
+     * the creation was pending, leaving the dashboard, due counts and history
+     * stale — for good, if the creation then failed.
+     */
+    it('refreshes after an update even while a task creation is still pending', async () => {
+      mockFetch.mockImplementation(
+        (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === DASHBOARD_URL) {
+            return Promise.resolve(
+              jsonResponse(dashboardWithTasks([dashboardTask(1)]))
+            );
+          }
+          if (init?.method === 'POST') {
+            // The creation never answers.
+            return new Promise<Response>(() => {});
+          }
+          return Promise.resolve(
+            jsonResponse(taskWriteResponse({ status: TaskStatus.DONE }))
+          );
+        }
+      );
+
+      const dashboard = renderHook(() => useHomeDashboard(), {
+        wrapper: createWrapper,
+      });
+      await waitFor(() => {
+        expect(dashboard.result.current.isSuccess).toBe(true);
+      });
+      expect(dashboardRequestCount()).toBe(1);
+
+      const creation = renderHook(() => useCreateTask(), {
+        wrapper: createWrapper,
+      }).result;
+      act(() => {
+        creation.current.mutate({
+          journalId: '10',
+          text: 'Draft the invoice',
+          due_journal_id: 20,
+        });
+      });
+      await waitFor(() => expect(queryClient.isMutating()).toBe(1));
+
+      const update = updateHook();
+      await update.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+
+      await waitFor(() => {
+        expect(dashboardRequestCount()).toBe(2);
+      });
+    });
+
     it('leaves the other sections of the payload untouched', async () => {
       seedDashboard([dashboardTask(1)]);
       const before = queryClient.getQueryData<HomeDashboardResponse>(

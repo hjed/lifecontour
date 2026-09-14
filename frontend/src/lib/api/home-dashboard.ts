@@ -374,6 +374,23 @@ export function useHomeDashboard() {
 }
 
 /**
+ * Whether this visit has a settled read of the dashboard: one that succeeded,
+ * with nothing in flight.
+ *
+ * The one answer the summary card's read on load and its hold share (Augment
+ * review on PR #1470). Data alone says nothing about *this* visit: on
+ * client-side navigation back, the previous visit's cached payload renders while
+ * the mount refetch runs, and React Query keeps that payload when the refetch
+ * fails.
+ */
+export function isSettledDashboardRead(read: {
+  readonly isSuccess: boolean;
+  readonly isFetching: boolean;
+}): boolean {
+  return read.isSuccess && !read.isFetching;
+}
+
+/**
  * Refresh the dashboard when its anchor day ends.
  *
  * The whole page is read for one day and every window hangs off it, so a
