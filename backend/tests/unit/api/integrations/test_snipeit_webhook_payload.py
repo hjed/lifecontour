@@ -113,6 +113,17 @@ def test_invalid_asset_ids_produce_no_events() -> None:
     assert extract_webhook_events(payload) == []
 
 
+def test_unparseable_links_produce_no_events() -> None:
+    """Links urlparse rejects (unbalanced IPv6 brackets) are ignored, not raised."""
+    payload = _notification(
+        "http://[",
+        "http://]/hardware/5",
+        "https://[::1/hardware/5",
+    )
+
+    assert extract_webhook_events(payload) == []
+
+
 def test_attachment_without_link_produces_no_events() -> None:
     """An attachment with no ``title_link`` is ignored."""
     assert extract_webhook_events(_notification(None)) == []

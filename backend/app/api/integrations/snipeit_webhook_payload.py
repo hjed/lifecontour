@@ -62,7 +62,12 @@ def _asset_id_from_link(link: str | None) -> int | None:
     """Return the asset id from a Snipe-IT ``/hardware/<id>`` URL, if it is one."""
     if not link:
         return None
-    match = _ASSET_PATH.search(urlparse(link).path)
+    try:
+        path = urlparse(link).path
+    except ValueError:
+        # e.g. an unbalanced IPv6 bracket ("http://[") - not an asset link.
+        return None
+    match = _ASSET_PATH.search(path)
     return int(match.group(1)) if match else None
 
 

@@ -133,14 +133,22 @@ async def test_asset_notification_publishes_asset_event(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "title_link",
+    [
+        pytest.param("https://snipe.example/accessories/5", id="accessory"),
+        pytest.param("http://[/hardware/5", id="unparseable-link"),
+    ],
+)
 async def test_non_asset_notification_publishes_nothing(
     authenticated_client: AsyncClient,
     read_webhook_events: ReadWebhookEvents,
+    title_link: str,
 ) -> None:
-    """A notification about a non-asset item is acknowledged without publishing."""
+    """A notification linking no parseable asset is acknowledged without publishing."""
     response = await authenticated_client.post(
         WEBHOOK_URL,
-        content=_notification_body("https://snipe.example/accessories/5"),
+        content=_notification_body(title_link),
         headers={"Content-Type": "application/json"},
     )
 
