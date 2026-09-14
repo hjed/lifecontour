@@ -97,7 +97,7 @@ class TestJournalTools:
 
             tool = next(t for t in tools if t.name == "list_journal_tags")
 
-            schema = tool.inputSchema
+            schema = tool.input_schema
             assert "limit" in schema["properties"], (
                 "list_journal_tags should expose a limit parameter"
             )
@@ -119,7 +119,7 @@ class TestJournalTools:
 
             tool = next(t for t in tools if t.name == "update_journal_tag")
 
-            schema = tool.inputSchema
+            schema = tool.input_schema
             properties = schema["properties"]
             for field in ("tag_id", "name", "color", "description", "parent_id"):
                 assert field in properties, f"{field} should be an update parameter"
@@ -149,7 +149,7 @@ class TestJournalTools:
 
             tool = next(t for t in tools if t.name == "delete_journal_tag")
 
-            schema = tool.inputSchema
+            schema = tool.input_schema
             assert "tag_id" in schema["properties"]
             assert schema.get("required", []) == ["tag_id"]
 
@@ -177,7 +177,7 @@ class TestJournalTools:
 
             tool = next(t for t in tools if t.name == "merge_journal_tag")
 
-            schema = tool.inputSchema
+            schema = tool.input_schema
             properties = schema["properties"]
             assert "source_tag_id" in properties
             assert "target_tag_id" in properties
@@ -222,10 +222,10 @@ class TestJournalTools:
             assert create_tool is not None, "create_journal_entry tool not found"
             assert create_tool.description is not None
             assert "create" in create_tool.description.lower()
-            assert create_tool.inputSchema is not None
+            assert create_tool.input_schema is not None
 
             # Verify the tool has the expected parameter
-            properties = create_tool.inputSchema.get("properties", {})
+            properties = create_tool.input_schema.get("properties", {})
             assert "request" in properties
 
     @pytest.mark.asyncio
@@ -251,10 +251,10 @@ class TestJournalTools:
             assert update_tool is not None, "update_journal_entry tool not found"
             assert update_tool.description is not None
             assert "update" in update_tool.description.lower()
-            assert update_tool.inputSchema is not None
+            assert update_tool.input_schema is not None
 
             # Verify the tool has the expected parameters
-            properties = update_tool.inputSchema.get("properties", {})
+            properties = update_tool.input_schema.get("properties", {})
             assert "journal_id" in properties
             assert "request" in properties
 
@@ -280,10 +280,10 @@ class TestJournalTools:
 
             assert get_tool is not None, "get_journal tool not found"
             assert get_tool.description is not None
-            assert get_tool.inputSchema is not None
+            assert get_tool.input_schema is not None
 
             # Verify the tool has the expected parameters
-            properties = get_tool.inputSchema.get("properties", {})
+            properties = get_tool.input_schema.get("properties", {})
             assert "journal_id" in properties
             assert "include_children" in properties
 
@@ -304,10 +304,10 @@ class TestJournalTools:
 
             assert summary_tool is not None, "get_daily_summary tool not found"
             assert summary_tool.description is not None
-            assert summary_tool.inputSchema is not None
+            assert summary_tool.input_schema is not None
 
             # Verify the tool has the expected parameters
-            properties = summary_tool.inputSchema.get("properties", {})
+            properties = summary_tool.input_schema.get("properties", {})
             assert "summary_date" in properties
 
     @pytest.mark.asyncio
@@ -328,10 +328,10 @@ class TestJournalTools:
             assert history_tool is not None, "get_journal_history tool not found"
             assert history_tool.description is not None
             assert "history" in history_tool.description.lower()
-            assert history_tool.inputSchema is not None
+            assert history_tool.input_schema is not None
 
             # Verify the tool exposes journal_id plus pagination params.
-            properties = history_tool.inputSchema.get("properties", {})
+            properties = history_tool.input_schema.get("properties", {})
             assert "journal_id" in properties
             assert "page" in properties
             assert "limit" in properties
@@ -633,9 +633,9 @@ class TestMergeToolRegistration:
             assert merge_tool is not None, "merge_journals tool not found"
             assert merge_tool.description is not None
             assert "merge" in merge_tool.description.lower()
-            assert merge_tool.inputSchema is not None
+            assert merge_tool.input_schema is not None
 
-            properties = merge_tool.inputSchema.get("properties", {})
+            properties = merge_tool.input_schema.get("properties", {})
             assert "target_journal_id" in properties
             assert "merge_data" in properties
             assert properties["merge_data"]["type"] == "string"
@@ -656,9 +656,9 @@ class TestMergeToolRegistration:
             )
             assert candidates_tool is not None, "get_merge_candidates tool not found"
             assert candidates_tool.description is not None
-            assert candidates_tool.inputSchema is not None
+            assert candidates_tool.input_schema is not None
 
-            properties = candidates_tool.inputSchema.get("properties", {})
+            properties = candidates_tool.input_schema.get("properties", {})
             assert "journal_id" in properties
             assert "limit" in properties
 

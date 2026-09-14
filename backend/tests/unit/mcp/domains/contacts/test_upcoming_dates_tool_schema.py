@@ -37,7 +37,7 @@ async def tool_schema(server: FastMCP[None]) -> dict[str, Any]:
 
     for tool in tools:
         if tool.name == TOOL:
-            return dict(tool.inputSchema)
+            return dict(tool.input_schema)
     raise AssertionError(f"{TOOL} is not registered")
 
 

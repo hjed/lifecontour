@@ -37,7 +37,7 @@ from core_shared.models.tasks import (
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
-from pydantic import Field, StrictBool
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
@@ -51,6 +51,7 @@ from app.mcp.shared.annotations import (
     IDEMPOTENT_WRITE,
     READ_ONLY,
 )
+from app.mcp.shared.arguments import JsonBool
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -376,7 +377,7 @@ async def retarget_task(
         ),
     ],
     acknowledge_reopen: Annotated[
-        StrictBool,
+        JsonBool,
         Field(
             description=(
                 "Confirms that reopening a task which is already done is "

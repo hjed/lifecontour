@@ -32,7 +32,7 @@ async def _tool_schema(name: str) -> dict[str, Any]:
     assert name in tools, "the tool must be registered to be reachable"
     tool = tools[name]
     return {
-        "input_schema": tool.inputSchema,
+        "input_schema": tool.input_schema,
         "description": tool.description or "",
     }
 

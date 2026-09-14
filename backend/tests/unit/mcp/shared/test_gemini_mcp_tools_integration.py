@@ -25,8 +25,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from dishka import AsyncContainer
 from fastmcp import Client
 from google import genai
 from google.genai import types
@@ -150,6 +152,81 @@ async def test_daily_summary_service_call_gemini_returns_text() -> None:
         result = await service._call_gemini("Summarise the day")
 
     assert result == '{"summary_text": "a good day"}'
+
+
+async def test_the_in_memory_client_speaks_the_sessionless_protocol() -> None:
+    """The summary services' ``Client(read_only_mcp)`` negotiates 2026-07-28.
+
+    Pinned so the background-container test below is known to exercise the
+    sessionless era — the one with no connection to carry state across calls.
+    """
+    read_only_mcp = await create_read_only_mcp_server("Summary Generation Tools")
+
+    async with Client(read_only_mcp) as mcp_client:
+        assert mcp_client.protocol_version == "2026-07-28"
+
+
+class _RecordingContainer:
+    """A stand-in Dishka container that records what a tool asks it for."""
+
+    def __init__(self) -> None:
+        self.requested: list[object] = []
+
+    async def get(self, dependency_type: object) -> object:
+        self.requested.append(dependency_type)
+        raise LookupError("not needed to prove the tool reached the container")
+
+
+async def test_a_tool_gemini_calls_resolves_the_background_container() -> None:
+    """A tool invoked by Gemini sees the container ``_call_gemini`` exposed.
+
+    ``_call_gemini`` sets ``mcp_background_container`` before opening the
+    in-memory MCP client, and the read-only tools resolve their user and
+    connection from it — there is no HTTP request on this path. The model's
+    first reply calls ``get_contact``, so google-genai's automatic function
+    calling runs the tool through the live session; the recorded request proves
+    the contextvar reached the tool on the sessionless transport.
+    """
+    container = _RecordingContainer()
+    service = DailySummaryService(
+        input_assembler=AsyncMock(),
+        eligibility_checker=MagicMock(),
+        prompt_builder=MagicMock(),
+        summary_repo=AsyncMock(),
+        gemini_api_key="test-key",
+        gemini_model="gemini-2.5-flash",
+        container=cast(AsyncContainer, container),
+    )
+    tool_call = types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(
+                content=types.Content(
+                    role="model",
+                    parts=[
+                        types.Part(
+                            function_call=types.FunctionCall(
+                                name="get_contact", args={"contact_id": 1}
+                            )
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+    original_client_cls = genai.Client
+
+    def factory(*args: object, **kwargs: object) -> genai.Client:
+        client = original_client_cls(*args, **kwargs)  # type: ignore[arg-type]
+        client.aio.models._generate_content = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[tool_call, _text_response('{"summary_text": "done"}')]
+        )
+        return client
+
+    with patch("google.genai.Client", side_effect=factory):
+        result = await service._call_gemini("Summarise the day")
+
+    assert result == '{"summary_text": "done"}'
+    assert container.requested, "the tool never reached the background container"
 
 
 async def test_contact_summary_generator_call_gemini_returns_text() -> None:

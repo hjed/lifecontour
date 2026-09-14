@@ -73,7 +73,7 @@ async def create_read_only_mcp_server(server_name: str = "AI Generation Tools") 
             # Sanitize the tool schema before passing it to Gemini
             if hasattr(t, "parameters") and isinstance(t.parameters, dict):
                 sanitize_schema(t.parameters)
-            read_only_mcp._local_provider.add_tool(t)
+            read_only_mcp.local_provider.add_tool(t)
 
     return read_only_mcp
 

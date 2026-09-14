@@ -4,7 +4,7 @@ This document describes how to set up and configure the MCP (Model Context Proto
 
 ## Overview
 
-The MCP server provides AI access to personal management data through the Model Context Protocol. It's built using FastMCP v2 and integrates seamlessly with the existing FastAPI application.
+The MCP server provides AI access to personal management data through the Model Context Protocol. It's built using FastMCP 4 (on the MCP Python SDK v2) and integrates seamlessly with the existing FastAPI application.
 
 ## Architecture
 
@@ -41,6 +41,27 @@ The MCP server is mounted as a sub-application in the main FastAPI app:
 - **MCP Endpoint**: `/mcp-server/mcp`
 - **Authentication**: Shared OAuth session with REST API
 - **Transport**: Streamable HTTP for web compatibility
+
+### Protocol Versions
+
+One endpoint serves both MCP protocol eras, chosen per request by the
+`MCP-Protocol-Version` header — there is no server setting, and neither can be
+switched off:
+
+- **Sessionless (`2026-07-28`)**: no `initialize` handshake and no
+  `mcp-session-id`. Each request carries its protocol version and client
+  capabilities in `params._meta`, and repeats the method (and tool name) in the
+  `Mcp-Method` / `Mcp-Name` headers, which must match the body. Any replica can
+  answer any request. Current clients, including `fastmcp.Client`, negotiate
+  this by default.
+- **Handshake (≤ `2025-11-25`)**: `initialize` returns an `mcp-session-id` that
+  later requests send back. Older clients keep working unchanged.
+
+Authentication and the Dishka request container apply identically to both.
+Because the sessionless era has no back-channel to the client, tools must not
+rely on server-initiated requests (sampling, elicitation, roots) or on state
+kept between calls. `tests/integration/mcp/test_mcp_protocol_eras.py` pins
+both eras against the mounted app.
 
 ## Configuration
 
@@ -301,11 +322,11 @@ Check logs for MCP-specific messages:
 
 - **Resource Access**: File and document retrieval
 - **Progress Reporting**: Long-running operation progress
-- **Sampling**: AI-to-AI communication capabilities
 - **Advanced Search**: Cross-domain search tools
 
 ## References
 
-- [FastMCP v2 Documentation](https://gofastmcp.com/llms.txt)
+- [FastMCP Documentation](https://gofastmcp.com/llms.txt)
+- [Upgrading from FastMCP 3](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-3)
 - [FastAPI Integration Guide](https://gofastmcp.com/deployment/asgi.md)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/)

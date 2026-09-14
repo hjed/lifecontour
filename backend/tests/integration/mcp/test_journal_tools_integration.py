@@ -210,7 +210,7 @@ class TestJournalToolsIntegration:
             for tool in tools:
                 assert tool.description is not None
                 assert len(tool.description) > 0
-                assert tool.inputSchema is not None
+                assert tool.input_schema is not None
 
     @pytest.mark.asyncio
     async def test_create_journal_integration_real_db(
