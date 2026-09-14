@@ -13507,10 +13507,89 @@ subsequent read regenerates once; four rapid mutations produce one regeneration;
 invalidates only the current day (or the recorded limitation is asserted); an explicit regenerate still
 forces one. No e2e (Phase 8).
 
-#### Phase 8: E2E — Summary on the Dashboard
+#### Phase 8: E2E — Summary on the Dashboard 🟡 IN PROGRESS (as 8a–8b)
 
 **Prerequisites:** Phases 1–7 and ITER18-004 Phase 17.
-**Estimated diff:** ~140 production → **~560 tracked** (×4)
+**Estimated diff:** ~140 production → **~560 tracked** (×4) · **Re-estimated at planning: ~970 tracked across
+two stacked PRs**, because the phase inherits a production gap rather than only tests (see below).
+
+**The title undersells the phase, and planning found out why.** Phases 1 and 2 each recorded a question for
+this phase rather than answering it: *which surface triggers generation for a quiet today*, and *how the
+dashboard obtains today's summary at all* — the dashboard reads the stored row and never generates, so after
+an invalidation or a new day it shows **W8** until the user presses Regenerate. Criterion 1 cannot pass on a
+pure read, and the specification's "the summary refreshes on the next load" is not true end to end. The
+second finding was that the "existing override" the last criterion names is a **constructor argument only**
+(`DailySummaryService._gemini_response_override`): nothing in settings or DI reaches it, which is why
+ITER18-004 Phase 17 found the generated state unreachable from a fixture.
+
+| PR | Slice | Estimate |
+|---|---|---|
+| **8a** | A daily-summary-only stub seam (`ENABLE_TEST_DAILY_SUMMARY_STUB`) wired through settings and DI; the MCP eligibility test the MCP criterion lacked; e2e for criteria 1–3 | ~470 |
+| **8b** | The card obtains today's summary once per load and holds a summary already on screen; e2e for criterion 4 and the next-load refresh; this phase's close-out | ~500 |
+
+**Decisions taken at planning (Phase 8):**
+
+1. **The dashboard obtains today's summary on load, through the existing `GET /api/journals/daily-summary/{date}`.**
+   That read *is* the specification's "the next read regenerates it", with its claim, freshness rule and
+   persist guard already in place. Once per page load, and only when the first read fetched after mount has
+   no prose. This **revises ITER18-004 Phase 4's "regeneration is never automatic"**: the card still never
+   *forces* a regeneration, and lazy invalidation still keeps four ticks at one AI call. User decision.
+2. **A summary already on screen is held for the visit.** A tick marks today `PENDING` (Phase 7b), and the
+   tick's own dashboard refetch would otherwise swap **W7** for **W8** in place — the thing criterion 4 forbids.
+3. **The stub is a daily-summary-only flag, not a fake `GEMINI_API_KEY`**, which would also switch on contact
+   summaries and inbound similarity assessment.
+4. **"AI unconfigured" is served at the HTTP seam in e2e, over real sections.** One stack cannot be both
+   configured and unconfigured; the unconfigured wire answer (`data: null`, an unavailable section) is what the
+   test serves, while the backend branch itself is pinned by unit and integration tests.
+5. **Today's summary row is one row shared by the whole run** (one worker, one e2e user), so every test
+   establishes the summary state it asserts rather than inheriting one.
+6. **The journals page's two-journal gate is unchanged** (Phase 1's question): the dashboard is the surface
+   that asks for a quiet today.
+
+##### 8a — The stub seam and the generated path
+
+**Actual: ~28 production, ~150 backend tests, ~235 e2e, ~33 documentation, plus a 35-line
+`fetchDailySummary` extraction → ~510 tracked** (this document's own lines excluded), against ~470.
+
+- **The seam.** `Settings.enable_test_daily_summary_stub` (`ENABLE_TEST_DAILY_SUMMARY_STUB`, `false` by
+  default, `true` in `.env.test` and passed through `docker-compose.yml`; CI already starts the stack from
+  `.env.test`). The `DailySummaryService` provider hands the service `DAILY_SUMMARY_STUB_TEXT` as its
+  response override when the flag is on, and `get_or_generate`'s unconfigured guard now reads *no key **and**
+  no override* — an override without a key used to return `None` before it was ever consulted, which is the
+  second reason the seam was unreachable.
+- **Tests.** Unit: an override generates with no key (the existing no-key-no-override guard is kept).
+  Integration, over the real container: flag on → `POST …/regenerate` returns the stub and the dashboard
+  reads it `generated`; flag off → both summary endpoints answer `data: null` and the section is
+  `unavailable` — the wire shape the e2e unconfigured test serves. **MCP**: `get_daily_summary` on a
+  journal-less today is `generated` with `journal_count: 0`, and an invalidated today is regenerated on read.
+  Review of the plan found the MCP criterion's evidence missing — the existing MCP test patches
+  `get_or_generate` out entirely, and the freshness MCP tests covered staleness only — so these two close it.
+- **E2E** (`home-dashboard.spec.ts`, *the summary, generated end to end*): a quiet day with a task due shows
+  the generated summary with `Journals 1`, not **W9** (criterion 1); a second journal today, then Regenerate,
+  moves the card to `Journals 2` without navigation (criterion 3); and with AI unconfigured, **W9**'s line and
+  an enabled Regenerate sit over a real agenda row, a real birthday and a real task row that still ticks off
+  (criterion 2). Each regeneration is pressed until **its own response** says `generated`, because seeding
+  invalidates the day asynchronously and an invalidation landing mid-generation is refused by the persist
+  guard (Phase 7c); the server's state is polled through the dashboard endpoint, never the daily-summary
+  read, which would regenerate what it observes.
+
+**Mutation checks.** Two, each backed up and restored. The e2e tests passed 13/13 over `--repeat-each 2` on
+both `firefox` and `Mobile Chrome`.
+
+**The full suite found what the isolated runs could not.** Criteria 1 and 3 assert the summary's journal
+count, and both failed in the first full run with `Journals 2` against an expected `1`, having passed 13/13
+on their own. A spec earlier in the run had left a journal dated today behind — `calendar-views.spec.ts`
+creates *Quick Created UI Event* through the UI, and nothing tracks a journal made that way for cleanup.
+By the time the run reached the journal-creation specs there were ten. So the two tests now clear the
+day first with a new `TestDataManager.clearJournalsOn(day)`, which is destructive to the shared account
+in exactly the way `clearFutureJournals()` is, and safe for the same reason (`workers: 1`). *The lesson
+is the one the phase-completion rules already state from the other side: a count read from real data
+depends on suite ordering, so a test that asserts one has to build the day it counts, not assume it.*
+
+| Mutation | Tests failed |
+|---|---|
+| The unconfigured guard ignores the override | 1 |
+| The provider ignores the flag | 3 |
 
 **Acceptance Criteria:**
 
@@ -13848,6 +13927,15 @@ why tasks are full domain-event citizens from the outset (ITER18-003).
 ## Follow-ups and Decisions
 
 Appended as the work proceeds, in the style of iterations 16 and 17.
+
+- **Journals created through the UI in e2e are never cleaned up** (found in ITER18-005 Phase 8a).
+  `calendar-views.spec.ts` (*Quick Created UI Event*), `journal-creation-ui.spec.ts` and
+  `journal-detail.spec.ts` (*Mood Check*, *Jog With Route*, …) create journals by driving the form, so
+  `TestDataManager` never learns their ids; a full run accumulates ten or more journals dated today. Any
+  test that counts a day's journals has to clear the day first (`clearJournalsOn`), and any that lists
+  them has to find its own rows by id. The fix is for those specs to read the created id back from the
+  page or the response and hand it to `testCleanup` — three specs' worth of change, outside a summary
+  phase.
 
 - **`scripts/workspace_env.py` has no port-override mechanism, and a host-service collision is therefore
   unfixable locally** (found in ITER18-004 Phase 3). Every port is derived from a hash of the worktree

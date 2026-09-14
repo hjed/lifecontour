@@ -1163,24 +1163,35 @@ export function useFutureJournals(
   });
 }
 
+/**
+ * Read a day's summary — which, for a summary that is missing, invalidated or
+ * not generated today, is also what generates it (`get_or_generate`).
+ *
+ * Exported because two surfaces ask this one question: the journals view, and
+ * the dashboard card obtaining today's summary on load.
+ */
+export async function fetchDailySummary(
+  date: string
+): Promise<DailySummaryResponse> {
+  const response = await fetch(`/api/journals/daily-summary/${date}`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || 'Failed to load daily summary'
+    );
+  }
+  return response.json();
+}
+
 export function useDailySummary(
   date: string,
   options: { enabled?: boolean } = {}
 ) {
   return useQuery({
     queryKey: [...journalKeys.all, 'daily-summary', date],
-    queryFn: async (): Promise<DailySummaryResponse> => {
-      const response = await fetch(`/api/journals/daily-summary/${date}`, {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        const errorData: JsonApiErrorResponse = await response.json();
-        throw new Error(
-          errorData.errors?.[0]?.detail || 'Failed to load daily summary'
-        );
-      }
-      return response.json();
-    },
+    queryFn: () => fetchDailySummary(date),
     staleTime: 5 * 60 * 1000, // 5 minutes
     enabled: (options.enabled ?? true) && Boolean(date),
   });

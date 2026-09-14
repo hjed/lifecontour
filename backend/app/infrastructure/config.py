@@ -153,6 +153,14 @@ class Settings(BaseSettings):
         "Disabled by default — set ENABLE_TEST_REVIEW_ITEMS=true "
         "only in test/CI environments for E2E review queue testing.",
     )
+    enable_test_daily_summary_stub: bool = Field(
+        default=False,
+        description="Answer daily summary generation with a fixed stub response "
+        "instead of calling Gemini, so the E2E stack can produce a generated "
+        "summary without a model. Daily summaries only — contact summaries and "
+        "similarity assessment still need GEMINI_API_KEY. Disabled by default — "
+        "set ENABLE_TEST_DAILY_SUMMARY_STUB=true only in test/CI environments.",
+    )
 
     # Outdoor-logbook PDF basemap-tile settings (ITER16-004)
     logbook_tile_base_url: str = Field(

@@ -121,7 +121,10 @@ class DailySummaryService:
         required because the request connection has no commit backstop, so an
         uncommitted write would be discarded at teardown (issue #945).
         """
-        if not self._gemini_api_key:
+        # A response override is a configured model too: it is how the e2e
+        # stack (ENABLE_TEST_DAILY_SUMMARY_STUB) and the tests generate without
+        # a key.
+        if not self._gemini_api_key and self._gemini_response_override is None:
             logger.info(
                 "No Gemini API key configured, skipping daily summary generation"
             )

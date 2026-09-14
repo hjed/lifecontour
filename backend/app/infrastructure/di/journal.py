@@ -1,5 +1,7 @@
 """Dependency injection providers for the journal domain."""
 
+import json
+
 from core_shared.models.journals import (
     ActivityTypeIndexCalculator,
     LogbookSummaryCalculator,
@@ -210,6 +212,12 @@ from app.core.tasks.services.task_journal_merge_service import (
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+
+# What the daily summary "model" says when ENABLE_TEST_DAILY_SUMMARY_STUB is on.
+# Fixed rather than configurable, so the e2e suite can assert the sentence.
+DAILY_SUMMARY_STUB_TEXT = (
+    "A stubbed daily summary: the end-to-end stack answers without an AI model."
+)
 
 
 class JournalProvider(Provider):
@@ -880,6 +888,11 @@ class JournalProvider(Provider):
             user_settings_repo=user_settings_repo,
             container=container,
             freshness_checker=freshness_checker,
+            _gemini_response_override=(
+                json.dumps({"summary_text": DAILY_SUMMARY_STUB_TEXT})
+                if settings.enable_test_daily_summary_stub
+                else None
+            ),
         )
 
     @provide(scope=Scope.REQUEST)

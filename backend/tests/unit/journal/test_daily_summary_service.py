@@ -811,6 +811,33 @@ class TestDailySummaryServiceFailure:
         assert result is None
         mock_input_assembler.assemble.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_a_response_override_generates_without_an_api_key(
+        self,
+        mock_input_assembler: AsyncMock,
+        mock_eligibility_checker: MagicMock,
+        mock_prompt_builder: MagicMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        """An override is a configured model: the e2e stack has no key, only it."""
+        service = DailySummaryService(
+            input_assembler=mock_input_assembler,
+            eligibility_checker=mock_eligibility_checker,
+            prompt_builder=mock_prompt_builder,
+            summary_repo=mock_summary_repo,
+            gemini_api_key="",
+            gemini_model="gemini-2.5-pro",
+            _gemini_response_override=json.dumps({"summary_text": "Stubbed."}),
+        )
+
+        result = await service.get_or_generate(
+            "user123", date(2026, 4, 27), transaction=_NO_TXN
+        )
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == "Stubbed."
+
 
 class TestDailySummaryServiceRegenerate:
     """Test explicit regeneration."""

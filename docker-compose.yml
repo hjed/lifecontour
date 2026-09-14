@@ -288,6 +288,7 @@ services:
       DISABLE_AUTH: ${DISABLE_AUTH:-false}
       HOME: /app/.cache
       ENABLE_TEST_REVIEW_ITEMS: ${ENABLE_TEST_REVIEW_ITEMS:-false}
+      ENABLE_TEST_DAILY_SUMMARY_STUB: ${ENABLE_TEST_DAILY_SUMMARY_STUB:-false}
       # Basemap tiles for the outdoor-logbook PDF's GPX maps. Defaults to the
       # live OSM servers; .env.test points it at a dead address so an E2E run
       # that happens to export a journal with a route falls back to a plain

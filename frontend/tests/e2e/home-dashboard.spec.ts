@@ -13,6 +13,7 @@ import type {
   HomeDashboardUpcomingDates,
 } from '../../src/lib/api/home-dashboard';
 import type { ImportantDateTypeEnum } from '../../src/types/contacts';
+import type { DailySummaryResponse } from '../../src/types/journals';
 import { TestDataManager } from './data-management';
 import {
   test,
@@ -328,19 +329,19 @@ test.describe('Home Dashboard — page shell', () => {
  * the Regenerate control that sits outside all three state branches.
  *
  * The dashboard payload is route-mocked here rather than driven from fixtures,
- * and deliberately so: `generated` and `generating` are produced by an AI
- * provider the e2e stack does not configure, so neither can be *created*
- * deterministically — only served. Each test installs its own mock for exactly
- * one state before navigating, which is what keeps every assertion
- * single-outcome; `journals-daily-summary.spec.ts` sets the same precedent for
- * the journals view's copy of this card.
+ * and deliberately so. The e2e stack's model is a stub
+ * (`ENABLE_TEST_DAILY_SUMMARY_STUB`), so `generated` *can* be created — the
+ * *generated end to end* block at the foot of this file does — but today's
+ * summary is one row shared by the whole run, and `generating` is transient by
+ * nature. Each test here installs its own mock for exactly one state before
+ * navigating, which is what keeps every assertion single-outcome;
+ * `journals-daily-summary.spec.ts` sets the same precedent for the journals
+ * view's copy of this card.
  *
- * `unavailable` is the exception, and is mocked for a different reason: with no
- * AI configured it is the stack's *natural* answer, so an unmocked test would
- * pass — until another spec in the run leaves a summary row on the anchor day,
- * at which point it would fail for a reason that has nothing to do with this
- * card. Serving it keeps the state under the test's own control rather than the
- * suite's ordering. Proving the real endpoint reaches this rendering is the
+ * `unavailable` is served for the same reason: whether the anchor day has a
+ * summary row depends on what else the run has done, so an unmocked test would
+ * pass or fail on suite ordering rather than on this card. Serving it keeps the
+ * state under the test's own control. Proving the real endpoint reaches this rendering is the
  * backend's 69 unit and integration tests plus ITER18-005 Phase 8's e2e, which
  * owns the summary end to end.
  */
@@ -1637,9 +1638,10 @@ test.describe('Home Dashboard — the tasks card', () => {
 
     // AC6: the summary is not regenerated underneath the user — it refreshes
     // on the next load, which is the contract ITER18-005 Phase 7 relies on.
-    // Asserted against the *requests* rather than against the card's text: the
-    // e2e account has no AI configured, so the card reads the same either way
-    // and comparing its words would pass however the page behaved.
+    // Asserted against the *requests* rather than against the card's text:
+    // nothing here establishes a summary before the tick, so comparing its words
+    // would pass however the page behaved. The *generated end to end* block
+    // establishes one and asserts the words as well.
     const summaryRequests: string[] = [];
     page.on('request', request => {
       if (request.url().includes('daily-summary')) {
@@ -2203,5 +2205,245 @@ test.describe('Home Dashboard — mobile layout (W3)', () => {
       clientWidth: node.clientWidth,
     }));
     expect(clipped.scrollWidth).toBeLessThanOrEqual(clipped.clientWidth);
+  });
+});
+
+/**
+ * Home Dashboard — the summary, generated end to end (ITER18-005 Phase 8)
+ *
+ * The card's three states from real data rather than served payloads. The e2e
+ * stack's model is a stub: `ENABLE_TEST_DAILY_SUMMARY_STUB` makes
+ * `DailySummaryService` answer with one fixed sentence instead of calling
+ * Gemini, so a *generated* summary is reachable from a fixture.
+ *
+ * **Today's summary is one row shared by the whole run** — one e2e user, one
+ * worker, one row per day — so no test inherits a state; each establishes the
+ * one it asserts. Two consequences shape the helpers below:
+ *
+ * - A generation can be *refused*. Seeding a journal or a task invalidates the
+ *   day asynchronously (outbox → relay → consumer), and an invalidation landing
+ *   while a generation is running makes the persist guard keep the row pending
+ *   (ITER18-005 Phase 7c). So a regeneration is pressed until its own response
+ *   says `generated`, which is idempotent and level-triggered.
+ * - The server's state is read from `GET /api/home-dashboard`, which never
+ *   writes. The daily-summary read would *regenerate* what it was asked about.
+ */
+
+/** The sentence the stub model writes (`DAILY_SUMMARY_STUB_TEXT`). */
+const STUB_SUMMARY_TEXT =
+  'A stubbed daily summary: the end-to-end stack answers without an AI model.';
+
+/** One W10 value, found by its label rather than by its position. */
+function summaryStat(page: Page, label: string) {
+  return page
+    .getByTestId('dashboard-summary-stats')
+    .locator('div')
+    .filter({ has: page.locator('dt', { hasText: new RegExp(`^${label}$`) }) })
+    .locator('dd');
+}
+
+/**
+ * Press Regenerate until a regeneration comes back generated for
+ * `journalCount` journals, and the card shows it.
+ *
+ * The response is what is asserted first, because the card can already be
+ * showing an earlier generated summary: only the regeneration's own answer
+ * says this press produced what the card then draws.
+ */
+async function regenerateUntilGenerated(page: Page, journalCount: number) {
+  const button = page.getByRole('button', { name: /regenerate/i });
+  await expect(async () => {
+    await expect(button).toBeEnabled({ timeout: 5000 });
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        candidate =>
+          candidate.url().includes('/api/journals/daily-summary/') &&
+          candidate.url().endsWith('/regenerate') &&
+          candidate.request().method() === 'POST',
+        { timeout: 15000 }
+      ),
+      button.click({ timeout: 5000 }),
+    ]);
+    const body = (await response.json()) as DailySummaryResponse;
+    expect(body.data?.attributes.status).toBe('generated');
+    expect(body.data?.attributes.journal_count).toBe(journalCount);
+
+    await expect(page.getByTestId('dashboard-summary-text')).toHaveText(
+      STUB_SUMMARY_TEXT,
+      { timeout: 5000 }
+    );
+    await expect(summaryStat(page, 'Journals')).toHaveText(
+      String(journalCount),
+      { timeout: 5000 }
+    );
+  }).toPass({ timeout: 90000 });
+}
+
+/** Today's summary state as the read-only dashboard endpoint reports it. */
+async function servedSummaryState(page: Page) {
+  const response = await page.request.get('/api/home-dashboard');
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as HomeDashboardResponse;
+  return body.data.attributes.summary.data?.state;
+}
+
+/**
+ * What an AI-unconfigured backend says about the summary, over a real page.
+ *
+ * One stack cannot be configured and unconfigured at once, and this one has
+ * the stub on. So the three answers an unconfigured backend gives — an
+ * unavailable summary section, and `data: null` from both the summary read and
+ * the regeneration, which `test_daily_summary_stub_api.py` pins against the
+ * real endpoints — are served here, while the agenda, tasks and upcoming dates
+ * pass through from the real dashboard untouched.
+ */
+async function serveUnconfiguredSummary(page: Page) {
+  await page.route('**/api/home-dashboard', async route => {
+    const response = await route.fetch();
+    const body = (await response.json()) as HomeDashboardResponse;
+    body.data.attributes.summary = unavailableSection;
+    await route.fulfill({ response, json: body });
+  });
+  const unconfigured = { data: null } satisfies DailySummaryResponse;
+  await page.route('**/api/journals/daily-summary/**', route =>
+    route.fulfill({ json: unconfigured })
+  );
+}
+
+test.describe('Home Dashboard — the summary, generated end to end', () => {
+  test('shows a generated summary on a quiet day with a task due, not the unavailable line (W7, W10)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    // The day's journal count is part of what is asserted, and a full run holds
+    // journals dated today that specs creating them through the UI leave behind.
+    await dataManager.clearJournalsOn(day);
+
+    // One journal today — the task's creating journal — and the task due two
+    // days out: below the two journals any other day needs for a summary.
+    await createDashboardTask(
+      dataManager,
+      day,
+      'Summary quiet day confirm the booking'
+    );
+
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+
+    await regenerateUntilGenerated(page, 1);
+    await expect(page.getByTestId('dashboard-summary-unavailable')).toHaveCount(
+      0
+    );
+    await expect(page.getByTestId('dashboard-summary-stats')).toBeVisible();
+  });
+
+  test('updates the card when a regeneration is requested (W6)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    // The day's journal count is part of what is asserted, and a full run holds
+    // journals dated today that specs creating them through the UI leave behind.
+    await dataManager.clearJournalsOn(day);
+
+    await createDashboardTask(
+      dataManager,
+      day,
+      'Summary regenerate water the garden'
+    );
+
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+    await regenerateUntilGenerated(page, 1);
+    const urlBefore = page.url();
+
+    // A second journal today changes the summary's inputs. Waiting for the
+    // server to report today stale is what makes the invalidation it causes
+    // land *before* the regeneration rather than during it.
+    await dataManager.createJournal({
+      title: 'Summary regenerate second journal today',
+      content: 'Seeded to move the summary card key stats.',
+      event_date_range: {
+        start: atUtc(day, '14:00:00'),
+        end: atUtc(day, '15:00:00'),
+      },
+    });
+    await expect
+      .poll(() => servedSummaryState(page), { timeout: 30000 })
+      .toBe(GENERATING);
+
+    await regenerateUntilGenerated(page, 2);
+    expect(page.url()).toBe(urlBefore);
+  });
+
+  test('with AI unconfigured, says so in one quiet line while the agenda, tasks and dates still work (W9)', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    const [calendar] = await dataManager.createCalendars([
+      { name: 'Summary Unconfigured Cal', color: '#0EA5E9' },
+    ]);
+    const standup = await createAgendaEvent(dataManager, day, {
+      title: 'Summary unconfigured standup',
+      startTime: '09:00:00',
+      endTime: '09:30:00',
+      calendarId: calendar.id,
+    });
+    const { task } = await createDashboardTask(
+      dataManager,
+      day,
+      'Summary unconfigured post the parcel'
+    );
+    const [friend] = await dataManager.createContacts([
+      {
+        firstName: 'Summary',
+        lastName: 'Unconfigured',
+        importantDates: [
+          {
+            date_type: BIRTHDAY,
+            precision: 'day_month',
+            ...monthAndDay(daysAfter(day, 3)),
+          },
+        ],
+      },
+    ]);
+
+    await serveUnconfiguredSummary(page);
+    await page.setViewportSize(DESKTOP);
+    await openDashboard(page);
+
+    await expect(page.getByTestId('dashboard-summary-unavailable')).toHaveText(
+      'No summary today — everything below still works.'
+    );
+    await expect(
+      page.getByRole('button', { name: /regenerate/i })
+    ).toBeEnabled();
+    await expect(page.getByTestId('dashboard-summary-stats')).toHaveCount(0);
+
+    // The three evidence sections, each drawing what was seeded for it.
+    await expect(agendaRow(page, standup)).toBeVisible();
+    await expect(upcomingRowFor(page, friend)).toBeVisible();
+    const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
+    await expect(row).toBeVisible();
+
+    // And working, not merely drawn: the one action the page offers still acts.
+    const write = writeFor(page, task);
+    await row.getByRole('button', { name: 'Mark done' }).click();
+    await expect(row).toHaveCount(0);
+    await write;
+    await expect(
+      page.getByTestId('dashboard-summary-unavailable')
+    ).toBeVisible();
   });
 });
