@@ -19,6 +19,22 @@ import path from 'node:path';
 import tailwindcss from '@tailwindcss/postcss';
 import postcss from 'postcss';
 
+/**
+ * `@tailwindcss/node` registers a module-loader hook on import, which Jest 30.5+
+ * forbids (the hook would attach to Jest's own loader, not the sandbox — see
+ * jestjs/jest#16391). The hook only busts the ESM cache when a plugin is
+ * reloaded, which a one-shot compile never does, so hide both registrars from
+ * Tailwind. It feature-detects them, so this fails loudly if that changes.
+ */
+jest.mock('module', () => {
+  const hookRegistrars = new Set(['register', 'registerHooks']);
+  return Object.fromEntries(
+    Object.entries(jest.requireActual<object>('module')).filter(
+      ([key]) => !hookRegistrars.has(key)
+    )
+  );
+});
+
 const APP_DIR = path.join(__dirname, '..');
 
 /** Radix enter/exit transitions in the `ui/` primitives depend on these. */
