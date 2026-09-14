@@ -13,6 +13,8 @@ from snipeit_sync_service import (
     _local_date,
     _resolve_zone,
     _snipeit_checkin_at,
+    _snipeit_datetime,
+    _snipeit_zone,
     _usage_period_has_ended,
 )
 
@@ -20,7 +22,7 @@ SYDNEY = "Australia/Sydney"
 
 
 class TestResolveZone:
-    """Snipe dates are read in the event's zone, then the user's, then UTC."""
+    """The first candidate naming a loadable zone wins."""
 
     def test_event_zone_wins(self) -> None:
         assert _resolve_zone("Europe/London", SYDNEY) == "Europe/London"
@@ -80,6 +82,44 @@ class TestLocalDate:
             _format_date_for_snipeit(datetime(2025, 3, 7, 13, 0, tzinfo=UTC), SYDNEY)
             == "2025-03-08"
         )
+
+
+class TestSnipeitZone:
+    """Snipe-IT stores naive values in its own zone, taken to be the user's."""
+
+    def test_user_zone_is_used_over_an_event_zone(self) -> None:
+        row = MagicMock(event_timezone="Europe/London", user_timezone=SYDNEY)
+        assert _snipeit_zone(row) == SYDNEY
+
+    def test_invalid_user_zone_is_utc(self) -> None:
+        row = MagicMock(event_timezone="Europe/London", user_timezone="Not/AZone")
+        assert _snipeit_zone(row) is None
+
+
+class TestSnipeitDatetime:
+    """Datetimes are sent as Snipe-IT's naive ``Y-m-d H:i:s`` wall-clock time."""
+
+    def test_sydney_daylight_time(self) -> None:
+        instant = datetime(2024, 3, 28, 22, 44, 35, tzinfo=UTC)
+        assert _snipeit_datetime(instant, SYDNEY) == "2024-03-29 09:44:35"
+
+    def test_sydney_standard_time(self) -> None:
+        instant = datetime(2025, 6, 7, 21, 30, tzinfo=UTC)
+        assert _snipeit_datetime(instant, SYDNEY) == "2025-06-08 07:30:00"
+
+    def test_naive_datetime_is_treated_as_utc(self) -> None:
+        naive = datetime(2024, 3, 28, 22, 44, 35)
+        assert _snipeit_datetime(naive, SYDNEY) == "2024-03-29 09:44:35"
+
+    def test_no_zone_uses_utc(self) -> None:
+        instant = datetime(2024, 3, 28, 22, 44, 35, tzinfo=UTC)
+        assert _snipeit_datetime(instant, None) == "2024-03-28 22:44:35"
+
+    def test_plain_date_is_local_midnight(self) -> None:
+        assert _snipeit_datetime(date(2024, 3, 29), SYDNEY) == "2024-03-29 00:00:00"
+
+    def test_none_is_none(self) -> None:
+        assert _snipeit_datetime(None, SYDNEY) is None
 
 
 class TestSnipeitCheckinAt:
@@ -797,7 +837,7 @@ class TestPushCheckoutCreate:
         payload = call_args.kwargs["payload"]
         assert payload["assigned_user"] == "5"
         assert payload["checkout_to_type"] == "user"
-        assert payload["checkout_at"] == "2099-06-01"
+        assert payload["checkout_at"] == "2099-06-01 08:00:00"
         assert payload["expected_checkin"] == "2099-06-02"
         assert payload["note"] == "Rope usage at crag"
 
@@ -982,7 +1022,7 @@ class TestPushCheckoutCreate:
 
         call_args = api_client.checkout_asset.call_args
         payload = call_args.kwargs["payload"]
-        assert payload["checkout_at"] == "2099-07-10"
+        assert payload["checkout_at"] == "2099-07-10 00:00:00"
         assert payload["expected_checkin"] == "2099-07-12"
 
     @pytest.mark.asyncio

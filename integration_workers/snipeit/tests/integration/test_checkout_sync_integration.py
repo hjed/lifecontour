@@ -126,7 +126,7 @@ class TestCheckoutSyncIntegration:
         request_body = json.loads(checkout_request.content)
         assert request_body["assigned_user"] == "5"
         assert request_body["checkout_to_type"] == "user"
-        assert request_body["checkout_at"] == "2099-06-01"
+        assert request_body["checkout_at"] == "2099-06-01 08:00:00"
         assert request_body["expected_checkin"] == "2099-06-02"
         assert request_body["note"] == "Rope usage at crag"
 
@@ -340,5 +340,5 @@ class TestCheckoutSyncIntegration:
             r for r in mock_transport.requests if r.url.path.endswith("/checkout")
         )
         request_body = json.loads(checkout_request.content)
-        assert request_body["checkout_at"] == "2099-07-10"
+        assert request_body["checkout_at"] == "2099-07-10 00:00:00"
         assert request_body["expected_checkin"] == "2099-07-12"
