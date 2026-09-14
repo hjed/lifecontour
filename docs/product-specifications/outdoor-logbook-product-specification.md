@@ -314,6 +314,13 @@ This type does not extend OUTDOOR_ACTIVITY or FITNESS. It uses base journal fiel
 - repairing gear
 - routine inspection
 - routine maintenance
+- upgrading gear
+- calibration
+- software support
+- hardware support
+- configuration change
+
+The last five, with repairing gear, routine inspection and routine maintenance, correspond one-to-one to Snipe-IT's maintenance kinds (see the [Snipe-IT integration specification](snipe-it-integration-product-specification.md)); retiring gear has no Snipe-IT equivalent.
 
 Users should be able to select or create a gear item inline when creating or editing a GEAR_MAINTENANCE journal.
 

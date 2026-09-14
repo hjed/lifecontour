@@ -822,9 +822,23 @@ class SnipeItSyncService:
                 # Enrich journal_data with gear_maintenance_data and
                 # journal_types for the outbox event processor
                 journal_data = dict(transformed.journal_data)
-                journal_data["gear_maintenance_data"] = (
-                    transformed.gear_maintenance_data
-                )
+                gear_maintenance_data = dict(transformed.gear_maintenance_data)
+                if existing_journal_id is not None:
+                    type_result = await session.execute(
+                        text("""
+                            SELECT maintenance_type
+                            FROM journal_gear_maintenance_data
+                            WHERE journal_id = :journal_id
+                        """),
+                        {"journal_id": existing_journal_id},
+                    )
+                    gear_maintenance_data["maintenance_type"] = (
+                        SnipeItMaintenanceTransformer.resolve_inbound_maintenance_type(
+                            maintenance.asset_maintenance_type,
+                            existing_type=type_result.scalar_one_or_none(),
+                        )
+                    )
+                journal_data["gear_maintenance_data"] = gear_maintenance_data
                 journal_data["journal_types"] = ["GEAR_MAINTENANCE"]
                 journal_data["version_hash"] = transformed.version_hash
 

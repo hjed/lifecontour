@@ -24,6 +24,7 @@ from core_shared.models.journals import (
     JournalHasAnchoredTasksError,
 )
 from core_shared.models.journals.event_state import EventState
+from core_shared.models.journals.exceptions import GearMaintenanceDataValidationError
 from core_shared.models.journals.gear_maintenance_data import GearMaintenanceData
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
@@ -1494,6 +1495,10 @@ class JournalOutboxEventProcessor:
         Safely skips malformed payloads and logs validation errors rather
         than raising, preventing poison-pill retry loops.
 
+        ``activity_types`` and ``retirement_reason`` are the journal's own: an
+        integration that does not send one (Snipe-IT records neither) leaves the
+        stored value alone. A key that is sent, ``None`` included, replaces it.
+
         Args:
             journal_id: ID of the journal to persist data for.
             journal_data: The ``journal_data`` dict from the outbox event.
@@ -1513,6 +1518,15 @@ class JournalOutboxEventProcessor:
             )
             return
 
+        repo = SqlGearMaintenanceDataRepository(self.connection)
+        stored = await repo.find_by_journal_id(journal_id)
+        activity_types = raw_maintenance.get(
+            "activity_types", stored.activity_types if stored else None
+        )
+        retirement_reason = raw_maintenance.get(
+            "retirement_reason", stored.retirement_reason if stored else None
+        )
+
         try:
             from uuid import UUID as _UUID
 
@@ -1520,10 +1534,10 @@ class JournalOutboxEventProcessor:
                 journal_id=journal_id,
                 gear_item_id=_UUID(str(gear_item_id)),
                 maintenance_type=maintenance_type,
-                activity_types=raw_maintenance.get("activity_types"),
-                retirement_reason=raw_maintenance.get("retirement_reason"),
+                activity_types=activity_types,
+                retirement_reason=retirement_reason,
             )
-        except ValueError, ValidationError:
+        except ValueError, ValidationError, GearMaintenanceDataValidationError:
             logger.warning(
                 "Failed to validate gear_maintenance_data, skipping",
                 journal_id=journal_id,
