@@ -21,7 +21,7 @@
  * produced by a filter change — therefore keeps the request that started before
  * the mutation. When it settles, React Query stores its pre-mutation rows,
  * clears `isInvalidated` and stamps a fresh `dataUpdatedAt`, so the app-wide
- * `staleTime` (5 minutes, see `lib/providers.tsx`) suppresses any further
+ * `staleTime` (5 minutes, see `lib/query-client-options.ts`) suppresses any further
  * refetch and the user keeps seeing data they just changed. Inactive queries
  * have the same shape: invalidated but not refetched, then un-invalidated by
  * the late response.

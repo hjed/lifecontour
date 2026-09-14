@@ -1060,6 +1060,63 @@ describe('HomePage — the dashboard shell', () => {
       expect(String(write[0])).toBe('/api/tasks/31');
     });
 
+    /**
+     * ITER18-005 Phase 8: a tick invalidates today's summary on the server, so
+     * the tick's own refetch reports it generating. The summary on screen stays
+     * where it is — it refreshes on the next load — and nothing reads it.
+     */
+    it('leaves the summary in place when a tick’s refetch reports it generating', async () => {
+      let current = populatedDashboard();
+      routeFetch(() =>
+        Promise.resolve({ ok: true, json: async () => current } as Response)
+      );
+      const user = userOnTheAnchorDay();
+
+      await renderHomePage();
+      await screen.findByTestId('dashboard-summary-text');
+
+      const afterTheTick = populatedDashboard();
+      afterTheTick.data.attributes.summary = {
+        status: DashboardSectionStatus.READY,
+        data: {
+          state: DashboardSummaryState.GENERATING,
+          summary_text: null,
+          journal_count: 3,
+          event_count: 2,
+          contact_count: 4,
+          mood_average: 7.5,
+        },
+      };
+      afterTheTick.data.attributes.tasks = {
+        status: DashboardSectionStatus.READY,
+        data: EMPTY_TASKS,
+      };
+      current = afterTheTick;
+      await user.click(await screen.findByTestId('dashboard-task-action-done'));
+
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.filter(
+            ([input]) => String(input) === DASHBOARD_URL
+          )
+        ).toHaveLength(2)
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByTestId('dashboard-task-31')
+        ).not.toBeInTheDocument()
+      );
+      expect(screen.getByTestId('dashboard-summary-text')).toHaveTextContent(
+        'A quiet Wednesday.'
+      );
+      expect(screen.queryByText('Generating...')).not.toBeInTheDocument();
+      expect(
+        mockFetch.mock.calls.filter(([input]) =>
+          String(input).includes('/daily-summary/')
+        )
+      ).toEqual([]);
+    });
+
     it('writes once, and only the summary, when Regenerate is pressed', async () => {
       respondWithPopulatedDashboard();
       // The control is deliberately disabled on a stale anchor; the day the

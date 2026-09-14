@@ -26,17 +26,19 @@ and the zone — and passes ``stale``; a stale generated row takes the same fold
 as ``PENDING``, *generating* with the prose withheld, because to the reader it
 is the same condition: a summary exists, and it is not yet today's.
 
-**But nothing on the dashboard moves a summary out of that state.**
-``SearchIndexerConsumer`` invalidates it and midnight makes it stale; only
-``DailySummaryService`` generates, and it is reached from the daily-summary
-endpoints alone — which this service deliberately does not call, because a page
-load must not write. So *generating* overstates what is happening until the user
-asks for a regeneration or opens the journals view, or an MCP client reads the
-day. It is still the least wrong of the three states — the other two say "no
-summary today" over a summary that exists, or show prose the day has outgrown —
-and the card's Regenerate control sits outside all three, so the reader always
-has the action that resolves it. Closing the gap end to end is ITER18-005
-Phase 8's.
+**Nothing on this path moves a summary out of that state.**
+``SummaryInvalidationConsumer`` invalidates it and midnight makes it stale;
+only ``DailySummaryService`` generates, and it is reached from the daily-summary
+endpoints and MCP alone — which this service deliberately does not call, because
+a page load must not hold an AI call open. The dashboard's client closes the gap
+instead (ITER18-005 Phase 8): when the first read of a page load reports
+*generating* or *unavailable*, the summary card reads today's summary through
+``GET /api/journals/daily-summary/{date}`` — which regenerates it — and reads
+this section back. So *generating* here usually means what it says for as long
+as that read takes — not always: a read that loses the generation claim to a
+concurrent request answers before that request finishes, and the card then shows
+*generating* until the next load. The card's Regenerate control stays the
+reader's way to force one.
 """
 
 from __future__ import annotations

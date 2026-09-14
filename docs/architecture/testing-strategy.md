@@ -305,7 +305,7 @@ model — so a *generated* summary can be created from fixtures. The flag reache
 contact summaries and similarity assessment still see an unconfigured AI. It defaults to `false` and
 must never be set outside test/CI.
 
-Two rules follow from a summary being **one row per user per day**, shared by the whole run:
+Three rules follow from a summary being **one row per user per day**, shared by the whole run:
 
 - **Establish the summary state a test asserts; never inherit it.** Press Regenerate until the
   regeneration's own response says `generated` — a journal or task seeded moments before invalidates

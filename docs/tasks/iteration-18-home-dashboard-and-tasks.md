@@ -1,7 +1,8 @@
 # Iteration 18: Home Dashboard and Tasks
 
-**Status:** 🟡 IN PROGRESS — fully broken down: 5 iterations, **63 phases**, one PR each, with per-phase
-acceptance criteria and diff estimates calibrated against iteration 17's recorded actuals.
+**Status:** ✅ COMPLETE — ITER18-005 Phase 8 was the last phase in this document. Fully broken down: 5
+iterations, **63 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated
+against iteration 17's recorded actuals.
 **ITER18-001 Phases 1–21 complete** (task tables + domain entity; task repository; journal-date
 resolution and the future-dated rule; the creation service and its core invariants; create over REST and
 MCP; the status lifecycle over service, REST and MCP; retargeting semantics in the service — the model's
@@ -136,6 +137,12 @@ down **both** `today` and `now`: the first pins the day and stops a second `user
 second pins the instant the importance signals count back from, and each has its own mutation. DI cost
 nothing — every container registering `JournalProvider` already registers `ContactProvider`. With this,
 open decision 4 (the prompt budget) is closed for all four input groups.
+**ITER18-005 Phase 8 complete: the summary is reachable end to end, and the dashboard asks for it.** The
+e2e stack answers daily summaries with a stub (`ENABLE_TEST_DAILY_SUMMARY_STUB`), so a generated summary is
+created from fixtures rather than served; and the dashboard's summary card now reads today's summary once per
+load when its first read has no prose — the read that regenerates a missing, invalidated or stale one — while
+holding a summary it has already drawn, so ticking a task never changes it in place. That makes the
+specification's "the summary refreshes on the next load" true end to end.
 **Dependencies:** Iteration 4 (journal core, contact relationships, event date ranges), Iteration 7
 (daily summaries, calendar sync, day-grouped journal browsing, journal merge), Iteration 12 (unified
 event-driven field history), Iteration 5 (Redis Streams event bus, outbox relay, stream consumers),
@@ -9055,7 +9062,7 @@ section without the inline done action — the specification names that as an in
    reason to fetch a second page of a small list. See *Decisions taken (Phase 6)*. *(Pointer corrected in
    Phase 4: it read "settled in Phase 4", which builds the summary card and has no tomorrow to expand.)*
 
-#### Phase 1: Dashboard Endpoint Skeleton and Section Envelope
+#### Phase 1: Dashboard Endpoint Skeleton and Section Envelope ✅ COMPLETE
 
 **Prerequisites:** none.
 **Estimated diff:** ~130 production → **~520 tracked** (×4)
@@ -9582,7 +9589,8 @@ summary reachable end to end; the criterion stays `[ ]` and its checklist is une
 
 **Decisions taken (Phase 4):**
 
-- **The card does not fire regeneration for itself, and that is how Phase 2's gap is closed.** Phase 2
+- **The card does not fire regeneration for itself, and that is how Phase 2's gap is closed.** *(Revised
+  in ITER18-005 Phase 8: the card now reads today's summary once on load, and still never forces one.)* Phase 2
   recorded that nothing moves a journal daily summary out of `PENDING`, folded `PENDING` into
   *generating*, and named the resolution "Phase 4's to close" — guessing that the card would fire the
   regenerate endpoint on seeing `generating`, "which keeps the write user-initiated in the sense that
@@ -10461,7 +10469,7 @@ boundary it owns: both ends inclusive, the days either side excluded, and a wind
   multiplier to *executable* lines and count explanatory prose separately, rather than multiplying a
   production figure that already contains the explanation.
 
-#### Phase 10: Contact Importance Signals — Shared Read
+#### Phase 10: Contact Importance Signals — Shared Read ✅ COMPLETE
 
 **Prerequisites:** none.
 **Estimated diff:** ~120 production → **~480 tracked** (×4) — isolated precisely because it rewrites an
@@ -12056,11 +12064,14 @@ journals view consumes the same summary, so it stands alone.
       describes it as done.
 - [x] Forward-looking material (upcoming dates, next-week tasks) is **current-day only**; a past-day
       summary describes that day. — Two guards apiece across Phases 3–6, each with its own mutation.
-- [ ] **Eligibility:** today is **always** eligible regardless of journal count; past days keep the
-      existing two-journal threshold and continue to produce no summary below it.
-- [ ] **Freshness:** today's summary is regenerated on read if it was not generated **today in the user's
+- [x] **Eligibility:** today is **always** eligible regardless of journal count; past days keep the
+      existing two-journal threshold and continue to produce no summary below it. — Phase 1; end to end in
+      Phase 8 (a quiet day with a task due shows a generated summary, and MCP answers a journal-less today
+      `generated`).
+- [x] **Freshness:** today's summary is regenerated on read if it was not generated **today in the user's
       timezone**. Otherwise caching is unchanged — a summary generated today is served from cache, and
-      concurrent generation is still prevented.
+      concurrent generation is still prevented. — Phases 2 and 7c; the dashboard reaches that read on load
+      since Phase 8b.
 - [x] **Invalidation follows inputs, not only journals:** a day's summary is invalidated by changes to that
       day's journals (as today), by changes to the tasks feeding it (created, retargeted into or out of
       the window, status changed, contact links changed), and — for the current day — by changes to
@@ -12076,13 +12087,15 @@ journals view consumes the same summary, so it stands alone.
       its value is in connecting them. The prompt-level instructions are assertable and are asserted
       (ITER18-005 Phase 3); the model's adherence to them is not mechanically testable and is not claimed
       to be.
-- [ ] **MCP** `get_daily_summary` picks up the extended inputs, the always-eligible-today rule and the
+- [x] **MCP** `get_daily_summary` picks up the extended inputs, the always-eligible-today rule and the
       staleness refresh automatically, because they are properties of the summary rather than of the
       requesting surface. No new tool is required; the docstring is updated where behaviour it describes
-      changes.
-- [ ] Wireframe-bearing only through the dashboard's summary card: the extension must not change the read
+      changes. — Docstrings in Phases 1–2; staleness pinned over MCP in Phase 2, eligibility and
+      invalidate-then-read in Phase 8a, against the real container.
+- [x] Wireframe-bearing only through the dashboard's summary card: the extension must not change the read
       contract that **W7**, **W9** and **W10** consume, and the always-eligible rule is what keeps
-      **W7** from falling back to **W9** on a quiet day.
+      **W7** from falling back to **W9** on a quiet day. — No field of the summary section changed in
+      this iteration; Phase 8's e2e draws **W7** and **W10** on a one-journal day.
 
 **Required Test Coverage:**
 
@@ -12182,7 +12195,8 @@ Phase 8, recorded rather than acted on here, and one documentation change:
   `DailySummaryView` only when a day group has two or more journals (`DayGroupedJournalList.tsx`), and the
   dashboard's summary section is a pure read of the stored row by design. The always-eligible rule is
   therefore a backend fact until a surface asks for today's summary on a quiet day — which surface, and
-  whether the journals-page gate should relax for today, is Phase 8's to settle. The existing e2e
+  whether the journals-page gate should relax for today, is Phase 8's to settle. *Settled in Phase 8: the dashboard is the surface that asks for a quiet today,
+  and the journals-page gate is unchanged.* The existing e2e
   `journals-daily-summary.spec.ts` ("Only one journal today" shows no summary) asserts that frontend gate
   and is unaffected.
 - The `disabled` row in `docs/architecture/api-design.md`'s summary-section table now reads "a past or
@@ -12256,7 +12270,8 @@ last-writer-wins guards are untouched. The endpoint and tool docstrings say what
   invalidation semantics, which are Phase 7's subject, and it is added there as an acceptance criterion
   rather than half-closed here with an `updated_at` comparison the test fixture could not exercise
   (`NOW()` is one value for a whole test transaction).
-- **What this does *not* close, recorded for Phase 8.** Nothing on the dashboard moves a summary out of
+- **What this does *not* close, recorded for Phase 8** *(closed in Phase 8b: the summary card reads today's
+  summary once per load)*. Nothing on the dashboard moves a summary out of
   *generating* — not for `PENDING`, and now not for a stale row either — until the user presses
   Regenerate, opens the journals view, or an MCP client reads the day. Every morning the post-sign-in page
   will therefore show **W8** with a Regenerate button rather than yesterday's prose, which is the honest
@@ -13507,7 +13522,7 @@ subsequent read regenerates once; four rapid mutations produce one regeneration;
 invalidates only the current day (or the recorded limitation is asserted); an explicit regenerate still
 forces one. No e2e (Phase 8).
 
-#### Phase 8: E2E — Summary on the Dashboard 🟡 IN PROGRESS (as 8a–8b)
+#### Phase 8: E2E — Summary on the Dashboard ✅ COMPLETE (as 8a–8b)
 
 **Prerequisites:** Phases 1–7 and ITER18-004 Phase 17.
 **Estimated diff:** ~140 production → **~560 tracked** (×4) · **Re-estimated at planning: ~970 tracked across
@@ -13531,9 +13546,12 @@ ITER18-004 Phase 17 found the generated state unreachable from a fixture.
 
 1. **The dashboard obtains today's summary on load, through the existing `GET /api/journals/daily-summary/{date}`.**
    That read *is* the specification's "the next read regenerates it", with its claim, freshness rule and
-   persist guard already in place. Once per page load, and only when the first read fetched after mount has
-   no prose. This **revises ITER18-004 Phase 4's "regeneration is never automatic"**: the card still never
-   *forces* a regeneration, and lazy invalidation still keeps four ticks at one AI call. User decision.
+   persist guard already in place. Once per mount of the card and anchor day, and only when the first settled
+   read has no prose. This **revises ITER18-004 Phase 4's "regeneration is never automatic"**: the card still
+   never *forces* a regeneration, and lazy invalidation still keeps four ticks at one AI call. User decision.
+   It also knowingly departs from the specification's §*Loading, freshness, and errors* line "nothing on it
+   mutates data except the inline task actions": the read writes a *derived* summary row, never a record the
+   user made, and the same specification's "the summary refreshes on the next load" requires it.
 2. **A summary already on screen is held for the visit.** A tick marks today `PENDING` (Phase 7b), and the
    tick's own dashboard refetch would otherwise swap **W7** for **W8** in place — the thing criterion 4 forbids.
 3. **The stub is a daily-summary-only flag, not a fake `GEMINI_API_KEY`**, which would also switch on contact
@@ -13579,8 +13597,8 @@ ITER18-004 Phase 17 found the generated state unreachable from a fixture.
   guard (Phase 7c); the server's state is polled through the dashboard endpoint, never the daily-summary
   read, which would regenerate what it observes.
 
-**Mutation checks.** Two, each backed up and restored. The e2e tests passed 13/13 over `--repeat-each 2` on
-both `firefox` and `Mobile Chrome`.
+**Mutation checks.** Two, each backed up and restored. The three e2e tests passed over `--repeat-each 2` on
+both `firefox` and `Mobile Chrome` (12 runs, plus the authentication setup project: 13/13).
 
 **The full suite found what the isolated runs could not.** Criteria 1 and 3 assert the summary's journal
 count, and both failed in the first full run with `Journals 2` against an expected `1`, having passed 13/13
@@ -13597,17 +13615,119 @@ depends on suite ordering, so a test that asserts one has to build the day it co
 | The unconfigured guard ignores the override | 1 |
 | The provider ignores the flag | 3 |
 
+##### 8b — The card obtains today's summary on load, and holds what it drew
+
+**Actual: ~324 production, ~590 unit, ~180 e2e, ~22 documentation → ~1,115 tracked** (this document's
+own lines excluded), against ~500 — **2.2×, and recorded rather than split**, because splitting the hold
+from the read would ship a dashboard that reads today's summary on load but swaps its prose on a tick,
+which delivery rule 9 forbids. Two things drove it, and neither is new. *Production is mostly
+explanation*: of the 324, the hook's module docstring and the card's rewritten one are over a hundred
+lines, the defaults extraction is 28 moved lines, and the backend and `tasks.ts` changes are comments
+only — the executable change is closer to 120. *Tests are a matrix, not a rendering*: the hook has four
+load-bearing properties and each needed a test that fails without it, run against a client built from
+production defaults rather than the shared harness — which is ITER18-004 Phase 4's calibration lesson
+(budget a phase whose criteria enumerate states at ×6) arriving again.
+
+- **Obtaining on load.** `useObtainTodaySummaryOnLoad` (`frontend/src/lib/api/today-summary-on-load.ts`)
+  decides once per mount of the card and anchor day, on the first *settled* read of the dashboard — no fetch in flight, so a
+  stale cached payload shown on client navigation cannot decide for the refetch that replaces it — whether
+  today has prose. If it does not, it reads `GET /api/journals/daily-summary/{date}` (the extracted
+  `fetchDailySummary`), which is the read that regenerates a missing, invalidated or stale summary, and then
+  reads the dashboard back when that answer carries a row. It lives in a module of its own because `journals.ts` builds a module-level
+  constant from `homeDashboardKeys`, so importing it from `home-dashboard.ts` would have been a cycle that
+  breaks at load.
+- **A query that cannot refetch itself, rather than a mutation.** The plan allowed either; a query won
+  because `enabled` starts the read with no effect to fire it. What makes it safe is its options, not its
+  kind: no retry, no refetch on mount, focus or reconnect, `staleTime: Infinity`, `gcTime: 0`, and a key
+  outside both `homeDashboardKeys.all` and `journalKeys.all`. The app's defaults — three retries and a
+  refetch on focus — would each have regenerated the summary under a reader, which is why the hook's tests
+  run against a client built from the production defaults (now `QUERY_CLIENT_DEFAULT_OPTIONS`) rather than
+  the shared harness, whose `retry: false` would have hidden both.
+- **The read-back yields to a *task* write in flight, and only to one** (`useIsMutating` over
+  `isTaskWrite`, the predicate `isLastTaskWrite` already counted with, now exported): a tick refetches the
+  dashboard when it settles, and a read-back landing first would put back the row it removed optimistically.
+  The read-back runs once such writes have settled, and **settled means the read-back itself finished**,
+  however it finished — an answer with no row settles at once, because nothing changed.
+- **`isObtaining` is derived, not stored**, so Regenerate is busy (`aria-busy`, disabled, spinning) from
+  the first render that holds the payload — which is also what gives the e2e a level to wait on.
+- **While obtaining, the card says *generating*.** A new day's first load has no row, which the section
+  reports as unavailable; drawing **W9**'s "No summary today" beside a busy Regenerate would say the opposite
+  of what is happening.
+- **The hold.** `DashboardSummaryCard` keeps the last generated summary it drew for the payload's anchor
+  day — prose, **W10** and no badge — when a later read withholds it, takes a newer generated read, and
+  lets go when the anchor day moves on. That is the half of criterion 4 the server cannot provide: a tick
+  invalidates today (Phase 7b), so the tick's own refetch *does* report today generating.
+- **No toast and no live region** for the automatic read: the post-sign-in page must not announce AI prose
+  unbidden, and the hold removes an in-place content swap a screen reader would otherwise meet.
+
+**Tests.** Unit (`home-dashboard.test.ts`, 14): one read when the first read is generating, one when it
+has no summary, none when it has prose, none for an ended anchor, none when a later read of the day reports
+generating, none on refocus, a stale cached read defers to the refetch, busy from the first render with
+data, settles after the read-back, no retry and no throw on failure, no read-back for an answer with no
+row, settles when the read-back fails, holds the read-back for a task write and reads back once it settles,
+and does not hold it for a write that is not a task's. Card (`DashboardSummaryCard.test.tsx`, 9): holds
+prose, stats and no badge over *generating* and over *unavailable*, draws a newer summary, lets go on a new
+anchor day, busy while reading, *generating* rather than **W9** while obtaining a missing summary, draws what
+it obtained and frees Regenerate, reads and never posts, announces nothing; one existing test now waits for
+the read to settle before asserting Regenerate enabled. Page (`page.test.tsx`, 1): a tick whose refetch
+reports generating leaves the summary in place and reads no summary. **E2E** (`home-dashboard.spec.ts`):
+*leaves the summary in place while tasks are ticked off, and refreshes it on the next load* — two ticks,
+the server polled until it reports today stale, the page's second read observed, the prose and **W10**
+still drawn with no summary request, then a reload whose one `GET` regenerates it (criterion 4 and the
+specification's lazy refresh); and the mocked **W8** test now asserts *one read and no regeneration*
+against the network. Mocked documents default to a generated summary so unrelated tests never trigger the
+read, and `openDashboard` waits for Regenerate's `aria-busy` to clear.
+
+**Review found four defects in the first cut of 8b, and all four were real.** A dashboard read-back that
+failed left Regenerate busy for the rest of the visit, because settling waited for a successful read; any
+mutation at all — not only a task write — held the read-back back, and nothing re-ran it once that mutation
+settled; the settle signal counted optimistic cache writes as reads; and the first load of a day drew **W9**
+for the whole generation. Each has a test that failed before its fix. Review also found the tick e2e could
+observe the *first* tick's read and pass with the hold removed, so each tick's own response is now awaited
+and the second one's body asserted stale; and criterion 1 is now proven through the load path rather than
+through Regenerate, since the dashboard obtains the summary itself.
+
+**Mutation checks.** Nine, against the reviewed code, in an isolated copy, each reverted.
+
+| Mutation | Tests failed |
+|---|---|
+| The hold is removed | 3 |
+| The badge is not suppressed while holding | 1 |
+| *Generating* is not shown while obtaining | 1 |
+| The read takes the app's query defaults | 2 |
+| The read fires on a read that already has prose | 2 |
+| The read-back ignores a task write in flight | 1 |
+| The read-back waits for every mutation, not only task writes | 1 |
+| The read-back settles only when it succeeds | 1 |
+| An answer with no row waits for a read-back | 1 |
+
+**E2E.** The whole of `home-dashboard.spec.ts` passed on both projects (85/85, including the auth setup),
+and the summary blocks — the *generated end to end* tests and the **W8** tests — passed 32 of 33 over
+`--repeat-each 2`. The one failure was a teardown race in 8a's AI-unconfigured test rather than a product
+defect: its pass-through dashboard route was still handling the tick's refetch when the browser context
+closed (`Response has been disposed`). It is fixed on the 8a branch, where the test now waits for that read,
+asserts **W9** survives it, and unroutes with `ignoreErrors`.
+
 **Acceptance Criteria:**
 
-- [ ] Deterministic specs: on a day with fewer than two journals but tasks due, the dashboard shows a
+- [x] Deterministic specs: on a day with fewer than two journals but tasks due, the dashboard shows a
       generated summary rather than the unavailable state (the always-eligible rule — **W7**, not **W9**).
-- [ ] With AI unconfigured the unavailable line renders (**W9**), the Regenerate control is still present,
-      and the agenda, tasks and dates sections still work.
-- [ ] Requesting a regeneration updates the card.
-- [ ] Ticking a task off does not change the summary text in place — the "never regenerated underneath the
-      user" contract, observable end to end.
-- [ ] Fixtures are per-test and deterministic, built with the UTC-boundary caveat from ITER18-001 Phase 22;
-      the AI response is stubbed through the existing override rather than calling a real model.
+      — *shows a generated summary on a quiet day with a task due when the dashboard loads*: a day cleared to
+      one journal, and a load's own read comes back generated for it (8a's stub, 8b's read on load).
+- [x] With AI unconfigured the unavailable line renders (**W9**), the Regenerate control is still present,
+      and the agenda, tasks and dates sections still work. — 8a: the unconfigured wire answer served over a
+      real agenda row, birthday and task that still ticks off; the backend branch itself pinned by the
+      flag-off integration test.
+- [x] Requesting a regeneration updates the card. — 8a: a second journal today, then Regenerate, moves
+      **W10** from one journal to two without navigation.
+- [x] Ticking a task off does not change the summary text in place — the "never regenerated underneath the
+      user" contract, observable end to end. — 8b: two ticks with the server reporting today stale, the
+      page's read observed, prose and **W10** unchanged, no summary request; the next load's one read then
+      regenerates it.
+- [x] Fixtures are per-test and deterministic, built with the UTC-boundary caveat from ITER18-001 Phase 22;
+      the AI response is stubbed through the existing override rather than calling a real model. — Days come
+      from the served anchor stepped in UTC; each test establishes its own summary state; the override is
+      reached through `ENABLE_TEST_DAILY_SUMMARY_STUB`.
 
 **Required Test Coverage:** this phase *is* the e2e coverage for ITER18-005; unit and integration coverage
 landed in Phases 1–7.
