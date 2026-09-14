@@ -33,10 +33,10 @@ def test_builds_all_four_hints() -> None:
         open_world=False,
     )
 
-    assert annotations.readOnlyHint is False
-    assert annotations.destructiveHint is True
-    assert annotations.idempotentHint is True
-    assert annotations.openWorldHint is False
+    assert annotations.read_only_hint is False
+    assert annotations.destructive_hint is True
+    assert annotations.idempotent_hint is True
+    assert annotations.open_world_hint is False
 
 
 def test_rejects_destructive_read_only_tool() -> None:
@@ -66,7 +66,12 @@ def test_every_preset_is_complete(name: str) -> None:
     """A preset with a hint missing would silently under-declare its tools."""
     annotations = ALL_PRESETS[name]
 
-    for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
+    for hint in (
+        "read_only_hint",
+        "destructive_hint",
+        "idempotent_hint",
+        "open_world_hint",
+    ):
         assert getattr(annotations, hint) is not None, f"{name} leaves {hint} unset"
 
 
@@ -74,10 +79,10 @@ def test_presets_are_distinct() -> None:
     """Two presets sharing all four values would be one preset with two names."""
     shapes = {
         (
-            preset.readOnlyHint,
-            preset.destructiveHint,
-            preset.idempotentHint,
-            preset.openWorldHint,
+            preset.read_only_hint,
+            preset.destructive_hint,
+            preset.idempotent_hint,
+            preset.open_world_hint,
         )
         for preset in ALL_PRESETS.values()
     }
@@ -88,6 +93,6 @@ def test_presets_are_distinct() -> None:
 def test_external_presets_declare_an_open_world() -> None:
     """The distinguishing feature of the external presets is the one that matters."""
     for name, preset in ALL_PRESETS.items():
-        assert preset.openWorldHint is name.startswith(
+        assert preset.open_world_hint is name.startswith(
             ("READ_ONLY_EXTERNAL", "EXTERNAL")
         )

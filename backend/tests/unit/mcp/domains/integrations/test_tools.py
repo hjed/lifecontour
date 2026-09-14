@@ -86,10 +86,10 @@ class TestIntegrationTools:
 
             tool = next((t for t in tools if t.name == "list_integrations"), None)
             assert tool is not None
-            assert tool.inputSchema is not None
+            assert tool.input_schema is not None
 
             # DI-injected params should not appear as required user inputs
-            required = tool.inputSchema.get("required", [])
+            required = tool.input_schema.get("required", [])
             assert "user_id" not in required
             assert "connection" not in required
             assert "registry_service" not in required
@@ -107,9 +107,9 @@ class TestIntegrationTools:
 
             tool = next((t for t in tools if t.name == "trigger_sync"), None)
             assert tool is not None
-            assert tool.inputSchema is not None
+            assert tool.input_schema is not None
 
-            required = tool.inputSchema.get("required", [])
+            required = tool.input_schema.get("required", [])
             assert "integration_id" in required
             assert "user_id" not in required
             assert "task_queue_service" not in required
@@ -129,9 +129,9 @@ class TestIntegrationTools:
                 (t for t in tools if t.name == "get_strava_athlete_mappings"), None
             )
             assert tool is not None
-            assert tool.inputSchema is not None
+            assert tool.input_schema is not None
 
-            required = tool.inputSchema.get("required", [])
+            required = tool.input_schema.get("required", [])
             assert "user_id" not in required
             assert "mapping_service" not in required
             assert "contact_id" not in required

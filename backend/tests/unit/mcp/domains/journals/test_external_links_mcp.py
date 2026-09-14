@@ -354,7 +354,7 @@ class TestSearchJournalsToolRegistration:
             search_tool = next((t for t in tools if t.name == "search_journals"), None)
             assert search_tool is not None, "search_journals tool not found"
 
-            properties = search_tool.inputSchema.get("properties", {})
+            properties = search_tool.input_schema.get("properties", {})
             assert "integration_source" in properties, (
                 "integration_source parameter not found in search_journals schema"
             )

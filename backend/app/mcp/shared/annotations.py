@@ -4,6 +4,9 @@ The MCP specification gives a tool four hints — ``readOnlyHint``,
 ``destructiveHint``, ``idempotentHint`` and ``openWorldHint`` — that tell a
 client what calling it will do: whether to confirm with the user first,
 whether a retry is safe, and whether the call reaches beyond this system.
+Those are the wire names; the MCP SDK's ``ToolAnnotations`` spells the fields
+in snake_case (``read_only_hint`` and so on) and serializes them under the
+camelCase aliases.
 
 Every one of them is optional in ``ToolAnnotations``, and unset means "assume
 the worst". This module makes them impossible to forget, in two steps:
@@ -76,10 +79,10 @@ def mcp_tool_annotations(
         )
 
     return ToolAnnotations(
-        readOnlyHint=read_only,
-        destructiveHint=destructive,
-        idempotentHint=idempotent,
-        openWorldHint=open_world,
+        read_only_hint=read_only,
+        destructive_hint=destructive,
+        idempotent_hint=idempotent,
+        open_world_hint=open_world,
     )
 
 

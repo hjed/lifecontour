@@ -14,6 +14,10 @@ from fastmcp.server.auth.oidc_proxy import OIDCConfiguration
 
 from app.infrastructure.config import Settings
 from app.main import create_app
+from tests.integration.mcp.http_helpers import (
+    sessionless_mcp_headers,
+    sessionless_mcp_request,
+)
 
 # What the upstream IdP advertises. Stubbed because OIDC discovery happens
 # synchronously while the app is being built, and these tests must not depend on
@@ -255,6 +259,16 @@ class TestMCPOAuthIntegration:
         )
         # Should return 401 Unauthorized without a valid bearer token
         assert response.status_code in [401, 403]
+
+    def test_mcp_rejects_unauthenticated_sessionless_requests(self, auth_client):
+        """The sessionless era is routed after auth, not around it."""
+        response = auth_client.post(
+            "/mcp-server/mcp",
+            json=sessionless_mcp_request("tools/list", {}),
+            headers=sessionless_mcp_headers("tools/list"),
+        )
+
+        assert response.status_code == 401
 
     def test_no_well_known_when_auth_disabled(self, db_config):
         """Test that .well-known endpoints are NOT present when auth disabled."""

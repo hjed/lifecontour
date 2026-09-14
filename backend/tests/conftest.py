@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
+import fastmcp
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -17,6 +18,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.infrastructure.config import Settings
 from app.infrastructure.database import get_database_session, metadata
 from app.main import create_app
+
+# MCP SDK v2 renamed protocol fields to snake_case. fastmcp bridges the old
+# camelCase names with a DeprecationWarning, which pyproject's filterwarnings
+# hides, so turn the bridge off: a camelCase read fails here instead of
+# silently depending on a shim scheduled for removal.
+fastmcp.settings.mcp_camelcase_compat = False
 
 # Test database URL (PostgreSQL test database)
 SQLALCHEMY_DATABASE_URL = (

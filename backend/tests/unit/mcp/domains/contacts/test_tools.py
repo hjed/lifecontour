@@ -88,7 +88,7 @@ class TestContactTools:
 
             tool = next(t for t in tools if t.name == "update_contact_tag")
 
-            schema = tool.inputSchema
+            schema = tool.input_schema
             properties = schema["properties"]
             for field in ("tag_id", "name", "color", "description", "parent_id"):
                 assert field in properties, f"{field} should be an update parameter"
@@ -127,7 +127,7 @@ class TestContactTools:
 
             tool = next(t for t in tools if t.name == "delete_contact_tag")
 
-            schema = tool.inputSchema
+            schema = tool.input_schema
             assert "tag_id" in schema["properties"]
             # Contact tag IDs are strings across the MCP surface (issue #1139).
             assert schema["properties"]["tag_id"]["type"] == "string"
@@ -167,7 +167,7 @@ class TestContactTools:
             )
 
             tool = next(t for t in tools if t.name == "merge_contact_tags")
-            properties = tool.inputSchema["properties"]
+            properties = tool.input_schema["properties"]
             assert "source_id" in properties
             assert "target_id" in properties
             # Contact tag IDs are strings across the MCP surface (issue #1139).
@@ -235,10 +235,10 @@ class TestContactTools:
             assert update_tool is not None, "update_contact tool not found"
             assert update_tool.description is not None
             assert "update" in update_tool.description.lower()
-            assert update_tool.inputSchema is not None
+            assert update_tool.input_schema is not None
 
             # Verify the tool has the expected parameter
-            properties = update_tool.inputSchema.get("properties", {})
+            properties = update_tool.input_schema.get("properties", {})
             assert "request" in properties
 
     def test_contact_update_request_schema_validation(self):

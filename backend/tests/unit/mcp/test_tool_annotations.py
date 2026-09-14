@@ -27,12 +27,14 @@ from app.mcp.shared.read_only_tools import READ_ONLY_TOOL_NAMES
 #: The four hints every tool has to answer. Named here rather than
 #: reflected off ``ToolAnnotations`` because that model also carries
 #: ``title`` and allows extras — this is the required set, not the
-#: available one.
+#: available one. These are the SDK's Python field names; the camelCase
+#: spellings are only the wire aliases, and reading them as attributes
+#: would find nothing.
 REQUIRED_HINTS = (
-    "readOnlyHint",
-    "destructiveHint",
-    "idempotentHint",
-    "openWorldHint",
+    "read_only_hint",
+    "destructive_hint",
+    "idempotent_hint",
+    "open_world_hint",
 )
 
 #: Tools that may remove or overwrite data a user would miss.
@@ -127,11 +129,11 @@ def test_read_only_tools_are_neither_destructive_nor_repeat_sensitive(
     for name, tool in sorted(registered_tools.items()):
         annotations = tool.annotations
         assert annotations is not None, f"{name} has no annotations"
-        if not annotations.readOnlyHint:
+        if not annotations.read_only_hint:
             continue
-        if annotations.destructiveHint:
+        if annotations.destructive_hint:
             contradictions.append(f"{name} is read-only but flagged destructive")
-        if not annotations.idempotentHint:
+        if not annotations.idempotent_hint:
             contradictions.append(f"{name} is read-only but flagged non-idempotent")
 
     assert not contradictions, "; ".join(contradictions)
@@ -144,7 +146,7 @@ def test_destructive_tools_are_exactly_the_expected_set(
     flagged = {
         name
         for name, tool in registered_tools.items()
-        if tool.annotations is not None and tool.annotations.destructiveHint
+        if tool.annotations is not None and tool.annotations.destructive_hint
     }
 
     unexpected = flagged - DESTRUCTIVE_TOOLS
@@ -179,8 +181,8 @@ def test_ai_summary_generation_reads_from_the_callers_view(
     annotations = registered_tools["get_daily_summary"].annotations
     assert annotations is not None
 
-    assert annotations.readOnlyHint is True
-    assert annotations.openWorldHint is True
+    assert annotations.read_only_hint is True
+    assert annotations.open_world_hint is True
 
 
 def test_curated_read_only_toolset_is_genuinely_read_only(
@@ -198,7 +200,7 @@ def test_curated_read_only_toolset_is_genuinely_read_only(
         name
         for name in READ_ONLY_TOOL_NAMES
         if (tool := registered_tools.get(name)) is not None
-        and not (tool.annotations is not None and tool.annotations.readOnlyHint)
+        and not (tool.annotations is not None and tool.annotations.read_only_hint)
     ]
 
     assert not not_read_only, (

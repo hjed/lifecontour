@@ -43,17 +43,20 @@ This document provides comprehensive API design patterns for both REST and MCP i
 
 ## MCP (Model Context Protocol) Guidelines
 
-### FastMCP v2 Implementation
+### FastMCP 4 Implementation
 
-- **Framework**: Use FastMCP v2 (jlowin/fastmcp) instead of official MCP SDK
+- **Framework**: Use FastMCP 4 (PrefectHQ/fastmcp, built on the MCP Python SDK v2) instead of the SDK directly
 - **Documentation**: Reference https://gofastmcp.com/llms.txt for AI-optimized patterns
 - **Integration**: Follow https://gofastmcp.com/deployment/asgi.md for FastAPI integration
+- **Protocol eras**: The endpoint serves the sessionless `2026-07-28` protocol and the older session handshake side by side (see [MCP Setup → Protocol Versions](../mcp-setup.md#protocol-versions)). Tools must not depend on session state or server-initiated requests (sampling, elicitation, roots) — the sessionless era has neither
+- **SDK field names**: MCP protocol models use snake_case Python fields (`input_schema`, `read_only_hint`); the camelCase names are only their wire aliases. The test suite turns fastmcp's camelCase compatibility bridge off, so a camelCase attribute read fails
 
 ### Tool Structure
 
 - Use `@mcp.tool` decorator on async functions
 - Define clear function names and docstrings
 - Use Pydantic `Field` with `Annotated` for parameter descriptions
+- Don't rely on `StrictBool` or other `Strict*` types: fastmcp validates arguments with `strict=False`, which overrides them, so `"true"` arrives as `True`. For a boolean that confirms an action, use `JsonBool` from `app/mcp/shared/arguments.py`, which refuses anything but a JSON `true`/`false`
 - Return JSON strings for structured data
 - Include comprehensive error handling with try/catch blocks
 - Provide AI-friendly responses with context and summaries

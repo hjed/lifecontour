@@ -239,7 +239,7 @@ class TestContactToolsIntegration:
             for tool in tools:
                 assert tool.description is not None
                 assert len(tool.description) > 0
-                assert tool.inputSchema is not None
+                assert tool.input_schema is not None
 
     @pytest.mark.asyncio
     async def test_create_contact_integration_real_db(
@@ -1260,7 +1260,7 @@ class TestContactToolsIntegration:
             assert merge_tool is not None, "merge_contacts tool not registered"
             assert merge_tool.description is not None
             assert "merge" in merge_tool.description.lower()
-            properties = merge_tool.inputSchema.get("properties", {})
+            properties = merge_tool.input_schema.get("properties", {})
             assert "survivor_contact_id" in properties
             assert "source_contact_id" in properties
             # ITER13-002: the optional per-field overrides mapping is advertised.
