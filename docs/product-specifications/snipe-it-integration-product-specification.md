@@ -44,7 +44,9 @@ Snipe-IT "Assets" map directly to the system's `gear_items` entity.
 - **Field Mapping**: Only the existing fields on the `gear_items` table are supported. No new fields will be added to accommodate Snipe-IT specific data.
 - **Sync Mechanisms**:
   - The system relies on **Snipe-IT Webhooks** for real-time updates.
-  - A **Periodic Sync** acts as a backup (similar to the Strava integration) to catch missed webhook events.
+    - Configure Snipe-IT's **General** (Slack-compatible) webhook with the URL shown in the integration settings (`/api/integrations/snipeit/webhook`).
+    - Snipe-IT sends Slack-format messages and only on checkout, checkin, acceptance and audit. Each message that links an asset (`<base>/hardware/<id>`) triggers a sync of that asset; the settings-page test message and non-asset notifications are acknowledged and ignored.
+  - A **Periodic Sync** acts as a backup (similar to the Strava integration) to catch missed webhook events, and is the only path for asset creation, edits and maintenance changes, which Snipe-IT does not send as webhooks.
 
 ---
 
