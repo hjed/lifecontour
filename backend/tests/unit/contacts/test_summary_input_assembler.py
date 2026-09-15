@@ -13,6 +13,7 @@ from core_shared.models.contacts.entities import (
     ContactSummary,
     ImportantDate,
     RelationshipType,
+    SummaryDisabledReason,
     SummaryStatus,
 )
 from core_shared.models.contacts.important_date_types import (
@@ -375,6 +376,7 @@ class TestSummaryInputAssembler:
             summary_text="Old disabled text",
             status=SummaryStatus.DISABLED,
             is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
         )
         assembler = _make_assembler(summary=prev_summary)
         result = await assembler.assemble(contact_id=1)

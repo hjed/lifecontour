@@ -6,6 +6,7 @@ import pytest
 from core_shared.models.contacts.entities import (
     Contact,
     ContactSummary,
+    SummaryDisabledReason,
     SummaryStatus,
 )
 
@@ -58,10 +59,18 @@ class TestContactSummaryConverter:
             id=20,
             status=SummaryStatus.DISABLED,
             is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
         )
         resource = ContactConverter.to_summary_resource(summary)
         assert resource.attributes.is_disabled is True
+        assert resource.attributes.disabled_reason == SummaryDisabledReason.USER
         assert resource.attributes.status == "disabled"
+
+    def test_to_summary_resource_enabled_has_no_disabled_reason(self):
+        """An enabled summary serialises a null disabled reason."""
+        summary = ContactSummary(contact_id=1, id=21, status=SummaryStatus.PENDING)
+        resource = ContactConverter.to_summary_resource(summary)
+        assert resource.attributes.disabled_reason is None
 
     def test_to_summary_resource_user_override(self):
         """Test converting a summary with user override to API resource."""

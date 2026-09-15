@@ -12,6 +12,7 @@ from core_shared.models.contacts.entities import (
     ImportantDate,
     MethodType,
     RelationshipType,
+    SummaryDisabledReason,
     SummaryStatus,
     Tag,
 )
@@ -278,7 +279,7 @@ class SqlContactRepository(ContactRepository):
         summary_query = text(
             """
             SELECT id, contact_id, summary_text, follow_up_suggestions, status,
-                   is_disabled, is_user_override, user_override_text,
+                   is_disabled, disabled_reason, is_user_override, user_override_text,
                    generated_at, created_at, updated_at
             FROM contact_summaries
             WHERE contact_id = :contact_id
@@ -303,6 +304,11 @@ class SqlContactRepository(ContactRepository):
                 follow_up_suggestions=suggestions,
                 status=SummaryStatus(summary_row.status),
                 is_disabled=summary_row.is_disabled,
+                disabled_reason=(
+                    SummaryDisabledReason(summary_row.disabled_reason)
+                    if summary_row.disabled_reason is not None
+                    else None
+                ),
                 is_user_override=summary_row.is_user_override,
                 user_override_text=summary_row.user_override_text,
                 generated_at=summary_row.generated_at,

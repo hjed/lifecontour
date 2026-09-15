@@ -3,7 +3,11 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+from core_shared.models.contacts.entities import (
+    ContactSummary,
+    SummaryDisabledReason,
+    SummaryStatus,
+)
 from core_shared.models.contacts.exceptions import ContactValidationError
 
 from app.core.contacts.models.events import ContactSummaryRefreshDue
@@ -103,12 +107,15 @@ class TestRequestRefresh:
         mock_summary_repo.clear_refresh_request.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
-    async def test_raises_when_disabled(
+    async def test_raises_when_user_disabled(
         self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
     ):
-        """A disabled summary blocks refresh with a validation error, no event."""
+        """A summary the user disabled blocks refresh with a validation error."""
         mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
-            contact_id=42, status=SummaryStatus.DISABLED, is_disabled=True
+            contact_id=42,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
         )
 
         with pytest.raises(ContactValidationError):
@@ -118,6 +125,27 @@ class TestRequestRefresh:
         mock_summary_repo.upsert.assert_not_awaited()
         mock_summary_repo.clear_refresh_request.assert_not_awaited()
         mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_paused_summary_is_queued_for_re_evaluation(
+        self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
+    ):
+        """A low-activity pause is refreshable; status stays DISABLED for the generator."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=42,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+
+        await summary_service.request_refresh(42, transaction=mock_transaction)
+
+        mock_summary_repo.update_status.assert_not_awaited()
+        mock_summary_repo.upsert.assert_not_awaited()
+        mock_summary_repo.clear_refresh_request.assert_awaited_once_with(42)
+        event = mock_event_publisher.publish.await_args.args[0]
+        assert isinstance(event, ContactSummaryRefreshDue)
+        assert event.event_data["contact_id"] == 42
 
 
 class TestUpdateSummary:
@@ -138,8 +166,84 @@ class TestUpdateSummary:
         )
 
         assert result.is_disabled is True
+        assert result.disabled_reason == SummaryDisabledReason.USER
         assert result.status == SummaryStatus.DISABLED
         mock_summary_repo.upsert.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_disable_publishes_no_refresh(
+        self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
+    ):
+        """Turning generation off queues nothing."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=7, status=SummaryStatus.GENERATED
+        )
+
+        await summary_service.update_summary(
+            7, ContactSummaryUpdate(is_disabled=True), transaction=mock_transaction
+        )
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disable_converts_auto_pause_to_user_choice(
+        self, summary_service, mock_summary_repo, mock_transaction
+    ):
+        """A user disabling an auto-paused summary makes the disable sticky."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=7,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+
+        result = await summary_service.update_summary(
+            7, ContactSummaryUpdate(is_disabled=True), transaction=mock_transaction
+        )
+
+        assert result.disabled_reason == SummaryDisabledReason.USER
+        assert result.status == SummaryStatus.DISABLED
+
+    @pytest.mark.asyncio
+    async def test_re_enable_clears_reason_and_queues_refresh(
+        self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
+    ):
+        """Re-enabling resets to pending and queues generation immediately."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=7,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+        )
+
+        result = await summary_service.update_summary(
+            7, ContactSummaryUpdate(is_disabled=False), transaction=mock_transaction
+        )
+
+        assert result.is_disabled is False
+        assert result.disabled_reason is None
+        assert result.status == SummaryStatus.PENDING
+        mock_summary_repo.clear_refresh_request.assert_awaited_once_with(7)
+        event = mock_event_publisher.publish.await_args.args[0]
+        assert isinstance(event, ContactSummaryRefreshDue)
+        assert event.event_data["contact_id"] == 7
+
+    @pytest.mark.asyncio
+    async def test_enable_on_enabled_summary_queues_nothing(
+        self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
+    ):
+        """is_disabled=False on an already-enabled summary is not a re-enable."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=7, status=SummaryStatus.GENERATED, summary_text="Text"
+        )
+
+        result = await summary_service.update_summary(
+            7, ContactSummaryUpdate(is_disabled=False), transaction=mock_transaction
+        )
+
+        assert result.status == SummaryStatus.GENERATED
+        mock_summary_repo.clear_refresh_request.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_user_override_text_sets_generated(
@@ -199,5 +303,6 @@ class TestUpdateSummary:
 
         assert result.contact_id == 99
         assert result.is_disabled is True
+        assert result.disabled_reason == SummaryDisabledReason.USER
         assert result.status == SummaryStatus.DISABLED
         mock_summary_repo.upsert.assert_awaited_once()

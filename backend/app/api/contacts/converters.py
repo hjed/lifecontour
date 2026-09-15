@@ -150,6 +150,7 @@ class ContactConverter:
                 follow_up_suggestions=summary.follow_up_suggestions,
                 status=str(summary.status),
                 is_disabled=summary.is_disabled,
+                disabled_reason=summary.disabled_reason,
                 is_user_override=summary.is_user_override,
                 user_override_text=summary.user_override_text,
                 generated_at=summary.generated_at,

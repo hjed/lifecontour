@@ -50,8 +50,8 @@ async def test_fetch_complete_contact_data_captures_signals(
     )
     await async_connection.execute(
         text("""
-            INSERT INTO contact_summaries (contact_id, summary_text, is_disabled, created_at, updated_at)
-            VALUES (:id, 'Hidden summary.', true, :now, :now)
+            INSERT INTO contact_summaries (contact_id, summary_text, is_disabled, disabled_reason, created_at, updated_at)
+            VALUES (:id, 'Hidden summary.', true, 'user', :now, :now)
         """),
         {"id": contact_id2, "now": datetime.now(UTC)},
     )

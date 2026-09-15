@@ -11,7 +11,11 @@ pipeline lives in :mod:`summary_generation_service`.
 
 from dataclasses import dataclass
 
-from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+from core_shared.models.contacts.entities import (
+    ContactSummary,
+    SummaryDisabledReason,
+    SummaryStatus,
+)
 from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -64,16 +68,21 @@ class ContactSummaryService:
         triggers go through, and absorbs any queued buffered request so the
         user's click costs a single generation.
 
-        Raises ContactValidationError if summary generation is disabled for the
-        contact. Committed as a single unit before the response is sent.
+        Raises ContactValidationError if the user disabled summary generation
+        for the contact. An auto-paused (low-activity) summary keeps its
+        DISABLED status and is queued anyway: the generator re-evaluates its
+        activity and resumes it if there is now enough. Committed as a single
+        unit before the response is sent.
         """
         existing = await self.summary_repo.find_by_contact_id(contact_id)
-        if existing and existing.is_disabled:
+        if existing and existing.is_user_disabled:
             raise ContactValidationError(
                 "summary", "Summary generation is disabled for this contact"
             )
 
-        if existing:
+        if existing and existing.is_disabled:
+            pass  # Auto-paused: the generator decides whether it resumes
+        elif existing:
             await self.summary_repo.update_status(
                 contact_id, SummaryStatus.PENDING.value
             )
@@ -102,8 +111,11 @@ class ContactSummaryService:
         """Update a contact summary configuration (disable/override).
 
         Allows disabling AI generation or setting manual override text, and
-        recomputes the summary status accordingly. Returns the persisted summary.
-        Committed as a single unit before the response is sent.
+        recomputes the summary status accordingly. Disabling records the user's
+        choice, which nothing automatic undoes. Re-enabling a disabled summary
+        queues generation immediately rather than waiting for other activity.
+        Returns the persisted summary. Committed as a single unit before the
+        response is sent.
         """
         existing = await self.summary_repo.find_by_contact_id(contact_id)
         if existing is None:
@@ -112,13 +124,14 @@ class ContactSummaryService:
                 status=SummaryStatus.PENDING,
             )
 
+        re_enabled = False
         if update.is_disabled is not None:
-            was_disabled = existing.is_disabled
-            existing.is_disabled = update.is_disabled
             if update.is_disabled:
-                existing.status = SummaryStatus.DISABLED
-            elif was_disabled:
+                existing.disable(SummaryDisabledReason.USER)
+            elif existing.is_disabled:
                 # Re-enabling: reset status so the summary can be refreshed
+                existing.enable()
+                re_enabled = True
                 existing.status = (
                     SummaryStatus.GENERATED
                     if existing.is_user_override
@@ -142,4 +155,12 @@ class ContactSummaryService:
                     else SummaryStatus.PENDING
                 )
 
-        return await self.summary_repo.upsert(existing)
+        persisted = await self.summary_repo.upsert(existing)
+
+        if re_enabled:
+            await self.summary_repo.clear_refresh_request(contact_id)
+            await self.event_publisher.publish(
+                ContactSummaryRefreshDue(contact_id=contact_id)
+            )
+
+        return persisted

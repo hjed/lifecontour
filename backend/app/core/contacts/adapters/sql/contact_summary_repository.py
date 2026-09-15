@@ -3,11 +3,18 @@
 import json
 from typing import Any
 
-from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+from core_shared.models.contacts.entities import (
+    ContactSummary,
+    SummaryDisabledReason,
+    SummaryStatus,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.repositories import ContactSummaryRepository
+from app.core.contacts.models.repositories import (
+    ClaimedRefresh,
+    ContactSummaryRepository,
+)
 
 
 class SqlContactSummaryRepository(ContactSummaryRepository):
@@ -31,6 +38,11 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
             follow_up_suggestions=suggestions,
             status=SummaryStatus(row.status),
             is_disabled=row.is_disabled,
+            disabled_reason=(
+                SummaryDisabledReason(row.disabled_reason)
+                if row.disabled_reason is not None
+                else None
+            ),
             is_user_override=row.is_user_override,
             user_override_text=row.user_override_text,
             generated_at=row.generated_at,
@@ -43,7 +55,7 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
         query = text(
             """
             SELECT id, contact_id, summary_text, follow_up_suggestions, status,
-                   is_disabled, is_user_override, user_override_text,
+                   is_disabled, disabled_reason, is_user_override, user_override_text,
                    generated_at, created_at, updated_at
             FROM contact_summaries
             WHERE contact_id = :contact_id
@@ -63,15 +75,18 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
             """
             INSERT INTO contact_summaries
                 (contact_id, summary_text, follow_up_suggestions, status,
-                 is_disabled, is_user_override, user_override_text, generated_at)
+                 is_disabled, disabled_reason, is_user_override, user_override_text,
+                 generated_at)
             VALUES
                 (:contact_id, :summary_text, CAST(:follow_up_suggestions AS jsonb), :status,
-                 :is_disabled, :is_user_override, :user_override_text, :generated_at)
+                 :is_disabled, :disabled_reason, :is_user_override, :user_override_text,
+                 :generated_at)
             ON CONFLICT (contact_id) DO UPDATE SET
                 summary_text = EXCLUDED.summary_text,
                 follow_up_suggestions = EXCLUDED.follow_up_suggestions,
                 status = EXCLUDED.status,
                 is_disabled = EXCLUDED.is_disabled,
+                disabled_reason = EXCLUDED.disabled_reason,
                 is_user_override = EXCLUDED.is_user_override,
                 user_override_text = EXCLUDED.user_override_text,
                 generated_at = EXCLUDED.generated_at,
@@ -87,6 +102,9 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
                 "follow_up_suggestions": suggestions_json,
                 "status": str(summary.status),
                 "is_disabled": summary.is_disabled,
+                "disabled_reason": (
+                    str(summary.disabled_reason) if summary.disabled_reason else None
+                ),
                 "is_user_override": summary.is_user_override,
                 "user_override_text": summary.user_override_text,
                 "generated_at": summary.generated_at,
@@ -110,8 +128,8 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
             SET status = :status, updated_at = NOW()
             WHERE contact_id = :contact_id
             RETURNING id, contact_id, summary_text, follow_up_suggestions, status,
-                      is_disabled, is_user_override, user_override_text,
-                      generated_at, created_at, updated_at
+                      is_disabled, disabled_reason, is_user_override,
+                      user_override_text, generated_at, created_at, updated_at
         """
         )
         result = await self.conn.execute(
@@ -128,7 +146,8 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
         Creates the summary row (status takes its server default 'pending')
         when none exists; overwrites ``refresh_requested_at`` on every call so
         the sweeper only dispatches after the contact has been quiet for the
-        full buffer window. No-op for disabled summaries.
+        full buffer window. No-op for summaries the user disabled; an
+        auto-paused (low-activity) summary is still marked so it is re-evaluated.
         """
         query = text(
             """
@@ -137,7 +156,7 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
             ON CONFLICT (contact_id) DO UPDATE SET
                 refresh_requested_at = NOW(),
                 updated_at = NOW()
-            WHERE contact_summaries.is_disabled = FALSE
+            WHERE contact_summaries.disabled_reason IS DISTINCT FROM 'user'
         """
         )
         await self.conn.execute(query, {"contact_id": contact_id})
@@ -156,11 +175,11 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
 
     async def claim_due_refreshes(
         self, buffer_seconds: int, limit: int
-    ) -> list[tuple[int, bool]]:
+    ) -> list[ClaimedRefresh]:
         """Atomically claim contacts whose buffered refresh is due.
 
         Clears markers older than the buffer window and returns the affected
-        ``(contact_id, is_disabled)`` pairs, oldest first. The cutoff is
+        contacts, oldest first, flagging those the user disabled. The cutoff is
         computed with the database's NOW() — the same clock that stamps the
         marker in mark_refresh_requested — so app/DB clock drift cannot
         stretch or shrink the debounce window. ``FOR UPDATE SKIP LOCKED``
@@ -183,11 +202,19 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
             SET refresh_requested_at = NULL, updated_at = NOW()
             FROM due
             WHERE cs.contact_id = due.contact_id
-            RETURNING cs.contact_id, cs.is_disabled, due.refresh_requested_at
+            RETURNING cs.contact_id,
+                      cs.disabled_reason IS NOT DISTINCT FROM 'user'
+                          AS is_user_disabled,
+                      due.refresh_requested_at
         """
         )
         result = await self.conn.execute(
             query, {"buffer_seconds": buffer_seconds, "limit": limit}
         )
         rows = sorted(result.fetchall(), key=lambda row: row.refresh_requested_at)
-        return [(row.contact_id, row.is_disabled) for row in rows]
+        return [
+            ClaimedRefresh(
+                contact_id=row.contact_id, is_user_disabled=row.is_user_disabled
+            )
+            for row in rows
+        ]

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from core_shared.models.contacts.entities import (
     ContactSummary,
+    SummaryDisabledReason,
     SummaryStatus,
 )
 from core_shared.models.contacts.value_objects import Provenance
@@ -485,6 +486,10 @@ class SummaryGenerator:
     async def generate(self, contact_id: int) -> ContactSummary | None:
         """Generate or regenerate an AI summary for a contact.
 
+        A summary the user disabled is skipped. A summary auto-paused for low
+        activity is re-evaluated: it stays paused while activity is still low
+        and resumes (the pause is lifted) once there is enough to summarise.
+
         Returns the resulting ContactSummary, or None if generation was skipped.
         """
         if not self._gemini_api_key:
@@ -494,13 +499,14 @@ class SummaryGenerator:
         # Check existing summary state
         existing = await self._summary_repo.find_by_contact_id(contact_id)
 
-        # Skip if already disabled and not user-overridden
-        if existing and existing.is_disabled and not existing.is_user_override:
+        # Skip if the user disabled it and has not overridden it
+        if existing and existing.is_user_disabled and not existing.is_user_override:
             logger.info(
                 "Contact %d summary is disabled, skipping generation",
                 contact_id,
             )
             return existing
+        was_paused = existing is not None and existing.is_disabled
 
         # Assemble input first to verify contact exists
         summary_input = await self._input_assembler.assemble(contact_id, self._timezone)
@@ -513,6 +519,9 @@ class SummaryGenerator:
             logger.info(
                 "Contact %d has no journals for prompt, skipping generation", contact_id
             )
+            if was_paused:
+                # Nothing to summarise still: leave the pause as it is
+                return existing
             if existing and (
                 existing.summary_text
                 or existing.follow_up_suggestions
@@ -545,6 +554,7 @@ class SummaryGenerator:
                 contact_id=contact_id,
                 status=SummaryStatus.DISABLED,
                 is_disabled=True,
+                disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
             )
             result_summary = await self._summary_repo.upsert(disabled_summary)
             if self._event_publisher and (not existing or not existing.is_disabled):
@@ -580,6 +590,8 @@ class SummaryGenerator:
                 existing,
                 contact_id=contact_id,
                 status=SummaryStatus.FAILED,
+                is_disabled=False,
+                disabled_reason=None,
             )
             return await self._summary_repo.upsert(failed_summary)
 
@@ -592,18 +604,25 @@ class SummaryGenerator:
             follow_up_suggestions=result.get("follow_up_suggestions", []),
             status=SummaryStatus.GENERATED,
             generated_at=now,
+            is_disabled=False,
+            disabled_reason=None,
         )
         result_summary = await self._summary_repo.upsert(generated_summary)
 
         if self._event_publisher and (
-            not existing or existing.summary_text != result["summary_text"]
+            not existing
+            or existing.summary_text != result["summary_text"]
+            or was_paused
         ):
-            summary_changed_fields = {
+            summary_changed_fields: dict[str, Any] = {
                 "summary_text": (
                     existing.summary_text if existing else None,
                     result["summary_text"],
                 )
             }
+            if was_paused:
+                # Mirror the auto-disable diff so history shows the pause lifting
+                summary_changed_fields["is_disabled"] = (True, False)
             try:
                 await self._record_summary_history(contact_id, summary_changed_fields)
             except Exception as e:  # noqa: BLE001
@@ -685,6 +704,7 @@ class SummaryGenerator:
             status=overrides.get("status", existing.status),
             generated_at=overrides.get("generated_at", existing.generated_at),
             is_disabled=overrides.get("is_disabled", existing.is_disabled),
+            disabled_reason=overrides.get("disabled_reason", existing.disabled_reason),
             is_user_override=overrides.get(
                 "is_user_override", existing.is_user_override
             ),

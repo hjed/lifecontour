@@ -8,6 +8,7 @@ the JSON API specification.
 from datetime import UTC, datetime
 from typing import Any
 
+from core_shared.models.contacts.entities import SummaryDisabledReason
 from pydantic import BaseModel, Field, model_validator
 
 from app.api.common.schemas import (
@@ -239,6 +240,14 @@ class ContactSummaryAttributes(BaseModel):
     )
     is_disabled: bool = Field(
         default=False, description="Whether AI generation is disabled for this contact"
+    )
+    disabled_reason: SummaryDisabledReason | None = Field(
+        default=None,
+        description=(
+            "Why generation is disabled: 'user' (the user turned it off; stays off) "
+            "or 'low_activity' (paused automatically; resumes once there is enough "
+            "recent activity). Null when enabled."
+        ),
     )
     is_user_override: bool = Field(
         default=False, description="Whether user has provided a manual override"

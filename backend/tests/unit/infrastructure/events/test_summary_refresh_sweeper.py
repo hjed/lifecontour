@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.contacts.models.repositories import ClaimedRefresh
 from app.infrastructure.events.summary_refresh_sweeper import SummaryRefreshSweeper
 
 
@@ -54,7 +55,10 @@ class TestSummaryRefreshSweeper:
     ) -> None:
         """Each claimed enabled contact gets one ContactSummaryRefreshDue event."""
         mock_repo.claim_due_refreshes = AsyncMock(
-            return_value=[(42, False), (43, False)]
+            return_value=[
+                ClaimedRefresh(contact_id=42, is_user_disabled=False),
+                ClaimedRefresh(contact_id=43, is_user_disabled=False),
+            ]
         )
 
         dispatched = await self._sweep(mock_repo, mock_publisher)
@@ -73,12 +77,19 @@ class TestSummaryRefreshSweeper:
         )
 
     @pytest.mark.asyncio
-    async def test_disabled_contacts_claimed_but_not_dispatched(
+    async def test_user_disabled_contacts_claimed_but_not_dispatched(
         self, mock_repo: MagicMock, mock_publisher: MagicMock
     ) -> None:
-        """Disabled rows have their markers cleared but no event published."""
+        """User-disabled rows have their markers cleared but no event published.
+
+        An auto-paused (low-activity) row is claimed unflagged and dispatched
+        like any other, so the generator can re-evaluate it.
+        """
         mock_repo.claim_due_refreshes = AsyncMock(
-            return_value=[(42, True), (43, False)]
+            return_value=[
+                ClaimedRefresh(contact_id=42, is_user_disabled=True),
+                ClaimedRefresh(contact_id=43, is_user_disabled=False),
+            ]
         )
 
         dispatched = await self._sweep(mock_repo, mock_publisher)
@@ -114,7 +125,9 @@ class TestSummaryRefreshSweeper:
     ) -> None:
         """A publish failure propagates so the transaction (and the claimed
         markers) rolls back and the batch is retried on the next sweep."""
-        mock_repo.claim_due_refreshes = AsyncMock(return_value=[(42, False)])
+        mock_repo.claim_due_refreshes = AsyncMock(
+            return_value=[ClaimedRefresh(contact_id=42, is_user_disabled=False)]
+        )
         mock_publisher.publish = AsyncMock(side_effect=RuntimeError("outbox down"))
 
         with pytest.raises(RuntimeError, match="outbox down"):

@@ -4,8 +4,11 @@ import pytest
 from core_shared.models.contacts.entities import (
     Contact,
     ContactSummary,
+    SummaryDisabledReason,
     SummaryStatus,
 )
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import (
@@ -141,11 +144,94 @@ class TestContactSummaryRepositoryIntegration:
             contact_id=test_contact.id,
             status=SummaryStatus.DISABLED,
             is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
         )
         result = await summary_repo.upsert(summary)
 
         assert result.is_disabled is True
         assert result.status == SummaryStatus.DISABLED
+
+    @pytest.mark.asyncio
+    async def test_disabled_reason_round_trips(self, summary_repo, test_contact):
+        """The disabled reason is persisted and read back on every read path."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                status=SummaryStatus.DISABLED,
+                is_disabled=True,
+                disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+            )
+        )
+
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+        updated = await summary_repo.update_status(
+            test_contact.id, SummaryStatus.DISABLED.value
+        )
+
+        assert found is not None
+        assert found.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
+        assert updated is not None
+        assert updated.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
+
+    @pytest.mark.asyncio
+    async def test_upsert_clears_disabled_reason_on_enable(
+        self, summary_repo, test_contact
+    ):
+        """Re-upserting an enabled summary clears the stored reason."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                status=SummaryStatus.DISABLED,
+                is_disabled=True,
+                disabled_reason=SummaryDisabledReason.USER,
+            )
+        )
+
+        await summary_repo.upsert(
+            ContactSummary(contact_id=test_contact.id, status=SummaryStatus.PENDING)
+        )
+
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+        assert found is not None
+        assert found.is_disabled is False
+        assert found.disabled_reason is None
+
+    @pytest.mark.asyncio
+    async def test_contact_load_includes_disabled_reason(
+        self, contact_repo, summary_repo, test_contact
+    ):
+        """The contact aggregate's summary carries the disabled reason."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                status=SummaryStatus.DISABLED,
+                is_disabled=True,
+                disabled_reason=SummaryDisabledReason.USER,
+            )
+        )
+
+        contact = await contact_repo.find_by_id(test_contact.id)
+
+        assert contact is not None
+        assert contact.summary is not None
+        assert contact.summary.disabled_reason == SummaryDisabledReason.USER
+
+    @pytest.mark.asyncio
+    async def test_disabled_row_without_reason_is_rejected(
+        self, test_contact, clean_database
+    ):
+        """The database refuses a disabled flag with no recorded reason."""
+        with pytest.raises(IntegrityError):
+            async with clean_database.begin_nested():
+                await clean_database.execute(
+                    text(
+                        """
+                        INSERT INTO contact_summaries (contact_id, status, is_disabled)
+                        VALUES (:contact_id, 'disabled', TRUE)
+                        """
+                    ),
+                    {"contact_id": test_contact.id},
+                )
 
     @pytest.mark.asyncio
     async def test_contact_find_by_id_includes_summary(
