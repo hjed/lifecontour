@@ -28,9 +28,15 @@ way Laravel's ``e()`` does must give back the stored value. That leaves alone:
 
 A local edit that is itself valid escaped output (a user literally typing
 ``&amp;``) would be decoded; that is accepted as vanishingly rare.
+
+The Snipe-IT worker and the app can write gear items while this runs, so each
+column is written only if it still holds the value that was read. A value
+changed after the read is left as it is, without holding locks.
 """
 
 import html
+from collections.abc import Mapping
+from typing import Any
 
 import sqlalchemy as sa
 from alembic import op
@@ -86,17 +92,26 @@ def upgrade() -> None:
     ).mappings()
 
     for row in rows.all():
-        decoded = {
-            column: value
-            for column in _TEXT_COLUMNS
-            if (value := _decoded_if_escaped(row[column])) is not None
-        }
-        if not decoded:
+        decode_gear_row(connection, row)
+
+
+def decode_gear_row(connection: sa.Connection, row: Mapping[Any, Any]) -> None:
+    """Decode the escaped text columns of one gear row as it was read.
+
+    Each column is updated only while it still holds the value in ``row``, so
+    a concurrent edit made after the read is never overwritten.
+    """
+    for column in _TEXT_COLUMNS:
+        read_value = row[column]
+        decoded = _decoded_if_escaped(read_value)
+        if decoded is None:
             continue
-        assignments = ", ".join(f"{column} = :{column}" for column in decoded)
         connection.execute(
-            sa.text(f"UPDATE gear_items SET {assignments} WHERE id = :id"),
-            {**decoded, "id": row["id"]},
+            sa.text(
+                f"UPDATE gear_items SET {column} = :decoded "  # noqa: S608 - column is from our own constant tuple
+                f"WHERE id = :id AND {column} = :read_value"
+            ),
+            {"decoded": decoded, "id": row["id"], "read_value": read_value},
         )
 
 
