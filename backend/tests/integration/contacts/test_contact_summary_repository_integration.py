@@ -274,7 +274,7 @@ class TestContactSummaryRepositoryIntegration:
             )
         )
 
-        written = await summary_repo.upsert_unless_user_disabled(
+        written = await summary_repo.upsert_from_generation(
             ContactSummary(
                 contact_id=test_contact.id,
                 summary_text="AI text",
@@ -302,7 +302,7 @@ class TestContactSummaryRepositoryIntegration:
             )
         )
 
-        written = await summary_repo.upsert_unless_user_disabled(
+        written = await summary_repo.upsert_from_generation(
             ContactSummary(
                 contact_id=test_contact.id,
                 summary_text="AI text",
@@ -322,7 +322,7 @@ class TestContactSummaryRepositoryIntegration:
         self, summary_repo, test_contact
     ):
         """With no row yet, the guarded write creates one."""
-        written = await summary_repo.upsert_unless_user_disabled(
+        written = await summary_repo.upsert_from_generation(
             ContactSummary(contact_id=test_contact.id, summary_text="First")
         )
 
@@ -330,6 +330,38 @@ class TestContactSummaryRepositoryIntegration:
         found = await summary_repo.find_by_contact_id(test_contact.id)
         assert found is not None
         assert found.summary_text == "First"
+
+    @pytest.mark.asyncio
+    async def test_generation_upsert_keeps_user_override_fields(
+        self, summary_repo, test_contact
+    ):
+        """A generation write never overwrites the user's override text, even
+        when the generator's copy of the row predates the override."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                is_user_override=True,
+                user_override_text="My own summary",
+                status=SummaryStatus.GENERATED,
+            )
+        )
+
+        written = await summary_repo.upsert_from_generation(
+            ContactSummary(
+                contact_id=test_contact.id,
+                summary_text="AI text",
+                status=SummaryStatus.GENERATED,
+            )
+        )
+
+        assert written is not None
+        assert written.summary_text == "AI text"
+        assert written.is_user_override is True
+        assert written.user_override_text == "My own summary"
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+        assert found is not None
+        assert found.is_user_override is True
+        assert found.user_override_text == "My own summary"
 
     @pytest.mark.asyncio
     async def test_guarded_status_update_skips_a_user_disabled_row(

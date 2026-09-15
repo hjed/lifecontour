@@ -643,14 +643,16 @@ class ContactSummaryRepository(ABC):
         pass
 
     @abstractmethod
-    async def upsert_unless_user_disabled(
+    async def upsert_from_generation(
         self, summary: ContactSummary
     ) -> ContactSummary | None:
-        """Create or update a summary unless the stored row is user-disabled.
+        """Write a generation result without overriding the user's choices.
 
-        For automated writers that read the row earlier without a lock: the
-        check runs against the row as it is at the write, so a user's disable
-        committed in between is kept. Returns None when the write is skipped.
+        For the generator, which reads the row earlier without a lock. Creates
+        the row if needed; on an existing row it updates only the columns
+        generation owns, leaves the user's override fields as stored, and skips
+        a row the user has disabled. The check runs against the row as it is at
+        the write. Returns the stored row, or None when the write is skipped.
         """
         pass
 

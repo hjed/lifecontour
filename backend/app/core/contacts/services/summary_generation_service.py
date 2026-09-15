@@ -538,17 +538,19 @@ class SummaryGenerator:
                     status=SummaryStatus.GENERATED,
                     generated_at=datetime.now(tz=UTC),
                 )
-                return await self._write_unless_user_disabled(
-                    contact_id, cleared_summary
-                )
+                return await self._write_from_generation(contact_id, cleared_summary)
             return existing
 
         # Set status to GENERATING (only after confirming contact exists)
         generating = await self._summary_repo.update_status_unless_user_disabled(
             contact_id, SummaryStatus.GENERATING.value
         )
-        if generating is None and existing is not None:
-            return await self._user_disabled_meanwhile(contact_id)
+        if generating is None:
+            # No row matched: the user disabled it since the read, or there is
+            # no row yet. Only a disable stops the run, before any AI call.
+            stored = await self._summary_repo.find_by_contact_id(contact_id)
+            if stored is not None and stored.is_user_disabled:
+                return self._keep_user_disable(stored)
 
         # Check low activity
         if self._activity_checker.should_auto_disable(summary_input, existing):
@@ -563,7 +565,7 @@ class SummaryGenerator:
                 is_disabled=True,
                 disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
             )
-            result_summary = await self._summary_repo.upsert_unless_user_disabled(
+            result_summary = await self._summary_repo.upsert_from_generation(
                 disabled_summary
             )
             if result_summary is None:
@@ -604,7 +606,7 @@ class SummaryGenerator:
                 is_disabled=False,
                 disabled_reason=None,
             )
-            return await self._write_unless_user_disabled(contact_id, failed_summary)
+            return await self._write_from_generation(contact_id, failed_summary)
 
         # Persist result
         now = datetime.now(tz=UTC)
@@ -618,7 +620,7 @@ class SummaryGenerator:
             is_disabled=False,
             disabled_reason=None,
         )
-        result_summary = await self._summary_repo.upsert_unless_user_disabled(
+        result_summary = await self._summary_repo.upsert_from_generation(
             generated_summary
         )
         if result_summary is None:
@@ -650,22 +652,28 @@ class SummaryGenerator:
 
         return result_summary
 
-    async def _write_unless_user_disabled(
+    async def _write_from_generation(
         self, contact_id: int, summary: ContactSummary
     ) -> ContactSummary | None:
         """Persist ``summary`` unless the user disabled generation since the read."""
-        written = await self._summary_repo.upsert_unless_user_disabled(summary)
+        written = await self._summary_repo.upsert_from_generation(summary)
         if written is None:
             return await self._user_disabled_meanwhile(contact_id)
         return written
 
     async def _user_disabled_meanwhile(self, contact_id: int) -> ContactSummary | None:
-        """Return the stored summary when a user disabled generation mid-run."""
+        """Return the stored summary after a guarded write was skipped."""
+        stored = await self._summary_repo.find_by_contact_id(contact_id)
+        return self._keep_user_disable(stored) if stored is not None else None
+
+    @staticmethod
+    def _keep_user_disable(stored: ContactSummary) -> ContactSummary:
+        """Log that a user's mid-run disable was kept and return their row."""
         logger.info(
             "Contact %d summary was disabled during generation; keeping that choice",
-            contact_id,
+            stored.contact_id,
         )
-        return await self._summary_repo.find_by_contact_id(contact_id)
+        return stored
 
     async def _call_gemini(self, prompt: str) -> str:
         """Call the Gemini API or use test override."""

@@ -16,6 +16,24 @@ from app.core.contacts.models.repositories import (
     ContactSummaryRepository,
 )
 
+# Shared by both upserts; each adds its own ON CONFLICT clause.
+_INSERT_SUMMARY_SQL = """
+    INSERT INTO contact_summaries
+        (contact_id, summary_text, follow_up_suggestions, status,
+         is_disabled, disabled_reason, is_user_override, user_override_text,
+         generated_at)
+    VALUES
+        (:contact_id, :summary_text, CAST(:follow_up_suggestions AS jsonb), :status,
+         :is_disabled, :disabled_reason, :is_user_override, :user_override_text,
+         :generated_at)
+"""
+
+_SUMMARY_COLUMNS = """
+    id, contact_id, summary_text, follow_up_suggestions, status, is_disabled,
+    disabled_reason, is_user_override, user_override_text, generated_at,
+    created_at, updated_at
+"""
+
 
 class SqlContactSummaryRepository(ContactSummaryRepository):
     """SQL implementation of ContactSummaryRepository using SQLAlchemy Core."""
@@ -73,42 +91,9 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
 
     async def upsert(self, summary: ContactSummary) -> ContactSummary:
         """Create or update a contact summary using INSERT ON CONFLICT."""
-        written = await self._upsert(summary, unless_user_disabled=False)
-        if written is None:
-            raise RuntimeError("Failed to upsert contact summary")
-        return written
-
-    async def upsert_unless_user_disabled(
-        self, summary: ContactSummary
-    ) -> ContactSummary | None:
-        """Create or update a summary unless the stored row is user-disabled.
-
-        The ON CONFLICT ... WHERE is evaluated against the latest committed row
-        version, so a disable committed after the caller's read is respected.
-        """
-        return await self._upsert(summary, unless_user_disabled=True)
-
-    async def _upsert(
-        self, summary: ContactSummary, *, unless_user_disabled: bool
-    ) -> ContactSummary | None:
-        """Shared INSERT ON CONFLICT; returns None when the guard skips the update."""
-        suggestions_json = json.dumps(summary.follow_up_suggestions)
-        guard = (
-            "WHERE contact_summaries.disabled_reason IS DISTINCT FROM 'user'"
-            if unless_user_disabled
-            else ""
-        )
-
         query = text(
             f"""
-            INSERT INTO contact_summaries
-                (contact_id, summary_text, follow_up_suggestions, status,
-                 is_disabled, disabled_reason, is_user_override, user_override_text,
-                 generated_at)
-            VALUES
-                (:contact_id, :summary_text, CAST(:follow_up_suggestions AS jsonb), :status,
-                 :is_disabled, :disabled_reason, :is_user_override, :user_override_text,
-                 :generated_at)
+            {_INSERT_SUMMARY_SQL}
             ON CONFLICT (contact_id) DO UPDATE SET
                 summary_text = EXCLUDED.summary_text,
                 follow_up_suggestions = EXCLUDED.follow_up_suggestions,
@@ -119,33 +104,64 @@ class SqlContactSummaryRepository(ContactSummaryRepository):
                 user_override_text = EXCLUDED.user_override_text,
                 generated_at = EXCLUDED.generated_at,
                 updated_at = NOW()
-            {guard}
             RETURNING id, created_at, updated_at
-        """  # noqa: S608 - guard is one of two fixed literals
+        """  # noqa: S608 - interpolates a module constant, not input
         )
-        result = await self.conn.execute(
-            query,
-            {
-                "contact_id": summary.contact_id,
-                "summary_text": summary.summary_text,
-                "follow_up_suggestions": suggestions_json,
-                "status": str(summary.status),
-                "is_disabled": summary.is_disabled,
-                "disabled_reason": (
-                    str(summary.disabled_reason) if summary.disabled_reason else None
-                ),
-                "is_user_override": summary.is_user_override,
-                "user_override_text": summary.user_override_text,
-                "generated_at": summary.generated_at,
-            },
-        )
+        result = await self.conn.execute(query, self._upsert_params(summary))
         row = result.fetchone()
         if row is None:
-            return None
+            raise RuntimeError("Failed to upsert contact summary")
         summary.id = row.id
         summary.created_at = row.created_at
         summary.updated_at = row.updated_at
         return summary
+
+    async def upsert_from_generation(
+        self, summary: ContactSummary
+    ) -> ContactSummary | None:
+        """Write a generation result without overriding the user's choices.
+
+        Updates only generation-owned columns, so ``is_user_override`` and
+        ``user_override_text`` stay as stored, and skips a user-disabled row.
+        ON CONFLICT ... WHERE is evaluated against the latest committed row
+        version, so changes the user commits after the generator's read are
+        kept. Returns the stored row, or None when skipped.
+        """
+        query = text(
+            f"""
+            {_INSERT_SUMMARY_SQL}
+            ON CONFLICT (contact_id) DO UPDATE SET
+                summary_text = EXCLUDED.summary_text,
+                follow_up_suggestions = EXCLUDED.follow_up_suggestions,
+                status = EXCLUDED.status,
+                is_disabled = EXCLUDED.is_disabled,
+                disabled_reason = EXCLUDED.disabled_reason,
+                generated_at = EXCLUDED.generated_at,
+                updated_at = NOW()
+            WHERE contact_summaries.disabled_reason IS DISTINCT FROM 'user'
+            RETURNING {_SUMMARY_COLUMNS}
+        """  # noqa: S608 - interpolates module constants, not input
+        )
+        result = await self.conn.execute(query, self._upsert_params(summary))
+        row = result.fetchone()
+        return self._row_to_entity(row) if row is not None else None
+
+    @staticmethod
+    def _upsert_params(summary: ContactSummary) -> dict[str, Any]:
+        """Bind parameters for the shared summary INSERT."""
+        return {
+            "contact_id": summary.contact_id,
+            "summary_text": summary.summary_text,
+            "follow_up_suggestions": json.dumps(summary.follow_up_suggestions),
+            "status": str(summary.status),
+            "is_disabled": summary.is_disabled,
+            "disabled_reason": (
+                str(summary.disabled_reason) if summary.disabled_reason else None
+            ),
+            "is_user_override": summary.is_user_override,
+            "user_override_text": summary.user_override_text,
+            "generated_at": summary.generated_at,
+        }
 
     async def update_status(
         self, contact_id: int, status: str
