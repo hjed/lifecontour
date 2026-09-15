@@ -175,11 +175,24 @@ export enum ContactSummaryStatus {
   DISABLED = 'disabled',
 }
 
+/**
+ * Why AI summary generation is disabled for a contact.
+ *
+ * `USER` is the user's own choice and stays off. `LOW_ACTIVITY` is an
+ * automatic pause that resumes once the contact has enough recent activity.
+ */
+export enum ContactSummaryDisabledReason {
+  USER = 'user',
+  LOW_ACTIVITY = 'low_activity',
+}
+
 export interface ContactSummaryAttributes {
   summary_text: string | null;
   follow_up_suggestions: string[];
   status: ContactSummaryStatus;
   is_disabled: boolean;
+  /** Null when generation is enabled. */
+  disabled_reason: ContactSummaryDisabledReason | null;
   is_user_override: boolean;
   user_override_text: string | null;
   generated_at: string | null;
@@ -189,6 +202,14 @@ export interface ContactSummaryResource {
   type: 'contact_summaries';
   id: string;
   attributes: ContactSummaryAttributes;
+}
+
+/** Body attributes for `PATCH /api/contacts/{id}/summary`. */
+export interface ContactSummaryUpdateData {
+  /** Turn AI generation off (`true`) or back on (`false`). */
+  is_disabled?: boolean;
+  /** Manual summary text; `null` clears an existing override. */
+  user_override_text?: string | null;
 }
 
 // Contact Types

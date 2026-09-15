@@ -2,11 +2,13 @@
  * Contact AI Summary component.
  *
  * Displays the AI-generated interaction summary with status indicators,
- * follow-up suggestions, and user override controls.
+ * follow-up suggestions, user override controls, and a switch to turn AI
+ * generation off and back on.
  */
 
 'use client';
 
+import { useId } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import {
   Bot,
@@ -14,14 +16,24 @@ import {
   Loader2,
   AlertTriangle,
   Ban,
+  Pause,
   Sparkles,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useRefreshContactSummary } from '@/lib/api/contacts';
-import { ContactSummaryResource, ContactSummaryStatus } from '@/types/contacts';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import {
+  useRefreshContactSummary,
+  useUpdateContactSummary,
+} from '@/lib/api/contacts';
+import {
+  ContactSummaryDisabledReason,
+  ContactSummaryResource,
+  ContactSummaryStatus,
+} from '@/types/contacts';
 
 export interface ContactSummaryProps {
   /** The summary resource from the API (null if no summary exists) */
@@ -72,6 +84,48 @@ const STATUS_CONFIG: Record<
   },
 };
 
+/** Badge for a summary paused automatically for low activity. */
+const PAUSED_BADGE = {
+  label: 'Paused',
+  variant: 'outline',
+  icon: Pause,
+} as const;
+
+interface SummaryGenerationSwitchProps {
+  readonly checked: boolean;
+  readonly disabled: boolean;
+  readonly onCheckedChange: (checked: boolean) => void;
+}
+
+/**
+ * Switch for the user's choice to generate AI summaries for this contact.
+ *
+ * Reflects the user's preference rather than the live state: a summary paused
+ * for low activity still shows as on, because it resumes by itself.
+ */
+function SummaryGenerationSwitch({
+  checked,
+  disabled,
+  onCheckedChange,
+}: SummaryGenerationSwitchProps) {
+  const switchId = useId();
+
+  return (
+    <div className='flex items-center justify-between gap-2 border-t pt-3'>
+      <Label htmlFor={switchId} className='text-sm font-normal'>
+        AI generation
+      </Label>
+      <Switch
+        id={switchId}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onCheckedChange}
+        data-testid='summary-generation-switch'
+      />
+    </div>
+  );
+}
+
 /**
  * Contact Summary display component.
  *
@@ -86,6 +140,12 @@ export function ContactSummary({
 }: ContactSummaryProps) {
   const { mutate: refreshSummary, isPending: isRefreshing } =
     useRefreshContactSummary(contactId);
+  const { mutate: updateSummary, isPending: isUpdating } =
+    useUpdateContactSummary(contactId);
+
+  const handleGenerationChange = (checked: boolean) => {
+    updateSummary({ is_disabled: !checked });
+  };
 
   // No summary exists yet — show placeholder
   if (!summary) {
@@ -107,14 +167,25 @@ export function ContactSummary({
             No AI summary available yet. Request a summary to get AI-generated
             insights about this contact.
           </p>
+          <SummaryGenerationSwitch
+            checked={true}
+            disabled={disabled || isUpdating}
+            onCheckedChange={handleGenerationChange}
+          />
         </CardContent>
       </Card>
     );
   }
 
   const attrs = summary.attributes;
-  const statusConfig =
-    STATUS_CONFIG[attrs.status] || STATUS_CONFIG[ContactSummaryStatus.PENDING];
+  const isUserDisabled =
+    attrs.disabled_reason === ContactSummaryDisabledReason.USER;
+  const isPaused =
+    attrs.disabled_reason === ContactSummaryDisabledReason.LOW_ACTIVITY;
+  const statusConfig = isPaused
+    ? PAUSED_BADGE
+    : STATUS_CONFIG[attrs.status] ||
+      STATUS_CONFIG[ContactSummaryStatus.PENDING];
   const StatusIcon = statusConfig.icon;
   const isAnimated =
     attrs.status === ContactSummaryStatus.GENERATING ||
@@ -162,7 +233,7 @@ export function ContactSummary({
             variant='ghost'
             size='icon'
             className='h-7 w-7'
-            disabled={disabled || attrs.is_disabled || isRefreshing}
+            disabled={disabled || isUserDisabled || isRefreshing}
             aria-label='Refresh AI summary'
             data-testid='summary-refresh-button'
             onClick={handleRefresh}
@@ -193,15 +264,17 @@ export function ContactSummary({
             className='text-muted-foreground text-sm'
             data-testid='summary-no-text'
           >
-            {attrs.status === ContactSummaryStatus.DISABLED
-              ? 'AI summary generation is disabled for this contact.'
-              : attrs.status === ContactSummaryStatus.FAILED
-                ? 'AI summary generation failed.'
-                : attrs.status === ContactSummaryStatus.PENDING
-                  ? 'Summary generation is pending…'
-                  : attrs.status === ContactSummaryStatus.GENERATING
-                    ? 'Summary is being generated…'
-                    : 'Summary is unavailable.'}
+            {isPaused
+              ? 'AI summary generation is paused — not enough recent activity. It resumes automatically.'
+              : attrs.status === ContactSummaryStatus.DISABLED
+                ? 'AI summary generation is disabled for this contact.'
+                : attrs.status === ContactSummaryStatus.FAILED
+                  ? 'AI summary generation failed.'
+                  : attrs.status === ContactSummaryStatus.PENDING
+                    ? 'Summary generation is pending…'
+                    : attrs.status === ContactSummaryStatus.GENERATING
+                      ? 'Summary is being generated…'
+                      : 'Summary is unavailable.'}
           </p>
         )}
 
@@ -237,6 +310,12 @@ export function ContactSummary({
             </ul>
           </div>
         )}
+
+        <SummaryGenerationSwitch
+          checked={!isUserDisabled}
+          disabled={disabled || isUpdating}
+          onCheckedChange={handleGenerationChange}
+        />
       </CardContent>
     </Card>
   );

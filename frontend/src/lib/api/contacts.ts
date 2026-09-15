@@ -26,6 +26,7 @@ import {
   TagCreateAttributes,
   TagResponse,
   ContactFieldResponse,
+  ContactSummaryUpdateData,
   CustomDateTypeResponse,
   CustomDateTypeListResponse,
   MergeContactOverrides,
@@ -1467,6 +1468,55 @@ export function useRefreshContactSummary(contactId: string) {
         queryKey: contactKeys.detail(contactId),
       });
       toast.success('Summary refresh requested');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+// Summary Configuration API Functions
+
+export async function updateContactSummary(
+  contactId: string,
+  data: ContactSummaryUpdateData
+): Promise<ContactResponse> {
+  const response = await fetch(
+    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/summary`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new Error(
+      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
+    );
+  }
+
+  return response.json();
+}
+
+/**
+ * Update a contact's AI summary configuration, e.g. turning generation off
+ * or back on. Re-enabling queues a new summary on the server.
+ */
+export function useUpdateContactSummary(contactId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ContactSummaryUpdateData) =>
+      updateContactSummary(contactId, data),
+    onSuccess: () => {
+      void invalidateAfterMutation(queryClient, {
+        queryKey: contactKeys.detail(contactId),
+      });
     },
     onError: (error: Error) => {
       toast.error(error.message);
