@@ -1,7 +1,7 @@
 """add disabled_reason to contact_summaries
 
-Revision ID: 0111
-Revises: 0110
+Revision ID: 0112
+Revises: 0111
 Create Date: 2026-09-15 10:20:00.000000
 
 Records *why* a contact's AI summary is disabled, so the low-activity
@@ -24,8 +24,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0111"
-down_revision: str | None = "0110"
+revision: str = "0112"
+down_revision: str | None = "0111"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
