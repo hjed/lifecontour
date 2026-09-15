@@ -37,8 +37,10 @@ instead (ITER18-005 Phase 8): when the first read of a page load reports
 this section back. So *generating* here usually means what it says for as long
 as that read takes — not always: a read that loses the generation claim to a
 concurrent request answers before that request finishes, and the card then shows
-*generating* until the next load. The card's Regenerate control stays the
-reader's way to force one.
+*generating* until the next load. A read that an invalidation overtakes (a task
+ticked while it is at the AI) does not end that way: it generates again before it
+answers, a bounded number of times (#1483). The card's Regenerate control stays
+the reader's way to force one.
 """
 
 from __future__ import annotations

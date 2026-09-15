@@ -2371,9 +2371,12 @@ async function regenerateThroughApi(page: Page, journalCount: number) {
  * Make today's summary stale with one last task write, and wait until the
  * read-only dashboard endpoint reports it.
  *
- * The task is due inside today's window, so its update invalidates today. It is
- * the last thing the test publishes, so the load that follows starts from a
- * known stale row rather than from whatever the seeding left in flight.
+ * The task is due inside today's window, so its update invalidates today. The
+ * poll cannot tell this write's invalidation from a seeding one still queued
+ * behind the regeneration (the task's creation invalidates today too), so this
+ * write's own invalidation may land while the page's read is generating. That
+ * read absorbs it — `get_or_generate` generates again from current inputs
+ * (#1483) — so the load still answers with one generated summary.
  */
 async function staleTodayWithLastTaskWrite(
   page: Page,
@@ -2435,7 +2438,8 @@ test.describe('Home Dashboard — the summary, generated end to end', () => {
     );
 
     // Today holds a summary, then one last task write makes it stale: the load
-    // below starts from a known row with nothing seeded still in flight.
+    // below starts from a stale row, and an invalidation still in flight is
+    // absorbed by the read that generates.
     await regenerateThroughApi(page, 1);
     await staleTodayWithLastTaskWrite(page, dataManager, task);
 

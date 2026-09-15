@@ -1307,3 +1307,117 @@ class TestARefusedWriteHandsTheDayBack:
 
         _, kwargs = mock_summary_repo.complete_generation.call_args
         assert kwargs["seen_invalidated_at"] == datetime(2026, 4, 27, 6, 0, tzinfo=UTC)
+
+
+class TestAReadOvertakenByAnInvalidationGeneratesAgain:
+    """A read whose write was refused answers with a summary, not ``PENDING``.
+
+    The dashboard reads today's summary once per load, so a read that handed
+    back the ``PENDING`` row left the card on "Generating..." until the next
+    load (#1483). The refused attempt is run again from current inputs, a
+    bounded number of times — and only when the day was handed back
+    ``PENDING``: a finished or re-claimed row is someone else's answer.
+    """
+
+    _DATE = date(2026, 4, 27)
+    _BEFORE = datetime(2026, 4, 27, 6, 0, tzinfo=UTC)
+    _AFTER = datetime(2026, 4, 27, 6, 5, tzinfo=UTC)
+
+    def _row(
+        self, status: SummaryStatus, invalidated_at: datetime | None = None
+    ) -> JournalDailySummary:
+        return JournalDailySummary(
+            user_id="user123",
+            summary_date=self._DATE,
+            summary_text="Earlier prose.",
+            status=status,
+            invalidated_at=invalidated_at,
+        )
+
+    @staticmethod
+    def _refuse_every_write(mock_summary_repo: AsyncMock) -> None:
+        # ``side_effect`` wins over ``return_value``, so the fixture's
+        # accept-everything default has to be cleared to refuse.
+        mock_summary_repo.complete_generation.side_effect = None
+        mock_summary_repo.complete_generation.return_value = None
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_left_pending_generates_again_from_the_new_stamp(
+        self,
+        service: DailySummaryService,
+        mock_input_assembler: AsyncMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        written: list[JournalDailySummary] = []
+
+        def refuse_then_accept(
+            summary: JournalDailySummary, **_: object
+        ) -> JournalDailySummary | None:
+            written.append(summary)
+            return None if len(written) == 1 else summary
+
+        mock_summary_repo.complete_generation.side_effect = refuse_then_accept
+        generating = self._row(SummaryStatus.GENERATING)
+        mock_summary_repo.find_by_user_and_date.side_effect = [
+            self._row(SummaryStatus.PENDING, self._BEFORE),  # attempt 1: cache check
+            generating,  # attempt 1: concurrent-completion re-read
+            self._row(SummaryStatus.PENDING, self._AFTER),  # handed back after refusal
+            self._row(SummaryStatus.PENDING, self._AFTER),  # attempt 2: cache check
+            generating,  # attempt 2: concurrent-completion re-read
+        ]
+
+        result = await service.get_or_generate(
+            "user123", self._DATE, transaction=_NO_TXN
+        )
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert mock_input_assembler.assemble.await_count == 2
+        seen = [
+            call.kwargs["seen_invalidated_at"]
+            for call in mock_summary_repo.complete_generation.call_args_list
+        ]
+        assert seen == [self._BEFORE, self._AFTER]
+
+    @pytest.mark.asyncio
+    async def test_a_read_refused_every_time_stops_after_three_attempts(
+        self,
+        service: DailySummaryService,
+        mock_input_assembler: AsyncMock,
+        mock_summary_repo: AsyncMock,
+    ) -> None:
+        self._refuse_every_write(mock_summary_repo)
+        pending = self._row(SummaryStatus.PENDING, self._AFTER)
+        mock_summary_repo.find_by_user_and_date.return_value = pending
+
+        result = await service.get_or_generate(
+            "user123", self._DATE, transaction=_NO_TXN
+        )
+
+        assert result is pending
+        assert mock_input_assembler.assemble.await_count == 3
+        assert mock_summary_repo.claim_for_generation.await_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "handed_back",
+        [SummaryStatus.GENERATED, SummaryStatus.GENERATING],
+        ids=["finished-concurrently", "claimed-by-another-request"],
+    )
+    async def test_a_refusal_not_left_pending_is_answered_without_generating_again(
+        self,
+        service: DailySummaryService,
+        mock_input_assembler: AsyncMock,
+        mock_summary_repo: AsyncMock,
+        handed_back: SummaryStatus,
+    ) -> None:
+        self._refuse_every_write(mock_summary_repo)
+        row = self._row(handed_back)
+        mock_summary_repo.find_by_user_and_date.side_effect = [None, None, row]
+
+        result = await service.get_or_generate(
+            "user123", self._DATE, transaction=_NO_TXN
+        )
+
+        assert result is row
+        assert mock_input_assembler.assemble.await_count == 1
