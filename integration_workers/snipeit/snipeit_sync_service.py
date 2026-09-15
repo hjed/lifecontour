@@ -1512,6 +1512,11 @@ class SnipeItSyncService:
                     asset_dates_before = AssetUsageDates.from_asset(
                         await self._api_client.get_asset(snipeit_asset_id)
                     )
+                    # Kept before posting: a checkout whose response is lost is
+                    # linked on retry, when the asset already shows its date.
+                    await self._keep_asset_dates_before(
+                        journal_id, external_id, asset_dates_before, session_factory
+                    )
                 await self._api_client.checkout_asset(
                     asset_id=snipeit_asset_id,
                     payload=payload,
@@ -1549,7 +1554,7 @@ class SnipeItSyncService:
         }
         if linked_log_id is not None:
             checkout_reference["snipeit_log_id"] = linked_log_id
-        elif asset_dates_before is not None:
+        if asset_dates_before is not None:
             checkout_reference[_ASSET_DATES_BEFORE] = asset_dates_before.to_reference()
 
         # Save sync metadata: journal_id → snipeit_checkout
@@ -1663,6 +1668,33 @@ class SnipeItSyncService:
             journal_id=journal_id,
             snipeit_asset_id=asset_id,
         )
+
+    async def _keep_asset_dates_before(
+        self,
+        journal_id: int,
+        external_id: str,
+        asset_dates: AssetUsageDates,
+        session_factory: Any,
+    ) -> None:
+        """Record the asset dates read before posting on the in-progress checkout row."""
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET reference_data = :reference_data, updated_at = now()
+                        WHERE integration_source = 'snipeit_checkout'
+                          AND internal_uuid = :internal_uuid
+                          AND external_id = :external_id
+                    """),
+                    {
+                        "internal_uuid": str(journal_id),
+                        "external_id": external_id,
+                        "reference_data": json.dumps(
+                            {_ASSET_DATES_BEFORE: asset_dates.to_reference()}
+                        ),
+                    },
+                )
 
     async def _rekey_checkout(
         self, journal_id: int, external_id: str, session_factory: Any
@@ -1790,7 +1822,7 @@ class SnipeItSyncService:
     ) -> int | None:
         """Claim the first candidate no other journal holds, or return ``None``.
 
-        The claim is written onto this journal's in-progress ``source`` row while
+        The claim is merged into this journal's in-progress ``source`` row while
         a per-asset advisory lock is held, so journals processed at once see each
         other's claims and cannot both link one Snipe-IT entry. A claim left on a
         failed row is stale and ignored. Only this user's journals count: log ids
@@ -1834,7 +1866,11 @@ class SnipeItSyncService:
                 await session.execute(
                     text("""
                         UPDATE sync_metadata
-                        SET reference_data = :claim, updated_at = now()
+                        SET reference_data = (
+                                COALESCE(reference_data, '{}')::jsonb
+                                || CAST(:claim AS jsonb)
+                            )::text,
+                            updated_at = now()
                         WHERE integration_source = :source
                           AND internal_uuid = :journal_id
                           AND external_id = :external_id
@@ -2110,11 +2146,18 @@ class SnipeItSyncService:
             snipeit_asset_id=snipeit_asset_id,
         )
         if usage_dates is not None and restore_baseline is not None:
-            # A checkout linked to existing history left Snipe-IT's own date.
+            # A checkout linked to existing history left Snipe-IT's own date,
+            # unless the worker read the asset first: it posted that checkout
+            # itself and linked it only because the response was lost.
+            worker_checkout = (
+                checkout_log_id is None
+                or AssetUsageDates.from_reference(checkout_row.reference_data)
+                is not None
+            )
             await self._restore_asset_dates(
                 snipeit_asset_id,
                 restore_baseline.latest(usage_dates).payload(
-                    include_checkout=checkout_log_id is None
+                    include_checkout=worker_checkout
                 ),
                 journal_id=journal_id,
             )

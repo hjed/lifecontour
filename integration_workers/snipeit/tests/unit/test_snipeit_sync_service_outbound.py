@@ -915,8 +915,15 @@ class TestPushCheckoutCreate:
         third_session.begin = MagicMock(return_value=mock_begin)
         third_session.execute = AsyncMock()
 
+        # The asset's dates are kept on the pending row before the POST.
+        keep_dates_ctx = _begin_session_ctx([MagicMock()])
         session_factory = MagicMock(
-            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+            side_effect=[
+                first_session_ctx,
+                second_session_ctx,
+                keep_dates_ctx,
+                third_session_ctx,
+            ]
         )
 
         service = SnipeItSyncService(
@@ -1105,8 +1112,15 @@ class TestPushCheckoutCreate:
         third_session.begin = MagicMock(return_value=mock_begin)
         third_session.execute = AsyncMock()
 
+        # The asset's dates are kept on the pending row before the POST.
+        keep_dates_ctx = _begin_session_ctx([MagicMock()])
         session_factory = MagicMock(
-            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+            side_effect=[
+                first_session_ctx,
+                second_session_ctx,
+                keep_dates_ctx,
+                third_session_ctx,
+            ]
         )
 
         service = SnipeItSyncService(
@@ -1458,6 +1472,7 @@ class TestPushCheckinCreate:
             side_effect=[
                 fetch_ctx,
                 checkout_lock_ctx,
+                _begin_session_ctx([MagicMock()]),  # keep the asset's dates
                 checkout_success_ctx,
                 checkin_resolve_ctx,
                 checkin_lock_ctx,

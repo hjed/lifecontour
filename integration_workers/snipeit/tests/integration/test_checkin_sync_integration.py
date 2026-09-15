@@ -1364,6 +1364,64 @@ class TestLinkExistingActivityIntegration:
         }
 
     @pytest.mark.asyncio
+    async def test_checkout_whose_response_was_lost_still_restores_last_checkout(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # The first checkout reached Snipe-IT but its response never arrived. The
+        # retry links that checkout and must still restore the later last
+        # checkout it replaced, read before the first attempt posted.
+        journal_id = await _sydney_trip(async_connection)
+        before = {
+            "last_checkout": "2026-01-21 23:14:00",
+            "last_checkin": "2026-02-12 21:26:37",
+        }
+        mock_transport.add_response(
+            "/hardware/42",
+            json_data={
+                "id": 42,
+                "asset_tag": "T-42",
+                "last_checkout": _snipeit_datetime_object(before["last_checkout"]),
+                "last_checkin": _snipeit_datetime_object(before["last_checkin"]),
+            },
+            method="GET",
+        )
+        # No checkout response is queued, so the POST fails as if it were lost.
+        with pytest.raises(ValueError, match="No mock response"):
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
+        mock_transport.add_response(
+            "/hardware/42/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
+        )
+        mock_transport.add_response(
+            "/hardware/42",
+            json_data={"status": "success", "payload": {"id": 42, "asset_tag": "T-42"}},
+            method="PATCH",
+        )
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert len(mock_transport.responses) == 0
+        assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST]
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert checkout_reference["snipeit_log_id"] == 100
+        assert checkout_reference["asset_dates_before"] == before
+        assert _request_body(mock_transport, "hardware/42", method="PATCH") == before
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "log",
         [
