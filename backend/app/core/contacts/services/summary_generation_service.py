@@ -523,8 +523,26 @@ class SummaryGenerator:
                 "Contact %d has no journals for prompt, skipping generation", contact_id
             )
             if was_paused:
-                # Nothing to summarise still: leave the pause as it is
-                return existing
+                # Notes and contact changes count as activity too: stay paused
+                # only while the activity checker still says so.
+                if self._activity_checker.should_auto_disable(summary_input, existing):
+                    return existing
+                resumed = await self._write_from_generation(
+                    contact_id,
+                    self._merge_with_existing(
+                        existing,
+                        contact_id=contact_id,
+                        summary_text="",
+                        follow_up_suggestions=[],
+                        status=SummaryStatus.GENERATED,
+                        generated_at=datetime.now(tz=UTC),
+                        is_disabled=False,
+                        disabled_reason=None,
+                    ),
+                )
+                if resumed is not None and not resumed.is_disabled:
+                    await self._record_pause_lifted(contact_id)
+                return resumed
             if existing and (
                 existing.summary_text
                 or existing.follow_up_suggestions
@@ -551,6 +569,11 @@ class SummaryGenerator:
             stored = await self._summary_repo.find_by_contact_id(contact_id)
             if stored is not None and stored.is_user_disabled:
                 return self._keep_user_disable(stored)
+        else:
+            # Decide from the row as stored at this write, so anything the user
+            # committed since the first read (such as an override) counts.
+            existing = generating
+            was_paused = generating.is_disabled
 
         # Check low activity
         if self._activity_checker.should_auto_disable(summary_input, existing):
@@ -660,6 +683,19 @@ class SummaryGenerator:
         if written is None:
             return await self._user_disabled_meanwhile(contact_id)
         return written
+
+    async def _record_pause_lifted(self, contact_id: int) -> None:
+        """Record in summary history that a low-activity pause was lifted."""
+        try:
+            await self._record_summary_history(
+                contact_id, {"is_disabled": (True, False)}
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Failed to record history/event for contact %s pause lift: %s",
+                contact_id,
+                e,
+            )
 
     async def _user_disabled_meanwhile(self, contact_id: int) -> ContactSummary | None:
         """Return the stored summary after a guarded write was skipped."""
