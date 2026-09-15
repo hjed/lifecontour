@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 from core_shared.models.journals.constants import MaintenanceType
@@ -93,6 +94,7 @@ class SnipeItMaintenanceTransformer:
         *,
         user_id: str,
         gear_item_id: str,
+        zone: str | None = None,
     ) -> MaintenanceTransformResult:
         """Transform a Snipe-IT maintenance record into journal event payloads.
 
@@ -101,6 +103,10 @@ class SnipeItMaintenanceTransformer:
             user_id: Internal user ID for the journal owner.
             gear_item_id: Internal gear item UUID string that the
                 maintenance applies to.
+            zone: IANA zone the journal owner's dates are read in, or ``None``
+                for UTC. Snipe-IT dates are calendar dates, so each becomes the
+                instant of its local midnight: the push reads them back in the
+                same zone and sends the same dates.
 
         Returns:
             ``MaintenanceTransformResult`` containing journal data,
@@ -128,17 +134,22 @@ class SnipeItMaintenanceTransformer:
             start_dt = now
             end_dt = now
         else:
-            start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+            tz = ZoneInfo(zone) if zone else UTC
+            start_dt = datetime.combine(
+                start_date, datetime.min.time(), tzinfo=tz
+            ).astimezone(UTC)
             end_dt = (
-                datetime.combine(end_date, datetime.min.time(), tzinfo=UTC)
+                datetime.combine(end_date, datetime.min.time(), tzinfo=tz).astimezone(
+                    UTC
+                )
                 if end_date
                 else start_dt
             )
 
-        # Covers the mapped type as well as the record, so an import stored under
-        # an older, lossy mapping is synced again and its type corrected.
+        # Covers the mapped type and the anchoring zone as well as the record, so
+        # an import stored under an older mapping or zone is synced again.
         version_hash = hashlib.sha256(
-            f"{maintenance.model_dump_json()}\n{maintenance_type}".encode()
+            f"{maintenance.model_dump_json()}\n{maintenance_type}\n{zone or 'UTC'}".encode()
         ).hexdigest()
 
         journal_data: dict[str, Any] = {

@@ -262,7 +262,7 @@ class TestPushMaintenanceCreate:
         )
         asset_sync_meta_row = MagicMock(external_id="42")
 
-        # First session_factory() call: _fetch_journal_and_maintenance_data (3 queries)
+        # First session_factory() call: _fetch_maintenance_push_context (4 queries)
         first_session = AsyncMock()
         first_session_ctx = MagicMock()
         first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
@@ -696,8 +696,9 @@ def _sql_routed_session_factory(rows: dict[str, object]) -> MagicMock:
     return MagicMock(return_value=session_ctx)
 
 
-class TestPushMaintenanceSkipsImportedJournals:
-    """A journal imported from Snipe-IT must never be written back to it."""
+class TestPushMaintenanceOfImportedJournals:
+    """A journal imported from Snipe-IT is never created there again; its edits
+    update the record it was imported from."""
 
     @staticmethod
     def _imported_journal_rows(**extra: object) -> dict[str, object]:
@@ -713,7 +714,9 @@ class TestPushMaintenanceSkipsImportedJournals:
                 maintenance_type="routine maintenance",
             ),
             "integration_source = 'snipeit'\n": MagicMock(external_id="51"),
-            "journal_external_event_links": (1,),
+            "journal_external_event_links": MagicMock(
+                external_event_id="snipeit_maint:17"
+            ),
             **extra,
         }
 
@@ -731,8 +734,9 @@ class TestPushMaintenanceSkipsImportedJournals:
         api_client.create_maintenance.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_update_does_not_patch_an_echo(self) -> None:
-        """An already-echoed journal carries a push row, yet must not PATCH it."""
+    async def test_update_patches_the_imported_record_not_an_echo(self) -> None:
+        """An already-echoed journal carries a push row naming the echo; its
+        edits still go to the record it was imported from."""
         api_client = _mock_api_client()
         service = SnipeItSyncService(api_client=api_client, user_id="user-1")
         rows = self._imported_journal_rows(
@@ -744,7 +748,8 @@ class TestPushMaintenanceSkipsImportedJournals:
             session_factory=_sql_routed_session_factory(rows),
         )
 
-        api_client.update_maintenance.assert_not_called()
+        api_client.update_maintenance.assert_called_once()
+        assert api_client.update_maintenance.call_args.args[0] == 17
 
 
 class TestPushCheckoutCreate:

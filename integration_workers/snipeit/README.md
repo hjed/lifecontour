@@ -27,7 +27,7 @@ the single source of truth for the worker's consumed-event set:
 | Event type | Handler | Behaviour |
 |---|---|---|
 | `GearItemUpdated` | `_handle_gear_item_updated` | pushes local gear changes to Snipe-IT |
-| `JournalCreated`, `JournalUpdated` | `_handle_journal_maintenance_event` | syncs gear-maintenance / gear-usage journals |
+| `JournalCreated`, `JournalUpdated` | `_handle_journal_maintenance_event` | syncs gear-maintenance / gear-usage journals; an edit to a maintenance journal imported from Snipe-IT updates the record it came from, and an update the inbound sync applied (`changed_by` `snipeit_maintenance`) is skipped |
 | `snipeit.webhook_received` | `_handle_webhook_received` | syncs the webhook's asset (`item.id`). The backend translates Snipe-IT's Slack-format notifications into `{action, item: {id}}` and publishes only those that link an asset |
 
 A handler that raises leaves its event unacknowledged so the base class retries

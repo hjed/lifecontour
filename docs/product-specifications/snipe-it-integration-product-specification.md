@@ -60,7 +60,8 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
 - **Two-Way Sync**:
   - Creating a maintenance record in Snipe-IT creates a journal.
   - Creating a `GEAR_MAINTENANCE` journal in the personal management system creates a maintenance record in Snipe-IT.
-  - Edits to a journal created in the personal management system are pushed to its Snipe-IT record. Edits to a journal imported from Snipe-IT are not yet pushed back.
+  - Edits to a journal created in the personal management system are pushed to its Snipe-IT record.
+  - Edits to a journal imported from Snipe-IT are pushed to the record it was imported from (`snipeit_maint:{id}` on its external event link), even when an earlier echo left a copy of that record in Snipe-IT.
 - **Maintenance Types**: Every Snipe-IT maintenance kind has its own `GEAR_MAINTENANCE` type, so a record's kind survives import and push unchanged. Snipe-IT (up to 8.4) stores the kind as the free-text `asset_maintenance_type`.
 
   | Snipe-IT | Journal `maintenance_type` |
@@ -80,8 +81,12 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
 - **Local-Only Fields**: Snipe-IT has no activity types or retirement reason, so a re-import leaves a journal's `activity_types` and `retirement_reason` untouched.
 - **Deduplication**: Uses the `SyncMetadata` table to map the internal journal ID to the external Snipe-IT maintenance ID.
 - **Loop Prevention**: A record must never travel back to the system it came from.
-  - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created or updated in Snipe-IT.
+  - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created in Snipe-IT again.
+  - A journal update the inbound sync applied (`changed_by` is `snipeit_maintenance`) is not pushed; only a user's edit is.
+  - A push of the record's own state changes nothing when it is next imported, so no journal update follows it.
   - A Snipe-IT record created from a journal is skipped by the inbound sync rather than imported as a second journal.
+- **Dates**: Snipe-IT maintenance dates are calendar dates. An import stores each as the instant of local midnight in the user's configured timezone (UTC when none is set), the zone every push reads dates in (see Part 4), so a round trip never moves a date.
+  - The zone is part of an import's version hash, so changing the user's timezone re-anchors imported dates at the next full maintenance sync. Until then a push reads them in the new zone, like every other date sent to Snipe-IT.
 - **Text Encoding**: Snipe-IT HTML-escapes text in API responses but stores what it is sent, so titles and notes are decoded once on import and sent unescaped.
 
 ---
