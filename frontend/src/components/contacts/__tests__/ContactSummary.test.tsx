@@ -5,13 +5,20 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ContactSummary } from '@/components/contacts/ContactSummary';
-import { ContactSummaryResource, ContactSummaryStatus } from '@/types/contacts';
+import {
+  ContactSummaryDisabledReason,
+  ContactSummaryResource,
+  ContactSummaryStatus,
+} from '@/types/contacts';
 
 const mockMutate = jest.fn();
 const mockRefreshHook = jest.fn();
+const mockUpdateMutate = jest.fn();
+const mockUpdateHook = jest.fn();
 
 jest.mock('@/lib/api/contacts', () => ({
   useRefreshContactSummary: (...args: unknown[]) => mockRefreshHook(...args),
+  useUpdateContactSummary: (...args: unknown[]) => mockUpdateHook(...args),
 }));
 
 function makeSummary(
@@ -25,6 +32,7 @@ function makeSummary(
       follow_up_suggestions: [],
       status: ContactSummaryStatus.GENERATED,
       is_disabled: false,
+      disabled_reason: null,
       is_user_override: false,
       user_override_text: null,
       generated_at: '2026-01-01T00:00:00Z',
@@ -39,7 +47,27 @@ beforeEach(() => {
     mutate: mockMutate,
     isPending: false,
   });
+  mockUpdateHook.mockReturnValue({
+    mutate: mockUpdateMutate,
+    isPending: false,
+  });
 });
+
+const userDisabled = {
+  status: ContactSummaryStatus.DISABLED,
+  is_disabled: true,
+  disabled_reason: ContactSummaryDisabledReason.USER,
+};
+
+const autoPaused = {
+  status: ContactSummaryStatus.DISABLED,
+  is_disabled: true,
+  disabled_reason: ContactSummaryDisabledReason.LOW_ACTIVITY,
+};
+
+function generationSwitch() {
+  return screen.getByRole('switch', { name: /ai generation/i });
+}
 
 describe('ContactSummary', () => {
   describe('empty state', () => {
@@ -107,13 +135,7 @@ describe('ContactSummary', () => {
 
     it('shows Disabled badge for disabled status', () => {
       render(
-        <ContactSummary
-          summary={makeSummary({
-            status: ContactSummaryStatus.DISABLED,
-            is_disabled: true,
-          })}
-          contactId='1'
-        />
+        <ContactSummary summary={makeSummary(userDisabled)} contactId='1' />
       );
 
       expect(screen.getByTestId('summary-status-badge')).toHaveTextContent(
@@ -157,11 +179,7 @@ describe('ContactSummary', () => {
     it('shows disabled message when status is disabled', () => {
       render(
         <ContactSummary
-          summary={makeSummary({
-            status: ContactSummaryStatus.DISABLED,
-            is_disabled: true,
-            summary_text: null,
-          })}
+          summary={makeSummary({ ...userDisabled, summary_text: null })}
           contactId='1'
         />
       );
@@ -277,15 +295,9 @@ describe('ContactSummary', () => {
       expect(screen.getByTestId('summary-refresh-button')).toBeInTheDocument();
     });
 
-    it('disables refresh button when summary is disabled', () => {
+    it('disables refresh button when the user disabled the summary', () => {
       render(
-        <ContactSummary
-          summary={makeSummary({
-            status: ContactSummaryStatus.DISABLED,
-            is_disabled: true,
-          })}
-          contactId='1'
-        />
+        <ContactSummary summary={makeSummary(userDisabled)} contactId='1' />
       );
 
       expect(screen.getByTestId('summary-refresh-button')).toBeDisabled();
@@ -380,6 +392,128 @@ describe('ContactSummary', () => {
       expect(
         screen.getByRole('button', { name: /refresh ai summary/i })
       ).toBeInTheDocument();
+    });
+  });
+  describe('generation switch', () => {
+    it('passes the contact id to the update hook', () => {
+      render(<ContactSummary summary={makeSummary()} contactId='42' />);
+
+      expect(mockUpdateHook).toHaveBeenCalledWith('42');
+    });
+
+    it('is on when generation is enabled', () => {
+      render(<ContactSummary summary={makeSummary()} contactId='1' />);
+
+      expect(generationSwitch()).toBeChecked();
+    });
+
+    it('stays on while generation is paused for low activity', () => {
+      render(
+        <ContactSummary summary={makeSummary(autoPaused)} contactId='1' />
+      );
+
+      expect(generationSwitch()).toBeChecked();
+    });
+
+    it('is off when the user disabled generation', () => {
+      render(
+        <ContactSummary summary={makeSummary(userDisabled)} contactId='1' />
+      );
+
+      expect(generationSwitch()).not.toBeChecked();
+    });
+
+    it('turns generation off when switched off', async () => {
+      const user = userEvent.setup();
+      render(<ContactSummary summary={makeSummary()} contactId='1' />);
+
+      await user.click(generationSwitch());
+
+      expect(mockUpdateMutate).toHaveBeenCalledWith({ is_disabled: true });
+    });
+
+    it('turns a paused summary off as the user choice when switched off', async () => {
+      const user = userEvent.setup();
+      render(
+        <ContactSummary summary={makeSummary(autoPaused)} contactId='1' />
+      );
+
+      await user.click(generationSwitch());
+
+      expect(mockUpdateMutate).toHaveBeenCalledWith({ is_disabled: true });
+    });
+
+    it('turns generation back on when switched on', async () => {
+      const user = userEvent.setup();
+      render(
+        <ContactSummary summary={makeSummary(userDisabled)} contactId='1' />
+      );
+
+      await user.click(generationSwitch());
+
+      expect(mockUpdateMutate).toHaveBeenCalledWith({ is_disabled: false });
+    });
+
+    it('is disabled while an update is in flight', () => {
+      mockUpdateHook.mockReturnValue({
+        mutate: mockUpdateMutate,
+        isPending: true,
+      });
+      render(<ContactSummary summary={makeSummary()} contactId='1' />);
+
+      expect(generationSwitch()).toBeDisabled();
+    });
+
+    it('is disabled when the component is disabled', () => {
+      render(
+        <ContactSummary summary={makeSummary()} contactId='1' disabled={true} />
+      );
+
+      expect(generationSwitch()).toBeDisabled();
+    });
+
+    it('is shown on in the empty state and can turn generation off', async () => {
+      const user = userEvent.setup();
+      render(<ContactSummary summary={null} contactId='1' />);
+
+      expect(generationSwitch()).toBeChecked();
+      await user.click(generationSwitch());
+
+      expect(mockUpdateMutate).toHaveBeenCalledWith({ is_disabled: true });
+    });
+  });
+
+  describe('paused for low activity', () => {
+    it('shows a Paused badge', () => {
+      render(
+        <ContactSummary summary={makeSummary(autoPaused)} contactId='1' />
+      );
+
+      expect(screen.getByTestId('summary-status-badge')).toHaveTextContent(
+        'Paused'
+      );
+    });
+
+    it('explains the pause resumes automatically', () => {
+      render(
+        <ContactSummary
+          summary={makeSummary({ ...autoPaused, summary_text: null })}
+          contactId='1'
+        />
+      );
+
+      expect(
+        screen.getByText(/paused.*not enough recent activity/i)
+      ).toBeInTheDocument();
+      expect(screen.getByText(/resumes automatically/i)).toBeInTheDocument();
+    });
+
+    it('keeps the refresh button enabled so activity can be re-checked', () => {
+      render(
+        <ContactSummary summary={makeSummary(autoPaused)} contactId='1' />
+      );
+
+      expect(screen.getByTestId('summary-refresh-button')).toBeEnabled();
     });
   });
 });

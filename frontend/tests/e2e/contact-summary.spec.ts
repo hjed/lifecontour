@@ -2,10 +2,10 @@ import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
 // Note: the AI Summary card rendering (empty state, heading, status badges,
-// user-override text, refresh button enable/disable, generated-at visibility)
-// is unit-tested in ContactSummary.test.tsx. These e2e tests cover only the
-// real summary-refresh API contract (POST 202 / PATCH 200) that the component
-// test mocks out.
+// user-override text, refresh button enable/disable, generated-at visibility,
+// generation switch states) is unit-tested in ContactSummary.test.tsx. These
+// e2e tests cover only the real summary API contract (POST 202 / PATCH 200)
+// that the component test mocks out.
 test.describe('Contact AI Summary', () => {
   test('should queue summary regeneration via refresh button without blocking UI', async ({
     authenticatedPage,
@@ -184,5 +184,67 @@ test.describe('Contact AI Summary', () => {
     await expect(
       authenticatedPage.getByTestId('summary-generated-at')
     ).not.toBeVisible({ timeout: 3000 });
+  });
+
+  test('should turn AI summary generation back on with the switch', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(authenticatedPage);
+    const contact = await dataManager.createContact({
+      firstName: 'SummaryToggle',
+      lastName: 'Reenable',
+    });
+
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    // Seed a summary the user has turned off. The PATCH is idempotent, so
+    // retrying it rides out transient 404s while the new contact becomes
+    // visible.
+    await expect(async () => {
+      const disableResponse = await authenticatedPage.request.patch(
+        `/api/contacts/${contact.id}/summary`,
+        {
+          // Outer `data` is Playwright's option; inner `data` is JSON:API.
+          data: { data: { is_disabled: true } },
+          timeout: 3000,
+        }
+      );
+      expect(disableResponse.status()).toBe(200);
+    }).toPass({ timeout: 10000 });
+
+    await authenticatedPage.goto(`/contacts/${contact.id}`);
+
+    const generationSwitch = authenticatedPage.getByRole('switch', {
+      name: 'AI generation',
+    });
+    const refreshButton = authenticatedPage.getByTestId(
+      'summary-refresh-button'
+    );
+    await expect(generationSwitch).toHaveAttribute('aria-checked', 'false', {
+      timeout: 10000,
+    });
+    await expect(refreshButton).toBeDisabled();
+
+    const [response] = await Promise.all([
+      authenticatedPage.waitForResponse(
+        resp =>
+          resp.url().endsWith(`/api/contacts/${contact.id}/summary`) &&
+          resp.request().method() === 'PATCH',
+        { timeout: 10000 }
+      ),
+      generationSwitch.click(),
+    ]);
+    expect(response.status()).toBe(200);
+
+    // Durable state from the server, not the transient status badge: the
+    // re-enabled summary is no longer user-disabled, so the switch is on and
+    // refresh is allowed again.
+    await expect(generationSwitch).toHaveAttribute('aria-checked', 'true', {
+      timeout: 10000,
+    });
+    await expect(refreshButton).toBeEnabled();
   });
 });

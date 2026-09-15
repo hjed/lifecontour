@@ -77,6 +77,10 @@ jest.mock('@/lib/api/contacts', () => ({
     mutateAsync: jest.fn(),
     isPending: false,
   })),
+  useUpdateContactSummary: jest.fn(() => ({
+    mutate: jest.fn(),
+    isPending: false,
+  })),
 }));
 
 // Create trackable mock for router
