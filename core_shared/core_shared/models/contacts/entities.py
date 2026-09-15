@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 
 from core_shared.models.contacts.important_date_types import (
     DatePrecision,
@@ -28,6 +28,19 @@ class SummaryStatus(Enum):
     def __str__(self) -> str:
         """Return the string value of the enum."""
         return self.value
+
+
+class SummaryDisabledReason(StrEnum):
+    """Why AI summary generation is disabled for a contact.
+
+    ``USER`` is the user's own choice and is sticky: nothing automatic turns it
+    back on. ``LOW_ACTIVITY`` is the generator pausing a contact with too little
+    recent activity; it is re-evaluated whenever a refresh is triggered, so the
+    summary resumes once activity picks up.
+    """
+
+    USER = "user"
+    LOW_ACTIVITY = "low_activity"
 
 
 class MethodType(Enum):
@@ -227,11 +240,35 @@ class ContactSummary:
     follow_up_suggestions: list[str] = field(default_factory=list)
     status: SummaryStatus = SummaryStatus.PENDING
     is_disabled: bool = False
+    disabled_reason: SummaryDisabledReason | None = None
     is_user_override: bool = False
     user_override_text: str | None = None
     generated_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        """Reject a disabled flag and reason that disagree."""
+        if self.is_disabled != (self.disabled_reason is not None):
+            raise ValueError(
+                "disabled_reason must be set exactly when is_disabled is True"
+            )
+
+    @property
+    def is_user_disabled(self) -> bool:
+        """Whether the user disabled generation (sticky, unlike an auto-pause)."""
+        return self.disabled_reason == SummaryDisabledReason.USER
+
+    def disable(self, reason: SummaryDisabledReason) -> None:
+        """Disable generation for ``reason``, moving the status to DISABLED."""
+        self.is_disabled = True
+        self.disabled_reason = reason
+        self.status = SummaryStatus.DISABLED
+
+    def enable(self) -> None:
+        """Clear the disabled flag and reason; the caller decides the new status."""
+        self.is_disabled = False
+        self.disabled_reason = None
 
     def get_display_text(self) -> str | None:
         """Get the text to display for this summary.

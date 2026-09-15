@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from core_shared.models.contacts.entities import (
     Contact,
@@ -21,6 +21,18 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.models.importance import ContactImportance
 from app.core.contacts.models.upcoming_dates import ContactImportantDate
 from app.core.history.models import FieldHistoryEntry, FieldHistoryRepository
+
+
+class ClaimedRefresh(NamedTuple):
+    """A buffered summary refresh claimed by the sweeper.
+
+    ``is_user_disabled`` marks a summary the user turned off: its marker is
+    cleared but no generation is dispatched. An auto-paused (low-activity)
+    summary is not flagged, so it is dispatched and re-evaluated.
+    """
+
+    contact_id: int
+    is_user_disabled: bool
 
 
 class DomainEventProtocol(Protocol):
@@ -607,8 +619,15 @@ class ContactSummaryRepository(ABC):
     """Repository interface for contact summary operations."""
 
     @abstractmethod
-    async def find_by_contact_id(self, contact_id: int) -> ContactSummary | None:
-        """Find a summary by contact ID."""
+    async def find_by_contact_id(
+        self, contact_id: int, *, for_update: bool = False
+    ) -> ContactSummary | None:
+        """Find a summary by contact ID.
+
+        ``for_update`` locks the row until the transaction ends. Use it for a
+        read whose result is written back, so a concurrent writer waits instead
+        of having its change overwritten by a write built from a stale read.
+        """
         pass
 
     @abstractmethod
@@ -624,12 +643,37 @@ class ContactSummaryRepository(ABC):
         pass
 
     @abstractmethod
+    async def upsert_from_generation(
+        self, summary: ContactSummary
+    ) -> ContactSummary | None:
+        """Write a generation result without overriding the user's choices.
+
+        For the generator, which reads the row earlier without a lock. Creates
+        the row if needed; on an existing row it updates only the columns
+        generation owns, leaves the user's override fields as stored, and skips
+        a row the user has disabled. The check runs against the row as it is at
+        the write. Returns the stored row, or None when the write is skipped.
+        """
+        pass
+
+    @abstractmethod
+    async def update_status_unless_user_disabled(
+        self, contact_id: int, status: str
+    ) -> ContactSummary | None:
+        """Update the status unless the row is user-disabled.
+
+        Returns None when the write is skipped or no row exists.
+        """
+        pass
+
+    @abstractmethod
     async def mark_refresh_requested(self, contact_id: int) -> None:
         """Record a buffered refresh request for a contact (rolling debounce).
 
         Sets ``refresh_requested_at`` to now, resetting the debounce timer on
         every call. Creates the summary row if none exists; no-op when the
-        summary is disabled.
+        user disabled the summary. An auto-paused (low-activity) summary is
+        still marked so the generator can re-evaluate it.
         """
         pass
 
@@ -641,15 +685,14 @@ class ContactSummaryRepository(ABC):
     @abstractmethod
     async def claim_due_refreshes(
         self, buffer_seconds: int, limit: int
-    ) -> list[tuple[int, bool]]:
+    ) -> list[ClaimedRefresh]:
         """Atomically claim contacts whose buffered refresh is due.
 
         Clears the marker on rows whose ``refresh_requested_at`` is at least
         ``buffer_seconds`` old — measured on the database clock, the same
-        source that stamps the marker — and returns ``(contact_id,
-        is_disabled)`` tuples, oldest marker first. Disabled rows are claimed
-        too (so stale markers don't accumulate) but callers must not dispatch
-        generation for them.
+        source that stamps the marker — and returns them oldest marker first.
+        User-disabled rows are claimed too (so stale markers don't accumulate)
+        but flagged, and callers must not dispatch generation for them.
         """
         pass
 

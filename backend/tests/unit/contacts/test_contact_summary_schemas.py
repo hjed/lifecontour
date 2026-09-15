@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from core_shared.models.contacts.entities import SummaryDisabledReason
 from pydantic import ValidationError
 
 from app.api.contacts.schemas import (
@@ -56,10 +57,25 @@ class TestContactSummaryAttributes:
             follow_up_suggestions=[],
             status="disabled",
             is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
             is_user_override=False,
         )
         assert attrs.is_disabled is True
+        assert attrs.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
+        assert attrs.model_dump(mode="json")["disabled_reason"] == "low_activity"
         assert attrs.status == "disabled"
+
+    def test_disabled_reason_defaults_to_none(self):
+        """An enabled summary has no disabled reason."""
+        attrs = ContactSummaryAttributes(status="pending")
+        assert attrs.disabled_reason is None
+
+    def test_unknown_disabled_reason_rejected(self):
+        """Only the known reasons are valid."""
+        with pytest.raises(ValidationError):
+            ContactSummaryAttributes.model_validate(
+                {"status": "disabled", "disabled_reason": "bored"}
+            )
 
     def test_serialize_user_override(self):
         """Test serialization with user override text."""

@@ -422,6 +422,9 @@ contact_summaries_table = Table(
     ),
     Column("status", String(30), server_default=text("'pending'"), nullable=False),
     Column("is_disabled", Boolean, server_default=text("false"), nullable=False),
+    # Why generation is disabled: 'user' (sticky) or 'low_activity' (an
+    # auto-pause re-evaluated on refresh). NULL exactly when enabled.
+    Column("disabled_reason", String(30), nullable=True),
     Column("is_user_override", Boolean, server_default=text("false"), nullable=False),
     Column("user_override_text", Text, nullable=True),
     Column("generated_at", DateTime(timezone=True), nullable=True),
@@ -444,5 +447,13 @@ contact_summaries_table = Table(
     CheckConstraint(
         "status IN ('pending', 'generating', 'generated', 'failed', 'disabled')",
         name="ck_contact_summaries_status",
+    ),
+    CheckConstraint(
+        "disabled_reason IN ('user', 'low_activity')",
+        name="ck_contact_summaries_disabled_reason",
+    ),
+    CheckConstraint(
+        "is_disabled = (disabled_reason IS NOT NULL)",
+        name="ck_contact_summaries_disabled_reason_matches_flag",
     ),
 )

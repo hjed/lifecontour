@@ -127,3 +127,56 @@ class TestSummaryRefreshSweeperIntegration:
         assert dispatched == 0
         events = await self._get_due_outbox_events(clean_database, test_contact_id)
         assert events == []
+
+    @pytest.mark.asyncio
+    async def test_sweep_dispatches_auto_paused_contact(
+        self,
+        sweeper: SummaryRefreshSweeper,
+        test_contact_id: int,
+        clean_database: AsyncConnection,
+    ):
+        """A low-activity pause is re-evaluated: its due marker is dispatched."""
+        await self._mark_backdated(clean_database, test_contact_id, seconds_ago=600)
+        await clean_database.execute(
+            text(
+                """
+                UPDATE contact_summaries
+                SET is_disabled = TRUE, disabled_reason = 'low_activity',
+                    status = 'disabled'
+                WHERE contact_id = :contact_id
+                """
+            ),
+            {"contact_id": test_contact_id},
+        )
+
+        dispatched = await sweeper.sweep_batch(clean_database)
+
+        assert dispatched == 1
+        events = await self._get_due_outbox_events(clean_database, test_contact_id)
+        assert len(events) == 1
+
+    @pytest.mark.asyncio
+    async def test_sweep_skips_user_disabled_contact(
+        self,
+        sweeper: SummaryRefreshSweeper,
+        test_contact_id: int,
+        clean_database: AsyncConnection,
+    ):
+        """A user's own disable is sticky: its due marker is cleared, not dispatched."""
+        await self._mark_backdated(clean_database, test_contact_id, seconds_ago=600)
+        await clean_database.execute(
+            text(
+                """
+                UPDATE contact_summaries
+                SET is_disabled = TRUE, disabled_reason = 'user', status = 'disabled'
+                WHERE contact_id = :contact_id
+                """
+            ),
+            {"contact_id": test_contact_id},
+        )
+
+        dispatched = await sweeper.sweep_batch(clean_database)
+
+        assert dispatched == 0
+        events = await self._get_due_outbox_events(clean_database, test_contact_id)
+        assert events == []

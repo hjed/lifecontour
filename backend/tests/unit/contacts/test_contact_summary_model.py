@@ -6,6 +6,7 @@ import pytest
 from core_shared.models.contacts.entities import (
     Contact,
     ContactSummary,
+    SummaryDisabledReason,
     SummaryStatus,
 )
 
@@ -36,6 +37,16 @@ class TestSummaryStatus:
         """Test string representation of enum values."""
         assert str(SummaryStatus.PENDING) == "pending"
         assert str(SummaryStatus.GENERATED) == "generated"
+
+
+@pytest.mark.unit
+class TestSummaryDisabledReason:
+    """Test SummaryDisabledReason enum values."""
+
+    def test_enum_values(self):
+        """Both reasons a summary can be disabled for are persisted as strings."""
+        assert SummaryDisabledReason.USER.value == "user"
+        assert SummaryDisabledReason.LOW_ACTIVITY.value == "low_activity"
 
 
 @pytest.mark.unit
@@ -84,8 +95,66 @@ class TestContactSummary:
             contact_id=1,
             status=SummaryStatus.DISABLED,
             is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
         )
         assert summary.is_disabled is True
+        assert summary.disabled_reason == SummaryDisabledReason.USER
+        assert summary.status == SummaryStatus.DISABLED
+
+    def test_enabled_summary_has_no_disabled_reason(self):
+        """An enabled summary defaults to no disabled reason."""
+        summary = ContactSummary(contact_id=1)
+        assert summary.disabled_reason is None
+        assert summary.is_user_disabled is False
+
+    def test_disabled_without_reason_is_rejected(self):
+        """A disabled summary must say why it is disabled."""
+        with pytest.raises(ValueError, match="disabled_reason"):
+            ContactSummary(contact_id=1, is_disabled=True)
+
+    def test_reason_without_disabled_is_rejected(self):
+        """A reason on an enabled summary is contradictory."""
+        with pytest.raises(ValueError, match="disabled_reason"):
+            ContactSummary(
+                contact_id=1, disabled_reason=SummaryDisabledReason.LOW_ACTIVITY
+            )
+
+    def test_is_user_disabled_only_for_user_reason(self):
+        """Only a user's choice counts as user-disabled; auto-pause does not."""
+        user = ContactSummary(
+            contact_id=1, is_disabled=True, disabled_reason=SummaryDisabledReason.USER
+        )
+        paused = ContactSummary(
+            contact_id=1,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+        assert user.is_user_disabled is True
+        assert paused.is_user_disabled is False
+
+    def test_disable_sets_flag_reason_and_status(self):
+        """disable() records the reason alongside the flag and DISABLED status."""
+        summary = ContactSummary(contact_id=1, status=SummaryStatus.GENERATED)
+
+        summary.disable(SummaryDisabledReason.LOW_ACTIVITY)
+
+        assert summary.is_disabled is True
+        assert summary.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
+        assert summary.status == SummaryStatus.DISABLED
+
+    def test_enable_clears_flag_and_reason(self):
+        """enable() clears both the flag and the reason, leaving status to the caller."""
+        summary = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+        )
+
+        summary.enable()
+
+        assert summary.is_disabled is False
+        assert summary.disabled_reason is None
         assert summary.status == SummaryStatus.DISABLED
 
     def test_create_user_override_summary(self):
@@ -136,6 +205,7 @@ class TestContactSummary:
             contact_id=1,
             status=SummaryStatus.DISABLED,
             is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
         )
         assert summary.get_display_text() is None
 

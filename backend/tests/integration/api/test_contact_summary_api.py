@@ -5,6 +5,8 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.main import create_app
 
@@ -14,7 +16,6 @@ async def integration_api_client(async_connection, clean_database, test_settings
     """Create async test client for API integration tests with real database setup."""
     from dishka import Provider, Scope, make_async_container, provide
     from dishka.integrations.fastapi import FastapiProvider, setup_dishka
-    from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.infrastructure.auth.models import SessionUser
     from app.infrastructure.di.contacts import ContactProvider
@@ -98,6 +99,22 @@ async def _get_contact_summary(
     return result
 
 
+async def _count_refresh_due_events(
+    connection: AsyncConnection, contact_id: str
+) -> int:
+    """Count ContactSummaryRefreshDue outbox events queued for a contact."""
+    result = await connection.execute(
+        text(
+            "SELECT COUNT(*) FROM outbox_events "
+            "WHERE event_type = 'ContactSummaryRefreshDue' "
+            "AND aggregate_id = :contact_id"
+        ),
+        {"contact_id": int(contact_id)},
+    )
+    count: int = result.scalar_one()
+    return count
+
+
 @pytest.mark.integration
 class TestContactSummaryRefreshEndpoint:
     """Integration tests for POST /api/contacts/{id}/summary/refresh."""
@@ -164,7 +181,7 @@ class TestContactSummaryRefreshEndpoint:
         assert summary["attributes"]["status"] == "pending"
 
     async def test_refresh_disabled_summary_returns_error(self, integration_api_client):
-        """Test refresh for disabled summary returns validation error."""
+        """Test refresh for a summary the user disabled returns validation error."""
         contact_id = await _create_contact(integration_api_client)
 
         # Disable the summary
@@ -207,6 +224,35 @@ class TestContactSummaryRefreshEndpoint:
         assert len(rows) >= 1
         assert rows[0].event_type == "ContactSummaryRefreshDue"
 
+    async def test_refresh_auto_paused_summary_is_accepted(
+        self, integration_api_client, async_connection
+    ):
+        """A low-activity pause is refreshable: 202, still disabled, event queued."""
+        from sqlalchemy import text
+
+        contact_id = await _create_contact(integration_api_client)
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO contact_summaries
+                    (contact_id, status, is_disabled, disabled_reason)
+                VALUES (:contact_id, 'disabled', TRUE, 'low_activity')
+                """
+            ),
+            {"contact_id": int(contact_id)},
+        )
+
+        response = await integration_api_client.post(
+            f"/api/contacts/{contact_id}/summary/refresh"
+        )
+
+        assert response.status_code == 202
+        summary = await _get_contact_summary(integration_api_client, contact_id)
+        assert summary is not None
+        assert summary["attributes"]["status"] == "disabled"
+        assert summary["attributes"]["disabled_reason"] == "low_activity"
+        assert await _count_refresh_due_events(async_connection, contact_id) == 1
+
 
 @pytest.mark.integration
 class TestContactSummaryPatchEndpoint:
@@ -228,6 +274,7 @@ class TestContactSummaryPatchEndpoint:
         assert response.status_code == 200
         summary = response.json()["data"]["attributes"]["summary"]
         assert summary["attributes"]["is_disabled"] is True
+        assert summary["attributes"]["disabled_reason"] == "user"
         assert summary["attributes"]["status"] == "disabled"
 
     async def test_patch_reenable_summary(self, integration_api_client):
@@ -249,7 +296,26 @@ class TestContactSummaryPatchEndpoint:
         assert response.status_code == 200
         summary = response.json()["data"]["attributes"]["summary"]
         assert summary["attributes"]["is_disabled"] is False
+        assert summary["attributes"]["disabled_reason"] is None
         assert summary["attributes"]["status"] == "pending"
+
+    async def test_patch_reenable_queues_generation(
+        self, integration_api_client, async_connection
+    ):
+        """Re-enabling publishes one ContactSummaryRefreshDue; disabling publishes none."""
+        contact_id = await _create_contact(integration_api_client)
+
+        await integration_api_client.patch(
+            f"/api/contacts/{contact_id}/summary",
+            json={"data": {"is_disabled": True}},
+        )
+        assert await _count_refresh_due_events(async_connection, contact_id) == 0
+
+        await integration_api_client.patch(
+            f"/api/contacts/{contact_id}/summary",
+            json={"data": {"is_disabled": False}},
+        )
+        assert await _count_refresh_due_events(async_connection, contact_id) == 1
 
     async def test_patch_set_user_override(self, integration_api_client):
         """Test setting user override text via PATCH."""

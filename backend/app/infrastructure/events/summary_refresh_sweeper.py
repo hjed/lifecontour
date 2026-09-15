@@ -54,8 +54,10 @@ class SummaryRefreshSweeper:
     async def sweep_batch(self, connection: AsyncConnection) -> int:
         """Dispatch due buffered refreshes on the given connection.
 
-        Disabled summaries are claimed too (their stale markers are cleared)
-        but no generation is dispatched for them. A publish failure propagates
+        Summaries the user disabled are claimed too (their stale markers are
+        cleared) but no generation is dispatched for them. An auto-paused
+        (low-activity) summary is dispatched so the generator re-evaluates it.
+        A publish failure propagates
         so the caller's transaction rolls back the claimed markers.
 
         Args:
@@ -77,14 +79,16 @@ class SummaryRefreshSweeper:
             return 0
 
         dispatched = 0
-        for contact_id, is_disabled in claimed:
-            if is_disabled:
+        for claim in claimed:
+            if claim.is_user_disabled:
                 logger.debug(
-                    "Cleared stale refresh marker for disabled summary",
-                    contact_id=contact_id,
+                    "Cleared stale refresh marker for user-disabled summary",
+                    contact_id=claim.contact_id,
                 )
                 continue
-            await publisher.publish(ContactSummaryRefreshDue(contact_id=contact_id))
+            await publisher.publish(
+                ContactSummaryRefreshDue(contact_id=claim.contact_id)
+            )
             dispatched += 1
 
         if dispatched > 0:

@@ -3,7 +3,12 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from core_shared.models.contacts.entities import Contact, ContactSummary, SummaryStatus
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactSummary,
+    SummaryDisabledReason,
+    SummaryStatus,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -11,6 +16,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactRepository,
     SqlContactSummaryRepository,
 )
+from app.core.contacts.models.repositories import ClaimedRefresh
 
 
 @pytest.mark.integration
@@ -125,15 +131,16 @@ class TestSummaryRefreshBufferRepository:
         assert marker is not None
 
     @pytest.mark.asyncio
-    async def test_mark_is_noop_for_disabled_summary(
+    async def test_mark_is_noop_for_user_disabled_summary(
         self, summary_repo, test_contact, clean_database
     ):
-        """Marking a disabled summary must not set the marker."""
+        """Marking a summary the user disabled must not set the marker."""
         await summary_repo.upsert(
             ContactSummary(
                 contact_id=test_contact.id,
                 status=SummaryStatus.DISABLED,
                 is_disabled=True,
+                disabled_reason=SummaryDisabledReason.USER,
             )
         )
 
@@ -141,6 +148,28 @@ class TestSummaryRefreshBufferRepository:
 
         marker = await self._get_marker(clean_database, test_contact.id)
         assert marker is None
+
+    @pytest.mark.asyncio
+    async def test_mark_sets_marker_for_auto_paused_summary(
+        self, summary_repo, test_contact, clean_database
+    ):
+        """A low-activity pause is re-evaluated, so activity still marks it."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                status=SummaryStatus.DISABLED,
+                is_disabled=True,
+                disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+            )
+        )
+
+        await summary_repo.mark_refresh_requested(test_contact.id)
+
+        marker = await self._get_marker(clean_database, test_contact.id)
+        assert marker is not None
+        summary = await summary_repo.find_by_contact_id(test_contact.id)
+        assert summary is not None
+        assert summary.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
 
     @pytest.mark.asyncio
     async def test_clear_refresh_request(
@@ -164,7 +193,9 @@ class TestSummaryRefreshBufferRepository:
 
         claimed = await summary_repo.claim_due_refreshes(buffer_seconds=300, limit=10)
 
-        assert claimed == [(test_contact.id, False)]
+        assert claimed == [
+            ClaimedRefresh(contact_id=test_contact.id, is_user_disabled=False)
+        ]
         marker = await self._get_marker(clean_database, test_contact.id)
         assert marker is None
 
@@ -182,18 +213,18 @@ class TestSummaryRefreshBufferRepository:
         assert marker is not None
 
     @pytest.mark.asyncio
-    async def test_claim_returns_disabled_rows_flagged(
+    async def test_claim_flags_user_disabled_rows(
         self, summary_repo, test_contact, clean_database
     ):
-        """Disabled rows with stale markers are claimed (cleared) but flagged."""
+        """User-disabled rows with stale markers are claimed (cleared) but flagged."""
         await summary_repo.mark_refresh_requested(test_contact.id)
         await self._backdate_marker(clean_database, test_contact.id, seconds_ago=600)
-        # Disable after the marker was set (e.g. LowActivityChecker mid-window)
+        # The user disables after the marker was set
         await clean_database.execute(
             text(
                 """
                 UPDATE contact_summaries
-                SET is_disabled = TRUE, status = 'disabled'
+                SET is_disabled = TRUE, disabled_reason = 'user', status = 'disabled'
                 WHERE contact_id = :contact_id
                 """
             ),
@@ -202,9 +233,37 @@ class TestSummaryRefreshBufferRepository:
 
         claimed = await summary_repo.claim_due_refreshes(buffer_seconds=300, limit=10)
 
-        assert claimed == [(test_contact.id, True)]
+        assert claimed == [
+            ClaimedRefresh(contact_id=test_contact.id, is_user_disabled=True)
+        ]
         marker = await self._get_marker(clean_database, test_contact.id)
         assert marker is None
+
+    @pytest.mark.asyncio
+    async def test_claim_does_not_flag_auto_paused_rows(
+        self, summary_repo, test_contact, clean_database
+    ):
+        """An auto-paused row is claimed unflagged so the sweeper re-evaluates it."""
+        await summary_repo.mark_refresh_requested(test_contact.id)
+        await self._backdate_marker(clean_database, test_contact.id, seconds_ago=600)
+        # LowActivityChecker pauses the contact after the marker was set
+        await clean_database.execute(
+            text(
+                """
+                UPDATE contact_summaries
+                SET is_disabled = TRUE, disabled_reason = 'low_activity',
+                    status = 'disabled'
+                WHERE contact_id = :contact_id
+                """
+            ),
+            {"contact_id": test_contact.id},
+        )
+
+        claimed = await summary_repo.claim_due_refreshes(buffer_seconds=300, limit=10)
+
+        assert claimed == [
+            ClaimedRefresh(contact_id=test_contact.id, is_user_disabled=False)
+        ]
 
     @pytest.mark.asyncio
     async def test_claim_respects_limit_and_orders_oldest_first(

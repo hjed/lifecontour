@@ -1,13 +1,19 @@
 """Unit tests for SummaryGenerator — orchestrator for AI summary generation."""
 
+import dataclasses
 import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from core_shared.models.contacts.entities import ContactSummary, SummaryStatus
+from core_shared.models.contacts.entities import (
+    ContactSummary,
+    SummaryDisabledReason,
+    SummaryStatus,
+)
 
 from app.core.contacts.services.summary_generation_service import (
+    LowActivityChecker,
     SummaryGenerator,
     SummaryInput,
 )
@@ -35,6 +41,15 @@ def _make_input(**overrides: Any) -> SummaryInput:
     return SummaryInput(**defaults)
 
 
+def _stored_with_status(
+    existing: ContactSummary | None, contact_id: int, status: str
+) -> ContactSummary:
+    """What a status UPDATE ... RETURNING gives back: the stored row, new status."""
+    if existing is None:
+        return ContactSummary(contact_id=contact_id, status=SummaryStatus(status))
+    return dataclasses.replace(existing, status=SummaryStatus(status))
+
+
 def _make_generator(
     assembler_result: SummaryInput | None = None,
     low_activity: bool = False,
@@ -57,6 +72,12 @@ def _make_generator(
     summary_repo.update_status = AsyncMock(
         side_effect=lambda cid, status: ContactSummary(
             contact_id=cid, status=SummaryStatus(status)
+        )
+    )
+    summary_repo.upsert_from_generation = AsyncMock(side_effect=lambda s: s)
+    summary_repo.update_status_unless_user_disabled = AsyncMock(
+        side_effect=lambda cid, status: _stored_with_status(
+            existing_summary, cid, status
         )
     )
 
@@ -120,13 +141,133 @@ class TestSummaryGenerator:
         assert "summary_text" in event.event_data["changed_fields"]
 
     @pytest.mark.asyncio
+    async def test_writes_only_through_user_disable_guards(self):
+        """No row lock is held across the AI call; every write is guarded so a
+        user disable committed after the read is never overwritten."""
+        generator = _make_generator()
+        repo = cast(Any, generator._summary_repo)
+
+        await generator.generate(contact_id=1)
+
+        repo.find_by_contact_id.assert_awaited_once_with(1)
+        repo.update_status_unless_user_disabled.assert_awaited_once_with(
+            1, SummaryStatus.GENERATING.value
+        )
+        repo.upsert_from_generation.assert_awaited_once()
+        repo.update_status.assert_not_awaited()
+        repo.upsert.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_user_disable_before_generating_stops_generation(self):
+        """A disable committed before GENERATING is written stops the run."""
+        enabled = ContactSummary(contact_id=1, status=SummaryStatus.PENDING)
+        user_disabled = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+        )
+        generator = _make_generator(existing_summary=enabled)
+        repo = cast(Any, generator._summary_repo)
+        repo.find_by_contact_id = AsyncMock(side_effect=[enabled, user_disabled])
+        repo.update_status_unless_user_disabled = AsyncMock(return_value=None)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is user_disabled
+        cast(MagicMock, generator._prompt_builder.build).assert_not_called()
+        repo.upsert_from_generation.assert_not_awaited()
+        assert generator._event_publisher is not None
+        cast(AsyncMock, generator._event_publisher.publish).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_user_disable_on_a_new_row_stops_generation(self):
+        """With no row at the read, a disable inserted before GENERATING still
+        stops the run before any AI call."""
+        user_disabled = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+        )
+        generator = _make_generator(existing_summary=None)
+        repo = cast(Any, generator._summary_repo)
+        repo.find_by_contact_id = AsyncMock(side_effect=[None, user_disabled])
+        repo.update_status_unless_user_disabled = AsyncMock(return_value=None)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is user_disabled
+        cast(MagicMock, generator._prompt_builder.build).assert_not_called()
+        repo.upsert_from_generation.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_missing_row_still_generates(self):
+        """No row at the read and none at GENERATING is a first summary, not a
+        disable: generation carries on and creates the row."""
+        generator = _make_generator(existing_summary=None)
+        repo = cast(Any, generator._summary_repo)
+        repo.find_by_contact_id = AsyncMock(side_effect=[None, None])
+        repo.update_status_unless_user_disabled = AsyncMock(return_value=None)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        cast(MagicMock, generator._prompt_builder.build).assert_called_once()
+        repo.upsert_from_generation.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_user_disable_during_ai_call_keeps_their_choice(self):
+        """A disable committed while the AI call runs is kept, with no history."""
+        enabled = ContactSummary(contact_id=1, status=SummaryStatus.PENDING)
+        user_disabled = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+        )
+        generator = _make_generator(existing_summary=enabled)
+        repo = cast(Any, generator._summary_repo)
+        repo.find_by_contact_id = AsyncMock(side_effect=[enabled, user_disabled])
+        repo.upsert_from_generation = AsyncMock(return_value=None)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is user_disabled
+        assert generator._event_publisher is not None
+        cast(AsyncMock, generator._event_publisher.publish).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_user_disable_before_auto_pause_keeps_their_choice(self):
+        """Low activity never converts a concurrent user disable into a pause."""
+        enabled = ContactSummary(contact_id=1, status=SummaryStatus.PENDING)
+        user_disabled = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+        )
+        generator = _make_generator(existing_summary=enabled, low_activity=True)
+        repo = cast(Any, generator._summary_repo)
+        repo.find_by_contact_id = AsyncMock(side_effect=[enabled, user_disabled])
+        repo.upsert_from_generation = AsyncMock(return_value=None)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is user_disabled
+        assert result.disabled_reason == SummaryDisabledReason.USER
+        assert generator._event_publisher is not None
+        cast(AsyncMock, generator._event_publisher.publish).assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_sets_generating_status_before_ai_call(self):
         """Test that status is set to GENERATING before calling AI."""
         generator = _make_generator()
         await generator.generate(contact_id=1)
 
         # Verify update_status was called with GENERATING
-        generator._summary_repo.update_status.assert_any_call(  # type: ignore[attr-defined]
+        generator._summary_repo.update_status_unless_user_disabled.assert_any_call(  # type: ignore[attr-defined]
             1, SummaryStatus.GENERATING.value
         )
 
@@ -150,6 +291,7 @@ class TestSummaryGenerator:
         assert result is not None
         assert result.status == SummaryStatus.DISABLED
         assert result.is_disabled is True
+        assert result.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
 
         # Verify a ContactSummaryUpdated event was published with the disable diff.
         assert generator._event_publisher is not None
@@ -161,12 +303,13 @@ class TestSummaryGenerator:
         assert "is_disabled" in event.event_data["changed_fields"]
 
     @pytest.mark.asyncio
-    async def test_disabled_contact_skipped(self):
-        """Test that already disabled contacts (non-override) are skipped."""
+    async def test_user_disabled_contact_skipped(self):
+        """A summary the user disabled (non-override) is skipped outright."""
         existing = ContactSummary(
             contact_id=1,
             status=SummaryStatus.DISABLED,
             is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
             is_user_override=False,
         )
         generator = _make_generator(existing_summary=existing)
@@ -176,6 +319,180 @@ class TestSummaryGenerator:
         # Should return the existing disabled summary without attempting generation
         assert result is not None
         assert result.status == SummaryStatus.DISABLED
+        cast(AsyncMock, generator._input_assembler.assemble).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_user_disabled_contact_with_override_skipped(self):
+        """A user's disable is sticky even when the summary has a manual override."""
+        existing = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+            is_user_override=True,
+            user_override_text="My own summary",
+        )
+        generator = _make_generator(existing_summary=existing)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is existing
+        assert result.disabled_reason == SummaryDisabledReason.USER
+        cast(AsyncMock, generator._input_assembler.assemble).assert_not_awaited()
+        cast(
+            AsyncMock, generator._summary_repo.upsert_from_generation
+        ).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_paused_contact_resumes_when_activity_recovers(self):
+        """A low-activity pause is re-evaluated and lifted once activity is enough."""
+        existing = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+        generator = _make_generator(existing_summary=existing, low_activity=False)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.is_disabled is False
+        assert result.disabled_reason is None
+        assert generator._event_publisher is not None
+        publish_mock = cast(AsyncMock, generator._event_publisher.publish)
+        publish_mock.assert_awaited_once()
+        changed_fields = (
+            publish_mock.await_args_list[0].args[0].event_data["changed_fields"]
+        )
+        assert "summary_text" in changed_fields
+        assert "is_disabled" in changed_fields
+
+    @pytest.mark.asyncio
+    async def test_auto_paused_contact_stays_paused_while_activity_low(self):
+        """Still-low activity keeps the pause and records no new history."""
+        existing = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+        generator = _make_generator(existing_summary=existing, low_activity=True)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.DISABLED
+        assert result.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
+        assert generator._event_publisher is not None
+        cast(AsyncMock, generator._event_publisher.publish).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_paused_contact_without_journals_is_unchanged(self):
+        """While activity is still low and there is nothing to summarise, a
+        paused summary is left as it is."""
+        existing = ContactSummary(
+            contact_id=1,
+            summary_text="Old text",
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+        generator = _make_generator(
+            existing_summary=existing,
+            assembler_result=_make_input(recent_journals=[], future_journals=[]),
+            low_activity=True,
+        )
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is existing
+        assert result.status == SummaryStatus.DISABLED
+        cast(
+            AsyncMock, generator._summary_repo.upsert_from_generation
+        ).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_paused_contact_without_journals_keeps_its_summary(self):
+        """Without a journal nothing can be generated, so enough notes or contact
+        changes do not lift the pause: lifting it would only erase the summary."""
+        existing = ContactSummary(
+            contact_id=1,
+            summary_text="Old text",
+            follow_up_suggestions=["Call them"],
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+        generator = _make_generator(
+            existing_summary=existing,
+            assembler_result=_make_input(
+                recent_journals=[],
+                future_journals=[],
+                recent_notes=["Called about the move", "Sent the forms"],
+                recent_history=["Changed company"],
+            ),
+        )
+        generator._activity_checker = LowActivityChecker()
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is existing
+        assert result.summary_text == "Old text"
+        assert result.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
+        cast(
+            AsyncMock, generator._summary_repo.upsert_from_generation
+        ).assert_not_awaited()
+        assert generator._event_publisher is not None
+        cast(AsyncMock, generator._event_publisher.publish).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_override_saved_during_the_run_blocks_the_auto_pause(self):
+        """The auto-pause decision uses the row as stored at the GENERATING
+        write, so an override saved after the first read is respected."""
+        enabled = ContactSummary(contact_id=1, status=SummaryStatus.PENDING)
+        with_override = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.GENERATING,
+            is_user_override=True,
+            user_override_text="My own summary",
+        )
+        generator = _make_generator(
+            existing_summary=enabled,
+            assembler_result=_make_input(recent_notes=[], recent_history=[]),
+        )
+        generator._activity_checker = LowActivityChecker()
+        repo = cast(Any, generator._summary_repo)
+        repo.update_status_unless_user_disabled = AsyncMock(return_value=with_override)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.disabled_reason is None
+        written = repo.upsert_from_generation.await_args.args[0]
+        assert written.status == SummaryStatus.GENERATED
+
+    @pytest.mark.asyncio
+    async def test_auto_paused_contact_resumes_even_if_ai_call_fails(self):
+        """Enough activity lifts the pause; a failed AI call is an ordinary FAILED."""
+        existing = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+        )
+        generator = _make_generator(
+            existing_summary=existing, gemini_response="INVALID_NOT_JSON"
+        )
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is not None
+        assert result.status == SummaryStatus.FAILED
+        assert result.is_disabled is False
+        assert result.disabled_reason is None
 
     @pytest.mark.asyncio
     async def test_user_override_respects_override(self):
@@ -262,7 +579,7 @@ class TestSummaryGenerator:
         await generator.generate(contact_id=999)
 
         # update_status should NOT have been called (no stale GENERATING row)
-        generator._summary_repo.update_status.assert_not_called()  # type: ignore[attr-defined]
+        generator._summary_repo.update_status_unless_user_disabled.assert_not_called()  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_preserves_user_override_on_generation(self):
@@ -369,7 +686,9 @@ class TestSummaryGenerator:
         assert result.generated_at is not None
 
         # Ensure that it was saved with cleared data
-        generator._summary_repo.upsert.assert_called_once_with(result)  # type: ignore[attr-defined]
+        cast(
+            AsyncMock, generator._summary_repo.upsert_from_generation
+        ).assert_called_once_with(result)
 
         # Ensure full generation flow was skipped
-        generator._summary_repo.update_status.assert_not_called()  # type: ignore[attr-defined]
+        generator._summary_repo.update_status_unless_user_disabled.assert_not_called()  # type: ignore[attr-defined]
