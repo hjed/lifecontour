@@ -185,6 +185,26 @@ class TestSummaryGenerator:
         cast(AsyncMock, generator._input_assembler.assemble).assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_user_disabled_contact_with_override_skipped(self):
+        """A user's disable is sticky even when the summary has a manual override."""
+        existing = ContactSummary(
+            contact_id=1,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+            is_user_override=True,
+            user_override_text="My own summary",
+        )
+        generator = _make_generator(existing_summary=existing)
+
+        result = await generator.generate(contact_id=1)
+
+        assert result is existing
+        assert result.disabled_reason == SummaryDisabledReason.USER
+        cast(AsyncMock, generator._input_assembler.assemble).assert_not_awaited()
+        cast(AsyncMock, generator._summary_repo.upsert).assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_auto_paused_contact_resumes_when_activity_recovers(self):
         """A low-activity pause is re-evaluated and lifted once activity is enough."""
         existing = ContactSummary(

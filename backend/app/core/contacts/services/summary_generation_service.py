@@ -499,8 +499,8 @@ class SummaryGenerator:
         # Check existing summary state
         existing = await self._summary_repo.find_by_contact_id(contact_id)
 
-        # Skip if the user disabled it and has not overridden it
-        if existing and existing.is_user_disabled and not existing.is_user_override:
+        # A user's disable is sticky: skip it whether or not it has an override
+        if existing and existing.is_user_disabled:
             logger.info(
                 "Contact %d summary is disabled, skipping generation",
                 contact_id,

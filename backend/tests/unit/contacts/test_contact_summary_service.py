@@ -246,6 +246,30 @@ class TestUpdateSummary:
         mock_event_publisher.publish.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_override_text_keeps_user_disable(
+        self, summary_service, mock_summary_repo, mock_event_publisher, mock_transaction
+    ):
+        """Writing override text never lifts the user's disable or queues work."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=7,
+            status=SummaryStatus.DISABLED,
+            is_disabled=True,
+            disabled_reason=SummaryDisabledReason.USER,
+        )
+        update_data = ContactSummaryUpdate(
+            user_override_text="Custom summary", override_text_provided=True
+        )
+
+        result = await summary_service.update_summary(
+            7, update_data, transaction=mock_transaction
+        )
+
+        assert result.is_user_override is True
+        assert result.disabled_reason == SummaryDisabledReason.USER
+        assert result.status == SummaryStatus.DISABLED
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_user_override_text_sets_generated(
         self, summary_service, mock_summary_repo, mock_transaction
     ):

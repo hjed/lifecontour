@@ -8,6 +8,7 @@ or Summary Generation + Search Index (Due).
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -212,3 +213,107 @@ class TestSummaryConsumerIntegration:
             mock_indexer.process_event.assert_called_once()
             call_args = mock_indexer.process_event.call_args[0]
             assert call_args[0].event_type == "ContactSummaryRefreshDue"
+
+    @pytest.mark.asyncio
+    async def test_due_event_leaves_user_disabled_summary_with_override_untouched(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """A user's disable is sticky through real generation, override or not.
+
+        The contact has a recent linked journal so generation is not skipped for
+        lack of input: only the user-disabled check can stop the AI call.
+        """
+        contact_id = 9997
+        await self._insert_contact(async_connection, contact_id)
+        recent = datetime.now(UTC) - timedelta(days=2)
+        journal_row = await async_connection.execute(
+            text(
+                """
+                INSERT INTO journals (user_id, title, content, event_date_range_start,
+                                      event_date_range_end, created_at, updated_at)
+                VALUES ('user1', 'Coffee catch-up', 'Notes', :at, :at, :at, :at)
+                RETURNING id
+                """
+            ),
+            {"at": recent},
+        )
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_contact_relationships
+                    (journal_id, contact_id, relationship_type)
+                VALUES (:journal_id, :contact_id, 'MENTION')
+                """
+            ),
+            {"journal_id": journal_row.scalar_one(), "contact_id": contact_id},
+        )
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO contact_summaries
+                    (contact_id, status, is_disabled, disabled_reason,
+                     is_user_override, user_override_text)
+                VALUES (:contact_id, 'disabled', TRUE, 'user', TRUE, 'My own summary')
+                """
+            ),
+            {"contact_id": contact_id},
+        )
+
+        await stream_client.publish(
+            stream_name=test_stream_name,
+            event_id=f"evt-{uuid.uuid4().hex[:8]}",
+            event_type="ContactSummaryRefreshDue",
+            aggregate_id=contact_id,
+            event_data={"contact_id": contact_id},
+            occurred_at="2024-01-01T12:00:00Z",
+        )
+        consumer = self._make_consumer(stream_client, test_stream_name)
+        await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
+
+        mock_settings = MagicMock()
+        mock_settings.gemini_api_key = "fake-key-for-test"
+        mock_settings.gemini_summary_model = "fake-model"
+
+        with (
+            patch(
+                "app.infrastructure.events.summary_consumer.get_async_database_engine",
+                return_value=self._mock_engine(async_connection),
+            ),
+            patch(
+                "app.infrastructure.events.summary_consumer.get_settings",
+                return_value=mock_settings,
+            ),
+            patch(
+                "app.core.contacts.services.summary_generation_service."
+                "SummaryGenerator._call_gemini",
+                new_callable=AsyncMock,
+                return_value='{"summary_text": "AI text", "follow_up_suggestions": []}',
+            ) as mock_call_gemini,
+            patch(
+                "app.infrastructure.events.summary_consumer.SearchIndexer"
+            ) as mock_indexer_cls,
+        ):
+            mock_indexer_cls.return_value.process_event = AsyncMock()
+
+            count = await consumer._process_batch()
+
+            assert count == 1
+            mock_call_gemini.assert_not_awaited()
+
+        result = await async_connection.execute(
+            text(
+                """
+                SELECT status, is_disabled, disabled_reason, user_override_text
+                FROM contact_summaries WHERE contact_id = :contact_id
+                """
+            ),
+            {"contact_id": contact_id},
+        )
+        row = result.one()
+        assert row.status == "disabled"
+        assert row.is_disabled is True
+        assert row.disabled_reason == "user"
+        assert row.user_override_text == "My own summary"
