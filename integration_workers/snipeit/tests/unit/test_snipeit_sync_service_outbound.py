@@ -8,9 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
-from snipeit_models import SnipeItAsset
+from snipeit_models import SnipeItAsset, SnipeItMaintenance
 from snipeit_sync_service import (
     AssetUsageDates,
+    MaintenanceClaim,
+    MaintenancePushContext,
     SnipeItSyncService,
     _format_date_for_snipeit,
     _local_date,
@@ -336,93 +338,95 @@ def _mock_session_factory(
     return factory
 
 
+class TestMaintenancePushPayload:
+    """The Snipe-IT fields a GEAR_MAINTENANCE journal is pushed as."""
+
+    def test_maps_the_type_and_sends_local_dates(self) -> None:
+        context = MaintenancePushContext(
+            journal=MagicMock(
+                title="Rope Inspection",
+                content="All good",
+                event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
+                event_date_range_end=datetime(2024, 6, 2, 14, 30, tzinfo=UTC),
+                user_timezone=None,
+            ),
+            maintenance=MagicMock(maintenance_type="routine inspection"),
+            asset_meta=MagicMock(external_id="42"),
+            imported_external_id=None,
+        )
+
+        assert context.snipeit_payload() == {
+            "name": "Rope Inspection",
+            "notes": "All good",
+            "asset_maintenance_type": "PAT Test",
+            "start_date": "2024-06-01",
+            "completion_date": "2024-06-02",
+        }
+
+
+def _listed_maintenance(**overrides: object) -> SnipeItMaintenance:
+    """Maintenance 17 as ``GET /maintenances`` lists it, text HTML-escaped."""
+    return SnipeItMaintenance.model_validate(
+        {
+            "id": 17,
+            "asset": {"id": 51, "name": "Canyoneroo 50m"},
+            "title": "Split Canyoneroo 50 -&gt; 34 + 15",
+            "start_date": {"date": "2026-09-11", "formatted": "11/09/2026"},
+            **overrides,
+        }
+    )
+
+
+class TestMaintenanceClaim:
+    """The record a push is creating, as it is matched against Snipe-IT's."""
+
+    CLAIM = MaintenanceClaim(
+        asset_id=51, title="Split Canyoneroo 50 -> 34 + 15", start_date="2026-09-11"
+    )
+
+    def test_is_built_from_the_payload_sent(self) -> None:
+        payload = {
+            "name": "Split Canyoneroo 50 -> 34 + 15",
+            "notes": "",
+            "asset_maintenance_type": "Maintenance",
+            "start_date": "2026-09-11",
+        }
+
+        assert MaintenanceClaim.for_payload(51, payload) == self.CLAIM
+
+    def test_matches_the_record_by_its_decoded_title(self) -> None:
+        assert self.CLAIM.matches(_listed_maintenance())
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"start_date": {"date": "2026-09-12"}},
+            {"start_date": None},
+            {"asset": {"id": 52, "name": "Canyoneroo 30m"}},
+            {"title": "Split Canyoneroo 50 -&gt; 34"},
+            {"title": None},
+        ],
+        ids=["other-date", "no-date", "other-asset", "other-title", "no-title"],
+    )
+    def test_does_not_match_another_record(self, overrides: dict[str, object]) -> None:
+        assert not self.CLAIM.matches(_listed_maintenance(**overrides))
+
+    def test_round_trips_through_reference_data(self) -> None:
+        assert MaintenanceClaim.from_reference(self.CLAIM.to_reference()) == self.CLAIM
+
+    @pytest.mark.parametrize(
+        "reference_data",
+        [None, "", "not json", "[]", '{"asset_id": "51", "title": "x"}'],
+        ids=["null", "empty", "not-json", "not-object", "wrong-types"],
+    )
+    def test_unreadable_reference_data_is_no_claim(
+        self, reference_data: str | None
+    ) -> None:
+        assert MaintenanceClaim.from_reference(reference_data) is None
+
+
 class TestPushMaintenanceCreate:
     """Tests for push_maintenance_create method."""
-
-    @pytest.mark.asyncio
-    async def test_creates_maintenance_in_snipeit(self) -> None:
-        """Happy path: creates maintenance record via POST and saves sync metadata."""
-        api_client = _mock_api_client()
-        api_client.create_maintenance.return_value = MagicMock(id=201)
-
-        journal_row = MagicMock(
-            title="Rope Inspection",
-            content="All good",
-            event_date_range_start=datetime(2024, 6, 1, tzinfo=UTC),
-            event_date_range_end=datetime(2024, 6, 2, 14, 30, tzinfo=UTC),
-        )
-        maintenance_data_row = MagicMock(
-            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            maintenance_type="routine inspection",
-        )
-        asset_sync_meta_row = MagicMock(external_id="42")
-
-        # First session_factory() call: _fetch_maintenance_push_context (4 queries)
-        first_session = AsyncMock()
-        first_session_ctx = MagicMock()
-        first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
-        first_session_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        fetch_results = [
-            MagicMock(fetchone=MagicMock(return_value=journal_row)),
-            MagicMock(fetchone=MagicMock(return_value=maintenance_data_row)),
-            MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
-            MagicMock(fetchone=MagicMock(return_value=None)),  # not imported
-        ]
-        first_session.execute = AsyncMock(side_effect=fetch_results)
-
-        # Second session_factory() call: check if already synced
-        second_session = AsyncMock()
-        second_session_ctx = MagicMock()
-        second_session_ctx.__aenter__ = AsyncMock(return_value=second_session)
-        second_session_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_begin_2 = MagicMock()
-        mock_begin_2.__aenter__ = AsyncMock(return_value=None)
-        mock_begin_2.__aexit__ = AsyncMock(return_value=False)
-        second_session.begin = MagicMock(return_value=mock_begin_2)
-        second_session.execute = AsyncMock(
-            side_effect=[
-                MagicMock(fetchone=MagicMock(return_value=None)),
-                MagicMock(fetchone=MagicMock(return_value=(1,))),
-            ]
-        )
-
-        # Third session_factory() call: save sync metadata (with begin())
-        third_session = MagicMock()
-        third_session_ctx = MagicMock()
-        third_session_ctx.__aenter__ = AsyncMock(return_value=third_session)
-        third_session_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        mock_begin = MagicMock()
-        mock_begin.__aenter__ = AsyncMock(return_value=None)
-        mock_begin.__aexit__ = AsyncMock(return_value=False)
-        third_session.begin = MagicMock(return_value=mock_begin)
-        third_session.execute = AsyncMock()
-
-        session_factory = MagicMock(
-            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
-        )
-
-        service = SnipeItSyncService(
-            api_client=api_client,
-            user_id="user-1",
-        )
-
-        await service.push_maintenance_create(
-            journal_id=100,
-            session_factory=session_factory,
-        )
-
-        # Verify API was called with correct asset_id and payload
-        api_client.create_maintenance.assert_called_once()
-        call_args = api_client.create_maintenance.call_args
-        assert call_args.kwargs["asset_id"] == 42
-        payload = call_args.kwargs["payload"]
-        assert payload["name"] == "Rope Inspection"
-        assert payload["asset_maintenance_type"] == "PAT Test"  # routine inspection
-        # Dates must be YYYY-MM-DD format for Snipe-IT API
-        assert payload["start_date"] == "2024-06-01"
-        assert payload["completion_date"] == "2024-06-02"
 
     @pytest.mark.asyncio
     async def test_skips_when_no_journal_found(self) -> None:

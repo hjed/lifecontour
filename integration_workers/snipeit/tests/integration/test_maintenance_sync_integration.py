@@ -15,11 +15,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
+import httpx
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
+from snipeit_api_client import SnipeItAPIError
 from snipeit_models import SnipeItMaintenance
+from snipeit_sync_service import IN_FLIGHT_LOCK_SECONDS, SnipeItSyncInProgress
 
 # ``mock_transport``, ``integration_client`` and ``snipeit_sync_service`` are
 # shared fixtures defined in ``conftest.py``.
@@ -1097,3 +1100,226 @@ class TestImportedMaintenanceEditsArePushed:
         [body] = _patch_bodies(mock_transport)
         assert body["start_date"] == "2026-09-11"
         assert body["completion_date"] == "2026-09-11"
+
+
+# The claim ``_seed_maintenance_journal``'s journal titled "Retire Harness" makes
+# on asset 51.
+_RETIRE_HARNESS_CLAIM = {
+    "asset_id": 51,
+    "title": "Retire Harness",
+    "start_date": "2026-09-11",
+}
+
+
+async def _seed_claim(
+    async_connection: AsyncConnection,
+    *,
+    journal_id: int,
+    status: str,
+    age_seconds: int = 0,
+) -> None:
+    """A claim an earlier push of ``journal_id`` left, last touched ``age_seconds`` ago."""
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (internal_uuid, integration_source, external_id, last_synced_at,
+                 version_hash, sync_status, retry_count, reference_data,
+                 created_at, updated_at)
+            VALUES
+                (:journal_id, 'snipeit_maintenance_claim', :journal_id, now(),
+                 'PENDING', :status, 0, :reference_data, now(),
+                 now() - CAST(:age_seconds AS integer) * interval '1 second')
+        """),
+        {
+            "journal_id": str(journal_id),
+            "status": status,
+            "age_seconds": age_seconds,
+            "reference_data": json.dumps(_RETIRE_HARNESS_CLAIM),
+        },
+    )
+
+
+async def _claim_row(async_connection: AsyncConnection, journal_id: int) -> Any:
+    """The journal's maintenance claim, or ``None``."""
+    result = await async_connection.execute(
+        text("""
+            SELECT sync_status, reference_data
+            FROM sync_metadata
+            WHERE integration_source = 'snipeit_maintenance_claim'
+              AND external_id = :journal_id
+        """),
+        {"journal_id": str(journal_id)},
+    )
+    return result.fetchone()
+
+
+async def _push_rows(async_connection: AsyncConnection, journal_id: int) -> list[str]:
+    """The external ids of the Snipe-IT records the journal is linked to."""
+    result = await async_connection.execute(
+        text("""
+            SELECT external_id
+            FROM sync_metadata
+            WHERE integration_source = 'snipeit_maintenance'
+              AND internal_uuid = :journal_id
+            ORDER BY external_id
+        """),
+        {"journal_id": str(journal_id)},
+    )
+    return [row.external_id for row in result.fetchall()]
+
+
+class TestMaintenanceCreateClaim:
+    """A push claims the record it creates before posting, so an attempt that
+    fails after the POST leaves a claim for its retry and the inbound sync."""
+
+    @pytest.mark.asyncio
+    async def test_claim_is_written_before_the_post_and_kept_when_it_fails(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        claims_at_post: list[Any] = []
+        serve = mock_transport.handle_async_request
+
+        async def record_claim_then_serve(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST":
+                claims_at_post.append(await _claim_row(async_connection, journal_id))
+            return await serve(request)
+
+        monkeypatch.setattr(
+            mock_transport, "handle_async_request", record_claim_then_serve
+        )
+        # Snipe-IT created the record, but the response lost its payload.
+        mock_transport.add_response(
+            "/maintenances", json_data={"status": "success"}, method="POST"
+        )
+
+        with pytest.raises(SnipeItAPIError):
+            await snipeit_sync_service.push_maintenance_create(
+                journal_id=journal_id,
+                session_factory=_joined_session_factory(async_connection),
+            )
+
+        [claim_at_post] = claims_at_post
+        assert claim_at_post.sync_status == "pending"
+        assert json.loads(claim_at_post.reference_data) == _RETIRE_HARNESS_CLAIM
+        claim = await _claim_row(async_connection, journal_id)
+        assert claim.sync_status == "failed"
+        assert json.loads(claim.reference_data) == _RETIRE_HARNESS_CLAIM
+        assert await _push_rows(async_connection, journal_id) == []
+
+    @pytest.mark.asyncio
+    async def test_recorded_push_replaces_the_claim(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(8), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert await _claim_row(async_connection, journal_id) is None
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:8"]
+
+    @pytest.mark.asyncio
+    async def test_rejected_post_releases_the_claim(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        mock_transport.add_response(
+            "/maintenances", status_code=404, json_data={}, method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert await _claim_row(async_connection, journal_id) is None
+        assert await _push_rows(async_connection, journal_id) == []
+
+    @pytest.mark.asyncio
+    async def test_a_claim_in_flight_defers_the_push(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Another worker may be posting this journal's record right now."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_claim(async_connection, journal_id=journal_id, status="pending")
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(8), method="POST"
+        )
+
+        with pytest.raises(SnipeItSyncInProgress):
+            await snipeit_sync_service.push_maintenance_create(
+                journal_id=journal_id,
+                session_factory=_joined_session_factory(async_connection),
+            )
+
+        assert mock_transport.requests == []
+        claim = await _claim_row(async_connection, journal_id)
+        assert claim.sync_status == "pending"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status", "age_seconds"),
+        [("pending", IN_FLIGHT_LOCK_SECONDS + 1), ("failed", 0)],
+        ids=["abandoned", "failed"],
+    )
+    async def test_a_claim_no_longer_in_flight_is_retaken(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        status: str,
+        age_seconds: int,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_claim(
+            async_connection,
+            journal_id=journal_id,
+            status=status,
+            age_seconds=age_seconds,
+        )
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(8), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == ["POST /api/v1/maintenances"]
+        assert await _claim_row(async_connection, journal_id) is None
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:8"]
