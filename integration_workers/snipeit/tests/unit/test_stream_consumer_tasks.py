@@ -185,11 +185,16 @@ async def test_handle_event_processes_gear_item_updated(
 
 
 @pytest.mark.asyncio
-async def test_handle_event_processes_maintenance_webhook(
+async def test_handle_event_syncs_asset_when_action_mentions_maintenance(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """Maintenance webhook events are routed to the maintenance handler."""
+    """Webhook item ids are always assets, whatever the notification text says.
+
+    The action is Snipe-IT's free-text Slack message, and Snipe-IT never sends
+    maintenance notifications, so a mention of maintenance must not turn the
+    asset id into a maintenance id.
+    """
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
@@ -200,8 +205,8 @@ async def test_handle_event_processes_maintenance_webhook(
         event_type="snipeit.webhook_received",
         aggregate_id=0,
         event_data={
-            "action": "maintenance_created",
-            "item": {"id": 77, "title": "Rope Inspection"},
+            "action": "Asset Checkin Notification: returned after maintenance",
+            "item": {"id": 77},
         },
         occurred_at="2024-01-01T00:00:00Z",
     )
@@ -217,27 +222,23 @@ async def test_handle_event_processes_maintenance_webhook(
 
     # Mock sync service
     mock_sync_service = AsyncMock()
+    mock_sync_service._sync_single_asset_with_retry = AsyncMock()
     mock_sync_service.sync_maintenance_batch = AsyncMock(
         return_value={"synced": 1, "skipped": 0, "failed": 0}
     )
     mock_sync_service._api_client = AsyncMock()
 
     with (
-        patch("worker._get_auth_data", return_value={"mock": "auth"}) as mock_get_auth,
-        patch(
-            "worker._create_sync_service", return_value=mock_sync_service
-        ) as mock_create_service,
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
     ):
         await consumer._handle_event(event)
 
-        mock_get_auth.assert_called_once_with(mock_session_factory, "user1")
-        mock_create_service.assert_called_once()
-
-        # Verify it syncs maintenance ID 77
-        mock_sync_service.sync_maintenance_batch.assert_called_once_with(
-            maintenance_ids=[77],
+        mock_sync_service._sync_single_asset_with_retry.assert_called_once_with(
+            asset_id=77,
             session_factory=mock_session_factory,
         )
+        mock_sync_service.sync_maintenance_batch.assert_not_called()
         mock_sync_service._api_client.close.assert_called_once()
 
 

@@ -3,7 +3,7 @@ Snipe-IT Worker Stream Consumer for Redis Streams.
 
 Reads events from the pms:domain-events stream using the 'snipeit-worker'
 consumer group. The declarative route table consumes ``snipeit.webhook_received``
-(asset / maintenance sync), ``GearItemUpdated`` (push local gear changes), and
+(asset sync), ``GearItemUpdated`` (push local gear changes), and
 ``JournalCreated`` / ``JournalUpdated`` (gear-maintenance / gear-usage sync).
 """
 
@@ -31,7 +31,7 @@ MAX_DELIVERY_COUNT = math.ceil(IN_FLIGHT_LOCK_SECONDS * 1000 / RETRY_MIN_IDLE_MS
 class SnipeItWorkerStreamConsumer(StreamConsumer):
     """Stream consumer for Snipe-IT integration event processing.
 
-    Listens to Snipe-IT webhook and maintenance events on the
+    Listens to Snipe-IT webhook, gear item and journal events on the
     ``pms:domain-events`` stream using the ``snipeit-worker`` consumer group.
     The declarative route table maps each consumed event type to a handler;
     the shared ``StreamConsumer`` runs the read/ack/retry loop and dispatches
@@ -85,32 +85,16 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         """Process a ``snipeit.webhook_received`` event.
 
         Extracts the asset ID and synchronizes it for all users that have a
-        Snipe-IT configuration, routing maintenance-related actions to the
-        maintenance handler.
+        Snipe-IT configuration. The item is always an asset: the backend
+        publishes only notifications that link an asset, and Snipe-IT sends no
+        maintenance notifications, so maintenance records are imported only by
+        the maintenance sync job (``sync_snipeit_maintenances``).
         """
         self._log_processed(event)
 
         item = event.event_data.get("item")
         if not item or not isinstance(item, dict):
             logger.debug("Skipping webhook event: missing or invalid item payload")
-            return
-
-        # Determine if this is a maintenance-related action
-        action = event.event_data.get("action", "")
-        if not isinstance(action, str):
-            action = str(action)
-        if "maintenance" in action.lower():
-            maintenance_id = item.get("id")
-            if not maintenance_id:
-                logger.debug("Skipping maintenance webhook: missing item.id")
-                return
-            try:
-                await self._handle_maintenance_webhook(int(maintenance_id))
-            except (ValueError, TypeError):
-                logger.warning(
-                    "Skipping maintenance webhook: non-numeric item.id",
-                    raw_id=maintenance_id,
-                )
             return
 
         asset_id = item.get("id")
@@ -267,70 +251,6 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 raise
         finally:
             await sync_service._api_client.close()
-
-    async def _handle_maintenance_webhook(self, maintenance_id: int) -> None:
-        """Process a maintenance-related Snipe-IT webhook event.
-
-        Syncs the maintenance record for all users that have
-        Snipe-IT configured.
-        """
-        from sqlalchemy import text
-
-        from snipeit_settings import SnipeItWorkerSettings
-        from worker import _create_sync_service, _get_auth_data
-
-        worker_settings = SnipeItWorkerSettings()
-
-        async with self._session_factory() as session:
-            result = await session.execute(
-                text("""
-                    SELECT user_id, base_url, snipeit_user_id
-                    FROM snipeit_settings
-                """)
-            )
-            settings_rows = result.fetchall()
-
-        for row in settings_rows:
-            user_id = row.user_id
-            base_url = row.base_url
-            snipeit_user_id = row.snipeit_user_id
-
-            auth_data = await _get_auth_data(self._session_factory, user_id)
-            if not auth_data:
-                continue
-
-            sync_service = _create_sync_service(
-                user_id=user_id,
-                auth_data=auth_data,
-                base_url=base_url,
-                snipeit_user_id=snipeit_user_id,
-                worker_settings=worker_settings,
-                session_factory=self._session_factory,
-            )
-
-            try:
-                result = await sync_service.sync_maintenance_batch(
-                    maintenance_ids=[maintenance_id],
-                    session_factory=self._session_factory,
-                )
-                if result.get("failed", 0) > 0:
-                    raise RuntimeError("Maintenance sync failed")
-
-                logger.info(
-                    "Successfully processed maintenance webhook",
-                    maintenance_id=maintenance_id,
-                    user_id=user_id,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to sync maintenance from webhook",
-                    maintenance_id=maintenance_id,
-                    user_id=user_id,
-                    exc_info=True,
-                )
-                raise  # Re-raise to prevent ACK and trigger stream consumer retry
-            finally:
-                await sync_service._api_client.close()
 
     async def _handle_journal_maintenance_event(self, event: StreamEvent) -> None:
         """Process JournalCreated/JournalUpdated events for outbound sync.
