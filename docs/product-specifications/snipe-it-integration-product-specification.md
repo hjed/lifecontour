@@ -61,6 +61,23 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
   - Creating a maintenance record in Snipe-IT creates a journal.
   - Creating a `GEAR_MAINTENANCE` journal in the personal management system creates a maintenance record in Snipe-IT.
   - Edits to a journal created in the personal management system are pushed to its Snipe-IT record. Edits to a journal imported from Snipe-IT are not yet pushed back.
+- **Maintenance Types**: Every Snipe-IT maintenance kind has its own `GEAR_MAINTENANCE` type, so a record's kind survives import and push unchanged. Snipe-IT (up to 8.4) stores the kind as the free-text `asset_maintenance_type`.
+
+  | Snipe-IT | Journal `maintenance_type` |
+  |---|---|
+  | Maintenance | routine maintenance |
+  | Repair | repairing gear |
+  | PAT Test | routine inspection |
+  | Upgrade | upgrading gear |
+  | Calibration | calibration |
+  | Software Support | software support |
+  | Hardware Support | hardware support |
+  | Configuration Change | configuration change |
+
+  - `retiring gear` has no Snipe-IT kind and is sent as `Maintenance`. A re-import keeps `retiring gear` while the record is still `Maintenance`; any other kind replaces it.
+  - An unknown or missing kind imports as `routine maintenance`.
+  - Imports synced under the earlier, lossy mapping are re-synced and corrected by the next full maintenance sync.
+- **Local-Only Fields**: Snipe-IT has no activity types or retirement reason, so a re-import leaves a journal's `activity_types` and `retirement_reason` untouched.
 - **Deduplication**: Uses the `SyncMetadata` table to map the internal journal ID to the external Snipe-IT maintenance ID.
 - **Loop Prevention**: A record must never travel back to the system it came from.
   - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created or updated in Snipe-IT.

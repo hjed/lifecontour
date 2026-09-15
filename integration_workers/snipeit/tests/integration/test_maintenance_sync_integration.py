@@ -8,6 +8,7 @@ GEAR_MAINTENANCE journal entries in the database.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -16,6 +17,8 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
+
+from snipeit_models import SnipeItMaintenance
 
 # ``mock_transport``, ``integration_client`` and ``snipeit_sync_service`` are
 # shared fixtures defined in ``conftest.py``.
@@ -597,6 +600,8 @@ async def _seed_maintenance_journal(
     gear_item_id: str,
     title: str,
     imported_from: int | None = None,
+    maintenance_type: str = "routine maintenance",
+    retirement_reason: str | None = None,
 ) -> int:
     """A GEAR_MAINTENANCE journal, written as the backend's outbox processor does.
 
@@ -617,10 +622,16 @@ async def _seed_maintenance_journal(
     await async_connection.execute(
         text("""
             INSERT INTO journal_gear_maintenance_data
-                (journal_id, gear_item_id, maintenance_type)
-            VALUES (:journal_id, :gear_item_id, 'routine maintenance')
+                (journal_id, gear_item_id, maintenance_type, retirement_reason)
+            VALUES (:journal_id, :gear_item_id, :maintenance_type,
+                    :retirement_reason)
         """),
-        {"journal_id": journal_id, "gear_item_id": gear_item_id},
+        {
+            "journal_id": journal_id,
+            "gear_item_id": gear_item_id,
+            "maintenance_type": maintenance_type,
+            "retirement_reason": retirement_reason,
+        },
     )
     if imported_from is not None:
         await async_connection.execute(
@@ -842,3 +853,116 @@ class TestMaintenanceEchoPrevention:
 
         assert second == {"synced": 0, "skipped": 1, "failed": 0}
         assert _snipeit_writes(mock_transport) == []
+
+
+async def _seed_import_record(
+    async_connection: AsyncConnection, *, maintenance_id: int, version_hash: str
+) -> None:
+    """The sync row an import writes: the record's hash and no journal id."""
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (integration_source, external_id, last_synced_at,
+                 version_hash, sync_status, retry_count, created_at, updated_at)
+            VALUES
+                ('snipeit_maintenance', :external_id, now(),
+                 :version_hash, 'success', 0, now(), now())
+        """),
+        {
+            "external_id": f"snipeit_maint:{maintenance_id}",
+            "version_hash": version_hash,
+        },
+    )
+
+
+async def _updated_event_maintenance_type(async_connection: AsyncConnection) -> str:
+    """The maintenance type the one ``journal_event.updated`` would apply."""
+    row = (
+        await async_connection.execute(
+            text("""
+                SELECT event_data FROM outbox_events
+                WHERE event_type = 'journal_event.updated'
+            """)
+        )
+    ).one()
+    event_data = row.event_data
+    if isinstance(event_data, str):
+        event_data = json.loads(event_data)
+    return str(event_data["journal_data"]["gear_maintenance_data"]["maintenance_type"])
+
+
+class TestInboundMaintenanceTypeIsLossless:
+    """A re-import neither collapses a Snipe-IT kind nor loses an app-only type."""
+
+    @pytest.mark.asyncio
+    async def test_resync_keeps_retiring_gear_that_snipeit_records_as_maintenance(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        session_factory = _joined_session_factory(async_connection)
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        record = {**_SNIPEIT_MAINTENANCE_17, "asset_maintenance_type": "Maintenance"}
+        mock_transport.add_response("/maintenances/17", json_data=record)
+        await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17], session_factory=session_factory
+        )
+        # The user retired the item on the imported journal; the push that
+        # followed could only tell Snipe-IT "Maintenance".
+        await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15",
+            imported_from=17,
+            maintenance_type="retiring gear",
+            retirement_reason="Core shot",
+        )
+        mock_transport.add_response(
+            "/maintenances/17", json_data={**record, "notes": "Retired after the trip"}
+        )
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17], session_factory=session_factory
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert (
+            await _updated_event_maintenance_type(async_connection) == "retiring gear"
+        )
+
+    @pytest.mark.asyncio
+    async def test_resync_corrects_a_type_an_earlier_mapping_collapsed(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """An import synced before types were lossless is re-synced even though
+        the record itself has not changed since."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        record = {**_SNIPEIT_MAINTENANCE_17, "asset_maintenance_type": "Upgrade"}
+        await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15",
+            imported_from=17,
+            maintenance_type="routine maintenance",
+        )
+        legacy_hash = hashlib.sha256(
+            SnipeItMaintenance.model_validate(record).model_dump_json().encode()
+        ).hexdigest()
+        await _seed_import_record(
+            async_connection, maintenance_id=17, version_hash=legacy_hash
+        )
+        mock_transport.add_response("/maintenances/17", json_data=record)
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert (
+            await _updated_event_maintenance_type(async_connection) == "upgrading gear"
+        )

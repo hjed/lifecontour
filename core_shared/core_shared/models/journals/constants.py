@@ -183,12 +183,22 @@ MAX_GEAR_ITEM_FIELD_LENGTH: int = 200  # model, serial_number, manufacturer
 
 # GearMaintenanceData constants (GEAR_MAINTENANCE type)
 class MaintenanceType(StrEnum):
-    """Kinds of gear maintenance (GEAR_MAINTENANCE)."""
+    """Kinds of gear maintenance (GEAR_MAINTENANCE).
+
+    Every Snipe-IT maintenance kind has exactly one member here, so a maintenance
+    record imported from Snipe-IT and pushed back keeps its kind. ``RETIRING_GEAR``
+    is the only kind Snipe-IT has no equivalent for.
+    """
 
     RETIRING_GEAR = "retiring gear"
     REPAIRING_GEAR = "repairing gear"
     ROUTINE_INSPECTION = "routine inspection"
     ROUTINE_MAINTENANCE = "routine maintenance"
+    UPGRADING_GEAR = "upgrading gear"
+    CALIBRATION = "calibration"
+    SOFTWARE_SUPPORT = "software support"
+    HARDWARE_SUPPORT = "hardware support"
+    CONFIGURATION_CHANGE = "configuration change"
 
 
 VALID_MAINTENANCE_TYPES: list[str] = [member.value for member in MaintenanceType]

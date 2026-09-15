@@ -61,12 +61,19 @@ interface GearMaintenanceTypeEditorProps {
 
 const DEFAULT_DATA: GearMaintenanceData = {};
 
+// Mirrors the backend MaintenanceType enum. The last five match Snipe-IT's
+// maintenance kinds one-to-one, so an imported record keeps its kind.
 const MAINTENANCE_TYPES = [
   'routine inspection',
   'routine maintenance',
   'repairing gear',
   'retiring gear',
-];
+  'upgrading gear',
+  'calibration',
+  'software support',
+  'hardware support',
+  'configuration change',
+] as const;
 
 export function GearMaintenanceTypeEditor({
   journalId: _journalId,

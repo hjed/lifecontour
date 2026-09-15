@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT maintenance data transformer."""
 
+import hashlib
 import os
 
 db_port = os.environ.get("DB_TEST_PORT", "5432")
@@ -11,6 +12,7 @@ if "DATABASE_URL" not in os.environ:
 os.environ["ENCRYPTION_KEY"] = "testkey"
 
 import pytest
+from core_shared.models.journals.constants import MaintenanceType
 
 from snipeit_maintenance_transformer import (
     SnipeItMaintenanceTransformer,
@@ -27,9 +29,11 @@ class TestMaintenanceTypeMapping:
             ("Maintenance", "routine maintenance"),
             ("Repair", "repairing gear"),
             ("PAT Test", "routine inspection"),
-            ("Upgrade", "routine maintenance"),
-            ("Hardware Support", "repairing gear"),
-            ("Software Support", "routine maintenance"),
+            ("Upgrade", "upgrading gear"),
+            ("Calibration", "calibration"),
+            ("Software Support", "software support"),
+            ("Hardware Support", "hardware support"),
+            ("Configuration Change", "configuration change"),
         ],
     )
     def test_known_type_mapping(
@@ -234,6 +238,72 @@ class TestMaintenanceVersionHash:
         )
         assert r1.version_hash != r2.version_hash
 
+    def test_record_synced_before_lossless_types_is_synced_again(self) -> None:
+        """The legacy hash covered only the record, and matching it would skip the
+        re-import that corrects a type an earlier mapping collapsed."""
+        maintenance = SnipeItMaintenance.model_validate(
+            {
+                "id": 1,
+                "asset": {"id": 10, "name": "Test Asset"},
+                "title": "Test",
+                "asset_maintenance_type": "Upgrade",
+                "start_date": {"date": "2024-01-01"},
+            }
+        )
+        legacy_hash = hashlib.sha256(maintenance.model_dump_json().encode()).hexdigest()
+
+        result = SnipeItMaintenanceTransformer.transform(
+            maintenance,
+            user_id="u1",
+            gear_item_id="00000000-0000-0000-0000-000000000001",
+        )
+
+        assert result.version_hash != legacy_hash
+
+
+class TestResolveInboundMaintenanceType:
+    """A re-import keeps a local type Snipe-IT cannot tell apart from its own."""
+
+    def test_retiring_gear_pushed_as_maintenance_is_kept(self) -> None:
+        assert (
+            SnipeItMaintenanceTransformer.resolve_inbound_maintenance_type(
+                "Maintenance", existing_type="retiring gear"
+            )
+            == "retiring gear"
+        )
+
+    def test_kind_changed_in_snipeit_replaces_retiring_gear(self) -> None:
+        assert (
+            SnipeItMaintenanceTransformer.resolve_inbound_maintenance_type(
+                "Repair", existing_type="retiring gear"
+            )
+            == "repairing gear"
+        )
+
+    def test_type_collapsed_by_an_earlier_mapping_is_corrected(self) -> None:
+        assert (
+            SnipeItMaintenanceTransformer.resolve_inbound_maintenance_type(
+                "Upgrade", existing_type="routine maintenance"
+            )
+            == "upgrading gear"
+        )
+
+    def test_new_import_takes_the_mapped_type(self) -> None:
+        assert (
+            SnipeItMaintenanceTransformer.resolve_inbound_maintenance_type(
+                "Calibration", existing_type=None
+            )
+            == "calibration"
+        )
+
+    def test_missing_snipeit_type_takes_the_default(self) -> None:
+        assert (
+            SnipeItMaintenanceTransformer.resolve_inbound_maintenance_type(
+                None, existing_type="retiring gear"
+            )
+            == "routine maintenance"
+        )
+
 
 class TestReverseMaintenanceTypeMapping:
     """Tests for app → Snipe-IT maintenance type mapping."""
@@ -244,6 +314,11 @@ class TestReverseMaintenanceTypeMapping:
             ("routine maintenance", "Maintenance"),
             ("repairing gear", "Repair"),
             ("routine inspection", "PAT Test"),
+            ("upgrading gear", "Upgrade"),
+            ("calibration", "Calibration"),
+            ("software support", "Software Support"),
+            ("hardware support", "Hardware Support"),
+            ("configuration change", "Configuration Change"),
             ("retiring gear", "Maintenance"),
         ],
     )
@@ -268,6 +343,60 @@ class TestReverseMaintenanceTypeMapping:
             maintenance_type="some unknown type",
         )
         assert result["asset_maintenance_type"] == "Maintenance"
+
+
+class TestMaintenanceTypeRoundTrip:
+    """A Snipe-IT kind imported and pushed back is the kind it started as."""
+
+    @pytest.mark.parametrize(
+        "snipeit_type",
+        [
+            "Maintenance",
+            "Repair",
+            "Upgrade",
+            "PAT Test",
+            "Calibration",
+            "Software Support",
+            "Hardware Support",
+            "Configuration Change",
+        ],
+    )
+    def test_every_snipeit_kind_survives_import_and_push(
+        self, snipeit_type: str
+    ) -> None:
+        maintenance = SnipeItMaintenance.model_validate(
+            {
+                "id": 1,
+                "asset": {"id": 10, "name": "Test Asset"},
+                "title": "Test",
+                "asset_maintenance_type": snipeit_type,
+                "start_date": {"date": "2024-01-01"},
+            }
+        )
+        imported = SnipeItMaintenanceTransformer.transform(
+            maintenance,
+            user_id="user-1",
+            gear_item_id="00000000-0000-0000-0000-000000000001",
+        )
+
+        pushed = SnipeItMaintenanceTransformer.reverse_transform(
+            title="Test",
+            content="",
+            maintenance_type=imported.gear_maintenance_data["maintenance_type"],
+        )
+
+        assert pushed["asset_maintenance_type"] == snipeit_type
+
+    def test_every_app_kind_but_retirement_has_its_own_snipeit_kind(self) -> None:
+        pushed_kinds = {
+            SnipeItMaintenanceTransformer.reverse_transform(
+                title="Test", content="", maintenance_type=member.value
+            )["asset_maintenance_type"]
+            for member in MaintenanceType
+            if member is not MaintenanceType.RETIRING_GEAR
+        }
+
+        assert len(pushed_kinds) == len(MaintenanceType) - 1
 
 
 class TestReverseTransformPayload:

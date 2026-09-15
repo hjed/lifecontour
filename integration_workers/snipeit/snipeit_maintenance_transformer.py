@@ -5,57 +5,61 @@ Converts Snipe-IT API maintenance responses into journal outbox event
 payloads for the ``GEAR_MAINTENANCE`` journal type.  This is pure
 transformation logic with no I/O or database access.
 
-Maintenance type mapping (Snipe-IT → App):
-- ``Maintenance`` → ``routine maintenance``
-- ``Repair`` → ``repairing gear``
-- ``PAT Test`` → ``routine inspection``
-- ``Upgrade`` → ``routine maintenance``
-- ``Hardware Support`` → ``repairing gear``
-- ``Software Support`` → ``routine maintenance``
-- Unknown / None → ``routine maintenance``
+Maintenance types map one-to-one (Snipe-IT ↔ App), so a record imported and
+pushed back keeps its kind:
+- ``Maintenance`` ↔ ``routine maintenance``
+- ``Repair`` ↔ ``repairing gear``
+- ``PAT Test`` ↔ ``routine inspection``
+- ``Upgrade`` ↔ ``upgrading gear``
+- ``Calibration`` ↔ ``calibration``
+- ``Software Support`` ↔ ``software support``
+- ``Hardware Support`` ↔ ``hardware support``
+- ``Configuration Change`` ↔ ``configuration change``
 
-Reverse mapping (App → Snipe-IT):
-- ``routine maintenance`` → ``Maintenance``
-- ``repairing gear`` → ``Repair``
-- ``routine inspection`` → ``PAT Test``
-- ``retiring gear`` → ``Maintenance`` (no Snipe-IT equivalent)
+Unknown / None Snipe-IT types import as ``routine maintenance``. ``retiring gear``
+has no Snipe-IT equivalent and is pushed as ``Maintenance``.
 """
 
 from __future__ import annotations
 
 import hashlib
 import html
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
 import structlog
+from core_shared.models.journals.constants import MaintenanceType
 
 from snipeit_models import SnipeItMaintenance
 
 logger = structlog.get_logger()
 
-# Mapping from Snipe-IT maintenance type strings to VALID_MAINTENANCE_TYPES
-_MAINTENANCE_TYPE_MAP: dict[str, str] = {
-    "Maintenance": "routine maintenance",
-    "Repair": "repairing gear",
-    "PAT Test": "routine inspection",
-    "Upgrade": "routine maintenance",
-    "Hardware Support": "repairing gear",
-    "Software Support": "routine maintenance",
+# Snipe-IT's maintenance kinds (en-US labels) and the app type each one is
+_MAINTENANCE_TYPE_MAP: Mapping[str, MaintenanceType] = {
+    "Maintenance": MaintenanceType.ROUTINE_MAINTENANCE,
+    "Repair": MaintenanceType.REPAIRING_GEAR,
+    "PAT Test": MaintenanceType.ROUTINE_INSPECTION,
+    "Upgrade": MaintenanceType.UPGRADING_GEAR,
+    "Calibration": MaintenanceType.CALIBRATION,
+    "Software Support": MaintenanceType.SOFTWARE_SUPPORT,
+    "Hardware Support": MaintenanceType.HARDWARE_SUPPORT,
+    "Configuration Change": MaintenanceType.CONFIGURATION_CHANGE,
 }
 
-_DEFAULT_MAINTENANCE_TYPE = "routine maintenance"
-
-# Reverse mapping from app maintenance types to Snipe-IT maintenance type strings
-_REVERSE_MAINTENANCE_TYPE_MAP: dict[str, str] = {
-    "routine maintenance": "Maintenance",
-    "repairing gear": "Repair",
-    "routine inspection": "PAT Test",
-    "retiring gear": "Maintenance",
-}
+_DEFAULT_MAINTENANCE_TYPE = MaintenanceType.ROUTINE_MAINTENANCE
 
 _DEFAULT_SNIPEIT_MAINTENANCE_TYPE = "Maintenance"
+
+# Derived from the forward map so the two cannot disagree
+_REVERSE_MAINTENANCE_TYPE_MAP: Mapping[MaintenanceType, str] = {
+    **{
+        app_type: snipeit_type
+        for snipeit_type, app_type in _MAINTENANCE_TYPE_MAP.items()
+    },
+    MaintenanceType.RETIRING_GEAR: _DEFAULT_SNIPEIT_MAINTENANCE_TYPE,
+}
 
 
 @dataclass(frozen=True)
@@ -131,9 +135,10 @@ class SnipeItMaintenanceTransformer:
                 else start_dt
             )
 
-        # Version hash from maintenance data
+        # Covers the mapped type as well as the record, so an import stored under
+        # an older, lossy mapping is synced again and its type corrected.
         version_hash = hashlib.sha256(
-            maintenance.model_dump_json().encode()
+            f"{maintenance.model_dump_json()}\n{maintenance_type}".encode()
         ).hexdigest()
 
         journal_data: dict[str, Any] = {
@@ -198,6 +203,30 @@ class SnipeItMaintenanceTransformer:
 
         return payload
 
+    @staticmethod
+    def resolve_inbound_maintenance_type(
+        snipeit_type: str | None, *, existing_type: str | None
+    ) -> str:
+        """Return the app type a re-import gives a journal that already exists.
+
+        The app has a type Snipe-IT cannot record (``retiring gear``, pushed as
+        ``Maintenance``). While the record still carries the kind the journal's
+        type is pushed as, the journal keeps its type; any other kind means the
+        record changed in Snipe-IT, so its mapped type wins.
+
+        Args:
+            snipeit_type: The record's ``asset_maintenance_type``.
+            existing_type: The journal's current maintenance type, or ``None``
+                when there is no journal yet.
+        """
+        if (
+            snipeit_type is not None
+            and existing_type is not None
+            and _reverse_map_maintenance_type(existing_type) == snipeit_type
+        ):
+            return existing_type
+        return _map_maintenance_type(snipeit_type)
+
 
 def _map_maintenance_type(snipeit_type: str | None) -> str:
     """Map a Snipe-IT maintenance type string to app VALID_MAINTENANCE_TYPES.
@@ -207,19 +236,19 @@ def _map_maintenance_type(snipeit_type: str | None) -> str:
     if snipeit_type is None:
         logger.warning(
             "Missing Snipe-IT maintenance type, defaulting",
-            default=_DEFAULT_MAINTENANCE_TYPE,
+            default=_DEFAULT_MAINTENANCE_TYPE.value,
         )
-        return _DEFAULT_MAINTENANCE_TYPE
+        return _DEFAULT_MAINTENANCE_TYPE.value
 
     mapped = _MAINTENANCE_TYPE_MAP.get(snipeit_type)
     if mapped is None:
         logger.warning(
             "Unknown Snipe-IT maintenance type, defaulting",
             snipeit_type=snipeit_type,
-            default=_DEFAULT_MAINTENANCE_TYPE,
+            default=_DEFAULT_MAINTENANCE_TYPE.value,
         )
-        return _DEFAULT_MAINTENANCE_TYPE
-    return mapped
+        return _DEFAULT_MAINTENANCE_TYPE.value
+    return mapped.value
 
 
 def _reverse_map_maintenance_type(app_type: str) -> str:
@@ -227,15 +256,15 @@ def _reverse_map_maintenance_type(app_type: str) -> str:
 
     Returns the default Snipe-IT type for unknown inputs with a warning log.
     """
-    mapped = _REVERSE_MAINTENANCE_TYPE_MAP.get(app_type)
-    if mapped is None:
+    try:
+        return _REVERSE_MAINTENANCE_TYPE_MAP[MaintenanceType(app_type)]
+    except ValueError:
         logger.warning(
             "Unknown app maintenance type for reverse mapping, defaulting",
             app_type=app_type,
             default=_DEFAULT_SNIPEIT_MAINTENANCE_TYPE,
         )
         return _DEFAULT_SNIPEIT_MAINTENANCE_TYPE
-    return mapped
 
 
 def _generate_fallback_title(maintenance_type: str) -> str:

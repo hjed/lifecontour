@@ -23,6 +23,29 @@ def test_gear_maintenance_data_valid() -> None:
     assert data.retirement_reason is None
 
 
+@pytest.mark.parametrize(
+    "maintenance_type",
+    [
+        "upgrading gear",
+        "calibration",
+        "software support",
+        "hardware support",
+        "configuration change",
+    ],
+)
+def test_gear_maintenance_data_accepts_snipeit_maintenance_kinds(
+    maintenance_type: str,
+) -> None:
+    """Every Snipe-IT maintenance kind has its own type, so an import loses nothing."""
+    data = GearMaintenanceData(
+        gear_item_id=uuid4(),
+        maintenance_type=maintenance_type,
+    )
+
+    assert data.maintenance_type == maintenance_type
+    assert data.retirement_reason is None
+
+
 def test_gear_maintenance_data_retirement_reason_required() -> None:
     """Test that retirement_reason is required when maintenance_type is 'retiring gear'."""
     gear_item_id = uuid4()
