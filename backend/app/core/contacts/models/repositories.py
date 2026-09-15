@@ -619,8 +619,15 @@ class ContactSummaryRepository(ABC):
     """Repository interface for contact summary operations."""
 
     @abstractmethod
-    async def find_by_contact_id(self, contact_id: int) -> ContactSummary | None:
-        """Find a summary by contact ID."""
+    async def find_by_contact_id(
+        self, contact_id: int, *, for_update: bool = False
+    ) -> ContactSummary | None:
+        """Find a summary by contact ID.
+
+        ``for_update`` locks the row until the transaction ends. Use it for a
+        read whose result is written back, so a concurrent writer waits instead
+        of having its change overwritten by a write built from a stale read.
+        """
         pass
 
     @abstractmethod
@@ -633,6 +640,28 @@ class ContactSummaryRepository(ABC):
         self, contact_id: int, status: str
     ) -> ContactSummary | None:
         """Update the status of a contact summary."""
+        pass
+
+    @abstractmethod
+    async def upsert_unless_user_disabled(
+        self, summary: ContactSummary
+    ) -> ContactSummary | None:
+        """Create or update a summary unless the stored row is user-disabled.
+
+        For automated writers that read the row earlier without a lock: the
+        check runs against the row as it is at the write, so a user's disable
+        committed in between is kept. Returns None when the write is skipped.
+        """
+        pass
+
+    @abstractmethod
+    async def update_status_unless_user_disabled(
+        self, contact_id: int, status: str
+    ) -> ContactSummary | None:
+        """Update the status unless the row is user-disabled.
+
+        Returns None when the write is skipped or no row exists.
+        """
         pass
 
     @abstractmethod

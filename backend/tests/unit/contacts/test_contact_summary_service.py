@@ -147,9 +147,40 @@ class TestRequestRefresh:
         assert isinstance(event, ContactSummaryRefreshDue)
         assert event.event_data["contact_id"] == 42
 
+    @pytest.mark.asyncio
+    async def test_reads_the_summary_row_under_a_lock(
+        self, summary_service, mock_summary_repo, mock_transaction
+    ):
+        """The user-disabled check and the status reset see the same row state."""
+        mock_summary_repo.find_by_contact_id.return_value = None
+
+        await summary_service.request_refresh(42, transaction=mock_transaction)
+
+        mock_summary_repo.find_by_contact_id.assert_awaited_once_with(
+            42, for_update=True
+        )
+
 
 class TestUpdateSummary:
     """Test the update_summary unit of work."""
+
+    @pytest.mark.asyncio
+    async def test_reads_the_summary_row_under_a_lock(
+        self, summary_service, mock_summary_repo, mock_transaction
+    ):
+        """The configuration change is computed from a locked read, so it waits
+        for an in-flight generation instead of overwriting it or being lost."""
+        mock_summary_repo.find_by_contact_id.return_value = ContactSummary(
+            contact_id=7, status=SummaryStatus.GENERATED
+        )
+
+        await summary_service.update_summary(
+            7, ContactSummaryUpdate(is_disabled=True), transaction=mock_transaction
+        )
+
+        mock_summary_repo.find_by_contact_id.assert_awaited_once_with(
+            7, for_update=True
+        )
 
     @pytest.mark.asyncio
     async def test_disable_sets_disabled_status(

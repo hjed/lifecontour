@@ -216,6 +216,158 @@ class TestContactSummaryRepositoryIntegration:
         assert contact.summary is not None
         assert contact.summary.disabled_reason == SummaryDisabledReason.USER
 
+    async def _holds_summary_row_lock(self, connection: AsyncConnection) -> bool:
+        """Whether this connection holds a row lock (SELECT ... FOR UPDATE) on
+        contact_summaries. Only a locking read takes RowShareLock on the table;
+        plain reads take AccessShareLock and writes RowExclusiveLock."""
+        result = await connection.execute(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_locks
+                    WHERE pid = pg_backend_pid()
+                      AND relation = 'contact_summaries'::regclass
+                      AND mode = 'RowShareLock'
+                )
+                """
+            )
+        )
+        held: bool = result.scalar_one()
+        return held
+
+    @pytest.mark.asyncio
+    async def test_find_for_update_locks_the_row(
+        self, summary_repo, test_contact, clean_database
+    ):
+        """A read made to be written back locks the row until the transaction ends."""
+        await summary_repo.upsert(ContactSummary(contact_id=test_contact.id))
+
+        found = await summary_repo.find_by_contact_id(test_contact.id, for_update=True)
+
+        assert found is not None
+        assert await self._holds_summary_row_lock(clean_database) is True
+
+    @pytest.mark.asyncio
+    async def test_plain_find_takes_no_row_lock(
+        self, summary_repo, test_contact, clean_database
+    ):
+        """An ordinary read does not lock the row."""
+        await summary_repo.upsert(ContactSummary(contact_id=test_contact.id))
+
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+
+        assert found is not None
+        assert await self._holds_summary_row_lock(clean_database) is False
+
+    @pytest.mark.asyncio
+    async def test_guarded_upsert_skips_a_user_disabled_row(
+        self, summary_repo, test_contact
+    ):
+        """An automated write never overwrites a summary the user disabled."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                summary_text="Old text",
+                status=SummaryStatus.DISABLED,
+                is_disabled=True,
+                disabled_reason=SummaryDisabledReason.USER,
+            )
+        )
+
+        written = await summary_repo.upsert_unless_user_disabled(
+            ContactSummary(
+                contact_id=test_contact.id,
+                summary_text="AI text",
+                status=SummaryStatus.GENERATED,
+            )
+        )
+
+        assert written is None
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+        assert found is not None
+        assert found.disabled_reason == SummaryDisabledReason.USER
+        assert found.summary_text == "Old text"
+
+    @pytest.mark.asyncio
+    async def test_guarded_upsert_writes_over_an_auto_paused_row(
+        self, summary_repo, test_contact
+    ):
+        """A low-activity pause is not the user's choice, so it can be lifted."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                status=SummaryStatus.DISABLED,
+                is_disabled=True,
+                disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
+            )
+        )
+
+        written = await summary_repo.upsert_unless_user_disabled(
+            ContactSummary(
+                contact_id=test_contact.id,
+                summary_text="AI text",
+                status=SummaryStatus.GENERATED,
+            )
+        )
+
+        assert written is not None
+        assert written.id is not None
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+        assert found is not None
+        assert found.is_disabled is False
+        assert found.summary_text == "AI text"
+
+    @pytest.mark.asyncio
+    async def test_guarded_upsert_inserts_a_missing_row(
+        self, summary_repo, test_contact
+    ):
+        """With no row yet, the guarded write creates one."""
+        written = await summary_repo.upsert_unless_user_disabled(
+            ContactSummary(contact_id=test_contact.id, summary_text="First")
+        )
+
+        assert written is not None
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+        assert found is not None
+        assert found.summary_text == "First"
+
+    @pytest.mark.asyncio
+    async def test_guarded_status_update_skips_a_user_disabled_row(
+        self, summary_repo, test_contact
+    ):
+        """GENERATING is never written onto a summary the user disabled."""
+        await summary_repo.upsert(
+            ContactSummary(
+                contact_id=test_contact.id,
+                status=SummaryStatus.DISABLED,
+                is_disabled=True,
+                disabled_reason=SummaryDisabledReason.USER,
+            )
+        )
+
+        updated = await summary_repo.update_status_unless_user_disabled(
+            test_contact.id, SummaryStatus.GENERATING.value
+        )
+
+        assert updated is None
+        found = await summary_repo.find_by_contact_id(test_contact.id)
+        assert found is not None
+        assert found.status == SummaryStatus.DISABLED
+
+    @pytest.mark.asyncio
+    async def test_guarded_status_update_changes_an_enabled_row(
+        self, summary_repo, test_contact
+    ):
+        """An enabled summary moves to GENERATING as before."""
+        await summary_repo.upsert(ContactSummary(contact_id=test_contact.id))
+
+        updated = await summary_repo.update_status_unless_user_disabled(
+            test_contact.id, SummaryStatus.GENERATING.value
+        )
+
+        assert updated is not None
+        assert updated.status == SummaryStatus.GENERATING
+
     @pytest.mark.asyncio
     async def test_disabled_row_without_reason_is_rejected(
         self, test_contact, clean_database

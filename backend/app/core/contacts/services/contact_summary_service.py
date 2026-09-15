@@ -74,7 +74,9 @@ class ContactSummaryService:
         activity and resumes it if there is now enough. Committed as a single
         unit before the response is sent.
         """
-        existing = await self.summary_repo.find_by_contact_id(contact_id)
+        existing = await self.summary_repo.find_by_contact_id(
+            contact_id, for_update=True
+        )
         if existing and existing.is_user_disabled:
             raise ContactValidationError(
                 "summary", "Summary generation is disabled for this contact"
@@ -117,7 +119,11 @@ class ContactSummaryService:
         Returns the persisted summary. Committed as a single unit before the
         response is sent.
         """
-        existing = await self.summary_repo.find_by_contact_id(contact_id)
+        # Locked read: the change is computed from the row it overwrites, so an
+        # in-flight generation is waited for rather than clobbered or lost.
+        existing = await self.summary_repo.find_by_contact_id(
+            contact_id, for_update=True
+        )
         if existing is None:
             existing = ContactSummary(
                 contact_id=contact_id,
