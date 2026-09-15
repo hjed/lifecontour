@@ -414,14 +414,13 @@ class TestSummaryGenerator:
         ).assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_auto_paused_contact_without_journals_resumes_on_other_activity(
-        self,
-    ):
-        """Notes and contact changes count as activity: with enough of them a
-        pause is lifted even when there are no journals to summarise."""
+    async def test_auto_paused_contact_without_journals_keeps_its_summary(self):
+        """Without a journal nothing can be generated, so enough notes or contact
+        changes do not lift the pause: lifting it would only erase the summary."""
         existing = ContactSummary(
             contact_id=1,
             summary_text="Old text",
+            follow_up_suggestions=["Call them"],
             status=SummaryStatus.DISABLED,
             is_disabled=True,
             disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
@@ -439,18 +438,14 @@ class TestSummaryGenerator:
 
         result = await generator.generate(contact_id=1)
 
-        assert result is not None
-        assert result.is_disabled is False
-        assert result.disabled_reason is None
-        assert result.status == SummaryStatus.GENERATED
-        cast(MagicMock, generator._prompt_builder.build).assert_not_called()
+        assert result is existing
+        assert result.summary_text == "Old text"
+        assert result.disabled_reason == SummaryDisabledReason.LOW_ACTIVITY
+        cast(
+            AsyncMock, generator._summary_repo.upsert_from_generation
+        ).assert_not_awaited()
         assert generator._event_publisher is not None
-        publish_mock = cast(AsyncMock, generator._event_publisher.publish)
-        publish_mock.assert_awaited_once()
-        changed_fields = (
-            publish_mock.await_args_list[0].args[0].event_data["changed_fields"]
-        )
-        assert "is_disabled" in changed_fields
+        cast(AsyncMock, generator._event_publisher.publish).assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_override_saved_during_the_run_blocks_the_auto_pause(self):

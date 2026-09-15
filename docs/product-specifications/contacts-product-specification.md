@@ -139,7 +139,7 @@ The summary should help the user understand:
 - The user should be able to manually refresh it.
 - The system should be able to auto-disable summary generation for low-activity contacts, with user override.
 - The user should be able to turn AI summary generation off and back on from the contact details page. Turning it back on queues a new summary immediately.
-- An automatic low-activity disable is a pause, not a permanent state: it is re-evaluated whenever a summary refresh is triggered (by contact activity or a manual refresh), and generation resumes once there is enough recent activity. Only the user's own choice to turn generation off is sticky.
+- An automatic low-activity disable is a pause, not a permanent state: it is re-evaluated whenever a summary refresh is triggered (by contact activity or a manual refresh), and generation resumes once there is enough recent activity and at least one linked journal to summarise. Only the user's own choice to turn generation off is sticky.
 
 ### Inputs
 
