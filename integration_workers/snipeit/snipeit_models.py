@@ -94,6 +94,11 @@ class SnipeItAsset(BaseModel):
     notes: str | None = None
     assigned_to: SnipeItAssignedTo | None = None
     updated_at: SnipeItDateObject | None = None
+    # Read by gear-usage sync to restore the dates a historical checkout and
+    # check-in overwrite. Excluded from dumps, so they stay out of the inbound
+    # change-detection hash: they change on every checkout.
+    last_checkout: SnipeItDateObject | None = Field(default=None, exclude=True)
+    last_checkin: SnipeItDateObject | None = Field(default=None, exclude=True)
 
     # -- Convenience accessors ------------------------------------------------
 

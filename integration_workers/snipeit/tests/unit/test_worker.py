@@ -479,9 +479,9 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
     Reconciling straight after lets that journal's corrected pair be recorded;
     nothing else would revisit it once the asset is back.
     """
-    from datetime import date
+    from datetime import date, datetime
 
-    from snipeit_sync_service import OverdueGearUsage
+    from snipeit_sync_service import AssetUsageDates, OverdueGearUsage
     from worker import periodic_checkin_all_snipeit_accounts
 
     settings_result = MagicMock()
@@ -501,7 +501,10 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
     mock_sync_service.reconcile_gear_usage = AsyncMock()
     mock_sync_service._api_client.close = AsyncMock()
     overdue = OverdueGearUsage(
-        journal_id=100, checkout_at=date(2025, 3, 8), checkin_at=date(2025, 3, 9)
+        journal_id=100,
+        checkout_at=date(2025, 3, 8),
+        checkin_at=date(2025, 3, 9),
+        usage_dates=AssetUsageDates(last_checkin=datetime(2025, 3, 9, 17, 0)),
     )
 
     with (
@@ -520,3 +523,5 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
         await periodic_checkin_all_snipeit_accounts(mock_ctx)
 
     assert mock_sync_service.reconcile_gear_usage.await_count == reconciles
+    checkin_kwargs = mock_sync_service.push_checkin_create.await_args.kwargs
+    assert checkin_kwargs["usage_dates"] is overdue.usage_dates

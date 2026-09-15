@@ -1,13 +1,16 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT sync service outbound maintenance methods."""
 
+import json
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
+from snipeit_models import SnipeItAsset
 from snipeit_sync_service import (
+    AssetUsageDates,
     SnipeItSyncService,
     _format_date_for_snipeit,
     _local_date,
@@ -122,6 +125,96 @@ class TestSnipeitDatetime:
         assert _snipeit_datetime(None, SYDNEY) is None
 
 
+class TestAssetUsageDates:
+    """An asset's last checkout/check-in, kept as Snipe-IT wall-clock times."""
+
+    HISTORICAL = AssetUsageDates(
+        last_checkout=datetime(2024, 3, 29, 9, 44, 35),
+        last_checkin=datetime(2024, 3, 29, 16, 20, 30),
+    )
+    LATER = AssetUsageDates(
+        last_checkout=datetime(2026, 1, 21, 23, 14),
+        last_checkin=datetime(2026, 2, 12, 21, 26, 37),
+    )
+
+    def test_from_instants_reads_wall_clock_time_in_the_zone(self) -> None:
+        dates = AssetUsageDates.from_instants(
+            datetime(2024, 3, 28, 22, 44, 35, tzinfo=UTC),
+            datetime(2024, 3, 29, 5, 20, 30, tzinfo=UTC),
+            SYDNEY,
+        )
+        assert dates == self.HISTORICAL
+
+    def test_latest_keeps_a_later_baseline(self) -> None:
+        assert self.LATER.latest(self.HISTORICAL) == self.LATER
+
+    def test_latest_replaces_an_earlier_or_missing_baseline(self) -> None:
+        assert AssetUsageDates().latest(self.HISTORICAL) == self.HISTORICAL
+        baseline = AssetUsageDates(last_checkout=datetime(2020, 1, 1))
+        assert baseline.latest(self.HISTORICAL) == self.HISTORICAL
+
+    def test_latest_compares_each_field_on_its_own(self) -> None:
+        mixed = AssetUsageDates(
+            last_checkout=self.HISTORICAL.last_checkout,
+            last_checkin=self.LATER.last_checkin,
+        )
+        assert (
+            AssetUsageDates(last_checkin=self.LATER.last_checkin).latest(
+                self.HISTORICAL
+            )
+            == mixed
+        )
+
+    def test_reference_round_trip(self) -> None:
+        reference = json.dumps(
+            {
+                "checkout_at": "2024-03-29",
+                "asset_dates_before": self.LATER.to_reference(),
+            }
+        )
+        assert AssetUsageDates.from_reference(reference) == self.LATER
+        assert AssetUsageDates().to_reference() == {
+            "last_checkout": None,
+            "last_checkin": None,
+        }
+
+    def test_reference_without_a_snapshot_is_none(self) -> None:
+        assert AssetUsageDates.from_reference(None) is None
+        assert AssetUsageDates.from_reference('{"checkout_at": "2024-03-29"}') is None
+
+    def test_unparseable_reference_values_are_ignored(self) -> None:
+        reference = json.dumps(
+            {"asset_dates_before": {"last_checkout": "soon", "last_checkin": 7}}
+        )
+        assert AssetUsageDates.from_reference(reference) == AssetUsageDates()
+
+    def test_payload_names_only_the_requested_known_fields(self) -> None:
+        assert self.HISTORICAL.payload(include_checkout=True) == {
+            "last_checkout": "2024-03-29 09:44:35",
+            "last_checkin": "2024-03-29 16:20:30",
+        }
+        assert self.HISTORICAL.payload(include_checkout=False) == {
+            "last_checkin": "2024-03-29 16:20:30"
+        }
+        assert AssetUsageDates().payload(include_checkout=True) == {}
+
+    def test_from_asset_reads_the_get_datetime_objects(self) -> None:
+        asset = SnipeItAsset.model_validate(
+            {
+                "id": 33,
+                "asset_tag": "00033",
+                "last_checkout": {
+                    "datetime": "2026-01-21 23:14:00",
+                    "formatted": "2026-01-21 11:14 PM",
+                },
+                "last_checkin": None,
+            }
+        )
+        assert AssetUsageDates.from_asset(asset) == AssetUsageDates(
+            last_checkout=datetime(2026, 1, 21, 23, 14)
+        )
+
+
 class TestSnipeitCheckinAt:
     """Snipe-IT must never be sent a check-in date its server reads as the future.
 
@@ -183,6 +276,8 @@ class TestUsagePeriodHasEnded:
 def _mock_api_client() -> AsyncMock:
     """Create a mock SnipeItAPIClient."""
     client = AsyncMock(spec=SnipeItAPIClient)
+    # Checkouts read the asset's dates first; an asset with none keeps them unset.
+    client.get_asset.return_value = SnipeItAsset(id=42, asset_tag="T-42")
     return client
 
 
@@ -820,8 +915,15 @@ class TestPushCheckoutCreate:
         third_session.begin = MagicMock(return_value=mock_begin)
         third_session.execute = AsyncMock()
 
+        # The asset's dates are kept on the pending row before the POST.
+        keep_dates_ctx = _begin_session_ctx([MagicMock()])
         session_factory = MagicMock(
-            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+            side_effect=[
+                first_session_ctx,
+                second_session_ctx,
+                keep_dates_ctx,
+                third_session_ctx,
+            ]
         )
 
         service = SnipeItSyncService(
@@ -1010,8 +1112,15 @@ class TestPushCheckoutCreate:
         third_session.begin = MagicMock(return_value=mock_begin)
         third_session.execute = AsyncMock()
 
+        # The asset's dates are kept on the pending row before the POST.
+        keep_dates_ctx = _begin_session_ctx([MagicMock()])
         session_factory = MagicMock(
-            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+            side_effect=[
+                first_session_ctx,
+                second_session_ctx,
+                keep_dates_ctx,
+                third_session_ctx,
+            ]
         )
 
         service = SnipeItSyncService(
@@ -1363,6 +1472,7 @@ class TestPushCheckinCreate:
             side_effect=[
                 fetch_ctx,
                 checkout_lock_ctx,
+                _begin_session_ctx([MagicMock()]),  # keep the asset's dates
                 checkout_success_ctx,
                 checkin_resolve_ctx,
                 checkin_lock_ctx,

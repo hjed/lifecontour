@@ -61,6 +61,18 @@ class TestTransformerFullAsset:
         r2 = SnipeItDataTransformer.transform(a2, user_id="u")
         assert r1.version_hash != r2.version_hash
 
+    def test_version_hash_ignores_last_checkout_and_checkin(self) -> None:
+        """Checkouts change these on every use; they must not trigger a re-import."""
+        plain = _make_asset()
+        used = _make_asset(
+            last_checkout={"datetime": "2026-01-21 23:14:00", "formatted": "x"},
+            last_checkin={"datetime": "2026-02-12 21:26:37", "formatted": "y"},
+        )
+        assert used.last_checkin is not None
+        r1 = SnipeItDataTransformer.transform(plain, user_id="u")
+        r2 = SnipeItDataTransformer.transform(used, user_id="u")
+        assert r1.version_hash == r2.version_hash
+
 
 class TestTransformerMissingOptionalFields:
     """Tests for transformer handling of missing/optional fields."""
