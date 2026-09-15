@@ -264,6 +264,10 @@ class SnipeItAPIClient:
         The checkout response is returned as a raw dict because it differs
         from the standard asset response structure.
 
+        ``checkout_at`` may be a date or a ``YYYY-MM-DD HH:MM:SS`` datetime in
+        Snipe-IT's zone; Snipe-IT stores it verbatim as the asset's
+        ``last_checkout`` and dates the checkout log with it, time included.
+
         Args:
             asset_id: Snipe-IT asset numeric ID.
             payload: Checkout fields (assigned_user, checkout_to_type,
@@ -297,11 +301,12 @@ class SnipeItAPIClient:
         The checkin response is returned as a raw dict because it differs
         from the standard asset response structure.
 
-        Pass ``checkin_at`` (``YYYY-MM-DD``) to backdate the return. The field
-        is missing from Snipe-IT's API reference but is read by
+        Pass ``checkin_at`` (``YYYY-MM-DD``) to backdate the return's log entry.
+        The field is missing from Snipe-IT's API reference but is read by
         ``Api\\AssetsController::checkin``: Snipe-IT appends its current time and
-        sets the log's ``action_date`` when the date is not the server's today.
-        Without it the check-in is stamped at server time.
+        sets the log's ``action_date`` when the date is not the server's today,
+        so it must be a date, never a datetime. Either way the asset's
+        ``last_checkin`` is set to the server's current time.
 
         Args:
             asset_id: Snipe-IT asset numeric ID.

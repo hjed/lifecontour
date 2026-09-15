@@ -38,10 +38,13 @@ class MockTransport(httpx.AsyncBaseTransport):
     Snipe-IT API client without a live server. An activity report request with
     no queued response gets an empty report, since every checkout first looks
     for an existing Snipe-IT checkout to link.
+
+    A response queued with a ``method`` only answers that HTTP method, so a
+    ``GET /hardware/42`` cannot be served to ``POST /hardware/42/checkin``.
     """
 
     def __init__(self) -> None:
-        self.responses: list[tuple[str, int, object, dict[str, str]]] = []
+        self.responses: list[tuple[str, str | None, int, object, dict[str, str]]] = []
         self.requests: list[httpx.Request] = []
 
     def add_response(
@@ -50,14 +53,17 @@ class MockTransport(httpx.AsyncBaseTransport):
         status_code: int = 200,
         json_data: object = None,
         headers: dict[str, str] | None = None,
+        method: str | None = None,
     ) -> None:
-        self.responses.append((url_pattern, status_code, json_data, headers or {}))
+        self.responses.append(
+            (url_pattern, method, status_code, json_data, headers or {})
+        )
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         url = str(request.url)
-        for i, (pattern, status, data, hdrs) in enumerate(self.responses):
-            if pattern in url:
+        for i, (pattern, method, status, data, hdrs) in enumerate(self.responses):
+            if pattern in url and method in (None, request.method):
                 self.responses.pop(i)
                 # Bytes are served verbatim, e.g. to simulate a non-JSON body.
                 if isinstance(data, bytes):

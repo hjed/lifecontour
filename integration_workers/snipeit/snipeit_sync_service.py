@@ -13,7 +13,7 @@ import hashlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -39,10 +39,8 @@ _ACTIVITY_MAX_PAGES = 10
 def _resolve_zone(*candidates: object) -> str | None:
     """Return the first candidate naming a zone ``ZoneInfo`` can load, else ``None``.
 
-    Pass the event's zone before the user's: journal dates are read in the
-    event's zone when it records one, the user's otherwise, and UTC when neither
-    is usable. Settings are user input and a row column may be absent, so
-    anything that is not a loadable zone name is skipped rather than trusted.
+    Settings are user input and a row column may be absent, so anything that is
+    not a loadable zone name is skipped rather than trusted.
     """
     for candidate in candidates:
         if not isinstance(candidate, str) or not candidate:
@@ -83,24 +81,46 @@ def _format_date_for_snipeit(
     return local.isoformat() if local else None
 
 
-def _journal_zone(journal_row: Any) -> str | None:
-    """Return the zone a journal row's dates are read in (event, then user)."""
-    return _resolve_zone(
-        getattr(journal_row, "event_timezone", None),
-        getattr(journal_row, "user_timezone", None),
-    )
+# Snipe-IT's naive ``Y-m-d H:i:s`` datetime format.
+_SNIPEIT_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def _snipeit_zone(row: Any) -> str | None:
+    """Return the zone every date and time sent to Snipe-IT is read in.
+
+    Snipe-IT stores dates and times naive in its server's zone, which its API
+    does not expose. The user's configured zone stands in for it (``None``, i.e.
+    UTC, when unset). One zone is used for every value, even for an event in
+    another zone: a checkout's time and the date its log is looked up by must
+    land on the same day.
+    """
+    return _resolve_zone(getattr(row, "user_timezone", None))
+
+
+def _snipeit_datetime(value: date | datetime | None, zone: str | None) -> str | None:
+    """Format ``value`` as the naive ``Y-m-d H:i:s`` wall-clock time in ``zone``.
+
+    Naive datetimes are UTC (the storage convention); a plain date is its
+    midnight. ``zone`` must be loadable (see :func:`_snipeit_zone`).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        return datetime.combine(value, time()).strftime(_SNIPEIT_DATETIME_FORMAT)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    local = value.astimezone(ZoneInfo(zone) if zone else UTC)
+    return local.strftime(_SNIPEIT_DATETIME_FORMAT)
 
 
 async def _fetch_journal_row(session: Any, journal_id: int) -> Any:
-    """Fetch a journal's title, content and dates, with the zones they are read in."""
+    """Fetch a journal's title, content and dates, with the zone they are sent in."""
     result = await session.execute(
         text("""
             SELECT j.title, j.content,
                    j.event_date_range_start, j.event_date_range_end,
-                   jci.timezone AS event_timezone,
                    us.timezone AS user_timezone
             FROM journals j
-            LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
             LEFT JOIN user_settings us ON us.user_id = j.user_id
             WHERE j.id = :journal_id
         """),
@@ -993,10 +1013,10 @@ class SnipeItSyncService:
             maintenance_type=maintenance_data_row.maintenance_type
             or "routine maintenance",
             start_date=_format_date_for_snipeit(
-                journal_row.event_date_range_start, _journal_zone(journal_row)
+                journal_row.event_date_range_start, _snipeit_zone(journal_row)
             ),
             end_date=_format_date_for_snipeit(
-                journal_row.event_date_range_end, _journal_zone(journal_row)
+                journal_row.event_date_range_end, _snipeit_zone(journal_row)
             ),
         )
 
@@ -1122,10 +1142,10 @@ class SnipeItSyncService:
             maintenance_type=maintenance_data_row.maintenance_type
             or "routine maintenance",
             start_date=_format_date_for_snipeit(
-                journal_row.event_date_range_start, _journal_zone(journal_row)
+                journal_row.event_date_range_start, _snipeit_zone(journal_row)
             ),
             end_date=_format_date_for_snipeit(
-                journal_row.event_date_range_end, _journal_zone(journal_row)
+                journal_row.event_date_range_end, _snipeit_zone(journal_row)
             ),
         )
 
@@ -1371,15 +1391,16 @@ class SnipeItSyncService:
             )
             return
 
-        zone = _journal_zone(journal_row)
+        zone = _snipeit_zone(journal_row)
         checkout_at = _format_date_for_snipeit(checkout_date, zone)
         expected_checkin = _format_date_for_snipeit(checkin_date, zone)
 
-        # Build checkout payload
+        # Build checkout payload. Snipe-IT keeps a checkout's time of day (unlike
+        # a check-in's), so send it; the lookup day and recorded date stay dates.
         payload: dict[str, Any] = {
             "assigned_user": self._snipeit_user_id,
             "checkout_to_type": "user",
-            "checkout_at": checkout_at,
+            "checkout_at": _snipeit_datetime(checkout_date, zone),
             "expected_checkin": expected_checkin,
         }
         if journal_row.title:
@@ -2124,7 +2145,7 @@ class SnipeItSyncService:
             return
 
         journal_row, usage_data_row, _ = data
-        zone = _journal_zone(journal_row)
+        zone = _snipeit_zone(journal_row)
         checkout_date = (
             usage_data_row.checkout_date or journal_row.event_date_range_start
         )
@@ -2252,8 +2273,8 @@ class SnipeItSyncService:
 class OverdueGearUsage:
     """A checked-out GEAR_USAGE journal whose usage period has ended.
 
-    Dates are the local calendar dates the usage ran over, read in the journal's
-    event timezone, else the user's.
+    Dates are the local calendar dates the usage ran over, read in the user's
+    configured timezone (see :func:`_snipeit_zone`).
     """
 
     journal_id: int
@@ -2278,7 +2299,7 @@ async def fetch_overdue_gear_usage(
 
     Drives the periodic check-in sweep. The resolved check-in instant is compared
     against ``now()``, matching :func:`_usage_period_has_ended`; the returned
-    dates are local to the journal's event zone, else the user's zone.
+    dates are local to the user's configured zone.
     """
     async with session_factory() as session:
         result = await session.execute(
@@ -2286,12 +2307,10 @@ async def fetch_overdue_gear_usage(
                 SELECT j.id AS journal_id,
                        COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
                        COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date,
-                       jci.timezone AS event_timezone,
                        us.timezone AS user_timezone
                 FROM sync_metadata co
                 JOIN journals j ON j.id = co.internal_uuid::integer
                 JOIN journal_gear_usage_data u ON u.journal_id = j.id
-                LEFT JOIN journal_calendar_info jci ON jci.journal_id = j.id
                 LEFT JOIN user_settings us ON us.user_id = j.user_id
                 LEFT JOIN sync_metadata ci
                     ON ci.integration_source = 'snipeit_checkin'
@@ -2310,7 +2329,7 @@ async def fetch_overdue_gear_usage(
 
     overdue: list[OverdueGearUsage] = []
     for row in rows:
-        zone = _journal_zone(row)
+        zone = _snipeit_zone(row)
         checkin_at = _local_date(row.checkin_date, zone)
         if checkin_at is None:
             continue

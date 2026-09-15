@@ -84,9 +84,11 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
 
   Check-ins are idempotent (tracked via `SyncMetadata`), so an already-returned asset is never checked in twice.
 - **Historical Dates**: Checkouts and check-ins are recorded in Snipe-IT on the dates the gear was actually used, so past usage (e.g. an imported logbook) shows real return dates.
-  - `checkout_at`, `expected_checkin` and the check-in's `checkin_at` are the journal's **local** calendar dates, read in the event's timezone when it has one, otherwise the user's timezone, otherwise UTC. Journal dates are stored as the UTC instant of a local midnight, so taking their UTC date would land a day early east of UTC.
+  - Snipe-IT stores dates and times without a timezone, in its server's zone, and its API does not say which zone that is. Every date and time sent to Snipe-IT is therefore read in the **user's configured timezone** (UTC when unset), even for an event recorded in another zone. One zone keeps a checkout's time and the date its log entry is matched on (see Existing Snipe-IT History) on the same day. Journal dates are stored as the UTC instant of a local midnight, so taking their UTC date would land a day early east of UTC.
+  - `checkout_at` is the local date **and time** of the checkout (`YYYY-MM-DD HH:MM:SS`); Snipe-IT keeps it as the asset's last checkout and the checkout log's date. `expected_checkin` and the check-in's `checkin_at` are local calendar dates.
+  - Snipe-IT's check-in API only accepts a date: it adds its own current time to `checkin_at`, and only dates the check-in's log entry with it. The asset's own last check-in is always set to the moment the check-in is posted.
   - `checkin_at` is sent only once the check-in date has passed in every timezone (it is before today at UTC−12). Snipe-IT's server timezone is unknown, so a more recent return is stamped at the server's time rather than risk sending a date the server reads as the future. A check-in caused by deleting the journal is always stamped at server time.
-  - The dates sent are recorded on the checkout and check-in `SyncMetadata` rows (`reference_data`).
+  - The dates sent are recorded, as dates, on the checkout and check-in `SyncMetadata` rows (`reference_data`). Changing only the time of a checkout on the same day is therefore not re-recorded.
 - **Date Changes**: Snipe-IT cannot edit or delete its activity log, so updating a `GEAR_USAGE` journal only adds history that is missing:
   - If the checkout date changes after the asset was checked in, a new checkout and check-in are recorded on the new dates. The earlier pair stays in Snipe-IT.
   - A check-in that has not happened yet uses the updated check-in date.

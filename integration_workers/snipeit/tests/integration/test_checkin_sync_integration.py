@@ -238,7 +238,7 @@ class TestHistoricalDatesIntegration:
         )
 
         checkout_body = _request_body(mock_transport, "hardware/42/checkout")
-        assert checkout_body["checkout_at"] == checkout_at
+        assert checkout_body["checkout_at"] == f"{checkout_at} 00:00:00"
         assert checkout_body["expected_checkin"] == checkin_at
         checkin_body = _request_body(mock_transport, "hardware/42/checkin")
         assert checkin_body == {
@@ -253,13 +253,48 @@ class TestHistoricalDatesIntegration:
         ) == {"checkin_at": checkin_at}
 
     @pytest.mark.asyncio
-    async def test_event_timezone_takes_precedence_over_user_timezone(
+    async def test_checkout_keeps_its_local_time_of_day(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # A day trip imported with clock times (journal 215031's shape): out
+        # 09:44:35 and back 16:20:30 on 29 March 2024, Sydney daylight time.
+        journal_id = await _insert_gear_usage_journal(
+            async_connection,
+            start="2024-03-28T22:44:35+00:00",
+            end="2024-03-29T05:20:30+00:00",
+            user_timezone="Australia/Sydney",
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        checkout_body = _request_body(mock_transport, "hardware/42/checkout")
+        assert checkout_body["checkout_at"] == "2024-03-29 09:44:35"
+        assert checkout_body["expected_checkin"] == "2024-03-29"
+        checkin_body = _request_body(mock_transport, "hardware/42/checkin")
+        assert checkin_body == {
+            "checkin_at": "2024-03-29",
+            "note": "Usage period 2024-03-29 to 2024-03-29",
+        }
+        assert await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        ) == {"checkout_at": "2024-03-29", "expected_checkin": "2024-03-29"}
+
+    @pytest.mark.asyncio
+    async def test_user_timezone_is_used_even_when_event_timezone_differs(
         self,
         snipeit_sync_service: Any,
         mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
         # 23:30 UTC is still the same day in London but the next day in Sydney.
+        # Snipe-IT reads every value in its own zone, taken to be the user's.
         journal_id = await _insert_gear_usage_journal(
             async_connection,
             start="2025-03-07T23:30:00+00:00",
@@ -275,10 +310,10 @@ class TestHistoricalDatesIntegration:
         )
 
         checkout_body = _request_body(mock_transport, "hardware/42/checkout")
-        assert checkout_body["checkout_at"] == "2025-03-07"
-        assert checkout_body["expected_checkin"] == "2025-03-08"
+        assert checkout_body["checkout_at"] == "2025-03-08 10:30:00"
+        assert checkout_body["expected_checkin"] == "2025-03-09"
         checkin_body = _request_body(mock_transport, "hardware/42/checkin")
-        assert checkin_body["checkin_at"] == "2025-03-08"
+        assert checkin_body["checkin_at"] == "2025-03-09"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -327,6 +362,7 @@ class TestHistoricalDatesIntegration:
         mock_transport.add_response(
             "/hardware/41",
             json_data={"id": 41, "asset_tag": "T-41", "assigned_to": previous_assignee},
+            method="GET",
         )
         # Consumed only when the old asset is returned.
         mock_transport.add_response(
@@ -739,7 +775,7 @@ class TestReconcileGearUsageIntegration:
         assert len(mock_transport.responses) == 0
         assert (
             _request_body(mock_transport, "hardware/42/checkout")["checkout_at"]
-            == "2025-03-08"
+            == "2025-03-08 00:00:00"
         )
         assert (
             _request_body(mock_transport, "hardware/42/checkin")["checkin_at"]
@@ -1245,6 +1281,7 @@ class TestSupersededAssetRetryIntegration:
                 "asset_tag": "T-41",
                 "assigned_to": {"id": 5, "name": "Harry", "type": "user"},
             },
+            method="GET",
         )
         mock_transport.add_response(
             "/hardware/41/checkin", status_code=500, json_data={"status": "error"}
@@ -1489,6 +1526,7 @@ class TestPreviousAssetHeldElsewhereIntegration:
                 "asset_tag": "T-41",
                 "assigned_to": {"id": 5, "name": "Harry", "type": "user"},
             },
+            method="GET",
         )
         # Consumed only when the old asset is returned.
         mock_transport.add_response(
