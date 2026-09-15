@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from core_shared.models.contacts.entities import SummaryStatus
 from core_shared.models.journals.daily_summary import JournalDailySummary
@@ -40,6 +40,11 @@ if TYPE_CHECKING:
     from dishka import AsyncContainer
 
 logger = logging.getLogger(__name__)
+
+#: How many generations one read runs before answering ``PENDING``. Each attempt
+#: after the first follows an invalidation that landed while the previous one
+#: was generating, so this bounds the AI calls a read can make.
+_MAX_GENERATION_ATTEMPTS: Final = 3
 
 
 class DailySummaryService:
@@ -117,6 +122,13 @@ class DailySummaryService:
         claim is keyed on the ``generated_at`` the cache check saw, so a slow
         request cannot regenerate over a result a faster one finished meanwhile.
 
+        A generation an invalidation **overtakes** is discarded (see
+        ``_persist_generated``) and run again from current inputs, up to
+        ``_MAX_GENERATION_ATTEMPTS`` in all, before the read answers. Answering
+        ``PENDING`` instead left the dashboard's card on "Generating..." until the
+        next load, since the card reads once per load (#1483). Only after the
+        last attempt is also overtaken does the read hand back ``PENDING``.
+
         Committing in the service layer (rather than relying on teardown) is
         required because the request connection has no commit backstop, so an
         uncommitted write would be discarded at teardown (issue #945).
@@ -145,6 +157,46 @@ class DailySummaryService:
         # cannot disagree with itself.
         now = self._clock()
 
+        # 1-6. One attempt, run again while an invalidation overtakes it. An
+        #    attempt answers ``PENDING`` only when its finished summary was
+        #    refused because the day changed underneath it (or a claim it lost
+        #    was handed back that way): the day needs regenerating from inputs
+        #    that now include the change, and nobody else is doing it. A read
+        #    answering ``PENDING`` leaves the dashboard's card on "Generating..."
+        #    until the next load, because the card reads once (#1483). Bounded,
+        #    so edits landing during every generation cannot hold the read open.
+        summary: JournalDailySummary | None = None
+        for attempt in range(1, _MAX_GENERATION_ATTEMPTS + 1):
+            summary = await self._generate_once(
+                user_id, summary_date, transaction, timezone=timezone, now=now
+            )
+            if summary is None or summary.status != SummaryStatus.PENDING:
+                return summary
+            logger.info(
+                "Daily summary for %s on %s was invalidated while generating "
+                "(attempt %d of %d)",
+                user_id,
+                summary_date,
+                attempt,
+                _MAX_GENERATION_ATTEMPTS,
+            )
+        return summary
+
+    async def _generate_once(
+        self,
+        user_id: str,
+        summary_date: date,
+        transaction: AsyncConnection,
+        *,
+        timezone: str,
+        now: datetime,
+    ) -> JournalDailySummary | None:
+        """One pass of the cache check, claim, generation and guarded write.
+
+        Answers ``PENDING`` when the write was refused because the day was
+        invalidated after its inputs were gathered; ``get_or_generate`` decides
+        whether to run it again.
+        """
         # 1. Check cache (read — no transaction held). A GENERATED row is
         #    served unless it is today's and was not generated today, in which
         #    case it falls through to the same generate path an invalidated
@@ -253,7 +305,7 @@ class DailySummaryService:
 
         # 6. Persist the result as its own unit of work, refusing to write over
         #    an invalidation that landed while this request was working. The
-        #    marker it left is what the next read acts on.
+        #    ``PENDING`` row that leaves is what ``get_or_generate`` retries on.
         return await self._persist_generated(
             user_id,
             summary_date,
@@ -332,7 +384,8 @@ class DailySummaryService:
         already wrong, and the day would look fresh until the next change or
         local midnight. ``complete_generation`` refuses that write by comparing
         ``invalidated_at`` against what this request saw before it assembled its
-        inputs; the row is left ``PENDING`` and the next read regenerates.
+        inputs; the row is left ``PENDING`` and returned, and ``get_or_generate``
+        generates again from inputs that include the change.
         """
         existing = await self._summary_repo.find_by_user_and_date(user_id, summary_date)
         if existing and existing.status == SummaryStatus.GENERATED:
@@ -379,8 +432,8 @@ class DailySummaryService:
         ``GENERATING`` — and that status is *not* inert: ``get_or_generate``
         returns early on it, so leaving it there would strand the day behind a
         marker nothing clears. Moving it back to ``PENDING`` is what the phase's
-        criterion asks for in as many words, and is what makes the next read
-        regenerate.
+        criterion asks for in as many words, and is what ``get_or_generate``
+        generates again on.
 
         **Only a claim, and the check is the statement itself.** A refusal can
         also mean a concurrent run *finished* the summary between the re-read

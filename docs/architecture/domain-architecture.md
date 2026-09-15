@@ -1247,6 +1247,12 @@ A day's summary is cached, so something has to say when it stops describing the 
 `PENDING` and never generates. The next read of that day pays for one regeneration, so four changes
 in a row cost one, and a user acting on the dashboard never has the prose change underneath them.
 
+**An invalidation that overtakes a read is absorbed by that read.** A generation whose inputs changed
+while it ran is refused at persist (`invalidated_at` moved) and the row is left `PENDING`.
+`DailySummaryService.get_or_generate` then generates again from current inputs, up to three attempts,
+before it answers — so the dashboard's one read per load ends with a summary rather than a card stuck
+on "Generating..." until the next load (#1483). Invalidations themselves still never generate.
+
 **A journal is stale on every day it overlaps, not on its start date.** The day's journals are
 selected by overlap (above), so a Friday-to-Sunday trip is part of three summaries and a change to it
 makes three stale — expressed as a *span*, and applied as one range `UPDATE` that touches only rows

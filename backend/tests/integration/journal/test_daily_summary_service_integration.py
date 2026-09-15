@@ -615,6 +615,58 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
         assert result.summary_text == "Written from the inputs as they now are."
 
     @pytest.mark.asyncio
+    async def test_a_read_overtaken_once_regenerates_before_it_answers(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The read that was overtaken answers with a summary, not ``PENDING``.
+
+        The dashboard reads today's summary once per load, so a read that
+        answered ``PENDING`` left the card on "Generating..." until the next
+        load (#1483). One invalidation landing mid-generation — a task ticked
+        while the load's read is at the AI — costs a second generation inside
+        the same read, from inputs that now include the change.
+        """
+        await self._seed_stale(async_connection)
+        repo = SqlJournalDailySummaryRepository(async_connection)
+        texts = iter(["Written before the tick.", "Written after the tick."])
+        assembled: list[int] = []
+
+        async def assemble_invalidating_first(
+            *_args: object, **_kwargs: object
+        ) -> DailySummaryInput:
+            assembled.append(1)
+            if len(assembled) == 1:
+                await repo.invalidate_for_date(_USER, _DATE)
+            return _calm_input()
+
+        assembler = AsyncMock()
+        assembler.assemble.side_effect = assemble_invalidating_first
+        service = DailySummaryService(
+            input_assembler=assembler,
+            eligibility_checker=_always_eligible(),
+            prompt_builder=_static_prompt(),
+            summary_repo=repo,
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-pro",
+        )
+
+        async def fake_gemini(prompt: str) -> str:
+            return json.dumps({"summary_text": next(texts)})
+
+        service._call_gemini = fake_gemini  # type: ignore[method-assign]
+
+        result = await service.get_or_generate(_USER, _DATE, async_connection)
+
+        assert result is not None
+        assert result.status == SummaryStatus.GENERATED
+        assert result.summary_text == "Written after the tick."
+        assert len(assembled) == 2
+        row = await repo.find_by_user_and_date(_USER, _DATE)
+        assert row is not None
+        assert row.status == SummaryStatus.GENERATED
+        assert row.summary_text == "Written after the tick."
+
+    @pytest.mark.asyncio
     async def test_a_quiet_generation_is_written_as_before(
         self, async_connection: AsyncConnection
     ) -> None:
@@ -639,9 +691,8 @@ class TestAnInvalidationThatLandsWhileGeneratingIsNotLost:
         assert result.summary_text == "All quiet."
 
 
-def _calm_assembler() -> AsyncMock:
-    assembler = AsyncMock()
-    assembler.assemble.return_value = DailySummaryInput(
+def _calm_input() -> DailySummaryInput:
+    return DailySummaryInput(
         user_id=_USER,
         summary_date=_DATE,
         journals=[],
@@ -650,6 +701,11 @@ def _calm_assembler() -> AsyncMock:
         contact_names=["Alice"],
         mood_values=[7, 8],
     )
+
+
+def _calm_assembler() -> AsyncMock:
+    assembler = AsyncMock()
+    assembler.assemble.return_value = _calm_input()
     return assembler
 
 
