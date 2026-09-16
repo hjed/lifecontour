@@ -1291,6 +1291,17 @@ class SnipeItSyncService:
         claim = MaintenanceClaim.for_payload(snipeit_asset_id, payload)
         version_hash = _payload_version_hash(payload)
 
+        # A redelivered event for a journal already recorded only brings its
+        # record up to date: searching Snipe-IT again could only fail it.
+        if await self._update_recorded_maintenance(
+            journal_id, version_hash, session_factory
+        ):
+            logger.debug(
+                "Skipping maintenance create: already synced to Snipe-IT",
+                journal_id=journal_id,
+            )
+            return
+
         # A failed attempt's record carries what was sent then, which an edit
         # since may have changed; one on another asset is not this record.
         async with session_factory() as session:
@@ -1314,11 +1325,6 @@ class SnipeItSyncService:
         outcome = await self._claim_maintenance(
             journal_id, claim, candidates, session_factory
         )
-        if outcome == "recorded":
-            logger.debug(
-                "Skipping maintenance create: already synced to Snipe-IT",
-                journal_id=journal_id,
-            )
         if outcome != "claimed":
             await self._update_recorded_maintenance(
                 journal_id, version_hash, session_factory
@@ -1361,8 +1367,10 @@ class SnipeItSyncService:
 
     async def _update_recorded_maintenance(
         self, journal_id: int, version_hash: str, session_factory: Any
-    ) -> None:
+    ) -> bool:
         """Send the journal's values to its recorded record when it holds others.
+
+        Returns ``False`` when the journal has no recorded record.
 
         A linked record keeps what its creator sent: a failed attempt's values
         from before an edit, or a record entered by hand. An edit made while the
@@ -1382,9 +1390,11 @@ class SnipeItSyncService:
                 {"journal_id": str(journal_id)},
             )
             recorded_hash = result.scalar_one_or_none()
-        if recorded_hash is None or recorded_hash == version_hash:
-            return
-        await self.push_maintenance_update(journal_id, session_factory)
+        if recorded_hash is None:
+            return False
+        if recorded_hash != version_hash:
+            await self.push_maintenance_update(journal_id, session_factory)
+        return True
 
     async def _maintenance_candidates(
         self, asset_id: int, claims: Sequence[MaintenanceClaim]

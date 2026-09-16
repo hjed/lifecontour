@@ -1530,6 +1530,36 @@ class TestMaintenanceCreateLinksAClaimedRecord:
         assert body["name"] == "Retire Frayed Harness"
 
     @pytest.mark.asyncio
+    async def test_a_recorded_journal_is_not_searched_for_again(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A redelivered JournalCreated whose record exists must not fail on a
+        Snipe-IT outage the search would meet."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=9
+        )
+        mock_transport.add_response(
+            "/maintenances?", status_code=500, json_data={}, method="GET"
+        )
+        mock_transport.add_response(
+            "/maintenances/9", json_data=_write_response(9), method="PATCH"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert [r.url.path for r in mock_transport.requests if r.method == "GET"] == []
+
+    @pytest.mark.asyncio
     async def test_a_match_on_a_later_page_is_linked(
         self,
         snipeit_sync_service: Any,
