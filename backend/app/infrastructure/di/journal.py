@@ -25,6 +25,9 @@ from app.core.journal.adapters.sql.abseil_pitch_repository import (
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
+from app.core.journal.adapters.sql.activity_stats_repository import (
+    SqlActivityStatsRepository,
+)
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
 )
@@ -123,6 +126,7 @@ from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRe
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
+    ActivityStatsRepository,
     ActivityTemplateRepository,
     AgendaRepository,
     BushwalkingDataRepository,
@@ -486,6 +490,13 @@ class JournalProvider(Provider):
     ) -> IncompleteOutdoorActivityRepository:
         """Provide an IncompleteOutdoorActivityRepository instance."""
         return SqlIncompleteOutdoorActivityRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def activity_stats_repository(
+        self, connection: AsyncConnection
+    ) -> ActivityStatsRepository:
+        """Provide an ActivityStatsRepository instance."""
+        return SqlActivityStatsRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def outdoor_dashboard_repository(

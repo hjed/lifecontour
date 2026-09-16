@@ -3,10 +3,12 @@
 from typing import Any
 from uuid import UUID
 
+from core_shared.models.journals import EventDateRange
 from core_shared.models.route import Route
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.models.activity_stats import RouteUsageRow
 from app.core.journal.models.repositories import RouteRepository
 
 
@@ -192,3 +194,44 @@ class SqlRouteRepository(RouteRepository):
         ]
 
         return routes, total_count
+
+    async def find_usage_history(
+        self, user_id: str, route_id: UUID
+    ) -> list[RouteUsageRow]:
+        """The user's journals a route was used on, newest first."""
+        query = text(
+            """
+            SELECT
+                j.id,
+                j.title,
+                j.event_date_range_start,
+                j.event_date_range_end,
+                f.distance,
+                f.duration,
+                'ROUTE' AS activity_type
+            FROM journals j
+            INNER JOIN routes r ON r.journal_id = j.id
+            LEFT JOIN journal_fitness_data f ON f.journal_id = j.id
+            WHERE j.user_id = :user_id
+              AND r.id = :route_id
+            ORDER BY j.event_date_range_start DESC, j.created_at DESC
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {"user_id": user_id, "route_id": route_id},
+        )
+        return [
+            RouteUsageRow(
+                journal_id=row.id,
+                journal_title=row.title,
+                activity_type=row.activity_type,
+                event_date_range=EventDateRange(
+                    start=row.event_date_range_start,
+                    end=row.event_date_range_end,
+                ),
+                distance=int(row.distance) if row.distance is not None else None,
+                duration=int(row.duration) if row.duration is not None else None,
+            )
+            for row in result.fetchall()
+        ]
