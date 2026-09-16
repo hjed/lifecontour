@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.integrations.adapters.sql.snipeit_settings_repository import (
     SqlSnipeItSettingsRepository,
 )
-from app.core.integrations.models.snipeit import SnipeItSettings
+from app.core.integrations.models.snipeit import SnipeItSettings, generate_webhook_token
 from app.infrastructure.unit_of_work import transactional
 
 
@@ -26,5 +26,11 @@ class SnipeItSettingsService:
         settings: SnipeItSettings,
         transaction: AsyncConnection,
     ) -> SnipeItSettings:
-        """Create or update the user's Snipe-IT settings (upsert) as a committed unit."""
-        return await self.settings_repo.save(settings)
+        """
+        Create or update the user's Snipe-IT settings (upsert) as a committed unit.
+
+        New settings get a webhook token; existing settings keep theirs.
+        """
+        return await self.settings_repo.save(
+            settings, new_webhook_token=generate_webhook_token()
+        )

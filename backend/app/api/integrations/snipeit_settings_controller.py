@@ -16,6 +16,9 @@ from app.api.integrations.schemas import (
     SyncJobJsonApiResponse,
     SyncJobRequest,
     SyncType,
+    WebhookUrlAttributes,
+    WebhookUrlData,
+    WebhookUrlResponse,
 )
 from app.api.integrations.snipeit_settings_schemas import (
     SnipeItSettingsAttributes,
@@ -26,7 +29,7 @@ from app.api.integrations.snipeit_settings_schemas import (
 from app.core.integrations.adapters.sql.snipeit_settings_repository import (
     SqlSnipeItSettingsRepository,
 )
-from app.core.integrations.models.snipeit import SnipeItSettings
+from app.core.integrations.models.snipeit import SnipeItSettings, SnipeItWebhookToken
 from app.core.integrations.services.snipeit_settings_service import (
     SnipeItSettingsService,
 )
@@ -39,6 +42,33 @@ router = APIRouter(
     tags=["integrations-snipeit"],
 )
 logger = structlog.get_logger()
+
+SETTINGS_NOT_FOUND_DETAIL = "No Snipe-IT settings found for this user"
+
+
+def _webhook_url_response(
+    settings: Settings, webhook_token: SnipeItWebhookToken
+) -> dict[str, object]:
+    """Build the webhook URL response for a user's token."""
+    if not settings.webhook_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook base URL is not configured on the server",
+        )
+
+    base_url = settings.webhook_base_url.rstrip("/")
+    return WebhookUrlResponse(
+        data=WebhookUrlData(
+            id="snipeit-webhook-url",
+            attributes=WebhookUrlAttributes(
+                webhook_url=f"{base_url}/api/integrations/snipeit/webhook/{webhook_token}",
+                message=(
+                    "Configure this URL in your Snipe-IT instance under "
+                    "Admin > Settings > Webhooks."
+                ),
+            ),
+        )
+    ).model_dump()
 
 
 @router.get(
@@ -62,10 +92,7 @@ async def get_snipeit_settings(
         settings = await repository.get_by_user_id(str(user.id))
 
         if not settings:
-            raise HTTPException(
-                status_code=404,
-                detail="No Snipe-IT settings found for this user",
-            )
+            raise HTTPException(status_code=404, detail=SETTINGS_NOT_FOUND_DETAIL)
 
         return SnipeItSettingsResponse(
             data=SnipeItSettingsData(
@@ -158,47 +185,27 @@ async def save_snipeit_settings(
     responses={
         200: {"description": "Webhook URL returned"},
         400: {"description": "Webhook base URL not configured"},
+        404: {"description": "No Snipe-IT settings found for this user"},
     },
 )
 @inject
 async def get_snipeit_webhook_url(
-    user: FromDishka[SessionUser],  # noqa: ARG001
+    user: FromDishka[SessionUser],
     settings: FromDishka[Settings],
+    repository: FromDishka[SqlSnipeItSettingsRepository],
 ) -> dict[str, object]:
     """Get the webhook URL to configure in Snipe-IT.
 
     Snipe-IT uses an inbound-only webhook model — the webhook URL must be
     manually configured in the Snipe-IT admin UI. This endpoint returns
-    the URL so the user can copy it.
+    the URL so the user can copy it. The URL contains the user's secret
+    webhook token, which is how the webhook knows whose Snipe-IT to sync.
     """
-    from app.api.integrations.schemas import (
-        WebhookUrlAttributes,
-        WebhookUrlData,
-        WebhookUrlResponse,
-    )
+    webhook_token = await repository.get_webhook_token(str(user.id))
+    if webhook_token is None:
+        raise HTTPException(status_code=404, detail=SETTINGS_NOT_FOUND_DETAIL)
 
-    if not settings.webhook_base_url:
-        raise HTTPException(
-            status_code=400,
-            detail="Webhook base URL is not configured on the server",
-        )
-
-    webhook_url = (
-        f"{settings.webhook_base_url.rstrip('/')}/api/integrations/snipeit/webhook"
-    )
-
-    return WebhookUrlResponse(
-        data=WebhookUrlData(
-            id="snipeit-webhook-url",
-            attributes=WebhookUrlAttributes(
-                webhook_url=webhook_url,
-                message=(
-                    "Configure this URL in your Snipe-IT instance under "
-                    "Admin > Settings > Webhooks."
-                ),
-            ),
-        )
-    ).model_dump()
+    return _webhook_url_response(settings, webhook_token)
 
 
 @router.post(

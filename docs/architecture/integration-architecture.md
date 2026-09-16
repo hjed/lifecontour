@@ -553,6 +553,14 @@ Strava uses a push subscription model for real-time event delivery. The system i
 5. **Stream Consumer**: The `StravaWorkerStreamConsumer` registers as the `strava-worker` consumer group on the `pms:domain-events` Redis Stream for future domain event fan-out.
 6. **Subscription Lifecycle**: Subscriptions are deleted on OAuth disconnect. A `verify_subscription()` method checks if the subscription is still active, and `force_resubscribe()` deletes and recreates if needed.
 
+#### Snipe-IT Webhook Authentication
+
+Snipe-IT's General webhook has no signing secret or verification handshake, so the secret lives in the URL:
+
+1. **Token**: Saving Snipe-IT settings for the first time generates a random `webhook_token` (`secrets.token_urlsafe(32)`) in `snipeit_settings`; later saves keep it. `GET /api/integrations/snipeit/webhook-url` returns `<webhook_base_url>/api/integrations/snipeit/webhook/<token>` for the user to paste into Snipe-IT.
+2. **Event Delivery**: `POST /api/integrations/snipeit/webhook/{token}` looks up the token's owner before reading the body. An unknown token raises Starlette's own 404, identical to a path that does not exist. Each linked asset is published to `pms:domain-events` as `snipeit.webhook_received` with the owner's `user_id`.
+3. **Stream Consumer**: `SnipeItWorkerStreamConsumer` syncs the asset for that `user_id` only. Events without one are skipped, never fanned out to every configured user.
+
 ### 4. Bi-Directional Sync (Google Calendar)
 
 **Challenge**: Keep two systems in sync with conflict resolution

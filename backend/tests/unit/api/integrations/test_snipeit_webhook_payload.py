@@ -69,11 +69,15 @@ def test_asset_notification_produces_event_for_linked_asset() -> None:
 
 
 def test_event_data_matches_worker_contract() -> None:
-    """Event data has the ``{action, item: {id}}`` shape the worker reads."""
+    """Event data has the ``{action, item: {id}, user_id}`` shape the worker reads."""
     event = SnipeItWebhookEvent(action=CHECKOUT_TEXT, asset_id=42)
 
-    expected: dict[str, Any] = {"action": CHECKOUT_TEXT, "item": {"id": 42}}
-    assert event.to_event_data() == expected
+    expected: dict[str, Any] = {
+        "action": CHECKOUT_TEXT,
+        "item": {"id": 42},
+        "user_id": "user-1",
+    }
+    assert event.to_event_data(user_id="user-1") == expected
 
 
 def test_asset_id_extracted_from_subdirectory_install_with_trailing_slash() -> None:

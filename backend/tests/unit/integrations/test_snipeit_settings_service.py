@@ -34,7 +34,7 @@ class TestSaveSettings:
     async def test_save_settings_persists_and_returns(
         self, service, mock_repo, mock_transaction
     ):
-        """save_settings upserts via the repo and returns the saved entity."""
+        """save_settings upserts with a fresh candidate token and returns the saved entity."""
         settings = object()
         saved = object()
         mock_repo.save.return_value = saved
@@ -44,4 +44,8 @@ class TestSaveSettings:
         )
 
         assert result is saved
-        mock_repo.save.assert_awaited_once_with(settings)
+        mock_repo.save.assert_awaited_once()
+        assert mock_repo.save.call_args.args == (settings,)
+        new_webhook_token = mock_repo.save.call_args.kwargs["new_webhook_token"]
+        assert isinstance(new_webhook_token, str)
+        assert len(new_webhook_token) == 43

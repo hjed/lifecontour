@@ -28,11 +28,11 @@ async def journal_with_snipeit_links(
     await async_connection.execute(
         text(
             """
-            INSERT INTO snipeit_settings (user_id, base_url, snipeit_user_id)
-            VALUES (:user_id, 'https://snipeit.example.com', '123')
+            INSERT INTO snipeit_settings (user_id, base_url, snipeit_user_id, webhook_token)
+            VALUES (:user_id, 'https://snipeit.example.com', '123', :webhook_token)
             """
         ),
-        {"user_id": test_user.id},
+        {"user_id": test_user.id, "webhook_token": f"webhook-token-{test_user.id}"},
     )
 
     await async_connection.execute(
@@ -68,11 +68,11 @@ async def checkout_journal_with_snipeit_links(
     await async_connection.execute(
         text(
             """
-            INSERT INTO snipeit_settings (user_id, base_url, snipeit_user_id)
-            VALUES (:user_id, 'https://snipeit.example.com', '123')
+            INSERT INTO snipeit_settings (user_id, base_url, snipeit_user_id, webhook_token)
+            VALUES (:user_id, 'https://snipeit.example.com', '123', :webhook_token)
             """
         ),
-        {"user_id": test_user.id},
+        {"user_id": test_user.id, "webhook_token": f"webhook-token-{test_user.id}"},
     )
 
     # 3. Add Snipe-IT Asset sync metadata for the gear item

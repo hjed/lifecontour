@@ -1,7 +1,63 @@
 import pytest
 from httpx import AsyncClient
 
+from app.infrastructure.config import Settings
+
 pytestmark = pytest.mark.integration
+
+WEBHOOK_BASE_URL = "https://pms.example.com"
+
+
+@pytest.fixture
+def test_settings(test_settings: Settings) -> Settings:
+    """The shared test settings, with a public base URL for webhook URLs."""
+    test_settings.webhook_base_url = WEBHOOK_BASE_URL
+    return test_settings
+
+
+async def _save_settings(client: AsyncClient) -> None:
+    response = await client.put(
+        "/api/integrations/snipeit/settings",
+        json={"base_url": "https://snipeit.example.com"},
+    )
+    assert response.status_code == 200
+
+
+async def _webhook_url(client: AsyncClient) -> str:
+    response = await client.get("/api/integrations/snipeit/webhook-url")
+    assert response.status_code == 200
+    return str(response.json()["data"]["attributes"]["webhook_url"])
+
+
+async def test_webhook_url_contains_the_users_token(
+    authenticated_client: AsyncClient,
+) -> None:
+    """The webhook URL carries a token that the webhook endpoint accepts."""
+    await _save_settings(authenticated_client)
+
+    webhook_url = await _webhook_url(authenticated_client)
+    prefix = f"{WEBHOOK_BASE_URL}/api/integrations/snipeit/webhook/"
+    assert webhook_url.startswith(prefix)
+    token = webhook_url.removeprefix(prefix)
+    assert len(token) == 43
+
+    webhook = await authenticated_client.post(
+        webhook_url.removeprefix(WEBHOOK_BASE_URL),
+        json={"text": "Oh hai! It looks like your webhook is working!"},
+    )
+    assert webhook.status_code == 200
+
+
+async def test_webhook_url_not_found_without_settings(
+    authenticated_client: AsyncClient,
+) -> None:
+    """Without Snipe-IT settings there is no token, so no webhook URL."""
+    response = await authenticated_client.get("/api/integrations/snipeit/webhook-url")
+
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["detail"] == (
+        "No Snipe-IT settings found for this user"
+    )
 
 
 async def test_get_snipeit_settings_not_found(authenticated_client: AsyncClient):
