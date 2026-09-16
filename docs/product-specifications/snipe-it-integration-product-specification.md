@@ -81,6 +81,8 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
   - Imports synced under the earlier, lossy mapping are re-synced and corrected by the next full maintenance sync.
 - **Local-Only Fields**: Snipe-IT has no activity types or retirement reason, so a re-import leaves a journal's `activity_types` and `retirement_reason` untouched.
 - **Deduplication**: Uses the `SyncMetadata` table to map the internal journal ID to the external Snipe-IT maintenance ID.
+  - **Retries**: A push claims the record it creates before posting it. The journal's claim row (`snipeit_maintenance_claim`) holds the asset, title and start date sent, and is replaced by the record's own row once that is written. An attempt that fails after posting keeps its claim, marked failed: Snipe-IT may have created the record even though the response was lost.
+  - A push that finds its journal's claim still pending, and touched in the last five minutes, is retried later rather than posting a second record. A claim left by a worker that crashed is retaken after that.
 - **Loop Prevention**: A record must never travel back to the system it came from.
   - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created in Snipe-IT again.
   - A journal update the inbound sync applied (`changed_by` is `snipeit_maintenance`) is not pushed; only a user's edit is.
