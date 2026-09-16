@@ -15,9 +15,9 @@ from fastmcp import Client, FastMCP
 from app.core.history.models import FieldHistoryEntry
 from app.mcp.domains.journals.tools import (
     _journal_history_entry_to_schema,
-    _parse_optional_datetime_filter,
     register_journal_tools,
 )
+from app.mcp.domains.journals.tools._shared import parse_optional_datetime_filter
 
 
 class TestJournalTools:
@@ -376,15 +376,15 @@ class TestJournalHistoryEntryMapping:
 
 class TestDatetimeFilterParsing:
     def test_normalizes_date_only_filters_to_utc_bounds(self) -> None:
-        assert _parse_optional_datetime_filter("2024-03-11", "start_date") == datetime(
+        assert parse_optional_datetime_filter("2024-03-11", "start_date") == datetime(
             2024, 3, 11, 0, 0, 0, tzinfo=UTC
         )
-        assert _parse_optional_datetime_filter(
+        assert parse_optional_datetime_filter(
             "2024-03-11", "end_date", is_end=True
         ) == datetime(2024, 3, 11, 23, 59, 59, 999999, tzinfo=UTC)
 
     def test_preserves_timezone_aware_datetime_filters(self) -> None:
-        assert _parse_optional_datetime_filter(
+        assert parse_optional_datetime_filter(
             "2024-03-11T09:15:00Z", "start_date"
         ) == datetime(2024, 3, 11, 9, 15, 0, tzinfo=UTC)
 

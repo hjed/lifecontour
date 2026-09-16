@@ -44,7 +44,7 @@ _SUBTYPE_REPO_FILES = (
     _BACKEND_ROOT / "app/core/journal/adapters/sql/caving_data_repository.py",
 )
 
-_MCP_TOOLS_FILE = _BACKEND_ROOT / "app/mcp/domains/journals/tools.py"
+_MCP_TOOLS_PACKAGE = _BACKEND_ROOT / "app/mcp/domains/journals/tools"
 
 
 def _field_names(entity: type) -> set[str]:
@@ -98,15 +98,19 @@ class TestNoSubtypeTemplateIdReferences:
         )
 
     def test_mcp_tools_have_no_subtype_template_id(self) -> None:
-        text = _MCP_TOOLS_FILE.read_text(encoding="utf-8")
         forbidden = (
             "caving_data.template_id",
             "climbing_data.template_id",
             "canyoning_data.template_id",
         )
+        modules = sorted(_MCP_TOOLS_PACKAGE.glob("*.py"))
+        assert modules, f"no MCP tool modules found in {_MCP_TOOLS_PACKAGE}"
         offenders = [
-            f"{lineno}: {line.strip()}"
-            for lineno, line in enumerate(text.splitlines(), start=1)
+            f"{module.name}:{lineno}: {line.strip()}"
+            for module in modules
+            for lineno, line in enumerate(
+                module.read_text(encoding="utf-8").splitlines(), start=1
+            )
             if any(needle in line for needle in forbidden)
         ]
         assert not offenders, (
