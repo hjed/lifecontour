@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -378,6 +378,7 @@ class TestOutboundMaintenanceSyncIntegration:
         # Step 2: Mock Snipe-IT POST response
         mock_transport.add_response(
             "/maintenances",
+            method="POST",
             json_data={
                 "status": "success",
                 "messages": "Asset Maintenance created successfully.",
@@ -1323,3 +1324,222 @@ class TestMaintenanceCreateClaim:
         assert _snipeit_writes(mock_transport) == ["POST /api/v1/maintenances"]
         assert await _claim_row(async_connection, journal_id) is None
         assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:8"]
+
+
+def _listed(
+    maintenance_id: int, *, title: str = "Retire Harness", asset_id: int = 51
+) -> dict[str, Any]:
+    """A ``GET /maintenances`` row, dated like ``_seed_maintenance_journal``."""
+    return {
+        "id": maintenance_id,
+        "asset": {"id": asset_id, "name": "Canyoneroo 50m"},
+        "title": title,
+        "asset_maintenance_type": "Maintenance",
+        "start_date": {"date": "2026-09-11", "formatted": "2026-09-11"},
+        "completion_date": {"date": "2026-09-11", "formatted": "2026-09-11"},
+        "notes": "",
+    }
+
+
+def _queue_maintenance_page(
+    mock_transport: Any, *rows: dict[str, Any], total: int | None = None
+) -> None:
+    """Serve one page of ``GET /maintenances``; pages are served in queue order."""
+    mock_transport.add_response(
+        "/maintenances?",
+        json_data={"total": len(rows) if total is None else total, "rows": list(rows)},
+        method="GET",
+    )
+
+
+async def _held_by_an_import(async_connection: AsyncConnection) -> None:
+    await _seed_import_record(async_connection, maintenance_id=9, version_hash="h")
+
+
+async def _held_by_another_journals_push(async_connection: AsyncConnection) -> None:
+    await _seed_push_record(async_connection, journal_id=999999, maintenance_id=9)
+
+
+class TestMaintenanceCreateLinksAClaimedRecord:
+    """A push links a matching record no one holds instead of posting a copy of
+    it, so a retry after a lost response records one maintenance, not two."""
+
+    @pytest.mark.asyncio
+    async def test_retry_links_the_record_a_lost_response_created(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        session_factory = _joined_session_factory(async_connection)
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15",
+        )
+        # Snipe-IT created record 9, but the response lost its payload.
+        mock_transport.add_response(
+            "/maintenances", json_data={"status": "success"}, method="POST"
+        )
+        with pytest.raises(SnipeItAPIError):
+            await snipeit_sync_service.push_maintenance_create(
+                journal_id=journal_id, session_factory=session_factory
+            )
+        _queue_maintenance_page(
+            mock_transport, _listed(9, title="Split Canyoneroo 50 -&gt; 34 + 15")
+        )
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(10), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id, session_factory=session_factory
+        )
+
+        assert _snipeit_writes(mock_transport) == ["POST /api/v1/maintenances"]
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:9"]
+        assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "hold",
+        [_held_by_an_import, _held_by_another_journals_push],
+        ids=["import", "another-journals-push"],
+    )
+    async def test_a_record_already_held_is_not_linked(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        hold: Callable[[AsyncConnection], Awaitable[None]],
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await hold(async_connection)
+        _queue_maintenance_page(mock_transport, _listed(9))
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(10), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:10"]
+
+    @pytest.mark.asyncio
+    async def test_a_record_matching_another_journals_claim_is_not_linked(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Record 9 may be the one the other journal's failed attempt created."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        other_journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_claim(
+            async_connection, journal_id=other_journal_id, status="failed"
+        )
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        _queue_maintenance_page(mock_transport, _listed(9))
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(10), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:10"]
+        other_claim = await _claim_row(async_connection, other_journal_id)
+        assert other_claim.sync_status == "failed"
+
+    @pytest.mark.asyncio
+    async def test_retry_after_an_edit_links_the_record_its_claim_describes(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The failed attempt posted "Retire Harness"; the journal was retitled since."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Frayed Harness"
+        )
+        await _seed_claim(async_connection, journal_id=journal_id, status="failed")
+        _queue_maintenance_page(mock_transport, _listed(9))
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(10), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == []
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:9"]
+        assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_match_on_a_later_page_is_linked(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        _queue_maintenance_page(
+            mock_transport,
+            *(_listed(100 + n, title=f"Inspection {n}") for n in range(50)),
+            total=51,
+        )
+        _queue_maintenance_page(mock_transport, _listed(9), total=51)
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(10), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == []
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:9"]
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_maintenance_list_falls_back_to_posting(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        mock_transport.add_response(
+            "/maintenances?", status_code=403, json_data={}, method="GET"
+        )
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(10), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:10"]

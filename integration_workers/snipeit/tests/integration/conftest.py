@@ -37,7 +37,9 @@ class MockTransport(httpx.AsyncBaseTransport):
     Shared by the checkout/checkin outbound-sync integration tests to drive the
     Snipe-IT API client without a live server. An activity report request with
     no queued response gets an empty report, since every checkout first looks
-    for an existing Snipe-IT checkout to link.
+    for an existing Snipe-IT checkout to link. A maintenance list request gets
+    an empty page for the same reason: every maintenance create first looks for
+    a record an earlier attempt left.
 
     A response queued with a ``method`` only answers that HTTP method, so a
     ``GET /hardware/42`` cannot be served to ``POST /hardware/42/checkin``.
@@ -77,6 +79,12 @@ class MockTransport(httpx.AsyncBaseTransport):
                     request=request,
                 )
         if "reports/activity" in url:
+            return httpx.Response(
+                status_code=200,
+                json={"total": 0, "rows": []},
+                request=request,
+            )
+        if request.method == "GET" and request.url.path.endswith("/maintenances"):
             return httpx.Response(
                 status_code=200,
                 json={"total": 0, "rows": []},

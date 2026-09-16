@@ -12,10 +12,10 @@ import asyncio
 import hashlib
 import html
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -36,6 +36,9 @@ _PAGE_SIZE = 50
 
 # Most activity-report pages searched for an existing checkout or check-in
 _ACTIVITY_MAX_PAGES = 10
+
+# Most maintenance-list pages searched for a record an earlier push created
+_MAINTENANCE_MAX_PAGES = 10
 
 
 def _resolve_zone(*candidates: object) -> str | None:
@@ -380,6 +383,67 @@ async def _delete_maintenance_claim(session: Any, journal_id: int) -> None:
         """),
         {"claim_source": _MAINTENANCE_CLAIM_SOURCE, "journal_id": str(journal_id)},
     )
+
+
+async def _fetch_maintenance_claim(session: Any, journal_id: int) -> Any:
+    """The journal's maintenance claim row, with its age in seconds, or ``None``."""
+    result = await session.execute(
+        text("""
+            SELECT sync_status, reference_data,
+                   extract(epoch from (now() - updated_at)) AS age_seconds
+            FROM sync_metadata
+            WHERE integration_source = :claim_source
+              AND external_id = :journal_id
+            FOR UPDATE
+        """),
+        {"claim_source": _MAINTENANCE_CLAIM_SOURCE, "journal_id": str(journal_id)},
+    )
+    return result.fetchone()
+
+
+def _raise_if_claim_in_flight(journal_id: int, claim_row: Any) -> None:
+    """Raise when ``claim_row`` is pending and touched within the in-flight window.
+
+    A failed claim, or one left by a worker that died, is not in flight.
+    """
+    if (
+        claim_row is not None
+        and claim_row.sync_status == "pending"
+        and claim_row.age_seconds is not None
+        and claim_row.age_seconds < IN_FLIGHT_LOCK_SECONDS
+    ):
+        raise SnipeItSyncInProgress(
+            f"Maintenance create of journal {journal_id} is in flight"
+        )
+
+
+async def _insert_push_row(
+    session: Any, journal_id: int, external_id: str, version_hash: str
+) -> bool:
+    """Record ``external_id`` as the journal's Snipe-IT maintenance.
+
+    Returns ``False``, writing nothing, when a sync row already names that
+    record: a record's row is never re-pointed to another journal.
+    """
+    result = await session.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (internal_uuid, integration_source, external_id,
+                 last_synced_at, version_hash, sync_status,
+                 error_message, retry_count, created_at, updated_at)
+            VALUES
+                (:internal_uuid, 'snipeit_maintenance', :external_id,
+                 now(), :version_hash, 'success', NULL, 0, now(), now())
+            ON CONFLICT (integration_source, external_id) DO NOTHING
+            RETURNING id
+        """),
+        {
+            "internal_uuid": str(journal_id),
+            "external_id": external_id,
+            "version_hash": version_hash,
+        },
+    )
+    return result.fetchone() is not None
 
 
 @dataclass(frozen=True)
@@ -1202,16 +1266,42 @@ class SnipeItSyncService:
             return
 
         claim = MaintenanceClaim.for_payload(snipeit_asset_id, payload)
-        if not await self._claim_maintenance(journal_id, claim, session_factory):
+        version_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()
+
+        # A failed attempt's record carries what was sent then, which an edit
+        # since may have changed; one on another asset is not this record.
+        async with session_factory() as session:
+            earlier_row = await _fetch_maintenance_claim(session, journal_id)
+        _raise_if_claim_in_flight(journal_id, earlier_row)
+        earlier_claim = (
+            MaintenanceClaim.from_reference(earlier_row.reference_data)
+            if earlier_row
+            else None
+        )
+        candidates = await self._maintenance_candidates(
+            snipeit_asset_id,
+            [
+                candidate_claim
+                for candidate_claim in (claim, earlier_claim)
+                if candidate_claim is not None
+                and candidate_claim.asset_id == snipeit_asset_id
+            ],
+        )
+
+        outcome = await self._claim_maintenance(
+            journal_id, claim, candidates, version_hash, session_factory
+        )
+        if outcome == "recorded":
             logger.debug(
                 "Skipping maintenance create: already synced to Snipe-IT",
                 journal_id=journal_id,
             )
             return
+        if outcome == "linked":
+            return
 
-        version_hash = hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode()
-        ).hexdigest()
         try:
             created = await self._api_client.create_maintenance(
                 asset_id=snipeit_asset_id,
@@ -1246,20 +1336,122 @@ class SnipeItSyncService:
             snipeit_maintenance_id=created.id,
         )
 
+    async def _maintenance_candidates(
+        self, asset_id: int, claims: Sequence[MaintenanceClaim]
+    ) -> list[SnipeItMaintenance]:
+        """Page the asset's Snipe-IT maintenances for records any of ``claims`` match.
+
+        Linking is best-effort: when this API key may not read the list, nothing
+        is linked and the record is posted as usual.
+        """
+        candidates: list[SnipeItMaintenance] = []
+        try:
+            for page in range(1, _MAINTENANCE_MAX_PAGES + 1):
+                response = await self._api_client.list_maintenances(
+                    asset_id=asset_id, page=page, per_page=_PAGE_SIZE
+                )
+                candidates.extend(
+                    maintenance
+                    for maintenance in response.rows
+                    if any(claim.matches(maintenance) for claim in claims)
+                )
+                if (
+                    len(response.rows) < _PAGE_SIZE
+                    or page * _PAGE_SIZE >= response.total
+                ):
+                    break
+            else:
+                logger.warning(
+                    "Stopped searching Snipe-IT maintenances at the page limit",
+                    snipeit_asset_id=asset_id,
+                )
+        except SnipeItAPIError as exc:
+            if exc.status_code not in (403, 404):
+                raise
+            logger.warning(
+                "Snipe-IT maintenance list unavailable; creating without linking",
+                snipeit_asset_id=asset_id,
+                status_code=exc.status_code,
+            )
+            return []
+        return candidates
+
+    async def _free_maintenance(
+        self,
+        session: Any,
+        journal_id: int,
+        candidates: Sequence[SnipeItMaintenance],
+    ) -> SnipeItMaintenance | None:
+        """The first candidate no other journal holds, or ``None``.
+
+        A record is held when any sync row names it: another journal's push, or
+        an import, which belongs to its imported journal. It is also held when it
+        matches another of this user's journals' claims, since that journal's
+        failed attempt may have created it.
+        """
+        if not candidates:
+            return None
+        rows = await session.execute(
+            text("""
+                SELECT external_id
+                FROM sync_metadata
+                WHERE integration_source = 'snipeit_maintenance'
+                  AND external_id = ANY(:external_ids)
+            """),
+            {"external_ids": [f"snipeit_maint:{m.id}" for m in candidates]},
+        )
+        recorded = {row.external_id for row in rows.fetchall()}
+        claim_rows = await session.execute(
+            text("""
+                SELECT sm.reference_data
+                FROM sync_metadata sm
+                JOIN journals j ON j.id::text = sm.internal_uuid
+                WHERE sm.integration_source = :claim_source
+                  AND sm.external_id <> :journal_id
+                  AND j.user_id = :user_id
+            """),
+            {
+                "claim_source": _MAINTENANCE_CLAIM_SOURCE,
+                "journal_id": str(journal_id),
+                "user_id": self._user_id,
+            },
+        )
+        other_claims = [
+            other
+            for row in claim_rows.fetchall()
+            if (other := MaintenanceClaim.from_reference(row.reference_data))
+        ]
+        return next(
+            (
+                maintenance
+                for maintenance in candidates
+                if f"snipeit_maint:{maintenance.id}" not in recorded
+                and not any(other.matches(maintenance) for other in other_claims)
+            ),
+            None,
+        )
+
     async def _claim_maintenance(
         self,
         journal_id: int,
         claim: MaintenanceClaim,
+        candidates: Sequence[SnipeItMaintenance],
+        version_hash: str,
         session_factory: Any,
-    ) -> bool:
-        """Write the journal's claim before its record is posted.
+    ) -> Literal["recorded", "linked", "claimed"]:
+        """Link a free candidate, or else claim the record about to be posted.
 
-        Returns ``False`` when the journal's record is already recorded.
+        Runs under the asset's lock, so journals processed at once see each
+        other's claims and sync rows.
+
+        Returns:
+            ``"recorded"`` when the journal's record already has its sync row,
+            ``"linked"`` when a candidate was recorded as its record, and
+            ``"claimed"`` when the claim is written and the record is to be
+            posted.
 
         Raises:
-            SnipeItSyncInProgress: The journal's claim is pending and was
-                touched within ``IN_FLIGHT_LOCK_SECONDS``. A failed claim, or one
-                left by a worker that died, is retaken.
+            SnipeItSyncInProgress: The journal's claim is still in flight.
         """
         async with session_factory() as session:
             async with session.begin():
@@ -1274,32 +1466,22 @@ class SnipeItSyncService:
                     {"journal_id": str(journal_id)},
                 )
                 if pushed.fetchone():
-                    return False
-
-                held = await session.execute(
-                    text("""
-                        SELECT sync_status,
-                               extract(epoch from (now() - updated_at)) AS age_seconds
-                        FROM sync_metadata
-                        WHERE integration_source = :claim_source
-                          AND external_id = :journal_id
-                        FOR UPDATE
-                    """),
-                    {
-                        "claim_source": _MAINTENANCE_CLAIM_SOURCE,
-                        "journal_id": str(journal_id),
-                    },
+                    return "recorded"
+                _raise_if_claim_in_flight(
+                    journal_id, await _fetch_maintenance_claim(session, journal_id)
                 )
-                row = held.fetchone()
-                if (
-                    row
-                    and row.sync_status == "pending"
-                    and row.age_seconds is not None
-                    and row.age_seconds < IN_FLIGHT_LOCK_SECONDS
+
+                free = await self._free_maintenance(session, journal_id, candidates)
+                if free is not None and await _insert_push_row(
+                    session, journal_id, f"snipeit_maint:{free.id}", version_hash
                 ):
-                    raise SnipeItSyncInProgress(
-                        f"Maintenance create of journal {journal_id} is in flight"
+                    await _delete_maintenance_claim(session, journal_id)
+                    logger.info(
+                        "Linked an existing Snipe-IT maintenance instead of creating one",
+                        journal_id=journal_id,
+                        snipeit_maintenance_id=free.id,
                     )
+                    return "linked"
 
                 await session.execute(
                     text("""
@@ -1326,7 +1508,7 @@ class SnipeItSyncService:
                         "reference_data": claim.to_reference(),
                     },
                 )
-        return True
+        return "claimed"
 
     async def _record_pushed_maintenance(
         self,
@@ -1345,25 +1527,9 @@ class SnipeItSyncService:
         async with session_factory() as session:
             async with session.begin():
                 await _lock_asset_maintenances(session, claim.asset_id)
-                inserted = await session.execute(
-                    text("""
-                        INSERT INTO sync_metadata
-                            (internal_uuid, integration_source, external_id,
-                             last_synced_at, version_hash, sync_status,
-                             error_message, retry_count, created_at, updated_at)
-                        VALUES
-                            (:internal_uuid, 'snipeit_maintenance', :external_id,
-                             now(), :version_hash, 'success', NULL, 0, now(), now())
-                        ON CONFLICT (integration_source, external_id) DO NOTHING
-                        RETURNING id
-                    """),
-                    {
-                        "internal_uuid": str(journal_id),
-                        "external_id": external_id,
-                        "version_hash": version_hash,
-                    },
-                )
-                if inserted.fetchone() is None:
+                if not await _insert_push_row(
+                    session, journal_id, external_id, version_hash
+                ):
                     logger.error(
                         "Posted Snipe-IT maintenance already has a sync row",
                         journal_id=journal_id,
