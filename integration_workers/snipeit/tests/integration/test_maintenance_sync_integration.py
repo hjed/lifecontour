@@ -1470,7 +1470,8 @@ class TestMaintenanceCreateLinksAClaimedRecord:
         mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
-        """The failed attempt posted "Retire Harness"; the journal was retitled since."""
+        """The failed attempt posted "Retire Harness"; the journal was retitled since,
+        and that edit found no sync row to send it to."""
         gear_item_id = await _seed_synced_asset(async_connection, 51)
         journal_id = await _seed_maintenance_journal(
             async_connection, gear_item_id=gear_item_id, title="Retire Frayed Harness"
@@ -1480,15 +1481,53 @@ class TestMaintenanceCreateLinksAClaimedRecord:
         mock_transport.add_response(
             "/maintenances", json_data=_write_response(10), method="POST"
         )
+        mock_transport.add_response(
+            "/maintenances/9", json_data=_write_response(9), method="PATCH"
+        )
 
         await snipeit_sync_service.push_maintenance_create(
             journal_id=journal_id,
             session_factory=_joined_session_factory(async_connection),
         )
 
-        assert _snipeit_writes(mock_transport) == []
+        assert _snipeit_writes(mock_transport) == ["PATCH /api/v1/maintenances/9"]
+        [body] = _patch_bodies(mock_transport)
+        assert body["name"] == "Retire Frayed Harness"
         assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:9"]
         assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_redelivered_push_sends_the_edits_its_record_missed(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A link whose update failed is retried with the redelivered event, and a
+        record already holding the journal's values is left alone."""
+        session_factory = _joined_session_factory(async_connection)
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Frayed Harness"
+        )
+        # The push row a link wrote, with the hash of the record's older values.
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=9
+        )
+        mock_transport.add_response(
+            "/maintenances/9", json_data=_write_response(9), method="PATCH"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id, session_factory=session_factory
+        )
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id, session_factory=session_factory
+        )
+
+        assert _snipeit_writes(mock_transport) == ["PATCH /api/v1/maintenances/9"]
+        [body] = _patch_bodies(mock_transport)
+        assert body["name"] == "Retire Frayed Harness"
 
     @pytest.mark.asyncio
     async def test_a_match_on_a_later_page_is_linked(

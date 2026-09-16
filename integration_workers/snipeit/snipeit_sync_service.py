@@ -365,6 +365,29 @@ class MaintenanceClaim:
         return cls(asset_id=asset_id, title=title, start_date=start_date)
 
 
+def _payload_version_hash(payload: dict[str, Any]) -> str:
+    """The ``version_hash`` a push row records for the maintenance values ``payload``."""
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _snipeit_record_payload(maintenance: SnipeItMaintenance) -> dict[str, Any]:
+    """A Snipe-IT maintenance's own values, in the shape a push sends them.
+
+    Hashed for a linked record's push row, so the row says what the record
+    holds rather than what the journal holds.
+    """
+    payload: dict[str, Any] = {
+        "name": html.unescape(maintenance.title or ""),
+        "notes": html.unescape(maintenance.notes or ""),
+        "asset_maintenance_type": maintenance.asset_maintenance_type,
+    }
+    if maintenance.start_date_str:
+        payload["start_date"] = maintenance.start_date_str
+    if maintenance.completion_date_str:
+        payload["completion_date"] = maintenance.completion_date_str
+    return payload
+
+
 async def _lock_asset_maintenances(session: Any, asset_id: int) -> None:
     """Serialise writes of maintenance claims and sync rows on one Snipe-IT asset."""
     await session.execute(
@@ -1266,9 +1289,7 @@ class SnipeItSyncService:
             return
 
         claim = MaintenanceClaim.for_payload(snipeit_asset_id, payload)
-        version_hash = hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode()
-        ).hexdigest()
+        version_hash = _payload_version_hash(payload)
 
         # A failed attempt's record carries what was sent then, which an edit
         # since may have changed; one on another asset is not this record.
@@ -1291,15 +1312,17 @@ class SnipeItSyncService:
         )
 
         outcome = await self._claim_maintenance(
-            journal_id, claim, candidates, version_hash, session_factory
+            journal_id, claim, candidates, session_factory
         )
         if outcome == "recorded":
             logger.debug(
                 "Skipping maintenance create: already synced to Snipe-IT",
                 journal_id=journal_id,
             )
-            return
-        if outcome == "linked":
+        if outcome != "claimed":
+            await self._update_recorded_maintenance(
+                journal_id, version_hash, session_factory
+            )
             return
 
         try:
@@ -1335,6 +1358,33 @@ class SnipeItSyncService:
             journal_id=journal_id,
             snipeit_maintenance_id=created.id,
         )
+
+    async def _update_recorded_maintenance(
+        self, journal_id: int, version_hash: str, session_factory: Any
+    ) -> None:
+        """Send the journal's values to its recorded record when it holds others.
+
+        A linked record keeps what its creator sent: a failed attempt's values
+        from before an edit, or a record entered by hand. An edit made while the
+        journal had no sync row was never sent. The push row's hash says what
+        the record holds, and the update records the journal's hash only once it
+        lands, so a failed update is retried with the redelivered event.
+        """
+        async with session_factory() as session:
+            result = await session.execute(
+                text("""
+                    SELECT version_hash
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_maintenance'
+                      AND internal_uuid = :journal_id
+                    LIMIT 1
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            recorded_hash = result.scalar_one_or_none()
+        if recorded_hash is None or recorded_hash == version_hash:
+            return
+        await self.push_maintenance_update(journal_id, session_factory)
 
     async def _maintenance_candidates(
         self, asset_id: int, claims: Sequence[MaintenanceClaim]
@@ -1436,7 +1486,6 @@ class SnipeItSyncService:
         journal_id: int,
         claim: MaintenanceClaim,
         candidates: Sequence[SnipeItMaintenance],
-        version_hash: str,
         session_factory: Any,
     ) -> Literal["recorded", "linked", "claimed"]:
         """Link a free candidate, or else claim the record about to be posted.
@@ -1473,7 +1522,10 @@ class SnipeItSyncService:
 
                 free = await self._free_maintenance(session, journal_id, candidates)
                 if free is not None and await _insert_push_row(
-                    session, journal_id, f"snipeit_maint:{free.id}", version_hash
+                    session,
+                    journal_id,
+                    f"snipeit_maint:{free.id}",
+                    _payload_version_hash(_snipeit_record_payload(free)),
                 ):
                     await _delete_maintenance_claim(session, journal_id)
                     logger.info(
@@ -1647,9 +1699,7 @@ class SnipeItSyncService:
         # A push row records what was pushed. An import has none: its sync row
         # tracks the record as fetched, and the next inbound sync refreshes it.
         if context.imported_external_id is None:
-            version_hash = hashlib.sha256(
-                json.dumps(payload, sort_keys=True).encode()
-            ).hexdigest()
+            version_hash = _payload_version_hash(payload)
             async with session_factory() as session:
                 async with session.begin():
                     await session.execute(

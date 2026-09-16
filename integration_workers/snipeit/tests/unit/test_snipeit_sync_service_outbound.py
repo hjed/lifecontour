@@ -19,6 +19,7 @@ from snipeit_sync_service import (
     _resolve_zone,
     _snipeit_checkin_at,
     _snipeit_datetime,
+    _snipeit_record_payload,
     _snipeit_zone,
     _usage_period_has_ended,
 )
@@ -375,6 +376,24 @@ def _listed_maintenance(**overrides: object) -> SnipeItMaintenance:
             **overrides,
         }
     )
+
+
+class TestSnipeitRecordPayload:
+    """A listed Snipe-IT maintenance's own values, shaped like a push's payload."""
+
+    def test_decodes_text_and_leaves_out_missing_dates(self) -> None:
+        maintenance = _listed_maintenance(
+            notes="Cut at 34 &amp; 15",
+            asset_maintenance_type="Configuration Change",
+            completion_date=None,
+        )
+
+        assert _snipeit_record_payload(maintenance) == {
+            "name": "Split Canyoneroo 50 -> 34 + 15",
+            "notes": "Cut at 34 & 15",
+            "asset_maintenance_type": "Configuration Change",
+            "start_date": "2026-09-11",
+        }
 
 
 class TestMaintenanceClaim:
