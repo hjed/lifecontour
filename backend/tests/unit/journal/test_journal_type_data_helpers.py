@@ -7,7 +7,7 @@ create/update journal-entry tools), so the composite ``JournalWriteService``
 path persists GEAR_USAGE exactly like the old MCP tool path did.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -15,6 +15,7 @@ import pytest
 from core_shared.models.journals import (
     AbseilingData,
     AbseilPitchValidationError,
+    CalendarInfo,
     ClimbingData,
     JournalType,
     JournalValidationError,
@@ -350,6 +351,80 @@ class TestUpdateAbseilingTypeData:
         with pytest.raises(JournalValidationError):
             await helpers.update_abseiling_type_data(
                 5, "ABSEILING_TRIP", {"template_id": "not-a-uuid"}, repo, pitch_repo
+            )
+
+        repo.save.assert_not_awaited()
+
+
+class TestUpdateEventTypeData:
+    """EVENT updates on the path both the REST and MCP update tools take."""
+
+    @staticmethod
+    def _repo_holding(calendar_info: CalendarInfo) -> AsyncMock:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = calendar_info
+        return repo
+
+    @pytest.mark.asyncio
+    async def test_parses_time_strings(self) -> None:
+        repo = self._repo_holding(
+            CalendarInfo(journal_id=42, calendar_id=uuid4(), is_all_day=False)
+        )
+
+        await helpers.update_event_type_data(
+            42,
+            JournalType.EVENT.value,
+            {"start_time": "09:15", "end_time": "10:45:30"},
+            repo,
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved.start_time == time(9, 15)
+        assert saved.end_time == time(10, 45, 30)
+
+    @pytest.mark.asyncio
+    async def test_cross_midnight_times_anchored_to_existing_event_dates(
+        self,
+    ) -> None:
+        """A 23:00→01:00 update keeps the journal's two-day span, so it is valid.
+
+        The loaded record carries the journal's event dates (via the journals
+        JOIN); the update must keep them rather than judge the clock times alone.
+        """
+        repo = self._repo_holding(
+            CalendarInfo(
+                journal_id=42,
+                calendar_id=uuid4(),
+                start_time=time(20, 0),
+                end_time=time(21, 0),
+                event_start_date=date(2026, 6, 21),
+                event_end_date=date(2026, 6, 22),
+            )
+        )
+
+        await helpers.update_event_type_data(
+            42,
+            JournalType.EVENT.value,
+            {"start_time": "23:00", "end_time": "01:00"},
+            repo,
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved.start_time == time(23, 0)
+        assert saved.end_time == time(1, 0)
+
+    @pytest.mark.asyncio
+    async def test_invalid_time_string_raises_before_saving(self) -> None:
+        repo = self._repo_holding(
+            CalendarInfo(journal_id=42, calendar_id=uuid4(), is_all_day=False)
+        )
+
+        with pytest.raises(JournalValidationError, match="start_time"):
+            await helpers.update_event_type_data(
+                42,
+                JournalType.EVENT.value,
+                {"start_time": "not-a-time", "end_time": "10:00"},
+                repo,
             )
 
         repo.save.assert_not_awaited()
