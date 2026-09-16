@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from meilisearch.errors import MeilisearchError
 
@@ -19,6 +19,8 @@ from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.search.search_service import SearchService
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from core_shared.models.journals import Journal
 
     from app.core.journal.models.repositories import JournalRepository
@@ -194,6 +196,45 @@ class DateWindowOutcome:
     hits: list[JournalSearchHit]
 
 
+@dataclass(frozen=True)
+class JournalSearchFilters:
+    """The filters a journal search combines, already parsed and resolved.
+
+    ``type_filters`` are journal type values; ``source_filter`` is a resolved
+    integration source; ``tag_ids`` already include every descendant tag. A
+    journal must satisfy every filter that is set.
+    """
+
+    type_filters: list[str]
+    source_filter: str | None
+    start_date: datetime | None
+    end_date: datetime | None
+    tag_ids: list[str] | None
+    contact_id: int | None
+    calendar_id: str | None
+    parent_id: int | None
+
+
+@dataclass(frozen=True)
+class JournalSearchOutcome:
+    """One page of a journal search.
+
+    A full-text search fills ``hits``; a database listing fills ``journals``,
+    with ``journal_types`` holding each listed journal's types when the listing
+    already had to read them. ``source_journal_ids`` is the set of journals linked
+    to the source filter, or ``None`` without one — an empty set means nothing is
+    linked to that source, and the search stopped there.
+    """
+
+    backend: Literal["database", "meilisearch"]
+    total_hits: int
+    processing_time_ms: int
+    source_journal_ids: set[int] | None
+    hits: list[JournalSearchHit]
+    journals: list[Journal]
+    journal_types: dict[int, list[str]] | None
+
+
 class JournalSearchService:
     """Finds a user's journals by date window, filters and full text."""
 
@@ -202,6 +243,167 @@ class JournalSearchService:
     ) -> None:
         self.journal_repo = journal_repo
         self.search_service = search_service
+
+    async def search(
+        self,
+        user_id: str,
+        *,
+        query: str | None,
+        filters: JournalSearchFilters,
+        limit: int,
+        offset: int,
+        read_types: Callable[[int], Awaitable[list[str]]],
+    ) -> JournalSearchOutcome:
+        """Search the user's journals, combining every filter with the query.
+
+        With a non-blank ``query`` the search runs through MeiliSearch; without
+        one, journals are listed from the database, newest first. The filters
+        narrow both alike: MeiliSearch indexes the event dates as ISO strings and
+        its range operators are numeric-only, so the relational filters are
+        resolved to candidate ids here and intersected through Meili's
+        ``id IN [...]``, the same way the integration source filter is.
+
+        Several type filters cannot be expressed as one SQL filter, so a listing
+        with more than one reads every candidate's types through ``read_types``.
+
+        Raises:
+            SearchServiceUnavailableError: If the text search cannot reach
+                MeiliSearch.
+        """
+        # The filters the database resolves, in the spelling get_all/count_all use.
+        relational_filters: dict[str, Any] = {
+            "start_date": filters.start_date.isoformat()
+            if filters.start_date
+            else None,
+            "end_date": filters.end_date.isoformat() if filters.end_date else None,
+            "contact_id": str(filters.contact_id)
+            if filters.contact_id is not None
+            else None,
+            "tag_ids": filters.tag_ids,
+            "calendar_id": filters.calendar_id,
+            "parent_id": filters.parent_id,
+        }
+
+        # When integration_source filter is active, fetch journal IDs matching
+        # the source first, then intersect with other filters.
+        source_journal_ids: set[int] | None = None
+        if filters.source_filter is not None:
+            source_journal_ids = await self.journal_repo.find_ids_by_integration_source(
+                user_id, filters.source_filter
+            )
+            if not source_journal_ids:
+                return JournalSearchOutcome(
+                    backend="database",
+                    total_hits=0,
+                    processing_time_ms=0,
+                    source_journal_ids=source_journal_ids,
+                    hits=[],
+                    journals=[],
+                    journal_types=None,
+                )
+
+        if query and query.strip():
+            candidate_ids = source_journal_ids
+            if any(value is not None for value in relational_filters.values()):
+                candidate_ids = await self.journal_repo.find_ids_by_filters(
+                    user_id=user_id,
+                    journal_ids=(
+                        sorted(source_journal_ids)
+                        if source_journal_ids is not None
+                        else None
+                    ),
+                    **relational_filters,
+                )
+            hits, total_hits, processing_time_ms = search_journals_text(
+                self.search_service,
+                query=query.strip(),
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
+                type_filters=filters.type_filters,
+                journal_ids=candidate_ids,
+            )
+            return JournalSearchOutcome(
+                backend="meilisearch",
+                total_hits=total_hits,
+                processing_time_ms=processing_time_ms,
+                source_journal_ids=source_journal_ids,
+                hits=hits,
+                journals=[],
+                journal_types=None,
+            )
+
+        journal_ids = (
+            list(source_journal_ids) if source_journal_ids is not None else None
+        )
+        if len(filters.type_filters) <= 1:
+            journal_type = filters.type_filters[0] if filters.type_filters else None
+            total_hits = await self.journal_repo.count_all(
+                user_id=user_id,
+                journal_type=journal_type,
+                journal_ids=journal_ids,
+                **relational_filters,
+            )
+            journals = await self.journal_repo.get_all(
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
+                journal_type=journal_type,
+                journal_ids=journal_ids,
+                **relational_filters,
+            )
+            return JournalSearchOutcome(
+                backend="database",
+                total_hits=total_hits,
+                processing_time_ms=0,
+                source_journal_ids=source_journal_ids,
+                hits=[],
+                journals=journals,
+                journal_types=None,
+            )
+
+        # Several types cannot be expressed as one SQL filter, so every
+        # candidate the other filters allow is fetched and typed in Python.
+        candidate_count = await self.journal_repo.count_all(
+            user_id=user_id, journal_ids=journal_ids, **relational_filters
+        )
+        candidates = (
+            await self.journal_repo.get_all(
+                user_id=user_id,
+                limit=candidate_count,
+                offset=0,
+                journal_ids=journal_ids,
+                **relational_filters,
+            )
+            if candidate_count
+            else []
+        )
+        requested_types = set(filters.type_filters)
+        matched: list[Journal] = []
+        matched_types: dict[int, list[str]] = {}
+        for journal in candidates:
+            if journal.id is None:
+                continue
+            journal_types = await read_types(journal.id)
+            if requested_types.isdisjoint(journal_types):
+                continue
+            matched.append(journal)
+            matched_types[journal.id] = journal_types
+
+        page = matched[offset : offset + limit]
+        return JournalSearchOutcome(
+            backend="database",
+            total_hits=len(matched),
+            processing_time_ms=0,
+            source_journal_ids=source_journal_ids,
+            hits=[],
+            journals=page,
+            journal_types={
+                journal.id: matched_types[journal.id]
+                for journal in page
+                if journal.id is not None
+            },
+        )
 
     async def browse_window(
         self,

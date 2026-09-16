@@ -1,4 +1,4 @@
-"""Unit tests for JournalSearchService date-window browsing."""
+"""Unit tests for JournalSearchService: filtered search and date-window browsing."""
 
 from datetime import UTC, date, datetime
 from typing import Any
@@ -8,6 +8,7 @@ import pytest
 from core_shared.models.journals import EventDateRange, Journal
 
 from app.core.journal.services.journal_search_service import (
+    JournalSearchFilters,
     JournalSearchService,
     compute_date_window,
 )
@@ -174,3 +175,201 @@ class TestBrowseWindow:
 
         assert outcome.searched is False
         search_service.search_journals.assert_not_called()
+
+
+def _filters(**overrides: Any) -> JournalSearchFilters:
+    values: dict[str, Any] = {
+        "type_filters": [],
+        "source_filter": None,
+        "start_date": None,
+        "end_date": None,
+        "tag_ids": None,
+        "contact_id": None,
+        "calendar_id": None,
+        "parent_id": None,
+    }
+    values.update(overrides)
+    return JournalSearchFilters(**values)
+
+
+_NO_RELATIONAL_FILTERS: dict[str, Any] = {
+    "start_date": None,
+    "end_date": None,
+    "contact_id": None,
+    "tag_ids": None,
+    "calendar_id": None,
+    "parent_id": None,
+}
+
+
+async def _types_never_read(journal_id: int) -> list[str]:
+    raise AssertionError(f"types read for journal {journal_id}")
+
+
+class TestSearch:
+    @pytest.mark.asyncio
+    async def test_source_with_no_linked_journals_stops_at_the_source(self) -> None:
+        service, journal_repo, search_service = _service(
+            count=0, journals=[], documents=[]
+        )
+        journal_repo.find_ids_by_integration_source.return_value = set()
+
+        outcome = await service.search(
+            "user-1",
+            query="river",
+            filters=_filters(source_filter="strava"),
+            limit=20,
+            offset=0,
+            read_types=_types_never_read,
+        )
+
+        assert outcome.source_journal_ids == set()
+        assert (outcome.backend, outcome.total_hits) == ("database", 0)
+        journal_repo.find_ids_by_integration_source.assert_awaited_once_with(
+            "user-1", "strava"
+        )
+        journal_repo.find_ids_by_filters.assert_not_called()
+        search_service.search_journals.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_query_intersects_the_relational_filters_through_candidate_ids(
+        self,
+    ) -> None:
+        service, journal_repo, search_service = _service(
+            count=0, journals=[], documents=[_document(4)]
+        )
+        journal_repo.find_ids_by_integration_source.return_value = {9, 4}
+        journal_repo.find_ids_by_filters.return_value = {4}
+        start = datetime(2025, 10, 1, tzinfo=UTC)
+
+        outcome = await service.search(
+            "user-1",
+            query="  canyon ",
+            filters=_filters(
+                type_filters=["canyoning"],
+                source_filter="strava",
+                start_date=start,
+                tag_ids=["tag-1"],
+                contact_id=12,
+            ),
+            limit=5,
+            offset=10,
+            read_types=_types_never_read,
+        )
+
+        assert outcome.backend == "meilisearch"
+        assert [hit.id for hit in outcome.hits] == [4]
+        assert (outcome.total_hits, outcome.processing_time_ms) == (1, 3)
+        assert outcome.source_journal_ids == {9, 4}
+        journal_repo.find_ids_by_filters.assert_awaited_once_with(
+            user_id="user-1",
+            journal_ids=[4, 9],
+            start_date=start.isoformat(),
+            end_date=None,
+            contact_id="12",
+            tag_ids=["tag-1"],
+            calendar_id=None,
+            parent_id=None,
+        )
+        search_service.search_journals.assert_called_once_with(
+            query="canyon",
+            filters={"user_id": "user-1", "types": ["CANYONING"], "id": [4]},
+            limit=5,
+            offset=10,
+        )
+
+    @pytest.mark.asyncio
+    async def test_query_without_filters_searches_everything(self) -> None:
+        service, journal_repo, search_service = _service(
+            count=0, journals=[], documents=[]
+        )
+
+        outcome = await service.search(
+            "user-1",
+            query="river",
+            filters=_filters(),
+            limit=20,
+            offset=0,
+            read_types=_types_never_read,
+        )
+
+        assert (outcome.backend, outcome.total_hits, outcome.hits) == (
+            "meilisearch",
+            0,
+            [],
+        )
+        assert outcome.source_journal_ids is None
+        journal_repo.find_ids_by_filters.assert_not_called()
+        search_service.search_journals.assert_called_once_with(
+            query="river", filters={"user_id": "user-1"}, limit=20, offset=0
+        )
+
+    @pytest.mark.asyncio
+    async def test_blank_query_lists_one_type_from_the_database(self) -> None:
+        journals = [_journal(1)]
+        service, journal_repo, search_service = _service(
+            count=7, journals=journals, documents=[]
+        )
+        journal_repo.find_ids_by_integration_source.return_value = {1, 2}
+
+        outcome = await service.search(
+            "user-1",
+            query="  ",
+            filters=_filters(type_filters=["event"], source_filter="google_calendar"),
+            limit=1,
+            offset=3,
+            read_types=_types_never_read,
+        )
+
+        assert (outcome.backend, outcome.total_hits) == ("database", 7)
+        assert outcome.journals == journals
+        assert outcome.journal_types is None
+        journal_repo.count_all.assert_awaited_once_with(
+            user_id="user-1",
+            journal_type="event",
+            journal_ids=[1, 2],
+            **_NO_RELATIONAL_FILTERS,
+        )
+        journal_repo.get_all.assert_awaited_once_with(
+            user_id="user-1",
+            limit=1,
+            offset=3,
+            journal_type="event",
+            journal_ids=[1, 2],
+            **_NO_RELATIONAL_FILTERS,
+        )
+        search_service.search_journals.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_several_types_are_matched_on_every_candidate_then_paged(
+        self,
+    ) -> None:
+        journals = [_journal(1), _journal(2), _journal(3), _journal(4)]
+        service, journal_repo, _ = _service(count=4, journals=journals, documents=[])
+        types = {1: ["event"], 2: ["note"], 3: ["mood_rating", "event"], 4: ["travel"]}
+
+        async def read_types(journal_id: int) -> list[str]:
+            return types[journal_id]
+
+        outcome = await service.search(
+            "user-1",
+            query=None,
+            filters=_filters(type_filters=["event", "travel"]),
+            limit=2,
+            offset=1,
+            read_types=read_types,
+        )
+
+        assert outcome.total_hits == 3
+        assert [journal.id for journal in outcome.journals] == [3, 4]
+        assert outcome.journal_types == {3: ["mood_rating", "event"], 4: ["travel"]}
+        journal_repo.count_all.assert_awaited_once_with(
+            user_id="user-1", journal_ids=None, **_NO_RELATIONAL_FILTERS
+        )
+        journal_repo.get_all.assert_awaited_once_with(
+            user_id="user-1",
+            limit=4,
+            offset=0,
+            journal_ids=None,
+            **_NO_RELATIONAL_FILTERS,
+        )

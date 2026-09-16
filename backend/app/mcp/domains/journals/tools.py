@@ -157,10 +157,10 @@ from app.core.journal.services.journal_search_service import (
     SEARCH_SUGGESTIONS,
     SEARCH_UNAVAILABLE_HINT,
     WINDOW_SUGGESTIONS,
+    JournalSearchFilters,
     JournalSearchHit,
     JournalSearchService,
     explain_empty_result,
-    search_journals_text,
 )
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
@@ -185,7 +185,6 @@ from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.journals.converters import (
     ActivityTemplateMCPConverter,
     GearItemMCPConverter,
@@ -257,7 +256,6 @@ from app.mcp.shared.dependencies import (
     get_outdoor_activity_dismissal_service,
     get_outdoor_dashboard_service,
     get_review_item_service,
-    get_search_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
@@ -1446,29 +1444,6 @@ def _search_hit_to_result(hit: JournalSearchHit) -> JournalSearchResult:
     )
 
 
-def _meili_search_journals(
-    search_service: SearchService,
-    *,
-    query: str,
-    user_id: str,
-    limit: int,
-    offset: int = 0,
-    type_filters: list[str] | None = None,
-    journal_ids: set[int] | None = None,
-) -> tuple[list[JournalSearchResult], int, int]:
-    """Full-text search returning MCP result schemas."""
-    hits, total, ms = search_journals_text(
-        search_service,
-        query=query,
-        user_id=user_id,
-        limit=limit,
-        offset=offset,
-        type_filters=type_filters,
-        journal_ids=journal_ids,
-    )
-    return [_search_hit_to_result(hit) for hit in hits], total, ms
-
-
 async def _zero_result_diagnostics(
     repos: _JournalToolRepositories,
     user_id: str,
@@ -1573,7 +1548,9 @@ async def search_journals(
         Field(default=0, ge=0, description="Number of results to skip (default: 0)"),
     ] = 0,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    search_service: SearchService = mcp_depends(get_search_service),
+    journal_search_service: JournalSearchService = mcp_depends(
+        get_journal_search_service
+    ),
     tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
 ) -> str:
     """
@@ -1622,16 +1599,7 @@ async def search_journals(
         await tag_service.resolve_filter_tag_ids(tags.split(",")) if tags else None
     )
 
-    # The filters the database resolves, in the spelling get_all/count_all use.
-    relational_filters: dict[str, Any] = {
-        "start_date": start_filter.isoformat() if start_filter else None,
-        "end_date": end_filter.isoformat() if end_filter else None,
-        "contact_id": str(contact_id) if contact_id is not None else None,
-        "tag_ids": tag_filters,
-        "calendar_id": calendar_id,
-        "parent_id": parent_id,
-    }
-    # ...and the same filters as the agent spelled them, for the diagnostics.
+    # The filters as the agent spelled them, for the diagnostics.
     reported_filters: dict[str, Any] = {
         "types": types,
         "integration_source": source_filter,
@@ -1643,162 +1611,102 @@ async def search_journals(
         "parent_id": parent_id,
     }
 
-    # When integration_source filter is active, fetch journal IDs matching
-    # the source first, then intersect with other filters.
-    source_journal_ids: set[int] | None = None
-    if source_filter is not None:
-        source_journal_ids = await repos.journal_repo.find_ids_by_integration_source(
-            user_id, source_filter
-        )
-        if not source_journal_ids:
-            # No journals match the integration source — return empty, and say
-            # whether anything is linked to that source at all.
-            response = JournalSearchResponse(
-                results=[],
-                query=query,
-                total_hits=0,
-                processing_time_ms=0,
-                summary=f"Found 0 journal(s) linked to {source_filter}",
-                diagnostics=await _zero_result_diagnostics(
-                    repos,
-                    user_id,
-                    search_backend="database",
-                    filters=reported_filters,
-                    journals_linked_to_source=0,
-                    suggestions=[
-                        f"No journal is linked to {source_filter}. Check "
-                        "list_integrations, or trigger_sync if the integration "
-                        "is connected but has not imported yet.",
-                        *SEARCH_SUGGESTIONS[:2],
-                    ],
-                ),
-            )
-            return MCPResponseBuilder.success_response(response)
+    async def read_types(journal_id: int) -> list[str]:
+        journal_types, _ = await _fetch_types_for_journal(journal_id, repos)
+        return journal_types
 
-    summary_suffix = f" linked to {source_filter}" if source_filter else ""
-
-    if query and query.strip():
-        # MeiliSearch indexes the event dates as ISO strings and its range
-        # operators are numeric-only, so the relational filters are resolved to
-        # candidate ids here and intersected through Meili's `id IN [...]`,
-        # the same way the integration_source filter already is.
-        candidate_ids = source_journal_ids
-        if any(value is not None for value in relational_filters.values()):
-            candidate_ids = await repos.journal_repo.find_ids_by_filters(
-                user_id=user_id,
-                journal_ids=(
-                    sorted(source_journal_ids)
-                    if source_journal_ids is not None
-                    else None
-                ),
-                **relational_filters,
-            )
-        try:
-            results, total_hits, processing_time_ms = _meili_search_journals(
-                search_service,
-                query=query.strip(),
-                user_id=user_id,
-                limit=limit,
-                offset=offset,
-                type_filters=type_filters,
-                journal_ids=candidate_ids,
-            )
-        except SearchServiceUnavailableError as exc:
-            return MCPResponseBuilder.error_response(
-                error_type="Search unavailable",
-                message=exc.message,
-                context={"query": query, "hint": SEARCH_UNAVAILABLE_HINT},
-            )
-        response = JournalSearchResponse(
-            results=results,
+    try:
+        outcome = await journal_search_service.search(
+            user_id,
             query=query,
-            total_hits=total_hits,
-            processing_time_ms=processing_time_ms,
-            summary=f"Found {total_hits} journal(s){summary_suffix}",
+            filters=JournalSearchFilters(
+                type_filters=type_filters,
+                source_filter=source_filter,
+                start_date=start_filter,
+                end_date=end_filter,
+                tag_ids=tag_filters,
+                contact_id=contact_id,
+                calendar_id=calendar_id,
+                parent_id=parent_id,
+            ),
+            limit=limit,
+            offset=offset,
+            read_types=read_types,
+        )
+    except SearchServiceUnavailableError as exc:
+        return MCPResponseBuilder.error_response(
+            error_type="Search unavailable",
+            message=exc.message,
+            context={"query": query, "hint": SEARCH_UNAVAILABLE_HINT},
+        )
+
+    source_journal_ids = outcome.source_journal_ids
+    if source_filter is not None and not source_journal_ids:
+        # No journals match the integration source — return empty, and say
+        # whether anything is linked to that source at all.
+        response = JournalSearchResponse(
+            results=[],
+            query=query,
+            total_hits=0,
+            processing_time_ms=0,
+            summary=f"Found 0 journal(s) linked to {source_filter}",
             diagnostics=await _zero_result_diagnostics(
                 repos,
                 user_id,
-                search_backend="meilisearch",
-                filters={"query": query, **reported_filters},
-                source_filter=source_filter,
-                journals_linked_to_source=(
-                    len(source_journal_ids) if source_journal_ids else None
-                ),
-                suggestions=SEARCH_SUGGESTIONS,
-            )
-            if total_hits == 0
-            else None,
+                search_backend="database",
+                filters=reported_filters,
+                journals_linked_to_source=0,
+                suggestions=[
+                    f"No journal is linked to {source_filter}. Check "
+                    "list_integrations, or trigger_sync if the integration "
+                    "is connected but has not imported yet.",
+                    *SEARCH_SUGGESTIONS[:2],
+                ],
+            ),
         )
         return MCPResponseBuilder.success_response(response)
 
-    journal_ids = list(source_journal_ids) if source_journal_ids is not None else None
-    if len(type_filters) <= 1:
-        journal_type = type_filters[0] if type_filters else None
-        total_hits = await repos.journal_repo.count_all(
-            user_id=user_id,
-            journal_type=journal_type,
-            journal_ids=journal_ids,
-            **relational_filters,
-        )
-        journals = await repos.journal_repo.get_all(
-            user_id=user_id,
-            limit=limit,
-            offset=offset,
-            journal_type=journal_type,
-            journal_ids=journal_ids,
-            **relational_filters,
-        )
-        results = await _build_search_results(journals, repos)
+    summary_suffix = f" linked to {source_filter}" if source_filter else ""
+    total_hits = outcome.total_hits
+
+    if outcome.backend == "meilisearch":
+        results = [_search_hit_to_result(hit) for hit in outcome.hits]
+        diagnostic_filters = {"query": query, **reported_filters}
+        suggestions = SEARCH_SUGGESTIONS
     else:
-        # Several types cannot be expressed as one SQL filter, so every
-        # candidate the other filters allow is fetched and typed in Python.
-        candidate_count = await repos.journal_repo.count_all(
-            user_id=user_id, journal_ids=journal_ids, **relational_filters
+        journal_types = outcome.journal_types
+        results = (
+            await _build_search_results(outcome.journals, repos)
+            if journal_types is None
+            else [
+                _journal_to_search_result(journal, types=journal_types[journal.id])
+                for journal in outcome.journals
+                if journal.id is not None
+            ]
         )
-        journals = (
-            await repos.journal_repo.get_all(
-                user_id=user_id,
-                limit=candidate_count,
-                offset=0,
-                journal_ids=journal_ids,
-                **relational_filters,
-            )
-            if candidate_count
-            else []
-        )
-        requested_types = set(type_filters)
-        results = []
-        for journal in journals:
-            if journal.id is None:
-                continue
-            journal_types, _ = await _fetch_types_for_journal(journal.id, repos)
-            if requested_types.isdisjoint(journal_types):
-                continue
-            results.append(_journal_to_search_result(journal, types=journal_types))
-        total_hits = len(results)
-        results = results[offset : offset + limit]
+        diagnostic_filters = reported_filters
+        suggestions = SEARCH_SUGGESTIONS[1:]
 
     response = JournalSearchResponse(
         results=results,
         query=query,
         total_hits=total_hits,
-        processing_time_ms=0,
+        processing_time_ms=outcome.processing_time_ms,
         summary=f"Found {total_hits} journal(s){summary_suffix}",
         diagnostics=await _zero_result_diagnostics(
             repos,
             user_id,
-            search_backend="database",
-            filters=reported_filters,
+            search_backend=outcome.backend,
+            filters=diagnostic_filters,
             source_filter=source_filter,
             journals_linked_to_source=(
                 len(source_journal_ids) if source_journal_ids else None
             ),
-            suggestions=SEARCH_SUGGESTIONS[1:],
+            suggestions=suggestions,
         )
         if total_hits == 0
         else None,
     )
-
     return MCPResponseBuilder.success_response(response)
 
 
