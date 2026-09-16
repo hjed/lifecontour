@@ -209,6 +209,37 @@ async def get_snipeit_webhook_url(
 
 
 @router.post(
+    "/webhook-url/rotate",
+    responses={
+        200: {"description": "Webhook URL regenerated"},
+        400: {"description": "Webhook base URL not configured"},
+        404: {"description": "No Snipe-IT settings found for this user"},
+    },
+)
+@inject
+async def rotate_snipeit_webhook_url(
+    user: FromDishka[SessionUser],
+    settings: FromDishka[Settings],
+    service: FromDishka[SnipeItSettingsService],
+    connection: FromDishka[AsyncConnection],
+) -> dict[str, object]:
+    """Regenerate the Snipe-IT webhook URL with a new secret token.
+
+    The previous URL stops working immediately, so the new one must be
+    configured in Snipe-IT.
+    """
+    webhook_token = await service.rotate_webhook_token(
+        user_id=str(user.id),
+        transaction=connection,
+    )
+    if webhook_token is None:
+        raise HTTPException(status_code=404, detail=SETTINGS_NOT_FOUND_DETAIL)
+
+    logger.info("Snipe-IT webhook token rotated", user_id=user.id)
+    return _webhook_url_response(settings, webhook_token)
+
+
+@router.post(
     "/gear/sync",
     responses={
         400: {"description": "Invalid sync parameters"},

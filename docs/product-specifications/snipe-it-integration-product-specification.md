@@ -46,6 +46,7 @@ Snipe-IT "Assets" map directly to the system's `gear_items` entity.
   - The system relies on **Snipe-IT Webhooks** for real-time updates.
     - Configure Snipe-IT's **General** (Slack-compatible) webhook with the URL shown in the integration's **Webhook URL** dialog (`/api/integrations/snipeit/webhook/<token>`).
     - Snipe-IT webhooks carry no signature, so the URL contains a secret, per-user token. A notification is accepted only for a known token, and syncs the asset for that token's owner only; any other URL returns 404 so the endpoint's existence is not revealed.
+    - **Regenerate** in the Webhook URL dialog issues a new token after confirmation. The previous URL stops working immediately, so the new URL must be saved in Snipe-IT.
     - Snipe-IT sends Slack-format messages and only on checkout, checkin, acceptance and audit. Each message that links an asset (`<base>/hardware/<id>`) triggers a sync of that asset; the settings-page test message and non-asset notifications are acknowledged and ignored.
   - A **Periodic Sync** acts as a backup (similar to the Strava integration) to catch missed webhook events, and is the only path for asset creation, edits and maintenance changes, which Snipe-IT does not send as webhooks.
 - **Text Encoding**: Snipe-IT HTML-escapes text in API responses but stores what it is sent, so asset names, models, manufacturers, serials and asset tags are decoded once on import and sent unescaped.

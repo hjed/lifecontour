@@ -11,6 +11,17 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -20,6 +31,7 @@ import {
 import {
   useOAuthAuthorize,
   useReregisterWebhooks,
+  useRotateSnipeItWebhookUrl,
   useSnipeItWebhookUrl,
 } from '@/lib/api/integrations';
 
@@ -31,7 +43,7 @@ interface IntegrationActionsProps {
 /**
  * Action buttons for integration maintenance:
  * - Re-register Webhooks (Google, Strava)
- * - Get Webhook URL (Snipe-IT — manual webhook model)
+ * - Get or regenerate Webhook URL (Snipe-IT — manual webhook model)
  * - Re-authenticate (all OAuth integrations)
  */
 export function IntegrationActions({
@@ -45,6 +57,9 @@ export function IntegrationActions({
 
   const { mutate: authorizeOAuth, isPending: oauthPending } =
     useOAuthAuthorize(integrationId);
+
+  const { mutate: rotateWebhookUrl, isPending: rotatePending } =
+    useRotateSnipeItWebhookUrl();
 
   // Only fetch snipeit webhook URL when dialog is open
   const { data: webhookUrlData } = useSnipeItWebhookUrl(
@@ -182,6 +197,46 @@ export function IntegrationActions({
                   Loading webhook URL…
                 </p>
               )}
+              <div className='flex flex-wrap items-center justify-between gap-2'>
+                <p className='text-muted-foreground text-sm'>
+                  The URL contains a secret. Regenerate it if it has been
+                  shared.
+                </p>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='gap-2'
+                      disabled={rotatePending}
+                      data-testid='regenerate-webhook-url'
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4${rotatePending ? 'animate-spin' : ''}`}
+                      />
+                      Regenerate
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Regenerate the webhook URL?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        The current URL stops working immediately. Snipe-IT
+                        changes are not received until the new URL is saved in
+                        Snipe-IT.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep URL</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => rotateWebhookUrl()}>
+                        Regenerate URL
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

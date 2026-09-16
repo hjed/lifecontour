@@ -60,6 +60,48 @@ async def test_webhook_url_not_found_without_settings(
     )
 
 
+async def test_rotate_webhook_url_replaces_the_token(
+    authenticated_client: AsyncClient,
+) -> None:
+    """Rotating returns a new URL; the old URL stops working and the new one works."""
+    await _save_settings(authenticated_client)
+    old_url = await _webhook_url(authenticated_client)
+    test_message = {"text": "Oh hai! It looks like your webhook is working!"}
+
+    response = await authenticated_client.post(
+        "/api/integrations/snipeit/webhook-url/rotate"
+    )
+
+    assert response.status_code == 200
+    new_url = str(response.json()["data"]["attributes"]["webhook_url"])
+    assert new_url != old_url
+    assert new_url.startswith(f"{WEBHOOK_BASE_URL}/api/integrations/snipeit/webhook/")
+    assert await _webhook_url(authenticated_client) == new_url
+
+    old_webhook = await authenticated_client.post(
+        old_url.removeprefix(WEBHOOK_BASE_URL), json=test_message
+    )
+    new_webhook = await authenticated_client.post(
+        new_url.removeprefix(WEBHOOK_BASE_URL), json=test_message
+    )
+    assert old_webhook.status_code == 404
+    assert new_webhook.status_code == 200
+
+
+async def test_rotate_webhook_url_not_found_without_settings(
+    authenticated_client: AsyncClient,
+) -> None:
+    """There is no token to rotate before Snipe-IT settings are saved."""
+    response = await authenticated_client.post(
+        "/api/integrations/snipeit/webhook-url/rotate"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["detail"] == (
+        "No Snipe-IT settings found for this user"
+    )
+
+
 async def test_get_snipeit_settings_not_found(
     authenticated_client: AsyncClient,
 ) -> None:

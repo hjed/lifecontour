@@ -53,3 +53,35 @@ class TestSaveSettings:
         new_webhook_token = mock_repo.save.call_args.kwargs["new_webhook_token"]
         assert isinstance(new_webhook_token, str)
         assert len(new_webhook_token) == 43
+
+
+class TestRotateWebhookToken:
+    """Test the rotate_webhook_token unit of work."""
+
+    @pytest.mark.asyncio
+    async def test_rotate_stores_and_returns_a_new_token(
+        self, service, mock_repo, mock_transaction
+    ):
+        """The generated token is stored for the user and returned."""
+        mock_repo.set_webhook_token.return_value = True
+
+        token = await service.rotate_webhook_token(
+            user_id="user-1", transaction=mock_transaction
+        )
+
+        mock_repo.set_webhook_token.assert_awaited_once_with("user-1", token)
+        assert token is not None
+        assert len(token) == 43
+
+    @pytest.mark.asyncio
+    async def test_rotate_returns_none_without_settings(
+        self, service, mock_repo, mock_transaction
+    ):
+        """A user with no Snipe-IT settings has no token to rotate."""
+        mock_repo.set_webhook_token.return_value = False
+
+        token = await service.rotate_webhook_token(
+            user_id="user-1", transaction=mock_transaction
+        )
+
+        assert token is None
