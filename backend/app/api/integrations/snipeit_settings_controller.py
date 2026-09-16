@@ -46,17 +46,20 @@ logger = structlog.get_logger()
 SETTINGS_NOT_FOUND_DETAIL = "No Snipe-IT settings found for this user"
 
 
-def _webhook_url_response(
-    settings: Settings, webhook_token: SnipeItWebhookToken
-) -> dict[str, object]:
-    """Build the webhook URL response for a user's token."""
+def _webhook_base_url(settings: Settings) -> str:
+    """Return the public base URL webhook URLs are built on, or raise 400."""
     if not settings.webhook_base_url:
         raise HTTPException(
             status_code=400,
             detail="Webhook base URL is not configured on the server",
         )
+    return settings.webhook_base_url.rstrip("/")
 
-    base_url = settings.webhook_base_url.rstrip("/")
+
+def _webhook_url_response(
+    base_url: str, webhook_token: SnipeItWebhookToken
+) -> dict[str, object]:
+    """Build the webhook URL response for a user's token."""
     return WebhookUrlResponse(
         data=WebhookUrlData(
             id="snipeit-webhook-url",
@@ -201,11 +204,12 @@ async def get_snipeit_webhook_url(
     the URL so the user can copy it. The URL contains the user's secret
     webhook token, which is how the webhook knows whose Snipe-IT to sync.
     """
+    base_url = _webhook_base_url(settings)
     webhook_token = await repository.get_webhook_token(str(user.id))
     if webhook_token is None:
         raise HTTPException(status_code=404, detail=SETTINGS_NOT_FOUND_DETAIL)
 
-    return _webhook_url_response(settings, webhook_token)
+    return _webhook_url_response(base_url, webhook_token)
 
 
 @router.post(
@@ -226,8 +230,10 @@ async def rotate_snipeit_webhook_url(
     """Regenerate the Snipe-IT webhook URL with a new secret token.
 
     The previous URL stops working immediately, so the new one must be
-    configured in Snipe-IT.
+    configured in Snipe-IT. The base URL is checked first so a server that
+    cannot build the new URL never invalidates the old one.
     """
+    base_url = _webhook_base_url(settings)
     webhook_token = await service.rotate_webhook_token(
         user_id=str(user.id),
         transaction=connection,
@@ -236,7 +242,7 @@ async def rotate_snipeit_webhook_url(
         raise HTTPException(status_code=404, detail=SETTINGS_NOT_FOUND_DETAIL)
 
     logger.info("Snipe-IT webhook token rotated", user_id=user.id)
-    return _webhook_url_response(settings, webhook_token)
+    return _webhook_url_response(base_url, webhook_token)
 
 
 @router.post(

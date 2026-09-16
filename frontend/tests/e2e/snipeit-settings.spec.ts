@@ -287,28 +287,7 @@ test.describe('Snipe-IT Integration Settings', () => {
     authenticatedPage,
   }) => {
     // Override base routes to make Snipe-IT connected
-    await authenticatedPage.route('**/api/integrations', route => {
-      if (new URL(route.request().url()).pathname !== '/api/integrations')
-        return route.fallback();
-      return route.fulfill(
-        json({
-          data: [
-            {
-              id: 'snipeit',
-              type: 'integration',
-              attributes: {
-                name: 'Snipe-IT',
-                status: 'connected',
-                capabilities: [],
-                sync_summary: { sync_count: 0, error_count: 0 },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      );
-    });
+    await routeSnipeItOnlyIntegration(authenticatedPage, 'connected');
     await authenticatedPage.route('**/api/integrations/health', route =>
       route.fulfill(
         json({
@@ -327,28 +306,7 @@ test.describe('Snipe-IT Integration Settings', () => {
         if (route.request().method() === 'DELETE') {
           deleteCalled = true;
           // Mock the disconnected state
-          await authenticatedPage.route('**/api/integrations', r => {
-            if (new URL(r.request().url()).pathname !== '/api/integrations')
-              return r.fallback();
-            return r.fulfill(
-              json({
-                data: [
-                  {
-                    id: 'snipeit',
-                    type: 'integration',
-                    attributes: {
-                      name: 'Snipe-IT',
-                      status: 'disconnected',
-                      capabilities: [],
-                      sync_summary: { sync_count: 0, error_count: 0 },
-                      needs_reauth: false,
-                      needs_reconsent: false,
-                    },
-                  },
-                ],
-              })
-            );
-          });
+          await routeSnipeItOnlyIntegration(authenticatedPage, 'disconnected');
           return route.fulfill(
             json({
               success: true,
@@ -404,28 +362,7 @@ test.describe('Snipe-IT Webhook URL', () => {
     authenticatedPage,
   }) => {
     await setupBaseRoutes(authenticatedPage);
-    await authenticatedPage.route('**/api/integrations', route => {
-      if (new URL(route.request().url()).pathname !== '/api/integrations')
-        return route.fallback();
-      return route.fulfill(
-        json({
-          data: [
-            {
-              id: 'snipeit',
-              type: 'integration',
-              attributes: {
-                name: 'Snipe-IT',
-                status: 'connected',
-                capabilities: [],
-                sync_summary: { sync_count: 0, error_count: 0 },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      );
-    });
+    await routeSnipeItOnlyIntegration(authenticatedPage, 'connected');
 
     let rotateRequests = 0;
     await authenticatedPage.route(
@@ -465,6 +402,37 @@ test.describe('Snipe-IT Webhook URL', () => {
     expect(rotateRequests).toBe(1);
   });
 });
+
+/**
+ * Helper: stub the integration list with only Snipe-IT, in the given status.
+ */
+async function routeSnipeItOnlyIntegration(
+  page: import('@playwright/test').Page,
+  status: 'connected' | 'disconnected'
+) {
+  await page.route('**/api/integrations', route => {
+    if (new URL(route.request().url()).pathname !== '/api/integrations')
+      return route.fallback();
+    return route.fulfill(
+      json({
+        data: [
+          {
+            id: 'snipeit',
+            type: 'integration',
+            attributes: {
+              name: 'Snipe-IT',
+              status,
+              capabilities: [],
+              sync_summary: { sync_count: 0, error_count: 0 },
+              needs_reauth: false,
+              needs_reconsent: false,
+            },
+          },
+        ],
+      })
+    );
+  });
+}
 
 /**
  * Helper: mock snipeit settings endpoint to return 404 (no settings configured).

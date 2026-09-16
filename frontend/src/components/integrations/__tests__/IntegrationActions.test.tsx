@@ -92,5 +92,10 @@ describe('IntegrationActions Snipe-IT webhook URL dialog', () => {
     await openWebhookUrlDialog();
 
     expect(screen.getByTestId('regenerate-webhook-url')).toBeDisabled();
+    expect(screen.getByTestId('regenerate-webhook-url-icon')).toHaveClass(
+      'h-4',
+      'w-4',
+      'animate-spin'
+    );
   });
 });

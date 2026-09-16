@@ -88,6 +88,27 @@ async def test_rotate_webhook_url_replaces_the_token(
     assert new_webhook.status_code == 200
 
 
+async def test_rotate_webhook_url_keeps_the_token_without_a_base_url(
+    authenticated_client: AsyncClient,
+    test_settings: Settings,
+) -> None:
+    """A server that cannot build the new URL refuses to rotate, so the old URL keeps working."""
+    await _save_settings(authenticated_client)
+    old_url = await _webhook_url(authenticated_client)
+    test_settings.webhook_base_url = ""
+
+    response = await authenticated_client.post(
+        "/api/integrations/snipeit/webhook-url/rotate"
+    )
+
+    assert response.status_code == 400
+    old_webhook = await authenticated_client.post(
+        old_url.removeprefix(WEBHOOK_BASE_URL),
+        json={"text": "Oh hai! It looks like your webhook is working!"},
+    )
+    assert old_webhook.status_code == 200
+
+
 async def test_rotate_webhook_url_not_found_without_settings(
     authenticated_client: AsyncClient,
 ) -> None:

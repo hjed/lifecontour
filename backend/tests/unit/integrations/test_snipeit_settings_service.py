@@ -60,8 +60,11 @@ class TestRotateWebhookToken:
 
     @pytest.mark.asyncio
     async def test_rotate_stores_and_returns_a_new_token(
-        self, service, mock_repo, mock_transaction
-    ):
+        self,
+        service: SnipeItSettingsService,
+        mock_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
         """The generated token is stored for the user and returned."""
         mock_repo.set_webhook_token.return_value = True
 
@@ -75,8 +78,11 @@ class TestRotateWebhookToken:
 
     @pytest.mark.asyncio
     async def test_rotate_returns_none_without_settings(
-        self, service, mock_repo, mock_transaction
-    ):
+        self,
+        service: SnipeItSettingsService,
+        mock_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
         """A user with no Snipe-IT settings has no token to rotate."""
         mock_repo.set_webhook_token.return_value = False
 

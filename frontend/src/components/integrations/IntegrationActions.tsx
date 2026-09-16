@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Copy, KeyRound, Link2, RefreshCw, Webhook } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import {
   Tooltip,
   TooltipContent,
@@ -212,7 +213,11 @@ export function IntegrationActions({
                       data-testid='regenerate-webhook-url'
                     >
                       <RefreshCw
-                        className={`h-4 w-4${rotatePending ? 'animate-spin' : ''}`}
+                        className={cn(
+                          'h-4 w-4',
+                          rotatePending && 'animate-spin'
+                        )}
+                        data-testid='regenerate-webhook-url-icon'
                       />
                       Regenerate
                     </Button>

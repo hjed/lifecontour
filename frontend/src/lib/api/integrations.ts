@@ -1037,7 +1037,12 @@ export function useRotateSnipeItWebhookUrl() {
 
   return useMutation({
     mutationFn: rotateSnipeItWebhookUrl,
-    onSuccess: (data: WebhookUrlResponse) => {
+    onSuccess: async (data: WebhookUrlResponse) => {
+      // A URL request still in flight would otherwise land afterwards and put
+      // the old, now-rejected URL back in the dialog.
+      await queryClient.cancelQueries({
+        queryKey: integrationKeys.snipeItWebhookUrl(),
+      });
       queryClient.setQueryData(integrationKeys.snipeItWebhookUrl(), data);
       toast.success(
         'Webhook URL regenerated. Update it in Snipe-IT to keep receiving changes.'
