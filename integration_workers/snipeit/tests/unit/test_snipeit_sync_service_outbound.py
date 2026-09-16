@@ -19,6 +19,7 @@ from snipeit_sync_service import (
     _resolve_zone,
     _snipeit_checkin_at,
     _snipeit_datetime,
+    _snipeit_record_payload,
     _snipeit_zone,
     _usage_period_has_ended,
 )
@@ -375,6 +376,24 @@ def _listed_maintenance(**overrides: object) -> SnipeItMaintenance:
             **overrides,
         }
     )
+
+
+class TestSnipeitRecordPayload:
+    """A listed Snipe-IT maintenance's own values, shaped like a push's payload."""
+
+    def test_decodes_text_and_leaves_out_missing_dates(self) -> None:
+        maintenance = _listed_maintenance(
+            notes="Cut at 34 &amp; 15",
+            asset_maintenance_type="Configuration Change",
+            completion_date=None,
+        )
+
+        assert _snipeit_record_payload(maintenance) == {
+            "name": "Split Canyoneroo 50 -> 34 + 15",
+            "notes": "Cut at 34 & 15",
+            "asset_maintenance_type": "Configuration Change",
+            "start_date": "2026-09-11",
+        }
 
 
 class TestMaintenanceClaim:
@@ -1495,3 +1514,32 @@ class TestPushCheckinCreate:
         api_client.checkout_asset.assert_called_once()
         api_client.checkin_asset.assert_called_once()
         assert api_client.checkin_asset.call_args.kwargs["asset_id"] == 42
+
+
+class TestLinkClaimedMaintenance:
+    """The inbound sync linking a record to the journal whose push claims it."""
+
+    @pytest.mark.asyncio
+    async def test_keeps_the_claim_when_the_record_was_recorded_meanwhile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sync rows are keyed globally, so another user's sync can record the same
+        maintenance id under another asset's lock."""
+        service = SnipeItSyncService(api_client=_mock_api_client(), user_id="user-1")
+        claim = MaintenanceClaim(
+            asset_id=51, title="Split Canyoneroo 50 -> 34 + 15", start_date="2026-09-11"
+        )
+        monkeypatch.setattr(
+            service, "_user_maintenance_claims", AsyncMock(return_value=[(7, claim)])
+        )
+        # Routes nothing, so the push row's INSERT ... RETURNING returns no row.
+        session_factory = _sql_routed_session_factory({})
+
+        linked = await service._link_claimed_maintenance(
+            _listed_maintenance(), session_factory
+        )
+
+        assert linked is False
+        session = session_factory.return_value.__aenter__.return_value
+        statements = [str(call.args[0]) for call in session.execute.await_args_list]
+        assert not any("DELETE FROM sync_metadata" in sql for sql in statements)
