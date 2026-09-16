@@ -31,8 +31,9 @@ class CalendarPermissionError(JournalDomainError):
 class CalendarInUseError(JournalDomainError):
     """Raised when attempting to delete a calendar still used by journals."""
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, usage_count: int) -> None:
         super().__init__(message, 409)
+        self.usage_count = usage_count
 
 
 class CalendarService:
@@ -119,7 +120,8 @@ class CalendarService:
             raise CalendarInUseError(
                 f"Cannot delete calendar '{calendar.name}' because it is used by "
                 f"{usage_count} journal(s). "
-                "Remove the calendar from all journals before deleting it."
+                "Remove the calendar from all journals before deleting it.",
+                usage_count,
             )
 
         await self.calendar_repo.delete(calendar.id)

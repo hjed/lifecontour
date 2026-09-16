@@ -172,6 +172,22 @@ class JournalRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_overlapping_for_user(
+        self,
+        user_id: str,
+        *,
+        exclude_journal_id: int,
+        date_range: EventDateRange,
+        limit: int,
+    ) -> list[Journal]:
+        """The user's other journals whose event range overlaps ``date_range``.
+
+        Ranges that only touch at an endpoint overlap. Ordered by event start and
+        capped at ``limit``; ``exclude_journal_id`` is never returned.
+        """
+        pass
+
+    @abstractmethod
     async def find_by_ids_for_user(
         self, user_id: str, journal_ids: list[int]
     ) -> list[Journal]:

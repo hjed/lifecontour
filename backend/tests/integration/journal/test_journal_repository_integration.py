@@ -1540,3 +1540,65 @@ class TestTheJournalLockHoldsAgainstAnotherConnection:
                 assert result.scalar_one() == "Edited while locked"
         finally:
             await self._cleanup(async_engine, user_id)
+
+
+@pytest.mark.integration
+class TestJournalRepositoryFindOverlappingForUser:
+    """The merge-candidate read: the user's other journals overlapping a range."""
+
+    OWNER = "overlap-owner"
+    STRANGER = "overlap-stranger"
+    DAY = datetime(2025, 5, 10, tzinfo=UTC)
+
+    async def _save(
+        self,
+        journal_repository: SqlJournalRepository,
+        title: str,
+        start_hour: int,
+        end_hour: int,
+        user_id: str = OWNER,
+    ) -> Journal:
+        return await journal_repository.save(
+            create_test_journal(
+                user_id=user_id,
+                title=title,
+                start=self.DAY + timedelta(hours=start_hour),
+                end=self.DAY + timedelta(hours=end_hour),
+            )
+        )
+
+    async def test_returns_the_users_other_overlapping_journals_by_start(
+        self, journal_repository: SqlJournalRepository
+    ) -> None:
+        target = await self._save(journal_repository, "Target", 10, 12)
+        later = await self._save(journal_repository, "Runs past the end", 11, 13)
+        touching = await self._save(journal_repository, "Ends at the start", 8, 10)
+        await self._save(journal_repository, "Before", 8, 9)
+        await self._save(journal_repository, "Stranger's", 10, 12, self.STRANGER)
+
+        found = await journal_repository.find_overlapping_for_user(
+            self.OWNER,
+            exclude_journal_id=saved_id(target),
+            date_range=target.event_date_range,
+            limit=10,
+        )
+
+        assert [journal.id for journal in found] == [touching.id, later.id]
+        assert found[1].title == "Runs past the end"
+        assert found[1].content == "Test content"
+
+    async def test_limit_caps_the_candidates(
+        self, journal_repository: SqlJournalRepository
+    ) -> None:
+        target = await self._save(journal_repository, "Target", 10, 12)
+        first = await self._save(journal_repository, "First", 9, 11)
+        await self._save(journal_repository, "Second", 11, 12)
+
+        found = await journal_repository.find_overlapping_for_user(
+            self.OWNER,
+            exclude_journal_id=saved_id(target),
+            date_range=target.event_date_range,
+            limit=1,
+        )
+
+        assert [journal.id for journal in found] == [first.id]

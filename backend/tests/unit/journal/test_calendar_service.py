@@ -147,9 +147,10 @@ class TestDeleteCalendar:
         calendar = _calendar(id=uuid4())
         transaction = self._transaction_with_usage(2)
 
-        with pytest.raises(CalendarInUseError):
+        with pytest.raises(CalendarInUseError) as raised:
             await calendar_service.delete_calendar(
                 calendar, user_id="user-1", transaction=transaction
             )
 
+        assert raised.value.usage_count == 2
         mock_calendar_repo.delete.assert_not_awaited()

@@ -32,7 +32,6 @@ from core_shared.models.journals import (
 from fastmcp import FastMCP
 from fastmcp.tools import tool
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
@@ -43,7 +42,6 @@ from app.core.history.models import FieldHistoryEntry
 from app.core.history.services.journal_history_service import JournalHistoryService
 from app.core.integrations.external_link_helpers import (
     ExternalLinkInfo,
-    build_journal_external_links,
 )
 from app.core.integrations.link_sources import (
     journal_source_names,
@@ -141,7 +139,10 @@ from app.core.journal.models.repositories import (
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
-from app.core.journal.services.calendar_service import CalendarService
+from app.core.journal.services.calendar_service import (
+    CalendarInUseError,
+    CalendarService,
+)
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.gear_item_service import GearItemService
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
@@ -149,6 +150,9 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_external_link_service import (
+    JournalExternalLinkService,
+)
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_search_service import (
     SEARCH_SUGGESTIONS,
@@ -248,6 +252,7 @@ from app.mcp.shared.dependencies import (
     get_gear_item_service,
     get_incomplete_outdoor_activity_service,
     get_journal_contact_service,
+    get_journal_external_link_service,
     get_journal_tag_service,
     get_journal_write_service,
     get_outbox_event_publisher,
@@ -528,74 +533,6 @@ def _external_links_preserved(
     before_keys = {(link.source, link.external_id) for link in before}
     after_keys = {(link.source, link.external_id) for link in after}
     return before_keys <= after_keys
-
-
-async def _fetch_journal_external_links(
-    journal_id: int,
-    db_connection: AsyncConnection,
-    user_id: str,
-) -> list[ExternalLinkInfo]:
-    """Fetch external system links for a journal.
-
-    Fetches Strava activity links, Google Calendar links from
-    journal_external_event_links, and Snipe-IT / Immich links, then builds
-    ExternalLinkInfo objects using the shared helper.
-
-    Args:
-        journal_id: The journal ID to fetch links for
-        db_connection: Database connection for the link queries
-        user_id: The user ID to filter Snipe-IT sync metadata links
-
-    Returns:
-        List of ExternalLinkInfo objects for the journal.
-    """
-    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-
-    journal_repo = SqlJournalRepository(db_connection)
-
-    # Every Strava activity linked to the journal — an additively merged
-    # journal carries more than one.
-    strava_activity_ids = await journal_repo.get_strava_activity_ids(journal_id)
-
-    snipeit_links = await journal_repo.get_snipeit_links(journal_id, user_id)
-
-    # Fetch Immich album links and the user's Immich server URL (reusing the
-    # canonical read-only server-URL accessor — no API-key decryption).
-    from app.mcp.shared.dependencies import get_immich_token_service
-
-    immich_album_links = await journal_repo.get_immich_album_links(journal_id)
-    immich_token_service = await get_immich_token_service()
-    immich_server_url = await immich_token_service.get_server_url(user_id)
-
-    # Fetch Google Calendar external event links
-    result = await db_connection.execute(
-        text(
-            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
-            "FROM journal_external_event_links l "
-            "JOIN calendars c ON l.calendar_id = c.id "
-            "WHERE l.journal_id = :journal_id "
-            "AND l.external_event_id IS NOT NULL "
-            "AND trim(l.external_event_id) != '' "
-            "AND c.google_calendar_id IS NOT NULL"
-        ),
-        {"journal_id": journal_id},
-    )
-    external_event_links = [
-        {
-            "external_event_id": row[0],
-            "calendar_id": str(row[1]) if row[1] else None,
-            "internal_calendar_id": str(row[2]) if row[2] else None,
-        }
-        for row in result
-    ]
-
-    return build_journal_external_links(
-        strava_activity_ids=strava_activity_ids,
-        external_event_links=external_event_links,
-        snipeit_links=snipeit_links,
-        immich_album_links=immich_album_links,
-        immich_server_url=immich_server_url,
-    )
 
 
 async def _build_search_results(
@@ -917,6 +854,9 @@ async def create_journal_entry(
     request: JournalCreateRequest,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Create a new journal entry with types, type-specific data, relationships, and tags.
@@ -1072,9 +1012,7 @@ async def create_journal_entry(
     types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
 
     parent = await _fetch_parent_journal(created_journal, repos.journal_repo, user_id)
-    external_links = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    external_links = await link_service.links_for_journal(journal_id, user_id)
 
     # Convert to AI-friendly response
     response = JournalConverter.to_response(
@@ -1100,6 +1038,9 @@ async def update_journal_entry(
     request: JournalUpdateRequest,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Update an existing journal entry with partial data.
@@ -1183,9 +1124,7 @@ async def update_journal_entry(
     # Snapshot integration links so the response can state whether the update
     # preserved them (an agent cannot otherwise tell an omitted field from a
     # destroyed link).
-    links_before = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    links_before = await link_service.links_for_journal(journal_id, user_id)
 
     # Apply the requested core-field changes to the loaded journal.
     if request.title is not None:
@@ -1231,9 +1170,7 @@ async def update_journal_entry(
     types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
 
     parent = await _fetch_parent_journal(updated_journal, repos.journal_repo, user_id)
-    links_after = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    links_after = await link_service.links_for_journal(journal_id, user_id)
     links_preserved = _external_links_preserved(links_before, links_after)
 
     # Convert to AI-friendly response
@@ -1258,6 +1195,7 @@ async def _build_journal_response(
     journal_id: int,
     user_id: str,
     db_connection: AsyncConnection,
+    link_service: JournalExternalLinkService,
     *,
     include_children: bool = False,
 ) -> str:
@@ -1304,9 +1242,7 @@ async def _build_journal_response(
     ]
 
     # Fetch external links (Strava and Google Calendar)
-    external_links = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    external_links = await link_service.links_for_journal(journal_id, user_id)
 
     # Fetch every calendar this event lives in. One event held by two
     # calendars — where one invited the other — is a single journal linked
@@ -1347,6 +1283,9 @@ async def get_journal(
         ),
     ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Get journal details by ID for AI analysis.
@@ -1373,7 +1312,11 @@ async def get_journal(
     """
     user_id = await get_current_user_id()
     return await _build_journal_response(
-        journal_id, user_id, db_connection, include_children=include_children
+        journal_id,
+        user_id,
+        db_connection,
+        link_service,
+        include_children=include_children,
     )
 
 
@@ -1403,6 +1346,9 @@ async def get_journal_by_external_id(
         Field(default=False, description="Optional: Include child journals"),
     ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Find the journal linked to an external system's record.
@@ -1432,7 +1378,11 @@ async def get_journal_by_external_id(
             context={"source": source_filter, "external_id": normalized_id},
         )
     return await _build_journal_response(
-        journal_id, user_id, db_connection, include_children=include_children
+        journal_id,
+        user_id,
+        db_connection,
+        link_service,
+        include_children=include_children,
     )
 
 
@@ -2723,26 +2673,16 @@ async def delete_calendar(
     if not calendar or calendar.user_id != user_id:
         return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
 
-    check_query = text(
-        """
-        SELECT COUNT(*) as count
-        FROM journal_calendar_info
-        WHERE calendar_id = :calendar_id
-        """
-    )
-    result = await db_connection.execute(check_query, {"calendar_id": str(calendar.id)})
-    usage_count = int(result.scalar_one())
-
-    if usage_count > 0:
-        return MCPResponseBuilder.error_response(
-            "CONFLICT",
-            f"Calendar is in use by {usage_count} journal(s)",
-        )
-
     if calendar.id is not None:
-        await calendar_service.delete_calendar(
-            calendar, user_id, transaction=db_connection
-        )
+        try:
+            await calendar_service.delete_calendar(
+                calendar, user_id, transaction=db_connection
+            )
+        except CalendarInUseError as exc:
+            return MCPResponseBuilder.error_response(
+                "CONFLICT",
+                f"Calendar is in use by {exc.usage_count} journal(s)",
+            )
 
     class DeleteCalendarResponse(BaseModel):
         summary: str
@@ -2908,41 +2848,24 @@ async def get_merge_candidates(
     if not target:
         raise JournalNotFoundError(journal_id)
 
-    # Find journals with overlapping date ranges for the same user
-    query = text("""
-        SELECT j.id, j.title, j.content,
-               j.event_date_range_start, j.event_date_range_end
-        FROM journals j
-        WHERE j.user_id = :user_id
-          AND j.id != :journal_id
-          AND j.event_date_range_start <= :end_date
-          AND j.event_date_range_end >= :start_date
-        ORDER BY j.event_date_range_start
-        LIMIT :limit
-    """)
-
-    result = await db_connection.execute(
-        query,
-        {
-            # The caller's id, not the target's. They are the same id now that
-            # the read above is owner-scoped, and saying so keeps them the same
-            # if that guard is ever moved.
-            "user_id": user_id,
-            "journal_id": journal_id,
-            "start_date": target.event_date_range.start,
-            "end_date": target.event_date_range.end,
-            "limit": max(1, min(limit, 50)),
-        },
+    # Find journals with overlapping date ranges for the same user. The caller's
+    # id, not the target's: they are the same id now that the read above is
+    # owner-scoped, and saying so keeps them the same if that guard is ever moved.
+    overlapping = await repos.journal_repo.find_overlapping_for_user(
+        user_id,
+        exclude_journal_id=journal_id,
+        date_range=target.event_date_range,
+        limit=max(1, min(limit, 50)),
     )
-    rows = result.fetchall()
 
     candidates: list[MergeCandidateResult] = []
-    for row in rows:
-        candidate_id = int(row[0])
-        candidate_title = str(row[1])
-        candidate_content = str(row[2]) if row[2] else ""
-        candidate_start = row[3]
-        candidate_end = row[4]
+    for candidate in overlapping:
+        assert candidate.id is not None, "A stored journal has an id"
+        candidate_id = candidate.id
+        candidate_title = candidate.title
+        candidate_content = candidate.content or ""
+        candidate_start = candidate.event_date_range.start
+        candidate_end = candidate.event_date_range.end
 
         # Fetch types and tags for each candidate
         c_types, _ = await read_journal_types_and_data(candidate_id, repos)
