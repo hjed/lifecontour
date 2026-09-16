@@ -4,25 +4,26 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.integrations.models.snipeit import SnipeItSettings
 from app.core.integrations.services.snipeit_settings_service import (
     SnipeItSettingsService,
 )
 
 
 @pytest.fixture
-def mock_repo():
+def mock_repo() -> AsyncMock:
     """Create a mock Snipe-IT settings repository."""
     return AsyncMock()
 
 
 @pytest.fixture
-def mock_transaction():
+def mock_transaction() -> AsyncMock:
     """Create a mock transaction (not a real AsyncConnection)."""
     return AsyncMock()
 
 
 @pytest.fixture
-def service(mock_repo):
+def service(mock_repo: AsyncMock) -> SnipeItSettingsService:
     """Create a SnipeItSettingsService instance."""
     return SnipeItSettingsService(mock_repo)
 
@@ -32,11 +33,14 @@ class TestSaveSettings:
 
     @pytest.mark.asyncio
     async def test_save_settings_persists_and_returns(
-        self, service, mock_repo, mock_transaction
-    ):
+        self,
+        service: SnipeItSettingsService,
+        mock_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
         """save_settings upserts with a fresh candidate token and returns the saved entity."""
-        settings = object()
-        saved = object()
+        settings = SnipeItSettings(user_id="user-1", base_url="https://snipe.example")
+        saved = SnipeItSettings(user_id="user-1", base_url="https://snipe.example/")
         mock_repo.save.return_value = saved
 
         result = await service.save_settings(

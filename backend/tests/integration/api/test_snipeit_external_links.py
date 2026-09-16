@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -126,9 +127,9 @@ async def checkout_journal_with_snipeit_links(
 
 @pytest.mark.asyncio
 async def test_returns_snipeit_maintenance_link(
-    authenticated_client,
+    authenticated_client: AsyncClient,
     journal_with_snipeit_links: int,
-):
+) -> None:
     response = await authenticated_client.get(
         f"/api/journals/{journal_with_snipeit_links}/external-links"
     )
@@ -149,9 +150,9 @@ async def test_returns_snipeit_maintenance_link(
 
 @pytest.mark.asyncio
 async def test_returns_snipeit_checkout_asset_link(
-    authenticated_client,
+    authenticated_client: AsyncClient,
     checkout_journal_with_snipeit_links: int,
-):
+) -> None:
     response = await authenticated_client.get(
         f"/api/journals/{checkout_journal_with_snipeit_links}/external-links"
     )
@@ -169,10 +170,10 @@ async def test_returns_snipeit_checkout_asset_link(
 
 @pytest.mark.asyncio
 async def test_gear_item_returns_snipeit_asset_link(
-    authenticated_client,
+    authenticated_client: AsyncClient,
     checkout_journal_with_snipeit_links: int,
     async_connection: AsyncConnection,
-):
+) -> None:
     # Retrieve the gear_item_id associated with the checkout journal
     result = await async_connection.execute(
         text(

@@ -60,7 +60,9 @@ async def test_webhook_url_not_found_without_settings(
     )
 
 
-async def test_get_snipeit_settings_not_found(authenticated_client: AsyncClient):
+async def test_get_snipeit_settings_not_found(
+    authenticated_client: AsyncClient,
+) -> None:
     """Test GET settings returns 404 when not configured."""
     response = await authenticated_client.get("/api/integrations/snipeit/settings")
 
@@ -70,7 +72,9 @@ async def test_get_snipeit_settings_not_found(authenticated_client: AsyncClient)
     assert data["errors"][0]["detail"] == "No Snipe-IT settings found for this user"
 
 
-async def test_upsert_and_get_snipeit_settings(authenticated_client: AsyncClient):
+async def test_upsert_and_get_snipeit_settings(
+    authenticated_client: AsyncClient,
+) -> None:
     """Test PUT saves settings and GET retrieves them in JSON API format."""
     # Put settings
     put_payload = {
@@ -101,7 +105,7 @@ async def test_upsert_and_get_snipeit_settings(authenticated_client: AsyncClient
     assert get_attributes["snipeit_user_id"] == "42"
 
 
-async def test_trigger_gear_sync(authenticated_client: AsyncClient):
+async def test_trigger_gear_sync(authenticated_client: AsyncClient) -> None:
     """Test Snipe-IT gear sync endpoint."""
     from unittest.mock import AsyncMock, patch
 
@@ -175,7 +179,7 @@ async def test_trigger_gear_sync(authenticated_client: AsyncClient):
         assert mock_enqueue.call_args[1].get("sync_type") == "full"
 
 
-async def test_trigger_maintenance_sync(authenticated_client: AsyncClient):
+async def test_trigger_maintenance_sync(authenticated_client: AsyncClient) -> None:
     """Test Snipe-IT maintenance sync endpoint."""
     from unittest.mock import AsyncMock, patch
 
@@ -249,7 +253,7 @@ async def test_trigger_maintenance_sync(authenticated_client: AsyncClient):
         assert mock_enqueue.call_args[1].get("sync_type") == "full"
 
 
-async def test_trigger_checkout_sync(authenticated_client: AsyncClient):
+async def test_trigger_checkout_sync(authenticated_client: AsyncClient) -> None:
     """Test Snipe-IT checkout sync endpoint respects request sync_type."""
     response = await authenticated_client.post(
         "/api/integrations/snipeit/checkout/sync",
@@ -262,7 +266,9 @@ async def test_trigger_checkout_sync(authenticated_client: AsyncClient):
     assert data["data"]["attributes"]["syncType"] == "smart"
 
 
-async def test_trigger_checkout_sync_force_full(authenticated_client: AsyncClient):
+async def test_trigger_checkout_sync_force_full(
+    authenticated_client: AsyncClient,
+) -> None:
     """Test Snipe-IT checkout sync endpoint with force_full_sync."""
     response = await authenticated_client.post(
         "/api/integrations/snipeit/checkout/sync",

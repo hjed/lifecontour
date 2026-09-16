@@ -8,6 +8,7 @@ and update the database.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -116,7 +117,7 @@ class TestStreamConsumerIntegration:
         from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
 
         @asynccontextmanager
-        async def mock_session_factory():
+        async def mock_session_factory() -> AsyncIterator[SqlAsyncSession]:
             async with SqlAsyncSession(
                 async_connection,
                 expire_on_commit=False,
@@ -285,7 +286,7 @@ class TestStreamConsumerIntegration:
         from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
 
         @asynccontextmanager
-        async def mock_session_factory():
+        async def mock_session_factory() -> AsyncIterator[SqlAsyncSession]:
             async with SqlAsyncSession(
                 async_connection,
                 expire_on_commit=False,
