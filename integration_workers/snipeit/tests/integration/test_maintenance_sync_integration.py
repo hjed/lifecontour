@@ -1775,3 +1775,30 @@ class TestInboundSyncHonoursMaintenanceClaims:
 
         assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:9"]
         assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_claim_of_a_journal_already_recorded_is_spent(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A claim left beside a journal's record cannot link a second record to it."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=8
+        )
+        await _seed_claim(async_connection, journal_id=journal_id, status="failed")
+        mock_transport.add_response("/maintenances/9", json_data=_listed(9))
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[9],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert await _journal_events(async_connection) == ["journal_event.created"]
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:8"]

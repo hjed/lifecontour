@@ -1464,10 +1464,12 @@ class SnipeItSyncService:
     async def _user_maintenance_claims(
         self, session: Any
     ) -> list[tuple[int, MaintenanceClaim]]:
-        """Every claim of this user's journals, with the journal it belongs to.
+        """Every live claim of this user's journals, with the journal it belongs to.
 
         Maintenance ids are unique only within one Snipe-IT instance, so other
-        users' claims never count. A deleted journal's claim is ignored.
+        users' claims never count. A deleted journal's claim is ignored, and so
+        is a claim whose journal already has its record: it is spent, and must
+        not link a second record to that journal.
         """
         rows = await session.execute(
             text("""
@@ -1476,6 +1478,12 @@ class SnipeItSyncService:
                 JOIN journals j ON j.id::text = sm.internal_uuid
                 WHERE sm.integration_source = :claim_source
                   AND j.user_id = :user_id
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM sync_metadata recorded
+                      WHERE recorded.integration_source = 'snipeit_maintenance'
+                        AND recorded.internal_uuid = sm.internal_uuid
+                  )
             """),
             {"claim_source": _MAINTENANCE_CLAIM_SOURCE, "user_id": self._user_id},
         )
@@ -1533,9 +1541,13 @@ class SnipeItSyncService:
                     )
                     return True
                 [journal_id] = claimants
-                await _insert_push_row(
+                # Sync rows are keyed globally, so another user's sync may have
+                # recorded this maintenance id under another asset's lock; the
+                # journal then keeps its claim.
+                if not await _insert_push_row(
                     session, journal_id, external_id, _LINKED_VERSION_HASH
-                )
+                ):
+                    return False
                 await _delete_maintenance_claim(session, journal_id)
         logger.info(
             "Linked a Snipe-IT maintenance to the journal whose push created it",
