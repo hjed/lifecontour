@@ -87,6 +87,10 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
   - A linked record keeps what its creator sent: a failed attempt's values from before an edit, or a hand-entered record's own. When those differ from the journal's, the journal's values are sent to the record. An edit made while the journal had no sync row was never sent, so this is the only way it reaches Snipe-IT. The push row records the hash of what the record holds, and a redelivered push compares it again, so a failed update is retried with the event.
   - A record is held when a sync row names it: another journal's record, or an import, which belongs to its imported journal. It is also held when it matches a claim of another of the user's journals, since that journal's failed attempt may have created it.
   - The search reads the first 500 records per asset. When the maintenance list cannot be read (403/404), the record is posted without linking.
+  - The inbound maintenance sync checks claims before importing a record it has no sync row for. A record that exactly one of the user's journals' claims matches is linked to that journal instead of imported. This covers a record whose response was lost, and one fetched before its push recorded it. A record that several claims match is left unimported, and a later sync looks again once those pushes resolve.
+  - Known gaps:
+    - A push whose search missed a matching record (beyond the first 500) can still create a second record. This is logged as a warning, and that record imports as a separate journal.
+    - A journal deleted while its push was failing leaves a claim that is ignored, so a record its lost POST created imports as a new journal.
 - **Loop Prevention**: A record must never travel back to the system it came from.
   - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created in Snipe-IT again.
   - A journal update the inbound sync applied (`changed_by` is `snipeit_maintenance`) is not pushed; only a user's edit is.

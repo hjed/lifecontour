@@ -424,6 +424,27 @@ async def _fetch_maintenance_claim(session: Any, journal_id: int) -> Any:
     return result.fetchone()
 
 
+# ``version_hash`` of a push row the inbound sync writes when it links a claimed
+# record. Only an import compares hashes, and it skips push rows.
+_LINKED_VERSION_HASH = "LINKED"
+
+
+async def _recorded_maintenance(session: Any, journal_id: int) -> str | None:
+    """The ``snipeit_maint:{id}`` recorded as the journal's Snipe-IT maintenance."""
+    result = await session.execute(
+        text("""
+            SELECT external_id
+            FROM sync_metadata
+            WHERE integration_source = 'snipeit_maintenance'
+              AND internal_uuid = :journal_id
+            LIMIT 1
+        """),
+        {"journal_id": str(journal_id)},
+    )
+    external_id: str | None = result.scalar_one_or_none()
+    return external_id
+
+
 def _raise_if_claim_in_flight(journal_id: int, claim_row: Any) -> None:
     """Raise when ``claim_row`` is pending and touched within the in-flight window.
 
@@ -967,6 +988,8 @@ class SnipeItSyncService:
         external_id = f"snipeit_maint:{maintenance_id}"
 
         maintenance = await self._api_client.get_maintenance(maintenance_id)
+        if await self._link_claimed_maintenance(maintenance, session_factory):
+            raise _MaintenanceSkipped
 
         async with session_factory() as session:
             async with session.begin():
@@ -998,6 +1021,8 @@ class SnipeItSyncService:
                     raise _MaintenanceSkipped
 
                 gear_item_id = str(asset_meta.internal_uuid)
+                # A push writing this record's sync row commits it first.
+                await _lock_asset_maintenances(session, maintenance.asset_id)
 
                 # Imported dates are local midnights in the owner's zone, the
                 # zone a push reads them back in (imports record no event zone).
@@ -1436,6 +1461,89 @@ class SnipeItSyncService:
             return []
         return candidates
 
+    async def _user_maintenance_claims(
+        self, session: Any
+    ) -> list[tuple[int, MaintenanceClaim]]:
+        """Every claim of this user's journals, with the journal it belongs to.
+
+        Maintenance ids are unique only within one Snipe-IT instance, so other
+        users' claims never count. A deleted journal's claim is ignored.
+        """
+        rows = await session.execute(
+            text("""
+                SELECT j.id AS journal_id, sm.reference_data
+                FROM sync_metadata sm
+                JOIN journals j ON j.id::text = sm.internal_uuid
+                WHERE sm.integration_source = :claim_source
+                  AND j.user_id = :user_id
+            """),
+            {"claim_source": _MAINTENANCE_CLAIM_SOURCE, "user_id": self._user_id},
+        )
+        return [
+            (row.journal_id, claim)
+            for row in rows.fetchall()
+            if (claim := MaintenanceClaim.from_reference(row.reference_data))
+        ]
+
+    async def _link_claimed_maintenance(
+        self, maintenance: SnipeItMaintenance, session_factory: Any
+    ) -> bool:
+        """Record an unrecorded Snipe-IT maintenance as the journal whose push claims it.
+
+        A push claims its record before posting it, so a record whose response
+        was lost, or that a sync fetches before the push records it, is found
+        here rather than imported as a second journal. A record several of this
+        user's claims match is left alone: any of those journals' attempts may
+        have created it, and a later sync looks again.
+
+        Returns:
+            ``True`` when the record must not be imported.
+        """
+        if maintenance.asset_id is None:
+            return False
+        external_id = f"snipeit_maint:{maintenance.id}"
+        async with session_factory() as session:
+            async with session.begin():
+                await _lock_asset_maintenances(session, maintenance.asset_id)
+                recorded = await session.execute(
+                    text("""
+                        SELECT 1
+                        FROM sync_metadata
+                        WHERE integration_source = 'snipeit_maintenance'
+                          AND external_id = :external_id
+                    """),
+                    {"external_id": external_id},
+                )
+                if recorded.fetchone():
+                    return False
+                claimants = [
+                    journal_id
+                    for journal_id, claim in await self._user_maintenance_claims(
+                        session
+                    )
+                    if claim.matches(maintenance)
+                ]
+                if not claimants:
+                    return False
+                if len(claimants) > 1:
+                    logger.warning(
+                        "Leaving a Snipe-IT maintenance several journals' pushes claim",
+                        maintenance_id=maintenance.id,
+                        journal_ids=claimants,
+                    )
+                    return True
+                [journal_id] = claimants
+                await _insert_push_row(
+                    session, journal_id, external_id, _LINKED_VERSION_HASH
+                )
+                await _delete_maintenance_claim(session, journal_id)
+        logger.info(
+            "Linked a Snipe-IT maintenance to the journal whose push created it",
+            maintenance_id=maintenance.id,
+            journal_id=journal_id,
+        )
+        return True
+
     async def _free_maintenance(
         self,
         session: Any,
@@ -1461,25 +1569,10 @@ class SnipeItSyncService:
             {"external_ids": [f"snipeit_maint:{m.id}" for m in candidates]},
         )
         recorded = {row.external_id for row in rows.fetchall()}
-        claim_rows = await session.execute(
-            text("""
-                SELECT sm.reference_data
-                FROM sync_metadata sm
-                JOIN journals j ON j.id::text = sm.internal_uuid
-                WHERE sm.integration_source = :claim_source
-                  AND sm.external_id <> :journal_id
-                  AND j.user_id = :user_id
-            """),
-            {
-                "claim_source": _MAINTENANCE_CLAIM_SOURCE,
-                "journal_id": str(journal_id),
-                "user_id": self._user_id,
-            },
-        )
         other_claims = [
-            other
-            for row in claim_rows.fetchall()
-            if (other := MaintenanceClaim.from_reference(row.reference_data))
+            claim
+            for claimant, claim in await self._user_maintenance_claims(session)
+            if claimant != journal_id
         ]
         return next(
             (
@@ -1515,16 +1608,7 @@ class SnipeItSyncService:
         async with session_factory() as session:
             async with session.begin():
                 await _lock_asset_maintenances(session, claim.asset_id)
-                pushed = await session.execute(
-                    text("""
-                        SELECT 1
-                        FROM sync_metadata
-                        WHERE integration_source = 'snipeit_maintenance'
-                          AND internal_uuid = :journal_id
-                    """),
-                    {"journal_id": str(journal_id)},
-                )
-                if pushed.fetchone():
+                if await _recorded_maintenance(session, journal_id) is not None:
                     return "recorded"
                 _raise_if_claim_in_flight(
                     journal_id, await _fetch_maintenance_claim(session, journal_id)
@@ -1582,6 +1666,10 @@ class SnipeItSyncService:
     ) -> None:
         """Replace the journal's claim with the sync row of the record it posted.
 
+        The inbound sync may have recorded the journal's record while the POST
+        was in flight. When that is another record (one this push's search
+        missed), the posted one is reported rather than recorded twice.
+
         A record's row is never re-pointed. Sync rows are not scoped to a user,
         so another user's Snipe-IT can hold the same maintenance id; that row is
         left alone and reported, and the journal keeps its claim.
@@ -1589,6 +1677,18 @@ class SnipeItSyncService:
         async with session_factory() as session:
             async with session.begin():
                 await _lock_asset_maintenances(session, claim.asset_id)
+                linked = await _recorded_maintenance(session, journal_id)
+                if linked is not None:
+                    if linked != external_id:
+                        logger.warning(
+                            "Created a Snipe-IT maintenance for a journal already "
+                            "linked to another; the new record will import as a "
+                            "separate journal",
+                            journal_id=journal_id,
+                            external_id=external_id,
+                            linked_external_id=linked,
+                        )
+                    return
                 if not await _insert_push_row(
                     session, journal_id, external_id, version_hash
                 ):
