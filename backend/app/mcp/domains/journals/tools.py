@@ -126,8 +126,18 @@ from app.core.journal.adapters.sql.snorkelling_data_repository import (
     SqlSnorkellingDataRepository,
 )
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
+from app.core.journal.models.activity_stats import (
+    ActivityFilters,
+    ActivityJournalRow,
+    ActivityMetric,
+    TrendInterval,
+    parse_activity_type,
+)
 from app.core.journal.models.journal_tag import JournalTag
-from app.core.journal.models.repositories import JournalTagRepository
+from app.core.journal.models.repositories import (
+    ActivityStatsRepository,
+    JournalTagRepository,
+)
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
@@ -229,6 +239,7 @@ from app.mcp.shared.annotations import (
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
+    get_activity_stats_repository,
     get_activity_template_service,
     get_async_connection,
     get_calendar_service,
@@ -283,32 +294,6 @@ class _JournalToolRepositories:
     tag_repo: SqlJournalTagRepository
     activity_template_repo: SqlActivityTemplateRepository
     gear_item_repo: SqlGearItemRepository
-
-
-@dataclasses.dataclass(frozen=True)
-class _ActivityJournalRow:
-    """Activity journal row enriched with resolved activity metrics."""
-
-    journal: Journal
-    activity_type: str
-    distance: int
-    duration: int
-    elevation_gain: int
-    calories: int
-
-
-_ACTIVITY_TYPE_PRECEDENCE: tuple[JournalType, ...] = (
-    JournalType.CANYONING,
-    JournalType.CAVING,
-    JournalType.CROSS_COUNTRY_SKIING,
-    JournalType.KAYAKING,
-    JournalType.CLIMBING,
-    JournalType.ABSEILING_TRIP,
-    JournalType.BUSHWALKING,
-    JournalType.JOGGING,
-    JournalType.OUTDOOR_ACTIVITY,
-    JournalType.FITNESS,
-)
 
 
 def _create_journal_tool_repositories(
@@ -408,21 +393,6 @@ def _parse_type_filters(types: str | None) -> list[str]:
     return parsed_types
 
 
-def _parse_activity_type_filter(activity_type: str | None) -> str | None:
-    """Parse and validate an effective activity type filter."""
-    if activity_type is None:
-        return None
-
-    normalized = activity_type.strip().lower()
-    allowed_types = {journal_type.value for journal_type in _ACTIVITY_TYPE_PRECEDENCE}
-    if normalized not in allowed_types:
-        allowed = ", ".join(sorted(allowed_types))
-        raise ValueError(
-            f"Invalid activity_type '{activity_type}'. Must be one of: {allowed}"
-        )
-    return normalized
-
-
 def _parse_integration_source_filter(value: str | None) -> str | None:
     """Normalise an integration source filter (None passes through)."""
     return None if value is None else resolve_journal_source(value)
@@ -506,33 +476,21 @@ def _parse_optional_datetime_filter(
     )
 
 
-def _journal_from_row(row: Any) -> Journal:
-    """Build a journal entity from a SQL result row."""
-    return Journal(
-        id=row.id,
-        user_id=row.user_id,
-        title=row.title,
-        content=row.content,
-        event_date_range=EventDateRange(
-            start=row.event_date_range_start,
-            end=row.event_date_range_end,
-        ),
-        parent_id=row.parent_id,
-        order=row.journal_order,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-    )
-
-
-def _activity_row_from_row(row: Any) -> _ActivityJournalRow:
-    """Build an activity journal row from a SQL result row."""
-    return _ActivityJournalRow(
-        journal=_journal_from_row(row),
-        activity_type=row.activity_type,
-        distance=int(row.distance or 0),
-        duration=int(row.duration or 0),
-        elevation_gain=int(row.elevation_gain or 0),
-        calories=int(row.calories or 0),
+def _activity_filters(
+    user_id: str,
+    *,
+    activity_type: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    search_query: str | None = None,
+) -> ActivityFilters:
+    """Validate the activity tools' filter arguments into ``ActivityFilters``."""
+    return ActivityFilters(
+        user_id=user_id,
+        activity_type=parse_activity_type(activity_type),
+        start_date=_parse_optional_datetime_filter(start_date, "start_date"),
+        end_date=_parse_optional_datetime_filter(end_date, "end_date", is_end=True),
+        search_query=search_query,
     )
 
 
@@ -644,7 +602,7 @@ async def _build_search_results(
     journals: list[Journal],
     repos: _JournalToolRepositories,
     *,
-    activity_rows_by_id: dict[int, _ActivityJournalRow] | None = None,
+    activity_rows_by_id: dict[int, ActivityJournalRow] | None = None,
 ) -> list[JournalSearchResult]:
     """Build AI-friendly journal search results with concrete types included."""
     results: list[JournalSearchResult] = []
@@ -696,361 +654,6 @@ async def _build_hierarchy_node(
         children_count=node.children_count,
         children=children,
     )
-
-
-def _build_activity_query_filters(
-    user_id: str,
-    *,
-    search_query: str | None = None,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> tuple[dict[str, Any], list[str]]:
-    """Build shared parameters and filters for activity journal queries."""
-    normalized_activity_type = _parse_activity_type_filter(activity_type)
-    start_date_filter = _parse_optional_datetime_filter(start_date, "start_date")
-    end_date_filter = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
-
-    params: dict[str, Any] = {"user_id": user_id}
-    where_clauses: list[str] = []
-
-    if search_query:
-        params["search_pattern"] = f"%{search_query}%"
-        where_clauses.append(
-            "(title ILIKE :search_pattern OR content ILIKE :search_pattern)"
-        )
-
-    if normalized_activity_type is not None:
-        params["activity_type"] = normalized_activity_type
-        where_clauses.append("activity_type = :activity_type")
-
-    if start_date_filter is not None:
-        params["start_date"] = start_date_filter
-        where_clauses.append("event_date_range_end >= :start_date")
-
-    if end_date_filter is not None:
-        params["end_date"] = end_date_filter
-        where_clauses.append("event_date_range_start <= :end_date")
-
-    return params, where_clauses
-
-
-def _build_activity_rows_query_sql(
-    where_clauses: list[str],
-    *,
-    select_sql: str,
-    include_ordering: bool,
-) -> str:
-    """Build activity journal SQL with optional shared filters and ordering."""
-    query_sql = f"""
-        WITH activity_rows AS (
-            SELECT
-                j.id,
-                j.user_id,
-                j.title,
-                j.content,
-                j.event_date_range_start,
-                j.event_date_range_end,
-                j.parent_id,
-                j."order" AS journal_order,
-                j.created_at,
-                j.updated_at,
-                COALESCE(f.distance, 0) AS distance,
-                COALESCE(f.duration, 0) AS duration,
-                COALESCE(f.elevation_gain, 0) AS elevation_gain,
-                COALESCE(f.calories, 0) AS calories,
-                CASE
-                    WHEN canyoning.journal_id IS NOT NULL THEN 'canyoning'
-                    WHEN skiing.journal_id IS NOT NULL THEN 'cross_country_skiing'
-                    WHEN kayaking.journal_id IS NOT NULL THEN 'kayaking'
-                    WHEN climbing.journal_id IS NOT NULL THEN 'climbing'
-                    WHEN abseiling.journal_id IS NOT NULL THEN 'abseiling_trip'
-                    WHEN bushwalking.journal_id IS NOT NULL THEN 'bushwalking'
-                    WHEN jogging.journal_id IS NOT NULL THEN 'jogging'
-                    WHEN outdoor_activity.journal_id IS NOT NULL THEN 'outdoor_activity'
-                    ELSE 'fitness'
-                END AS activity_type
-            FROM journals j
-            INNER JOIN journal_fitness_data f ON f.journal_id = j.id
-            LEFT JOIN journal_outdoor_activity_data outdoor_activity
-                ON outdoor_activity.journal_id = j.id
-            LEFT JOIN journal_bushwalking_data bushwalking
-                ON bushwalking.journal_id = j.id
-            LEFT JOIN journal_jogging_data jogging
-                ON jogging.journal_id = j.id
-            LEFT JOIN journal_abseiling_data abseiling
-                ON abseiling.journal_id = j.id
-            LEFT JOIN journal_canyoning_data canyoning
-                ON canyoning.journal_id = j.id
-            LEFT JOIN journal_climbing_data climbing
-                ON climbing.journal_id = j.id
-            LEFT JOIN journal_kayaking_data kayaking
-                ON kayaking.journal_id = j.id
-            LEFT JOIN journal_skiing_data skiing
-                ON skiing.journal_id = j.id
-            WHERE j.user_id = :user_id
-        )
-        {select_sql}
-        FROM activity_rows
-        """
-
-    if where_clauses:
-        query_sql += "\n        WHERE " + " AND ".join(where_clauses)
-
-    if include_ordering:
-        query_sql += "\n        ORDER BY event_date_range_start DESC, created_at DESC"
-
-    return query_sql
-
-
-async def _fetch_activity_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    search_query: str | None = None,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-) -> list[_ActivityJournalRow]:
-    """Fetch activity journals with resolved effective activity types and metrics."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        search_query=search_query,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="SELECT *",
-        include_ordering=True,
-    )
-
-    if limit is not None:
-        params["limit"] = limit
-        params["offset"] = offset
-        query_sql += "\n        LIMIT :limit OFFSET :offset"
-
-    result = await db_connection.execute(text(query_sql), params)
-    return [_activity_row_from_row(row) for row in result.fetchall()]
-
-
-async def _count_activity_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    search_query: str | None = None,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> int:
-    """Count matching activity journals without materializing the full result set."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        search_query=search_query,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="SELECT COUNT(*)",
-        include_ordering=False,
-    )
-
-    result = await db_connection.execute(text(query_sql), params)
-    row = result.fetchone()
-    if row is None:
-        return 0
-    count_value = row[0]
-    return int(count_value) if count_value is not None else 0
-
-
-async def _fetch_activity_overall_stats_row(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> Any:
-    """Fetch overall activity aggregate totals without materializing activity rows."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="""
-        SELECT
-            COUNT(*) AS total_activities,
-            COALESCE(SUM(distance), 0) AS total_distance,
-            COALESCE(SUM(duration), 0) AS total_duration,
-            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
-            COALESCE(SUM(calories), 0) AS total_calories
-        """,
-        include_ordering=False,
-    )
-
-    result = await db_connection.execute(text(query_sql), params)
-    return result.fetchone()
-
-
-async def _fetch_activity_type_stats_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> list[Any]:
-    """Fetch grouped activity-type aggregates in SQL."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="""
-        SELECT
-            activity_type,
-            COUNT(*) AS count,
-            COALESCE(SUM(distance), 0) AS total_distance,
-            COALESCE(SUM(duration), 0) AS total_duration,
-            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
-            COALESCE(SUM(calories), 0) AS total_calories
-        """,
-        include_ordering=False,
-    )
-    query_sql += """
-        GROUP BY activity_type
-        ORDER BY activity_type
-    """
-
-    result = await db_connection.execute(text(query_sql), params)
-    return list(result.fetchall())
-
-
-async def _fetch_activity_personal_record_row(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    metric_name: str,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> Any:
-    """Fetch the top personal-record row for a metric in SQL."""
-    if metric_name not in {"distance", "duration", "elevation_gain", "calories"}:
-        raise ValueError(f"Unsupported activity metric '{metric_name}'")
-
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql=f"""
-        SELECT
-            id AS journal_id,
-            title AS journal_title,
-            activity_type,
-            {metric_name} AS metric_value,
-            event_date_range_start,
-            created_at
-        """,
-        include_ordering=False,
-    )
-    query_sql += f"""
-        ORDER BY {metric_name} DESC, event_date_range_start DESC, created_at DESC
-        LIMIT 1
-    """
-
-    result = await db_connection.execute(text(query_sql), params)
-    return result.fetchone()
-
-
-async def _fetch_activity_trend_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    interval: str,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> list[Any]:
-    """Fetch time-bucketed activity aggregates in SQL."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    params["interval_unit"] = interval
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="""
-        SELECT
-            DATE_TRUNC(:interval_unit, event_date_range_start AT TIME ZONE 'UTC')::date AS period_start,
-            COUNT(*) AS activity_count,
-            COALESCE(SUM(distance), 0) AS total_distance,
-            COALESCE(SUM(duration), 0) AS total_duration,
-            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain
-        """,
-        include_ordering=False,
-    )
-    query_sql += """
-        GROUP BY period_start
-        ORDER BY period_start
-    """
-
-    result = await db_connection.execute(text(query_sql), params)
-    return list(result.fetchall())
-
-
-async def _fetch_route_history_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    route_id: UUID,
-) -> list[Any]:
-    """Fetch route usage rows across all route-aware activity tables."""
-    query = text(
-        """
-        SELECT
-            j.id,
-            j.user_id,
-            j.title,
-            j.content,
-            j.event_date_range_start,
-            j.event_date_range_end,
-            j.parent_id,
-            j."order" AS journal_order,
-            j.created_at,
-            j.updated_at,
-            f.distance,
-            f.duration,
-            'ROUTE' AS activity_type
-        FROM journals j
-        INNER JOIN routes r ON r.journal_id = j.id
-        LEFT JOIN journal_fitness_data f ON f.journal_id = j.id
-        WHERE j.user_id = :user_id
-          AND r.id = :route_id
-        ORDER BY j.event_date_range_start DESC, j.created_at DESC
-        """
-    )
-    result = await db_connection.execute(
-        query,
-        {"user_id": user_id, "route_id": route_id},
-    )
-    return list(result.fetchall())
 
 
 async def _fetch_contact_relationships_with_names(
@@ -2342,30 +1945,26 @@ async def search_activities(
         Field(default=20, description="Maximum number of results to return"),
     ] = 20,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_stats_repo: ActivityStatsRepository = mcp_depends(
+        get_activity_stats_repository
+    ),
 ) -> str:
     """Search activity journals with effective activity-type filtering."""
     user_id = await get_current_user_id()
     repos = _create_journal_tool_repositories(db_connection)
-    total_hits = await _count_activity_rows(
-        db_connection,
+    filters = _activity_filters(
         user_id,
-        search_query=query,
         activity_type=activity_type,
         start_date=start_date,
         end_date=end_date,
+        search_query=query,
     )
+    total_hits = await activity_stats_repo.count_activity_journals(filters)
 
-    activity_rows: list[_ActivityJournalRow] = []
+    activity_rows: list[ActivityJournalRow] = []
     if total_hits > 0:
-        activity_rows = await _fetch_activity_rows(
-            db_connection,
-            user_id,
-            search_query=query,
-            activity_type=activity_type,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-            offset=0,
+        activity_rows = await activity_stats_repo.list_activity_journals(
+            filters, limit=limit, offset=0
         )
 
     results = await _build_search_results(
@@ -2402,72 +2001,63 @@ async def get_activity_stats(
         str | None,
         Field(default=None, description="Optional ISO end date/datetime filter"),
     ] = None,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_stats_repo: ActivityStatsRepository = mcp_depends(
+        get_activity_stats_repository
+    ),
 ) -> str:
     """Aggregate activity totals, breakdowns, and personal records."""
     user_id = await get_current_user_id()
-    overall_stats_row = await _fetch_activity_overall_stats_row(
-        db_connection,
+    filters = _activity_filters(
         user_id,
         activity_type=activity_type,
         start_date=start_date,
         end_date=end_date,
     )
-    activity_type_rows = await _fetch_activity_type_stats_rows(
-        db_connection,
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
+    totals = await activity_stats_repo.get_totals(filters)
+    activity_type_rows = await activity_stats_repo.list_type_totals(filters)
 
     overall_totals = ActivityTotals(
-        distance=int(getattr(overall_stats_row, "total_distance", 0) or 0),
-        duration=int(getattr(overall_stats_row, "total_duration", 0) or 0),
-        elevation_gain=int(getattr(overall_stats_row, "total_elevation_gain", 0) or 0),
-        calories=int(getattr(overall_stats_row, "total_calories", 0) or 0),
+        distance=totals.total_distance,
+        duration=totals.total_duration,
+        elevation_gain=totals.total_elevation_gain,
+        calories=totals.total_calories,
     )
 
     activity_type_stats = [
         ActivityTypeStats(
             activity_type=row.activity_type,
-            count=int(row.count or 0),
-            total_distance=int(row.total_distance or 0),
-            total_duration=int(row.total_duration or 0),
-            total_elevation_gain=int(row.total_elevation_gain or 0),
-            total_calories=int(row.total_calories or 0),
+            count=row.count,
+            total_distance=row.total_distance,
+            total_duration=row.total_duration,
+            total_elevation_gain=row.total_elevation_gain,
+            total_calories=row.total_calories,
         )
         for row in activity_type_rows
     ]
 
     async def build_personal_record(
-        metric_name: str,
+        metric: ActivityMetric,
     ) -> ActivityPersonalRecord | None:
-        record_row = await _fetch_activity_personal_record_row(
-            db_connection,
-            user_id,
-            metric_name=metric_name,
-            activity_type=activity_type,
-            start_date=start_date,
-            end_date=end_date,
-        )
+        record_row = await activity_stats_repo.find_personal_record(filters, metric)
         if record_row is None:
             return None
 
         return ActivityPersonalRecord(
             activity_type=record_row.activity_type,
-            journal_id=int(record_row.journal_id),
+            journal_id=record_row.journal_id,
             journal_title=record_row.journal_title,
-            value=int(record_row.metric_value or 0),
+            value=record_row.value,
         )
 
     personal_records = {
-        "longest_distance": await build_personal_record("distance"),
-        "longest_duration": await build_personal_record("duration"),
-        "highest_elevation_gain": await build_personal_record("elevation_gain"),
-        "most_calories": await build_personal_record("calories"),
+        "longest_distance": await build_personal_record(ActivityMetric.DISTANCE),
+        "longest_duration": await build_personal_record(ActivityMetric.DURATION),
+        "highest_elevation_gain": await build_personal_record(
+            ActivityMetric.ELEVATION_GAIN
+        ),
+        "most_calories": await build_personal_record(ActivityMetric.CALORIES),
     }
-    total_activities = int(getattr(overall_stats_row, "total_activities", 0) or 0)
+    total_activities = totals.total_activities
 
     response = ActivityStatsResponse(
         total_activities=total_activities,
@@ -2504,30 +2094,33 @@ async def analyze_activity_trends(
         str | None,
         Field(default=None, description="Optional ISO end date/datetime filter"),
     ] = None,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_stats_repo: ActivityStatsRepository = mcp_depends(
+        get_activity_stats_repository
+    ),
 ) -> str:
     """Analyse activity trends by day, week, month, or year buckets."""
     normalized_interval = interval.strip().lower()
-    if normalized_interval not in {"day", "week", "month", "year"}:
-        raise ValueError("interval must be one of: day, week, month, year")
+    try:
+        trend_interval = TrendInterval(normalized_interval)
+    except ValueError as exc:
+        raise ValueError("interval must be one of: day, week, month, year") from exc
 
     user_id = await get_current_user_id()
-    trend_rows = await _fetch_activity_trend_rows(
-        db_connection,
+    filters = _activity_filters(
         user_id,
-        interval=normalized_interval,
         activity_type=activity_type,
         start_date=start_date,
         end_date=end_date,
     )
+    trend_rows = await activity_stats_repo.list_trend_buckets(filters, trend_interval)
 
     periods = [
         ActivityTrendPeriod(
             period_start=row.period_start.isoformat(),
-            activity_count=int(row.activity_count or 0),
-            total_distance=int(row.total_distance or 0),
-            total_duration=int(row.total_duration or 0),
-            total_elevation_gain=int(row.total_elevation_gain or 0),
+            activity_count=row.activity_count,
+            total_distance=row.total_distance,
+            total_duration=row.total_duration,
+            total_elevation_gain=row.total_elevation_gain,
         )
         for row in trend_rows
     ]
@@ -2570,18 +2163,18 @@ async def get_route_history(
     if journal is None or journal.user_id != user_id:
         return MCPResponseBuilder.not_found_error_response("Route", route_id)
 
-    history_rows = await _fetch_route_history_rows(db_connection, user_id, route_uuid)
+    history_rows = await repos.route_repo.find_usage_history(user_id, route_uuid)
     entries = [
         RouteHistoryEntry(
-            journal_id=row.id,
-            journal_title=row.title,
+            journal_id=row.journal_id,
+            journal_title=row.journal_title,
             activity_type=row.activity_type,
             event_date_range=EventDateRangeSchema(
-                start=row.event_date_range_start,
-                end=row.event_date_range_end,
+                start=row.event_date_range.start,
+                end=row.event_date_range.end,
             ),
-            distance=int(row.distance) if row.distance is not None else None,
-            duration=int(row.duration) if row.duration is not None else None,
+            distance=row.distance,
+            duration=row.duration,
         )
         for row in history_rows
     ]

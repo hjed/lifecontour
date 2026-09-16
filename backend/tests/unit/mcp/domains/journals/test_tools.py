@@ -16,11 +16,6 @@ from fastmcp import Client, FastMCP
 
 from app.core.history.models import FieldHistoryEntry
 from app.mcp.domains.journals.tools import (
-    _fetch_activity_overall_stats_row,
-    _fetch_activity_personal_record_row,
-    _fetch_activity_rows,
-    _fetch_activity_trend_rows,
-    _fetch_activity_type_stats_rows,
     _journal_history_entry_to_schema,
     _parse_optional_datetime_filter,
     _resolve_tag_filters,
@@ -395,109 +390,6 @@ class TestDatetimeFilterParsing:
         assert _parse_optional_datetime_filter(
             "2024-03-11T09:15:00Z", "start_date"
         ) == datetime(2024, 3, 11, 9, 15, 0, tzinfo=UTC)
-
-
-class TestFetchActivityRows:
-    @pytest.mark.asyncio
-    async def test_applies_sql_limit_and_offset(self) -> None:
-        db_connection = AsyncMock()
-        result = MagicMock()
-        result.fetchall.return_value = []
-        db_connection.execute.return_value = result
-
-        await _fetch_activity_rows(
-            db_connection,
-            "user-123",
-            activity_type="jogging",
-            limit=5,
-            offset=10,
-        )
-
-        query = db_connection.execute.await_args.args[0]
-        params = db_connection.execute.await_args.args[1]
-
-        assert "LIMIT :limit OFFSET :offset" in str(query)
-        assert params["limit"] == 5
-        assert params["offset"] == 10
-
-
-class TestActivityAggregationQueries:
-    @pytest.mark.asyncio
-    async def test_fetches_overall_activity_stats_in_sql(self) -> None:
-        db_connection = AsyncMock()
-        result = MagicMock()
-        result.fetchone.return_value = (0, 0, 0, 0, 0)
-        db_connection.execute.return_value = result
-
-        await _fetch_activity_overall_stats_row(
-            db_connection,
-            "user-123",
-            activity_type="jogging",
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-        )
-
-        query = db_connection.execute.await_args.args[0]
-        params = db_connection.execute.await_args.args[1]
-
-        assert "COUNT(*) AS total_activities" in str(query)
-        assert "COALESCE(SUM(distance), 0) AS total_distance" in str(query)
-        assert params["activity_type"] == "jogging"
-
-    @pytest.mark.asyncio
-    async def test_fetches_activity_type_breakdown_in_sql(self) -> None:
-        db_connection = AsyncMock()
-        result = MagicMock()
-        result.fetchall.return_value = []
-        db_connection.execute.return_value = result
-
-        await _fetch_activity_type_stats_rows(db_connection, "user-123")
-
-        query = db_connection.execute.await_args.args[0]
-
-        assert "GROUP BY activity_type" in str(query)
-        assert "ORDER BY activity_type" in str(query)
-        assert "COUNT(*) AS count" in str(query)
-
-    @pytest.mark.asyncio
-    async def test_fetches_personal_record_with_sql_ordering_and_limit(self) -> None:
-        db_connection = AsyncMock()
-        result = MagicMock()
-        result.fetchone.return_value = None
-        db_connection.execute.return_value = result
-
-        await _fetch_activity_personal_record_row(
-            db_connection,
-            "user-123",
-            metric_name="distance",
-        )
-
-        query = db_connection.execute.await_args.args[0]
-
-        assert "distance AS metric_value" in str(query)
-        assert "ORDER BY distance DESC" in str(query)
-        assert "LIMIT 1" in str(query)
-
-    @pytest.mark.asyncio
-    async def test_fetches_activity_trend_buckets_in_sql(self) -> None:
-        db_connection = AsyncMock()
-        result = MagicMock()
-        result.fetchall.return_value = []
-        db_connection.execute.return_value = result
-
-        await _fetch_activity_trend_rows(
-            db_connection,
-            "user-123",
-            interval="month",
-        )
-
-        query = db_connection.execute.await_args.args[0]
-        params = db_connection.execute.await_args.args[1]
-
-        assert "DATE_TRUNC(:interval_unit" in str(query)
-        assert "GROUP BY period_start" in str(query)
-        assert "ORDER BY period_start" in str(query)
-        assert params["interval_unit"] == "month"
 
 
 class TestMergeToolRegistration:

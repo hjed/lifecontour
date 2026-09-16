@@ -21,6 +21,7 @@ from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
 from app.core.history.services.task_history_service import TaskHistoryService
+from app.core.journal.models.repositories import ActivityStatsRepository
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
@@ -184,6 +185,13 @@ async def get_upcoming_important_dates_service() -> UpcomingImportantDatesServic
 async def get_contact_merge_service() -> ContactMergeService:
     """Resolve the contact merge service for the current MCP request."""
     return cast(ContactMergeService, await _resolve_dependency(ContactMergeService))
+
+
+async def get_activity_stats_repository() -> ActivityStatsRepository:
+    """Resolve the activity stats repository for the current MCP request."""
+    return cast(
+        ActivityStatsRepository, await _resolve_dependency(ActivityStatsRepository)
+    )
 
 
 async def get_search_service() -> SearchService:
