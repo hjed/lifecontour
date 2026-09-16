@@ -4157,13 +4157,6 @@ async def list_review_items(
             description="Filter by items status, must be 'pending' for now",
         ),
     ] = "pending",
-    user_id_override: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Only for use in tests. Override the user_id.",
-        ),
-    ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
 ) -> str:
     """
@@ -4175,10 +4168,7 @@ async def list_review_items(
     Returns AI-friendly response containing reason, confidence score, and
     candidate journal ids for review.
     """
-    # Determine the user ID using similar logic to other tools
-    # The user ID is usually extracted from the context, or we can use a helper if we have it
-    # Actually tools usually take the test_user_id from context if provided.
-    user_id = user_id_override or "dev-system-user"
+    user_id = await get_current_user_id()
 
     if status != "pending":
         return json.dumps({"error": "Only 'pending' status is currently supported"})
@@ -4244,7 +4234,6 @@ async def list_review_items(
 @mcp_unified_error_handler("dismiss_review_item", "journal")
 async def dismiss_review_item(
     item_id: int,
-    user_id_override: str | None = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     review_item_service: ReviewItemService = mcp_depends(get_review_item_service),
 ) -> str:
@@ -4254,7 +4243,7 @@ async def dismiss_review_item(
     Use this tool to dismiss a pending merge candidate review item that the user
     has determined is not a match or should not be merged.
     """
-    user_id = user_id_override or "dev-system-user"
+    user_id = await get_current_user_id()
 
     item = await review_item_service.dismiss(
         item_id, user_id, transaction=db_connection

@@ -663,6 +663,23 @@ class TestMergeToolRegistration:
             assert "limit" in properties
 
 
+class TestReviewItemToolSchemas:
+    """The review queue tools act for the authenticated user only."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_name", ["list_review_items", "dismiss_review_item"])
+    async def test_no_argument_selects_whose_review_items(self, tool_name: str) -> None:
+        mcp: FastMCP[None] = FastMCP("TestServer")
+        register_journal_tools(mcp)
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+
+        properties = tools[tool_name].input_schema.get("properties", {})
+        assert "user_id_override" not in properties
+        assert not any("user" in name for name in properties)
+
+
 class TestMergeJournalMCPRequestSchema:
     """Test MergeJournalMCPRequest Pydantic schema validation."""
 
