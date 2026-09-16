@@ -30,7 +30,7 @@ from core_shared.models.journals.outdoor_activity_subtypes import (
     OutdoorActivitySubtype,
 )
 
-from app.mcp.domains.journals.tools import list_journal_types
+from app.mcp.domains.journals.tools.journals import list_journal_types
 from app.mcp.server import create_mcp_server
 
 
