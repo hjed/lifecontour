@@ -9,14 +9,19 @@ caller can report it loudly rather than as an empty result, and
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, date, datetime, time, timedelta
+from typing import TYPE_CHECKING, Any
 
 from meilisearch.errors import MeilisearchError
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.search.search_service import SearchService
+
+if TYPE_CHECKING:
+    from core_shared.models.journals import Journal
+
+    from app.core.journal.models.repositories import JournalRepository
 
 SEARCH_UNAVAILABLE_HINT = (
     "The search backend (MeiliSearch) could not be reached, so this is NOT an "
@@ -149,3 +154,139 @@ WINDOW_SUGGESTIONS = [
     "Dates are matched on the journal's event date range, in UTC.",
     "Use search_journals for a text search without a date restriction.",
 ]
+
+
+def compute_date_window(
+    anchor: date, days_back: int, days_forward: int
+) -> tuple[date, date]:
+    """Compute a date window around an anchor date.
+
+    Args:
+        anchor: The centre date for the window.
+        days_back: How many days before the anchor to include.
+        days_forward: How many days after the anchor to include.
+
+    Returns:
+        Tuple of (window_start, window_end) as date objects.
+    """
+    return (
+        anchor - timedelta(days=days_back),
+        anchor + timedelta(days=days_forward),
+    )
+
+
+@dataclass(frozen=True)
+class DateWindowOutcome:
+    """A page of the journals in a date window.
+
+    ``searched`` says which read produced the page: a full-text search
+    (``hits``) or a database listing (``journals``); the other list is empty.
+    ``start_iso`` is the window's first day; ``total_count`` counts every match,
+    not just this page.
+    """
+
+    window_start: date
+    window_end: date
+    start_iso: str
+    total_count: int
+    searched: bool
+    journals: list[Journal]
+    hits: list[JournalSearchHit]
+
+
+class JournalSearchService:
+    """Finds a user's journals by date window, filters and full text."""
+
+    def __init__(
+        self, journal_repo: JournalRepository, search_service: SearchService
+    ) -> None:
+        self.journal_repo = journal_repo
+        self.search_service = search_service
+
+    async def browse_window(
+        self,
+        user_id: str,
+        *,
+        anchor: date,
+        days_back: int,
+        days_forward: int,
+        type_filters: list[str],
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> DateWindowOutcome:
+        """The journals whose event range overlaps the window around ``anchor``.
+
+        One type filter is applied by the database; several are applied only
+        to a text search. A non-blank ``search`` runs through MeiliSearch
+        restricted to the window's journals.
+
+        Raises:
+            SearchServiceUnavailableError: If the text search cannot reach
+                MeiliSearch.
+        """
+        window_start, window_end = compute_date_window(anchor, days_back, days_forward)
+
+        start_iso = window_start.isoformat()
+        # Use end-of-day for window_end so journals occurring later on that
+        # day are included (the repo compares event_date_range_start <= end_date,
+        # and date.isoformat() alone yields midnight which would exclude them).
+        end_iso = datetime.combine(window_end, time(23, 59, 59), tzinfo=UTC).isoformat()
+
+        journal_type = type_filters[0] if len(type_filters) == 1 else None
+
+        total_count = await self.journal_repo.count_all(
+            user_id=user_id,
+            journal_type=journal_type,
+            start_date=start_iso,
+            end_date=end_iso,
+        )
+
+        if search and search.strip():
+            # Text search inside the window goes through MeiliSearch (word
+            # matching and typo tolerance, as in the web UI) restricted to the
+            # window's journal ids, rather than a literal substring match.
+            in_window = await self.journal_repo.get_all(
+                user_id=user_id,
+                limit=max(total_count, 1),
+                offset=0,
+                journal_type=journal_type,
+                start_date=start_iso,
+                end_date=end_iso,
+            )
+            window_ids = {j.id for j in in_window if j.id is not None}
+            matched, _total, _ms = search_journals_text(
+                self.search_service,
+                query=search.strip(),
+                user_id=user_id,
+                limit=max(len(window_ids), 1),
+                type_filters=type_filters,
+                journal_ids=window_ids,
+            )
+            return DateWindowOutcome(
+                window_start=window_start,
+                window_end=window_end,
+                start_iso=start_iso,
+                total_count=len(matched),
+                searched=True,
+                journals=[],
+                hits=matched[offset : offset + limit],
+            )
+
+        journals = await self.journal_repo.get_all(
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            journal_type=journal_type,
+            start_date=start_iso,
+            end_date=end_iso,
+        )
+        return DateWindowOutcome(
+            window_start=window_start,
+            window_end=window_end,
+            start_iso=start_iso,
+            total_count=total_count,
+            searched=False,
+            journals=journals,
+            hits=[],
+        )

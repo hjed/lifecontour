@@ -7,8 +7,6 @@ These unit tests focus on tool registration and basic structure.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
 import pytest
 from core_shared.models.history import Provenance
@@ -18,7 +16,6 @@ from app.core.history.models import FieldHistoryEntry
 from app.mcp.domains.journals.tools import (
     _journal_history_entry_to_schema,
     _parse_optional_datetime_filter,
-    _resolve_tag_filters,
     register_journal_tools,
 )
 
@@ -500,62 +497,3 @@ class TestMergeJournalMCPRequestSchema:
 
         with pytest.raises(ValidationError, match="source_journal_id"):
             MergeJournalMCPRequest.model_validate({})
-
-
-class TestTagFilterResolution:
-    """``_resolve_tag_filters`` turns the MCP ``tags`` string into tag ids."""
-
-    @staticmethod
-    def _tag_repo(
-        *,
-        by_name: dict[str, object] | None = None,
-        descendants: list[object] | None = None,
-    ) -> AsyncMock:
-        repo = AsyncMock()
-        lookup = by_name or {}
-        repo.find_by_name.side_effect = lambda name: lookup.get(name.lower())
-        repo.get_descendants_for_tags.return_value = descendants or []
-        return repo
-
-    @pytest.mark.asyncio
-    async def test_uuids_pass_through(self) -> None:
-        tag_id = uuid4()
-        repo = self._tag_repo()
-
-        assert await _resolve_tag_filters(str(tag_id), repo) == [str(tag_id)]
-        repo.find_by_name.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_names_are_resolved_to_ids(self) -> None:
-        tag_id = uuid4()
-        repo = self._tag_repo(by_name={"hiking": MagicMock(id=tag_id)})
-
-        assert await _resolve_tag_filters("Hiking", repo) == [str(tag_id)]
-
-    @pytest.mark.asyncio
-    async def test_descendant_tags_are_included(self) -> None:
-        parent_id, child_id = uuid4(), uuid4()
-        repo = self._tag_repo(
-            by_name={"outdoors": MagicMock(id=parent_id)},
-            descendants=[MagicMock(id=child_id)],
-        )
-
-        resolved = await _resolve_tag_filters("outdoors", repo)
-
-        assert resolved is not None
-        assert set(resolved) == {str(parent_id), str(child_id)}
-
-    @pytest.mark.asyncio
-    async def test_unknown_name_is_an_error_not_a_silent_empty_filter(self) -> None:
-        """Dropping an unresolvable tag would widen the search without saying so."""
-        repo = self._tag_repo()
-
-        with pytest.raises(ValueError, match="nonexistent-tag"):
-            await _resolve_tag_filters("nonexistent-tag", repo)
-
-    @pytest.mark.asyncio
-    async def test_blank_input_means_no_filter(self) -> None:
-        repo = self._tag_repo()
-
-        assert await _resolve_tag_filters(None, repo) is None
-        assert await _resolve_tag_filters("  , ", repo) is None

@@ -7,7 +7,7 @@ Each tool is designed to return AI-friendly, contextual information.
 
 import dataclasses
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from datetime import time as dt_time
 from typing import Annotated, Any
 from uuid import UUID
@@ -134,7 +134,6 @@ from app.core.journal.models.activity_stats import (
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import (
     ActivityStatsRepository,
-    JournalTagRepository,
 )
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
@@ -159,13 +158,11 @@ from app.core.journal.services.journal_search_service import (
     SEARCH_UNAVAILABLE_HINT,
     WINDOW_SUGGESTIONS,
     JournalSearchHit,
+    JournalSearchService,
     explain_empty_result,
     search_journals_text,
 )
 from app.core.journal.services.journal_service import JournalService
-from app.core.journal.services.journal_tag_hierarchy_service import (
-    JournalTagHierarchyService,
-)
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_type_data_reader import (
     read_journal_types_and_data,
@@ -253,6 +250,7 @@ from app.mcp.shared.dependencies import (
     get_incomplete_outdoor_activity_service,
     get_journal_contact_service,
     get_journal_external_link_service,
+    get_journal_search_service,
     get_journal_tag_service,
     get_journal_write_service,
     get_outbox_event_publisher,
@@ -401,54 +399,6 @@ def _parse_type_filters(types: str | None) -> list[str]:
 def _parse_integration_source_filter(value: str | None) -> str | None:
     """Normalise an integration source filter (None passes through)."""
     return None if value is None else resolve_journal_source(value)
-
-
-async def _resolve_tag_filters(
-    tags: str | None, tag_repo: JournalTagRepository
-) -> list[str] | None:
-    """Resolve a comma-separated ``tags`` filter to journal tag ids.
-
-    Each entry is either a tag UUID or a tag name, because a name is what an AI
-    client actually has to hand; names match case-insensitively, as the
-    repository does. A name that resolves to nothing raises rather than being
-    dropped, which would silently widen the search instead of narrowing it.
-
-    Every id is then expanded to its whole subtree, so filtering by a parent tag
-    returns journals tagged with a descendant — the behaviour the REST journal
-    list gets from ``JournalService._expand_tag_ids_with_descendants``.
-    """
-    if not tags:
-        return None
-
-    resolved: dict[str, None] = {}
-    for raw_tag in tags.split(","):
-        value = raw_tag.strip()
-        if not value:
-            continue
-        try:
-            resolved[str(UUID(value))] = None
-            continue
-        except ValueError:
-            pass
-        tag = await tag_repo.find_by_name(value)
-        if tag is None or tag.id is None:
-            raise ValueError(
-                f"Unknown journal tag '{value}'. Pass a tag name or id from "
-                "list_journal_tags."
-            )
-        resolved[str(tag.id)] = None
-
-    if not resolved:
-        return None
-
-    descendants = await JournalTagHierarchyService(tag_repo).get_all_descendants_bulk(
-        [UUID(tag_id) for tag_id in resolved]
-    )
-    for descendant in descendants:
-        if descendant.id is not None:
-            resolved[str(descendant.id)] = None
-
-    return list(resolved)
 
 
 def _parse_optional_datetime_filter(
@@ -783,25 +733,6 @@ async def _fetch_enrichment_data(
     tags = await repos.tag_repo.get_tags_for_journal(journal_id)
 
     return types, type_data, contacts, tags
-
-
-def compute_date_window(
-    anchor: date, days_back: int, days_forward: int
-) -> tuple[date, date]:
-    """Compute a date window around an anchor date.
-
-    Args:
-        anchor: The centre date for the window.
-        days_back: How many days before the anchor to include.
-        days_forward: How many days after the anchor to include.
-
-    Returns:
-        Tuple of (window_start, window_end) as date objects.
-    """
-    return (
-        anchor - timedelta(days=days_back),
-        anchor + timedelta(days=days_forward),
-    )
 
 
 @tool(annotations=READ_ONLY)
@@ -1643,6 +1574,7 @@ async def search_journals(
     ] = 0,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     search_service: SearchService = mcp_depends(get_search_service),
+    tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
 ) -> str:
     """
     Search journals with filtering options.
@@ -1686,7 +1618,9 @@ async def search_journals(
     source_filter = _parse_integration_source_filter(integration_source)
     start_filter = _parse_optional_datetime_filter(start_date, "start_date")
     end_filter = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
-    tag_filters = await _resolve_tag_filters(tags, repos.tag_repo)
+    tag_filters = (
+        await tag_service.resolve_filter_tag_ids(tags.split(",")) if tags else None
+    )
 
     # The filters the database resolves, in the spelling get_all/count_all use.
     relational_filters: dict[str, Any] = {
@@ -2970,7 +2904,9 @@ async def browse_journals_by_date_window(
         ),
     ] = 0,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    search_service: SearchService = mcp_depends(get_search_service),
+    journal_search_service: JournalSearchService = mcp_depends(
+        get_journal_search_service
+    ),
 ) -> str:
     """
     Browse journals within a date window anchored on a given date.
@@ -3008,66 +2944,34 @@ async def browse_journals_by_date_window(
     else:
         resolved_anchor = datetime.now(UTC).date()
 
-    window_start, window_end = compute_date_window(
-        resolved_anchor, days_back, days_forward
-    )
-
-    start_iso = window_start.isoformat()
-    # Use end-of-day for window_end so journals occurring later on that
-    # day are included (the repo compares event_date_range_start <= end_date,
-    # and date.isoformat() alone yields midnight which would exclude them).
-    end_iso = datetime.combine(window_end, dt_time(23, 59, 59), tzinfo=UTC).isoformat()
-
     type_filters = _parse_type_filters(types)
-    journal_type = type_filters[0] if len(type_filters) == 1 else None
 
-    total_count = await repos.journal_repo.count_all(
-        user_id=user_id,
-        journal_type=journal_type,
-        start_date=start_iso,
-        end_date=end_iso,
-    )
-
-    if search and search.strip():
-        # Text search inside the window goes through MeiliSearch (word matching
-        # and typo tolerance, as in the web UI) restricted to the window's
-        # journal ids, rather than a literal substring match.
-        in_window = await repos.journal_repo.get_all(
-            user_id=user_id,
-            limit=max(total_count, 1),
-            offset=0,
-            journal_type=journal_type,
-            start_date=start_iso,
-            end_date=end_iso,
-        )
-        window_ids = {j.id for j in in_window if j.id is not None}
-        try:
-            matched, _total, _ms = _meili_search_journals(
-                search_service,
-                query=search.strip(),
-                user_id=user_id,
-                limit=max(len(window_ids), 1),
-                type_filters=type_filters,
-                journal_ids=window_ids,
-            )
-        except SearchServiceUnavailableError as exc:
-            return MCPResponseBuilder.error_response(
-                error_type="Search unavailable",
-                message=exc.message,
-                context={"search": search, "hint": SEARCH_UNAVAILABLE_HINT},
-            )
-        total_count = len(matched)
-        results = matched[offset : offset + limit]
-    else:
-        journals = await repos.journal_repo.get_all(
-            user_id=user_id,
+    try:
+        window = await journal_search_service.browse_window(
+            user_id,
+            anchor=resolved_anchor,
+            days_back=days_back,
+            days_forward=days_forward,
+            type_filters=type_filters,
+            search=search,
             limit=limit,
             offset=offset,
-            journal_type=journal_type,
-            start_date=start_iso,
-            end_date=end_iso,
         )
-        results = await _build_search_results(journals, repos)
+    except SearchServiceUnavailableError as exc:
+        return MCPResponseBuilder.error_response(
+            error_type="Search unavailable",
+            message=exc.message,
+            context={"search": search, "hint": SEARCH_UNAVAILABLE_HINT},
+        )
+
+    results = (
+        [_search_hit_to_result(hit) for hit in window.hits]
+        if window.searched
+        else await _build_search_results(window.journals, repos)
+    )
+    total_count = window.total_count
+    start_iso = window.start_iso
+    window_end = window.window_end
 
     has_more = (offset + limit) < total_count
 

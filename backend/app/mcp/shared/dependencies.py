@@ -35,6 +35,7 @@ from app.core.journal.services.journal_contact_service import JournalContactServ
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
+from app.core.journal.services.journal_search_service import JournalSearchService
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
@@ -203,6 +204,11 @@ async def get_journal_external_link_service() -> JournalExternalLinkService:
         JournalExternalLinkService,
         await _resolve_dependency(JournalExternalLinkService),
     )
+
+
+async def get_journal_search_service() -> JournalSearchService:
+    """Resolve the journal search service for the current MCP request."""
+    return cast(JournalSearchService, await _resolve_dependency(JournalSearchService))
 
 
 async def get_search_service() -> SearchService:

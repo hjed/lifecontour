@@ -193,6 +193,7 @@ from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
 from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.journal.services.journal_search_service import JournalSearchService
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_hierarchy_service import (
@@ -220,6 +221,7 @@ from app.core.tasks.services.task_read_service import TaskReadService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.search.search_service import SearchService
 
 # What the daily summary "model" says when ENABLE_TEST_DAILY_SUMMARY_STUB is on.
 # Fixed rather than configurable, so the e2e suite can assert the sentence.
@@ -737,6 +739,15 @@ class JournalProvider(Provider):
         """Provide a JournalExternalLinkService instance."""
         return JournalExternalLinkService(
             journal_repo=journal_repo, immich_token_service=immich_token_service
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_search_service(
+        self, journal_repo: JournalRepository, search_service: SearchService
+    ) -> JournalSearchService:
+        """Provide a JournalSearchService instance."""
+        return JournalSearchService(
+            journal_repo=journal_repo, search_service=search_service
         )
 
     @provide(scope=Scope.REQUEST)
