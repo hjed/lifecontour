@@ -1464,13 +1464,20 @@ class SnipeItSyncService:
         Maintenance ids are unique only within one Snipe-IT instance, so other
         users' claims never count. A deleted journal's claim is ignored, and so
         is a claim whose journal already has its record: it is spent, and must
-        not link a second record to that journal.
+        not link a second record to that journal. A claim made for an asset the
+        journal has since moved from is ignored too, as the push ignores it: the
+        record it describes is on the wrong gear to be the journal's.
         """
         rows = await session.execute(
             text("""
-                SELECT j.id AS journal_id, sm.reference_data
+                SELECT j.id AS journal_id, sm.reference_data,
+                       asset.external_id AS asset_external_id
                 FROM sync_metadata sm
                 JOIN journals j ON j.id::text = sm.internal_uuid
+                JOIN journal_gear_maintenance_data gm ON gm.journal_id = j.id
+                JOIN sync_metadata asset
+                    ON asset.integration_source = 'snipeit'
+                   AND asset.internal_uuid = gm.gear_item_id::text
                 WHERE sm.integration_source = :claim_source
                   AND j.user_id = :user_id
                   AND NOT EXISTS (
@@ -1486,6 +1493,7 @@ class SnipeItSyncService:
             (row.journal_id, claim)
             for row in rows.fetchall()
             if (claim := MaintenanceClaim.from_reference(row.reference_data))
+            and str(claim.asset_id) == row.asset_external_id
         ]
 
     async def _link_claimed_maintenance(
