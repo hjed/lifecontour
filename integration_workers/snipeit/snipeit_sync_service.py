@@ -424,11 +424,6 @@ async def _fetch_maintenance_claim(session: Any, journal_id: int) -> Any:
     return result.fetchone()
 
 
-# ``version_hash`` of a push row the inbound sync writes when it links a claimed
-# record. Only an import compares hashes, and it skips push rows.
-_LINKED_VERSION_HASH = "LINKED"
-
-
 async def _recorded_maintenance(session: Any, journal_id: int) -> str | None:
     """The ``snipeit_maint:{id}`` recorded as the journal's Snipe-IT maintenance."""
     result = await session.execute(
@@ -1545,7 +1540,10 @@ class SnipeItSyncService:
                 # recorded this maintenance id under another asset's lock; the
                 # journal then keeps its claim.
                 if not await _insert_push_row(
-                    session, journal_id, external_id, _LINKED_VERSION_HASH
+                    session,
+                    journal_id,
+                    external_id,
+                    _payload_version_hash(_snipeit_record_payload(maintenance)),
                 ):
                     return False
                 await _delete_maintenance_claim(session, journal_id)
