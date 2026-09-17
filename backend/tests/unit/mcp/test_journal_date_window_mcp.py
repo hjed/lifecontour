@@ -22,6 +22,7 @@ class TestJournalDateWindowResponse:
             window_start="2026-03-31",
             window_end="2026-04-06",
             anchor_date="2026-04-02",
+            timezone="Australia/Sydney",
             total_count=0,
             has_more=False,
             summary="Found 0 journals in window",
@@ -30,6 +31,7 @@ class TestJournalDateWindowResponse:
         assert data["window_start"] == "2026-03-31"
         assert data["window_end"] == "2026-04-06"
         assert data["anchor_date"] == "2026-04-02"
+        assert data["timezone"] == "Australia/Sydney"
         assert data["total_count"] == 0
         assert data["has_more"] is False
         assert data["results"] == []
@@ -55,6 +57,7 @@ class TestJournalDateWindowResponse:
             window_start="2026-03-31",
             window_end="2026-04-06",
             anchor_date="2026-04-02",
+            timezone="Australia/Sydney",
             total_count=1,
             has_more=False,
             summary="Found 1 journal in window",
@@ -68,6 +71,7 @@ class TestJournalDateWindowResponse:
             window_start="2026-03-31",
             window_end="2026-04-06",
             anchor_date="2026-04-02",
+            timezone="Australia/Sydney",
             total_count=50,
             has_more=True,
             summary="Found 50 journals in window",

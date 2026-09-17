@@ -2450,8 +2450,8 @@ async def browse_journals_by_date_window(
         Field(
             default=None,
             description=(
-                "Optional ISO date to anchor the window on (defaults to today). "
-                "Example: '2026-04-02'"
+                "Optional ISO date to anchor the window on (defaults to today "
+                "in the user's configured timezone). Example: '2026-04-02'"
             ),
         ),
     ] = None,
@@ -2511,13 +2511,17 @@ async def browse_journals_by_date_window(
 
     Returns journals falling within [anchor - days_back, anchor + days_forward].
     Defaults to a 7-day window (2 days back, 4 days forward from today).
+    Days are the user's local days: "today" and each day's midnight are taken in
+    the user's configured timezone (UTC when none is set), which the response
+    reports as ``timezone``.
     Supports pagination via offset/limit and optional type/search filters.
 
     Use this tool for time-oriented journal browsing, such as seeing
     what happened recently or what is coming up.
 
     Args:
-        anchor_date: ISO date string to centre the window on (defaults to today)
+        anchor_date: ISO date string to centre the window on (defaults to today
+            in the user's timezone)
         days_back: Days before the anchor to include
         days_forward: Days after the anchor to include
         types: Comma-separated journal types to filter by
@@ -2531,23 +2535,23 @@ async def browse_journals_by_date_window(
     user_id = await get_current_user_id()
     repos = create_journal_tool_repositories(db_connection)
 
-    # Resolve anchor date
+    # Parsed here, but left unresolved: the service defaults it to today in the
+    # user's timezone, which is also the zone its day boundaries are drawn in.
+    requested_anchor: date | None = None
     if anchor_date is not None:
         try:
-            resolved_anchor = date.fromisoformat(anchor_date.strip())
+            requested_anchor = date.fromisoformat(anchor_date.strip())
         except ValueError as exc:
             raise ValueError(
                 f"Invalid anchor_date '{anchor_date}'. Must be ISO format (YYYY-MM-DD)."
             ) from exc
-    else:
-        resolved_anchor = datetime.now(UTC).date()
 
     type_filters = parse_type_filters(types)
 
     try:
         window = await journal_search_service.browse_window(
             user_id,
-            anchor=resolved_anchor,
+            anchor=requested_anchor,
             days_back=days_back,
             days_forward=days_forward,
             type_filters=type_filters,
@@ -2569,21 +2573,23 @@ async def browse_journals_by_date_window(
     )
     total_count = window.total_count
     start_iso = window.start_iso
-    window_end = window.window_end
+    end_iso = window.window_end.isoformat()
+    anchor_iso = window.anchor.isoformat()
 
     has_more = (offset + limit) < total_count
 
     response = JournalDateWindowResponse(
         results=results,
         window_start=start_iso,
-        window_end=window_end.isoformat(),
-        anchor_date=resolved_anchor.isoformat(),
+        window_end=end_iso,
+        anchor_date=anchor_iso,
+        timezone=window.timezone,
         total_count=total_count,
         has_more=has_more,
         summary=(
             f"Found {total_count} journal(s) between "
-            f"{start_iso} and {window_end.isoformat()} "
-            f"(anchored on {resolved_anchor.isoformat()})"
+            f"{start_iso} and {end_iso} "
+            f"(anchored on {anchor_iso}, {window.timezone})"
         ),
         diagnostics=await _zero_result_diagnostics(
             repos,
@@ -2591,7 +2597,8 @@ async def browse_journals_by_date_window(
             search_backend="meilisearch" if search and search.strip() else "database",
             filters={
                 "window_start": start_iso,
-                "window_end": window_end.isoformat(),
+                "window_end": end_iso,
+                "timezone": window.timezone,
                 "types": types,
                 "search": search,
             },

@@ -295,6 +295,7 @@ class TestZeroResultDiagnostics:
         assert diagnostics["filters"] == {
             "window_start": "2025-08-30",
             "window_end": "2025-09-09",
+            "timezone": "UTC",
         }
         assert any("Widen the window" in s for s in diagnostics["suggestions"])
 

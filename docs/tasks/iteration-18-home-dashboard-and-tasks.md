@@ -5520,6 +5520,7 @@ rather than its exit code.
   that payload would disagree with itself about what day it is. **Follow-up recorded:** that UTC
   anchor is a defect on its own terms — it is the same "date windows use the user's timezone" rule
   Phase 3 established — and it should be fixed by a phase that has business in that tool.
+  *Resolved in #1507: the tool now anchors and bounds its window in the user's configured timezone.*
 - **"Not computed" is not zero, and the schema is where that is said.** `tasks_due_count` is
   **nullable**: `int | None`, defaulting to `None`, so only the endpoint that actually runs the count
   ever writes a number. Every other journal payload answers `null` — the key is present, since
