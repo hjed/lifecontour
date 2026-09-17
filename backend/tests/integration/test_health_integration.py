@@ -109,3 +109,18 @@ async def test_outbox_backlog_counts_the_events_not_yet_relayed(
 
     assert response.status_code == 200
     assert response.json() == {"unrelayed_count": 2}
+
+
+@pytest.mark.integration
+def test_outbox_backlog_answers_a_health_probe_with_no_session(
+    integration_test_client: TestClient,
+) -> None:
+    """The outbox backlog is part of the anonymous health surface.
+
+    Its sibling probes are read without a session, and a monitor reading this
+    one has none either, so authentication must never creep on to it.
+    """
+    response = integration_test_client.get("/api/health/outbox-backlog")
+
+    assert response.status_code == 200
+    assert isinstance(response.json()["unrelayed_count"], int)
