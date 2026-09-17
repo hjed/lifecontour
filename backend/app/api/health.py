@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.infrastructure.config import Settings
 from app.infrastructure.database import check_database_connection
 from app.infrastructure.events.dead_letter_repository import DeadLetterRepository
+from app.infrastructure.events.outbox_repository import OutboxRepository
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -45,6 +46,12 @@ class HealthResponse(BaseModel):
     timestamp: datetime
     version: str
     uptime: str
+
+
+class OutboxBacklogResponse(BaseModel):
+    """Outbox backlog response model."""
+
+    unrelayed_count: int
 
 
 class DetailedHealthResponse(BaseModel):
@@ -327,6 +334,26 @@ async def get_consumer_lag(
         raise HTTPException(
             status_code=500, detail="Failed to retrieve consumer lag"
         ) from e
+
+
+@router.get("/health/outbox-backlog")
+@inject
+async def get_outbox_backlog(
+    connection: FromDishka[AsyncConnection],
+) -> OutboxBacklogResponse:
+    """Get the number of domain events not yet relayed to the events stream.
+
+    With ``/health/consumer-lag`` this places a backlog: events waiting here
+    have not reached any consumer group yet.
+    """
+    try:
+        count = await OutboxRepository(connection).count_unrelayed()
+    except Exception as e:
+        logger.error("Failed to get outbox backlog", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve outbox backlog"
+        ) from e
+    return OutboxBacklogResponse(unrelayed_count=count)
 
 
 @router.get("/health/dead-letters")

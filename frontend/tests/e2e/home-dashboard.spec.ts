@@ -22,6 +22,10 @@ import {
   type TestJournal,
   type TestTask,
 } from './fixtures';
+import {
+  SUMMARY_INVALIDATION_GROUP,
+  waitForDomainEventsSettled,
+} from './utils/domain-events';
 
 /**
  * Home Dashboard — page shell (ITER18-004 Phase 3)
@@ -2368,15 +2372,16 @@ async function regenerateThroughApi(page: Page, journalCount: number) {
 }
 
 /**
- * Make today's summary stale with one last task write, and wait until the
- * read-only dashboard endpoint reports it.
+ * Make today's summary stale with one last task write, and wait until every
+ * invalidation the test's writes cause has landed.
  *
- * The task is due inside today's window, so its update invalidates today. The
- * poll cannot tell this write's invalidation from a seeding one still queued
- * behind the regeneration (the task's creation invalidates today too), so this
- * write's own invalidation may land while the page's read is generating. That
- * read absorbs it — `get_or_generate` generates again from current inputs
- * (#1483) — so the load still answers with one generated summary.
+ * The task is due inside today's window, so its update invalidates today. So
+ * do the seeding writes before it, and the outbox relay can deliver all of them
+ * as one burst after the regeneration. Waiting for today to *read* stale passes
+ * on the burst's first invalidation, and the rest then overtake the page's read
+ * as it generates (#1512). Waiting for the summary-invalidation group to apply
+ * every event instead means the load starts with none in flight — and today
+ * reporting stale is then a fact to assert, not a condition to wait for.
  */
 async function staleTodayWithLastTaskWrite(
   page: Page,
@@ -2384,9 +2389,8 @@ async function staleTodayWithLastTaskWrite(
   task: TestTask
 ) {
   await dataManager.updateTaskText(task.id, `${task.text} (edited)`);
-  await expect
-    .poll(() => servedSummaryState(page), { timeout: 30000 })
-    .toBe(GENERATING);
+  await waitForDomainEventsSettled(page, SUMMARY_INVALIDATION_GROUP);
+  expect(await servedSummaryState(page)).toBe(GENERATING);
 }
 
 /** Today's summary state as the read-only dashboard endpoint reports it. */
@@ -2438,8 +2442,7 @@ test.describe('Home Dashboard — the summary, generated end to end', () => {
     );
 
     // Today holds a summary, then one last task write makes it stale: the load
-    // below starts from a stale row, and an invalidation still in flight is
-    // absorbed by the read that generates.
+    // below starts from a stale row, with no invalidation still in flight.
     await regenerateThroughApi(page, 1);
     await staleTodayWithLastTaskWrite(page, dataManager, task);
 

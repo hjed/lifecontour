@@ -261,6 +261,11 @@ export interface ConsumerGroupLag {
   'entries-read'?: number;
 }
 
+/** Domain events not yet relayed from the outbox to the events stream. */
+export interface OutboxBacklog {
+  unrelayed_count: number;
+}
+
 export async function fetchConsumerLag(): Promise<ConsumerGroupLag[]> {
   const response = await fetch('/api/health/consumer-lag', {
     credentials: 'include',
