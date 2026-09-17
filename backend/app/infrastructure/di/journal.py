@@ -25,6 +25,9 @@ from app.core.journal.adapters.sql.abseil_pitch_repository import (
 from app.core.journal.adapters.sql.abseiling_data_repository import (
     SqlAbseilingDataRepository,
 )
+from app.core.journal.adapters.sql.activity_stats_repository import (
+    SqlActivityStatsRepository,
+)
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
 )
@@ -123,6 +126,7 @@ from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRe
 from app.core.journal.models.repositories import (
     AbseilingDataRepository,
     AbseilPitchRepository,
+    ActivityStatsRepository,
     ActivityTemplateRepository,
     AgendaRepository,
     BushwalkingDataRepository,
@@ -185,6 +189,9 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.journal.services.journal_external_link_service import (
+    JournalExternalLinkService,
+)
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_service import JournalService
@@ -210,6 +217,7 @@ from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
 from app.core.tasks.services.task_read_service import TaskReadService
+from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.config import Settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
@@ -488,6 +496,13 @@ class JournalProvider(Provider):
         return SqlIncompleteOutdoorActivityRepository(connection)
 
     @provide(scope=Scope.REQUEST)
+    def activity_stats_repository(
+        self, connection: AsyncConnection
+    ) -> ActivityStatsRepository:
+        """Provide an ActivityStatsRepository instance."""
+        return SqlActivityStatsRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
     def outdoor_dashboard_repository(
         self, connection: AsyncConnection
     ) -> OutdoorDashboardRepository:
@@ -711,6 +726,17 @@ class JournalProvider(Provider):
             facts_repo=facts_repo,
             dismissal_repo=dismissal_repo,
             user_settings_repo=user_settings_repo,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_external_link_service(
+        self,
+        journal_repo: JournalRepository,
+        immich_token_service: ImmichTokenService,
+    ) -> JournalExternalLinkService:
+        """Provide a JournalExternalLinkService instance."""
+        return JournalExternalLinkService(
+            journal_repo=journal_repo, immich_token_service=immich_token_service
         )
 
     @provide(scope=Scope.REQUEST)

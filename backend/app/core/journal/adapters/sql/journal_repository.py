@@ -516,6 +516,41 @@ class SqlJournalRepository(JournalRepository):
             return []
         return type_names_from_projection_row(row) or ["NOTE"]
 
+    async def find_overlapping_for_user(
+        self,
+        user_id: str,
+        *,
+        exclude_journal_id: int,
+        date_range: EventDateRange,
+        limit: int,
+    ) -> list[Journal]:
+        """The user's other journals overlapping ``date_range``, by event start."""
+        query = text(
+            """
+            SELECT id, user_id, title, content,
+                   event_date_range_start, event_date_range_end,
+                   parent_id, "order", created_at, updated_at
+            FROM journals
+            WHERE user_id = :user_id
+              AND id != :journal_id
+              AND event_date_range_start <= :end_date
+              AND event_date_range_end >= :start_date
+            ORDER BY event_date_range_start
+            LIMIT :limit
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": user_id,
+                "journal_id": exclude_journal_id,
+                "start_date": date_range.start,
+                "end_date": date_range.end,
+                "limit": limit,
+            },
+        )
+        return [self._row_to_journal(row) for row in result.fetchall()]
+
     async def find_by_ids_for_user(
         self, user_id: str, journal_ids: list[int]
     ) -> list[Journal]:

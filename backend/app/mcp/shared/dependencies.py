@@ -21,6 +21,7 @@ from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
 from app.core.history.services.task_history_service import TaskHistoryService
+from app.core.journal.models.repositories import ActivityStatsRepository
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
@@ -31,6 +32,9 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_external_link_service import (
+    JournalExternalLinkService,
+)
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
@@ -184,6 +188,21 @@ async def get_upcoming_important_dates_service() -> UpcomingImportantDatesServic
 async def get_contact_merge_service() -> ContactMergeService:
     """Resolve the contact merge service for the current MCP request."""
     return cast(ContactMergeService, await _resolve_dependency(ContactMergeService))
+
+
+async def get_activity_stats_repository() -> ActivityStatsRepository:
+    """Resolve the activity stats repository for the current MCP request."""
+    return cast(
+        ActivityStatsRepository, await _resolve_dependency(ActivityStatsRepository)
+    )
+
+
+async def get_journal_external_link_service() -> JournalExternalLinkService:
+    """Resolve the journal external link service for the current MCP request."""
+    return cast(
+        JournalExternalLinkService,
+        await _resolve_dependency(JournalExternalLinkService),
+    )
 
 
 async def get_search_service() -> SearchService:

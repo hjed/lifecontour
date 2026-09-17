@@ -15,6 +15,17 @@ if TYPE_CHECKING:
     from core_shared.models.journals.review_item import ReviewItem
     from sqlalchemy.ext.asyncio import AsyncConnection
 
+    from app.core.journal.models.activity_stats import (
+        ActivityFilters,
+        ActivityJournalRow,
+        ActivityMetric,
+        ActivityPersonalRecordRow,
+        ActivityTotalsRow,
+        ActivityTrendRow,
+        ActivityTypeTotalsRow,
+        RouteUsageRow,
+        TrendInterval,
+    )
     from app.core.journal.models.agenda import AgendaEntry
 
 from core_shared.models.journals import (
@@ -157,6 +168,22 @@ class JournalRepository(ABC):
 
         Returns:
             A list of type strings for the journal, including 'NOTE' as the base type.
+        """
+        pass
+
+    @abstractmethod
+    async def find_overlapping_for_user(
+        self,
+        user_id: str,
+        *,
+        exclude_journal_id: int,
+        date_range: EventDateRange,
+        limit: int,
+    ) -> list[Journal]:
+        """The user's other journals whose event range overlaps ``date_range``.
+
+        Ranges that only touch at an endpoint overlap. Ordered by event start and
+        capped at ``limit``; ``exclude_journal_id`` is never returned.
         """
         pass
 
@@ -1609,6 +1636,17 @@ class RouteRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def find_usage_history(
+        self, user_id: str, route_id: UUID
+    ) -> list[RouteUsageRow]:
+        """The user's journals a route was used on, newest first.
+
+        A route on another user's journal, or one that does not exist, has no
+        usage.
+        """
+        pass
+
 
 class OutdoorActivityDataRepository(ABC):
     """
@@ -2812,6 +2850,60 @@ class IncompleteOutdoorActivityRepository(ABC):
         self, user_id: str
     ) -> list[OutdoorActivityFacts]:
         """Fetch the facts for every outdoor journal owned by ``user_id``."""
+        pass
+
+
+class ActivityStatsRepository(ABC):
+    """Read repository for a user's activity journals and their aggregates.
+
+    An activity journal is one with fitness data; its effective activity type
+    and metrics are described in ``app.core.journal.models.activity_stats``.
+    Every read covers only ``filters.user_id``'s journals.
+    """
+
+    @abstractmethod
+    async def list_activity_journals(
+        self,
+        filters: ActivityFilters,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[ActivityJournalRow]:
+        """Matching activity journals, newest event first."""
+        pass
+
+    @abstractmethod
+    async def count_activity_journals(self, filters: ActivityFilters) -> int:
+        """How many activity journals match, ignoring any paging."""
+        pass
+
+    @abstractmethod
+    async def get_totals(self, filters: ActivityFilters) -> ActivityTotalsRow:
+        """Metric totals across every matching journal (zeros when none match)."""
+        pass
+
+    @abstractmethod
+    async def list_type_totals(
+        self, filters: ActivityFilters
+    ) -> list[ActivityTypeTotalsRow]:
+        """Metric totals per effective activity type, ordered by type."""
+        pass
+
+    @abstractmethod
+    async def find_personal_record(
+        self, filters: ActivityFilters, metric: ActivityMetric
+    ) -> ActivityPersonalRecordRow | None:
+        """The matching journal with the highest ``metric``, if any match.
+
+        Ties go to the most recent event.
+        """
+        pass
+
+    @abstractmethod
+    async def list_trend_buckets(
+        self, filters: ActivityFilters, interval: TrendInterval
+    ) -> list[ActivityTrendRow]:
+        """Metric totals per UTC ``interval`` bucket of event start, oldest first."""
         pass
 
 

@@ -12,41 +12,26 @@ from datetime import time as dt_time
 from typing import Annotated, Any
 from uuid import UUID
 
-import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
-    AbseilingData,
     ActivityTemplate,
-    BushwalkingData,
     Calendar,
-    CalendarInfo,
-    CanyoningData,
     CanyonType,
-    ClimbingData,
     ClimbingType,
-    CrossCountrySkiingData,
     EventDateRange,
-    FitnessData,
     GearItem,
-    JoggingData,
     Journal,
     JournalContactRelationship,
     JournalContactRelationshipType,
     JournalNotFoundError,
     JournalType,
     JournalValidationError,
-    KayakingData,
-    MoodData,
-    OutdoorActivityData,
-    PlanData,
     TemplatePitch,
     TemplateType,
-    TravelData,
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
@@ -57,7 +42,6 @@ from app.core.history.models import FieldHistoryEntry
 from app.core.history.services.journal_history_service import JournalHistoryService
 from app.core.integrations.external_link_helpers import (
     ExternalLinkInfo,
-    build_journal_external_links,
 )
 from app.core.integrations.link_sources import (
     journal_source_names,
@@ -140,12 +124,25 @@ from app.core.journal.adapters.sql.snorkelling_data_repository import (
     SqlSnorkellingDataRepository,
 )
 from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
+from app.core.journal.models.activity_stats import (
+    ActivityFilters,
+    ActivityJournalRow,
+    ActivityMetric,
+    TrendInterval,
+    parse_activity_type,
+)
 from app.core.journal.models.journal_tag import JournalTag
-from app.core.journal.models.repositories import JournalTagRepository
+from app.core.journal.models.repositories import (
+    ActivityStatsRepository,
+    JournalTagRepository,
+)
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
-from app.core.journal.services.calendar_service import CalendarService
+from app.core.journal.services.calendar_service import (
+    CalendarInUseError,
+    CalendarService,
+)
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.gear_item_service import GearItemService
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
@@ -153,6 +150,9 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_external_link_service import (
+    JournalExternalLinkService,
+)
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_search_service import (
     SEARCH_SUGGESTIONS,
@@ -243,6 +243,7 @@ from app.mcp.shared.annotations import (
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
+    get_activity_stats_repository,
     get_activity_template_service,
     get_async_connection,
     get_calendar_service,
@@ -251,6 +252,7 @@ from app.mcp.shared.dependencies import (
     get_gear_item_service,
     get_incomplete_outdoor_activity_service,
     get_journal_contact_service,
+    get_journal_external_link_service,
     get_journal_tag_service,
     get_journal_write_service,
     get_outbox_event_publisher,
@@ -261,8 +263,6 @@ from app.mcp.shared.dependencies import (
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
-
-logger = structlog.get_logger()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -299,32 +299,6 @@ class _JournalToolRepositories:
     tag_repo: SqlJournalTagRepository
     activity_template_repo: SqlActivityTemplateRepository
     gear_item_repo: SqlGearItemRepository
-
-
-@dataclasses.dataclass(frozen=True)
-class _ActivityJournalRow:
-    """Activity journal row enriched with resolved activity metrics."""
-
-    journal: Journal
-    activity_type: str
-    distance: int
-    duration: int
-    elevation_gain: int
-    calories: int
-
-
-_ACTIVITY_TYPE_PRECEDENCE: tuple[JournalType, ...] = (
-    JournalType.CANYONING,
-    JournalType.CAVING,
-    JournalType.CROSS_COUNTRY_SKIING,
-    JournalType.KAYAKING,
-    JournalType.CLIMBING,
-    JournalType.ABSEILING_TRIP,
-    JournalType.BUSHWALKING,
-    JournalType.JOGGING,
-    JournalType.OUTDOOR_ACTIVITY,
-    JournalType.FITNESS,
-)
 
 
 def _create_journal_tool_repositories(
@@ -424,21 +398,6 @@ def _parse_type_filters(types: str | None) -> list[str]:
     return parsed_types
 
 
-def _parse_activity_type_filter(activity_type: str | None) -> str | None:
-    """Parse and validate an effective activity type filter."""
-    if activity_type is None:
-        return None
-
-    normalized = activity_type.strip().lower()
-    allowed_types = {journal_type.value for journal_type in _ACTIVITY_TYPE_PRECEDENCE}
-    if normalized not in allowed_types:
-        allowed = ", ".join(sorted(allowed_types))
-        raise ValueError(
-            f"Invalid activity_type '{activity_type}'. Must be one of: {allowed}"
-        )
-    return normalized
-
-
 def _parse_integration_source_filter(value: str | None) -> str | None:
     """Normalise an integration source filter (None passes through)."""
     return None if value is None else resolve_journal_source(value)
@@ -522,33 +481,21 @@ def _parse_optional_datetime_filter(
     )
 
 
-def _journal_from_row(row: Any) -> Journal:
-    """Build a journal entity from a SQL result row."""
-    return Journal(
-        id=row.id,
-        user_id=row.user_id,
-        title=row.title,
-        content=row.content,
-        event_date_range=EventDateRange(
-            start=row.event_date_range_start,
-            end=row.event_date_range_end,
-        ),
-        parent_id=row.parent_id,
-        order=row.journal_order,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-    )
-
-
-def _activity_row_from_row(row: Any) -> _ActivityJournalRow:
-    """Build an activity journal row from a SQL result row."""
-    return _ActivityJournalRow(
-        journal=_journal_from_row(row),
-        activity_type=row.activity_type,
-        distance=int(row.distance or 0),
-        duration=int(row.duration or 0),
-        elevation_gain=int(row.elevation_gain or 0),
-        calories=int(row.calories or 0),
+def _activity_filters(
+    user_id: str,
+    *,
+    activity_type: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    search_query: str | None = None,
+) -> ActivityFilters:
+    """Validate the activity tools' filter arguments into ``ActivityFilters``."""
+    return ActivityFilters(
+        user_id=user_id,
+        activity_type=parse_activity_type(activity_type),
+        start_date=_parse_optional_datetime_filter(start_date, "start_date"),
+        end_date=_parse_optional_datetime_filter(end_date, "end_date", is_end=True),
+        search_query=search_query,
     )
 
 
@@ -588,79 +535,11 @@ def _external_links_preserved(
     return before_keys <= after_keys
 
 
-async def _fetch_journal_external_links(
-    journal_id: int,
-    db_connection: AsyncConnection,
-    user_id: str,
-) -> list[ExternalLinkInfo]:
-    """Fetch external system links for a journal.
-
-    Fetches Strava activity links, Google Calendar links from
-    journal_external_event_links, and Snipe-IT / Immich links, then builds
-    ExternalLinkInfo objects using the shared helper.
-
-    Args:
-        journal_id: The journal ID to fetch links for
-        db_connection: Database connection for the link queries
-        user_id: The user ID to filter Snipe-IT sync metadata links
-
-    Returns:
-        List of ExternalLinkInfo objects for the journal.
-    """
-    from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-
-    journal_repo = SqlJournalRepository(db_connection)
-
-    # Every Strava activity linked to the journal — an additively merged
-    # journal carries more than one.
-    strava_activity_ids = await journal_repo.get_strava_activity_ids(journal_id)
-
-    snipeit_links = await journal_repo.get_snipeit_links(journal_id, user_id)
-
-    # Fetch Immich album links and the user's Immich server URL (reusing the
-    # canonical read-only server-URL accessor — no API-key decryption).
-    from app.mcp.shared.dependencies import get_immich_token_service
-
-    immich_album_links = await journal_repo.get_immich_album_links(journal_id)
-    immich_token_service = await get_immich_token_service()
-    immich_server_url = await immich_token_service.get_server_url(user_id)
-
-    # Fetch Google Calendar external event links
-    result = await db_connection.execute(
-        text(
-            "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
-            "FROM journal_external_event_links l "
-            "JOIN calendars c ON l.calendar_id = c.id "
-            "WHERE l.journal_id = :journal_id "
-            "AND l.external_event_id IS NOT NULL "
-            "AND trim(l.external_event_id) != '' "
-            "AND c.google_calendar_id IS NOT NULL"
-        ),
-        {"journal_id": journal_id},
-    )
-    external_event_links = [
-        {
-            "external_event_id": row[0],
-            "calendar_id": str(row[1]) if row[1] else None,
-            "internal_calendar_id": str(row[2]) if row[2] else None,
-        }
-        for row in result
-    ]
-
-    return build_journal_external_links(
-        strava_activity_ids=strava_activity_ids,
-        external_event_links=external_event_links,
-        snipeit_links=snipeit_links,
-        immich_album_links=immich_album_links,
-        immich_server_url=immich_server_url,
-    )
-
-
 async def _build_search_results(
     journals: list[Journal],
     repos: _JournalToolRepositories,
     *,
-    activity_rows_by_id: dict[int, _ActivityJournalRow] | None = None,
+    activity_rows_by_id: dict[int, ActivityJournalRow] | None = None,
 ) -> list[JournalSearchResult]:
     """Build AI-friendly journal search results with concrete types included."""
     results: list[JournalSearchResult] = []
@@ -712,361 +591,6 @@ async def _build_hierarchy_node(
         children_count=node.children_count,
         children=children,
     )
-
-
-def _build_activity_query_filters(
-    user_id: str,
-    *,
-    search_query: str | None = None,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> tuple[dict[str, Any], list[str]]:
-    """Build shared parameters and filters for activity journal queries."""
-    normalized_activity_type = _parse_activity_type_filter(activity_type)
-    start_date_filter = _parse_optional_datetime_filter(start_date, "start_date")
-    end_date_filter = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
-
-    params: dict[str, Any] = {"user_id": user_id}
-    where_clauses: list[str] = []
-
-    if search_query:
-        params["search_pattern"] = f"%{search_query}%"
-        where_clauses.append(
-            "(title ILIKE :search_pattern OR content ILIKE :search_pattern)"
-        )
-
-    if normalized_activity_type is not None:
-        params["activity_type"] = normalized_activity_type
-        where_clauses.append("activity_type = :activity_type")
-
-    if start_date_filter is not None:
-        params["start_date"] = start_date_filter
-        where_clauses.append("event_date_range_end >= :start_date")
-
-    if end_date_filter is not None:
-        params["end_date"] = end_date_filter
-        where_clauses.append("event_date_range_start <= :end_date")
-
-    return params, where_clauses
-
-
-def _build_activity_rows_query_sql(
-    where_clauses: list[str],
-    *,
-    select_sql: str,
-    include_ordering: bool,
-) -> str:
-    """Build activity journal SQL with optional shared filters and ordering."""
-    query_sql = f"""
-        WITH activity_rows AS (
-            SELECT
-                j.id,
-                j.user_id,
-                j.title,
-                j.content,
-                j.event_date_range_start,
-                j.event_date_range_end,
-                j.parent_id,
-                j."order" AS journal_order,
-                j.created_at,
-                j.updated_at,
-                COALESCE(f.distance, 0) AS distance,
-                COALESCE(f.duration, 0) AS duration,
-                COALESCE(f.elevation_gain, 0) AS elevation_gain,
-                COALESCE(f.calories, 0) AS calories,
-                CASE
-                    WHEN canyoning.journal_id IS NOT NULL THEN 'canyoning'
-                    WHEN skiing.journal_id IS NOT NULL THEN 'cross_country_skiing'
-                    WHEN kayaking.journal_id IS NOT NULL THEN 'kayaking'
-                    WHEN climbing.journal_id IS NOT NULL THEN 'climbing'
-                    WHEN abseiling.journal_id IS NOT NULL THEN 'abseiling_trip'
-                    WHEN bushwalking.journal_id IS NOT NULL THEN 'bushwalking'
-                    WHEN jogging.journal_id IS NOT NULL THEN 'jogging'
-                    WHEN outdoor_activity.journal_id IS NOT NULL THEN 'outdoor_activity'
-                    ELSE 'fitness'
-                END AS activity_type
-            FROM journals j
-            INNER JOIN journal_fitness_data f ON f.journal_id = j.id
-            LEFT JOIN journal_outdoor_activity_data outdoor_activity
-                ON outdoor_activity.journal_id = j.id
-            LEFT JOIN journal_bushwalking_data bushwalking
-                ON bushwalking.journal_id = j.id
-            LEFT JOIN journal_jogging_data jogging
-                ON jogging.journal_id = j.id
-            LEFT JOIN journal_abseiling_data abseiling
-                ON abseiling.journal_id = j.id
-            LEFT JOIN journal_canyoning_data canyoning
-                ON canyoning.journal_id = j.id
-            LEFT JOIN journal_climbing_data climbing
-                ON climbing.journal_id = j.id
-            LEFT JOIN journal_kayaking_data kayaking
-                ON kayaking.journal_id = j.id
-            LEFT JOIN journal_skiing_data skiing
-                ON skiing.journal_id = j.id
-            WHERE j.user_id = :user_id
-        )
-        {select_sql}
-        FROM activity_rows
-        """
-
-    if where_clauses:
-        query_sql += "\n        WHERE " + " AND ".join(where_clauses)
-
-    if include_ordering:
-        query_sql += "\n        ORDER BY event_date_range_start DESC, created_at DESC"
-
-    return query_sql
-
-
-async def _fetch_activity_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    search_query: str | None = None,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-) -> list[_ActivityJournalRow]:
-    """Fetch activity journals with resolved effective activity types and metrics."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        search_query=search_query,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="SELECT *",
-        include_ordering=True,
-    )
-
-    if limit is not None:
-        params["limit"] = limit
-        params["offset"] = offset
-        query_sql += "\n        LIMIT :limit OFFSET :offset"
-
-    result = await db_connection.execute(text(query_sql), params)
-    return [_activity_row_from_row(row) for row in result.fetchall()]
-
-
-async def _count_activity_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    search_query: str | None = None,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> int:
-    """Count matching activity journals without materializing the full result set."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        search_query=search_query,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="SELECT COUNT(*)",
-        include_ordering=False,
-    )
-
-    result = await db_connection.execute(text(query_sql), params)
-    row = result.fetchone()
-    if row is None:
-        return 0
-    count_value = row[0]
-    return int(count_value) if count_value is not None else 0
-
-
-async def _fetch_activity_overall_stats_row(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> Any:
-    """Fetch overall activity aggregate totals without materializing activity rows."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="""
-        SELECT
-            COUNT(*) AS total_activities,
-            COALESCE(SUM(distance), 0) AS total_distance,
-            COALESCE(SUM(duration), 0) AS total_duration,
-            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
-            COALESCE(SUM(calories), 0) AS total_calories
-        """,
-        include_ordering=False,
-    )
-
-    result = await db_connection.execute(text(query_sql), params)
-    return result.fetchone()
-
-
-async def _fetch_activity_type_stats_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> list[Any]:
-    """Fetch grouped activity-type aggregates in SQL."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="""
-        SELECT
-            activity_type,
-            COUNT(*) AS count,
-            COALESCE(SUM(distance), 0) AS total_distance,
-            COALESCE(SUM(duration), 0) AS total_duration,
-            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain,
-            COALESCE(SUM(calories), 0) AS total_calories
-        """,
-        include_ordering=False,
-    )
-    query_sql += """
-        GROUP BY activity_type
-        ORDER BY activity_type
-    """
-
-    result = await db_connection.execute(text(query_sql), params)
-    return list(result.fetchall())
-
-
-async def _fetch_activity_personal_record_row(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    metric_name: str,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> Any:
-    """Fetch the top personal-record row for a metric in SQL."""
-    if metric_name not in {"distance", "duration", "elevation_gain", "calories"}:
-        raise ValueError(f"Unsupported activity metric '{metric_name}'")
-
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql=f"""
-        SELECT
-            id AS journal_id,
-            title AS journal_title,
-            activity_type,
-            {metric_name} AS metric_value,
-            event_date_range_start,
-            created_at
-        """,
-        include_ordering=False,
-    )
-    query_sql += f"""
-        ORDER BY {metric_name} DESC, event_date_range_start DESC, created_at DESC
-        LIMIT 1
-    """
-
-    result = await db_connection.execute(text(query_sql), params)
-    return result.fetchone()
-
-
-async def _fetch_activity_trend_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    *,
-    interval: str,
-    activity_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> list[Any]:
-    """Fetch time-bucketed activity aggregates in SQL."""
-    params, where_clauses = _build_activity_query_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    params["interval_unit"] = interval
-    query_sql = _build_activity_rows_query_sql(
-        where_clauses,
-        select_sql="""
-        SELECT
-            DATE_TRUNC(:interval_unit, event_date_range_start AT TIME ZONE 'UTC')::date AS period_start,
-            COUNT(*) AS activity_count,
-            COALESCE(SUM(distance), 0) AS total_distance,
-            COALESCE(SUM(duration), 0) AS total_duration,
-            COALESCE(SUM(elevation_gain), 0) AS total_elevation_gain
-        """,
-        include_ordering=False,
-    )
-    query_sql += """
-        GROUP BY period_start
-        ORDER BY period_start
-    """
-
-    result = await db_connection.execute(text(query_sql), params)
-    return list(result.fetchall())
-
-
-async def _fetch_route_history_rows(
-    db_connection: AsyncConnection,
-    user_id: str,
-    route_id: UUID,
-) -> list[Any]:
-    """Fetch route usage rows across all route-aware activity tables."""
-    query = text(
-        """
-        SELECT
-            j.id,
-            j.user_id,
-            j.title,
-            j.content,
-            j.event_date_range_start,
-            j.event_date_range_end,
-            j.parent_id,
-            j."order" AS journal_order,
-            j.created_at,
-            j.updated_at,
-            f.distance,
-            f.duration,
-            'ROUTE' AS activity_type
-        FROM journals j
-        INNER JOIN routes r ON r.journal_id = j.id
-        LEFT JOIN journal_fitness_data f ON f.journal_id = j.id
-        WHERE j.user_id = :user_id
-          AND r.id = :route_id
-        ORDER BY j.event_date_range_start DESC, j.created_at DESC
-        """
-    )
-    result = await db_connection.execute(
-        query,
-        {"user_id": user_id, "route_id": route_id},
-    )
-    return list(result.fetchall())
 
 
 async def _fetch_contact_relationships_with_names(
@@ -1123,88 +647,6 @@ def _note_implied_context(requested_types: list[str] | None) -> str:
         return _NOTE_IMPLIED_CONTEXT
     return ""
 
-
-async def _create_type_specific_data(
-    journal_type: JournalType,
-    journal_id: int,
-    mood_data_repo: SqlMoodDataRepository,
-    plan_data_repo: SqlPlanDataRepository,
-    travel_data_repo: SqlTravelDataRepository,
-    fitness_data_repo: SqlFitnessDataRepository,
-    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
-    bushwalking_data_repo: SqlBushwalkingDataRepository,
-    jogging_data_repo: SqlJoggingDataRepository,
-    abseiling_data_repo: SqlAbseilingDataRepository,
-    canyoning_data_repo: SqlCanyoningDataRepository,
-    caving_data_repo: SqlCavingDataRepository,
-    climbing_data_repo: SqlClimbingDataRepository,
-    kayaking_data_repo: SqlKayakingDataRepository,
-    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
-    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository,
-    gear_usage_data_repo: SqlGearUsageDataRepository,
-) -> None:
-    """
-    Create type-specific data row with default values for the given journal type.
-
-    Args:
-        journal_type: The type of journal
-        journal_id: The ID of the journal
-        mood_data_repo: Repository for mood data
-        plan_data_repo: Repository for plan data
-        travel_data_repo: Repository for travel data
-        fitness_data_repo: Repository for fitness data
-        outdoor_activity_data_repo: Repository for outdoor activity data
-        bushwalking_data_repo: Repository for bushwalking data
-        jogging_data_repo: Repository for jogging data
-        abseiling_data_repo: Repository for abseiling data
-        canyoning_data_repo: Repository for canyoning data
-        caving_data_repo: Repository for caving data
-        climbing_data_repo: Repository for climbing data
-        kayaking_data_repo: Repository for kayaking data
-        cross_country_skiing_data_repo: Repository for cross-country skiing data
-        gear_maintenance_data_repo: Repository for gear maintenance data
-        gear_usage_data_repo: Repository for gear usage data
-    """
-    if journal_type == JournalType.MOOD_RATING:
-        mood_data = MoodData(journal_id=journal_id)
-        await mood_data_repo.save(mood_data)
-    elif journal_type == JournalType.PLAN:
-        plan_data = PlanData(journal_id=journal_id)
-        await plan_data_repo.save(plan_data)
-    elif journal_type == JournalType.TRAVEL:
-        travel_data = TravelData(journal_id=journal_id)
-        await travel_data_repo.save(travel_data)
-    elif journal_type == JournalType.FITNESS:
-        fitness_data = FitnessData(journal_id=journal_id)
-        await fitness_data_repo.save(fitness_data)
-    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
-        outdoor_activity_data = OutdoorActivityData(journal_id=journal_id)
-        await outdoor_activity_data_repo.save(outdoor_activity_data)
-    elif journal_type == JournalType.BUSHWALKING:
-        bushwalking_data = BushwalkingData(journal_id=journal_id)
-        await bushwalking_data_repo.save(bushwalking_data)
-    elif journal_type == JournalType.JOGGING:
-        jogging_data = JoggingData(journal_id=journal_id)
-        await jogging_data_repo.save(jogging_data)
-    elif journal_type == JournalType.ABSEILING_TRIP:
-        abseiling_data = AbseilingData(journal_id=journal_id)
-        await abseiling_data_repo.save(abseiling_data)
-    elif journal_type == JournalType.CANYONING:
-        canyoning_data = CanyoningData(journal_id=journal_id)
-        await canyoning_data_repo.save(canyoning_data)
-    elif journal_type == JournalType.CLIMBING:
-        climbing_data = ClimbingData(journal_id=journal_id)
-        await climbing_data_repo.save(climbing_data)
-    elif journal_type == JournalType.KAYAKING:
-        kayaking_data = KayakingData(journal_id=journal_id)
-        await kayaking_data_repo.save(kayaking_data)
-    elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
-        cross_country_skiing_data = CrossCountrySkiingData(journal_id=journal_id)
-        await cross_country_skiing_data_repo.save(cross_country_skiing_data)
-    elif journal_type == JournalType.GEAR_MAINTENANCE:
-        pass  # Deferred to update logic because gear_item_id is required
-    elif journal_type == JournalType.GEAR_USAGE:
-        pass  # Deferred to update logic because gear_item_id is required
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user provides type_data
 
@@ -1225,440 +667,6 @@ def _parse_calendar_id(calendar_id: Any) -> UUID | None:
             ) from exc
 
     raise ValueError(f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.")
-
-
-def _parse_optional_time_field(type_data_dict: dict[str, Any], field_name: str) -> Any:
-    value = type_data_dict.get(field_name)
-    if not isinstance(value, str):
-        return value
-
-    try:
-        return dt_time.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid {field_name} '{value}'. Must use HH:MM or HH:MM:SS format."
-        ) from exc
-
-
-async def _update_event_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    calendar_info_repo: SqlCalendarInfoRepository,
-) -> None:
-    calendar_id = _parse_calendar_id(type_data_dict.get("calendar_id"))
-    if calendar_id is None:
-        return
-
-    # Anchor clock-only times to the journal's event date range (carried on the
-    # existing record via the journals JOIN) so cross-midnight events pass the
-    # start<=end validation instead of being wrongly rejected.
-    existing = await calendar_info_repo.find_by_journal_id(journal_id)
-    event_start_date = existing.event_start_date if existing else None
-    event_end_date = existing.event_end_date if existing else None
-
-    calendar_info = CalendarInfo(
-        journal_id=journal_id,
-        calendar_id=calendar_id,
-        start_time=_parse_optional_time_field(type_data_dict, "start_time"),
-        end_time=_parse_optional_time_field(type_data_dict, "end_time"),
-        is_all_day=type_data_dict.get("is_all_day", False),
-        location=type_data_dict.get("location"),
-        description=type_data_dict.get("description"),
-        timezone=type_data_dict.get("timezone"),
-        sync_invitees=type_data_dict.get("sync_invitees", False),
-        private_description=type_data_dict.get("private_description", False),
-        event_state=type_data_dict.get("event_state", "confirmed"),
-        event_start_date=event_start_date,
-        event_end_date=event_end_date,
-    )
-    await calendar_info_repo.save(calendar_info)
-
-
-async def _update_mood_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    mood_data_repo: SqlMoodDataRepository,
-) -> None:
-    existing_mood = await mood_data_repo.find_by_journal_id(journal_id)
-    if existing_mood:
-        if "mood_value" in type_data_dict:
-            existing_mood.mood_value = type_data_dict["mood_value"]
-        if "mood_label" in type_data_dict:
-            existing_mood.mood_label = type_data_dict["mood_label"]
-        if "energy_level" in type_data_dict:
-            existing_mood.energy_level = type_data_dict["energy_level"]
-        await mood_data_repo.save(existing_mood)
-
-
-async def _update_fitness_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    fitness_data_repo: SqlFitnessDataRepository,
-) -> None:
-    existing_fitness = await fitness_data_repo.find_by_journal_id(journal_id)
-    if existing_fitness:
-        for field in [
-            "heart_rate_avg",
-            "heart_rate_max",
-            "distance",
-            "elevation_gain",
-            "elevation_loss",
-            "duration",
-            "calories",
-            "strava_activity_id",
-        ]:
-            if field in type_data_dict:
-                setattr(existing_fitness, field, type_data_dict[field])
-        await fitness_data_repo.save(existing_fitness)
-
-
-async def _update_outdoor_activity_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
-) -> None:
-    existing_outdoor = await outdoor_activity_data_repo.find_by_journal_id(journal_id)
-    if existing_outdoor:
-        updates: dict[str, Any] = {}
-        for field in [
-            "weather_conditions",
-            "role",
-            "in_leadership_role",
-            "participant_notes",
-        ]:
-            if field in type_data_dict:
-                updates[field] = type_data_dict[field]
-        validated_outdoor = dataclasses.replace(existing_outdoor, **updates)
-        await outdoor_activity_data_repo.save(validated_outdoor)
-
-
-async def _update_bushwalking_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    bushwalking_data_repo: SqlBushwalkingDataRepository,
-) -> None:
-    existing_bushwalking = await bushwalking_data_repo.find_by_journal_id(journal_id)
-    if existing_bushwalking:
-        bw_updates: dict[str, Any] = {}
-        if "track_grading" in type_data_dict:
-            bw_updates["track_grading"] = type_data_dict["track_grading"]
-        validated_bushwalking = dataclasses.replace(existing_bushwalking, **bw_updates)
-        await bushwalking_data_repo.save(validated_bushwalking)
-
-
-async def _update_jogging_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    jogging_data_repo: SqlJoggingDataRepository,
-) -> None:
-    existing_jogging = await jogging_data_repo.find_by_journal_id(journal_id)
-    if existing_jogging:
-        jog_updates: dict[str, Any] = {}
-        if "pace" in type_data_dict:
-            jog_updates["pace"] = type_data_dict["pace"]
-        validated_jogging = dataclasses.replace(existing_jogging, **jog_updates)
-        await jogging_data_repo.save(validated_jogging)
-
-
-async def _update_abseiling_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    abseiling_data_repo: SqlAbseilingDataRepository,
-) -> None:
-    existing_abseiling = await abseiling_data_repo.find_by_journal_id(journal_id)
-    if existing_abseiling:
-        abs_updates: dict[str, Any] = {}
-        if "template_id" in type_data_dict:
-            abs_updates["template_id"] = type_data_dict["template_id"]
-        if "number_of_abseils" in type_data_dict:
-            abs_updates["number_of_abseils"] = type_data_dict["number_of_abseils"]
-        if "total_length" in type_data_dict:
-            abs_updates["total_length"] = type_data_dict["total_length"]
-        if "number_of_setups" in type_data_dict:
-            abs_updates["number_of_setups"] = type_data_dict["number_of_setups"]
-        if "number_of_rescues" in type_data_dict:
-            abs_updates["number_of_rescues"] = type_data_dict["number_of_rescues"]
-        validated_abseiling = dataclasses.replace(existing_abseiling, **abs_updates)
-        await abseiling_data_repo.save(validated_abseiling)
-
-
-async def _update_caving_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    caving_data_repo: SqlCavingDataRepository,
-) -> None:
-    existing_caving = await caving_data_repo.find_by_journal_id(journal_id)
-    if existing_caving:
-        cav_updates: dict[str, Any] = {}
-        for field in [
-            "is_vertical",
-            "is_horizontal",
-        ]:
-            if field in type_data_dict:
-                cav_updates[field] = type_data_dict[field]
-        validated_caving = dataclasses.replace(existing_caving, **cav_updates)
-        await caving_data_repo.save(validated_caving)
-
-
-async def _update_canyoning_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    canyoning_data_repo: SqlCanyoningDataRepository,
-) -> None:
-    existing_canyoning = await canyoning_data_repo.find_by_journal_id(journal_id)
-    if existing_canyoning:
-        can_updates: dict[str, Any] = {}
-        for field in [
-            "french_grade",
-            "water_guage_name",
-            "water_guage_level",
-            "is_vertical",
-            "is_night_canyon",
-            "is_white_water",
-        ]:
-            if field in type_data_dict:
-                can_updates[field] = type_data_dict[field]
-        validated_canyoning = dataclasses.replace(existing_canyoning, **can_updates)
-        await canyoning_data_repo.save(validated_canyoning)
-
-
-async def _update_climbing_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    climbing_data_repo: SqlClimbingDataRepository,
-) -> None:
-    existing_climbing = await climbing_data_repo.find_by_journal_id(journal_id)
-    if existing_climbing:
-        clb_updates: dict[str, Any] = {}
-        for field in ["climbing_type", "grade", "length", "indoor"]:
-            if field in type_data_dict:
-                clb_updates[field] = type_data_dict[field]
-        validated_climbing = dataclasses.replace(existing_climbing, **clb_updates)
-        await climbing_data_repo.save(validated_climbing)
-
-
-async def _update_kayaking_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    kayaking_data_repo: SqlKayakingDataRepository,
-) -> None:
-    existing_kayaking = await kayaking_data_repo.find_by_journal_id(journal_id)
-    if existing_kayaking:
-        kayaking_updates: dict[str, Any] = {}
-        for field in ["water_type", "is_white_water", "rapids_grade"]:
-            if field in type_data_dict:
-                kayaking_updates[field] = type_data_dict[field]
-        validated_kayaking = dataclasses.replace(existing_kayaking, **kayaking_updates)
-        await kayaking_data_repo.save(validated_kayaking)
-
-
-async def _update_cross_country_skiing_data(
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
-) -> None:
-    existing_skiing = await cross_country_skiing_data_repo.find_by_journal_id(
-        journal_id
-    )
-    if existing_skiing:
-        skiing_updates: dict[str, Any] = {}
-        if "snow_conditions" in type_data_dict:
-            skiing_updates["snow_conditions"] = type_data_dict["snow_conditions"]
-        validated_skiing = dataclasses.replace(existing_skiing, **skiing_updates)
-        await cross_country_skiing_data_repo.save(validated_skiing)
-
-
-async def _update_type_specific_data(
-    journal_type: JournalType,
-    journal_id: int,
-    type_data_dict: dict[str, Any],
-    calendar_info_repo: SqlCalendarInfoRepository,
-    mood_data_repo: SqlMoodDataRepository,
-    photo_album_data_repo: AlbumSyncReadRepository,
-    fitness_data_repo: SqlFitnessDataRepository,
-    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository,
-    bushwalking_data_repo: SqlBushwalkingDataRepository,
-    jogging_data_repo: SqlJoggingDataRepository,
-    abseiling_data_repo: SqlAbseilingDataRepository,
-    canyoning_data_repo: SqlCanyoningDataRepository,
-    caving_data_repo: SqlCavingDataRepository,
-    climbing_data_repo: SqlClimbingDataRepository,
-    kayaking_data_repo: SqlKayakingDataRepository,
-    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository,
-    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository,
-    gear_usage_data_repo: SqlGearUsageDataRepository,
-) -> None:
-    """
-    Update type-specific data for a journal type.
-
-    Args:
-        journal_type: The type of journal
-        journal_id: The ID of the journal
-        type_data_dict: Dictionary containing type-specific data
-        calendar_info_repo: Repository for calendar info
-        mood_data_repo: Repository for mood data
-        photo_album_data_repo: Repository for photo album data
-        fitness_data_repo: Repository for fitness data
-        outdoor_activity_data_repo: Repository for outdoor activity data
-        bushwalking_data_repo: Repository for bushwalking data
-        jogging_data_repo: Repository for jogging data
-        abseiling_data_repo: Repository for abseiling data
-        canyoning_data_repo: Repository for canyoning data
-        caving_data_repo: Repository for caving data
-        climbing_data_repo: Repository for climbing data
-        kayaking_data_repo: Repository for kayaking data
-        cross_country_skiing_data_repo: Repository for cross-country skiing data
-        gear_maintenance_data_repo: Repository for gear maintenance data
-        gear_usage_data_repo: Repository for gear usage data
-    """
-    if not type_data_dict:
-        return
-
-    if journal_type == JournalType.EVENT:
-        await _update_event_data(journal_id, type_data_dict, calendar_info_repo)
-    elif journal_type == JournalType.MOOD_RATING:
-        await _update_mood_data(journal_id, type_data_dict, mood_data_repo)
-    elif journal_type == JournalType.PHOTO_ALBUM:
-        # PHOTO_ALBUM data is managed by Immich album sync. Fail fast rather than
-        # silently dropping the update so callers don't believe it succeeded
-        # (mirrors the REST API behaviour). JournalValidationError is a
-        # JournalDomainError, so mcp_unified_error_handler surfaces a clear
-        # validation message rather than a generic internal error.
-        from core_shared.models.journals import JournalValidationError
-
-        raise JournalValidationError(
-            "journal_type",
-            "PHOTO_ALBUM data is managed by Immich sync and cannot be edited",
-        )
-    elif journal_type == JournalType.FITNESS:
-        await _update_fitness_data(journal_id, type_data_dict, fitness_data_repo)
-    elif journal_type == JournalType.OUTDOOR_ACTIVITY:
-        await _update_outdoor_activity_data(
-            journal_id, type_data_dict, outdoor_activity_data_repo
-        )
-    elif journal_type == JournalType.BUSHWALKING:
-        await _update_bushwalking_data(
-            journal_id, type_data_dict, bushwalking_data_repo
-        )
-    elif journal_type == JournalType.JOGGING:
-        await _update_jogging_data(journal_id, type_data_dict, jogging_data_repo)
-    elif journal_type == JournalType.ABSEILING_TRIP:
-        await _update_abseiling_data(journal_id, type_data_dict, abseiling_data_repo)
-
-    elif journal_type == JournalType.CAVING:
-        await _update_caving_data(journal_id, type_data_dict, caving_data_repo)
-    elif journal_type == JournalType.CANYONING:
-        await _update_canyoning_data(journal_id, type_data_dict, canyoning_data_repo)
-    elif journal_type == JournalType.CLIMBING:
-        await _update_climbing_data(journal_id, type_data_dict, climbing_data_repo)
-    elif journal_type == JournalType.KAYAKING:
-        await _update_kayaking_data(journal_id, type_data_dict, kayaking_data_repo)
-    elif journal_type == JournalType.CROSS_COUNTRY_SKIING:
-        await _update_cross_country_skiing_data(
-            journal_id,
-            type_data_dict,
-            cross_country_skiing_data_repo,
-        )
-    elif journal_type == JournalType.GEAR_MAINTENANCE:
-        existing_maint = await gear_maintenance_data_repo.find_by_journal_id(journal_id)
-        if existing_maint:
-            maint_updates: dict[str, Any] = {}
-            if "gear_item_id" in type_data_dict and type_data_dict["gear_item_id"]:
-                maint_updates["gear_item_id"] = UUID(type_data_dict["gear_item_id"])
-            if "maintenance_type" in type_data_dict:
-                maint_updates["maintenance_type"] = type_data_dict["maintenance_type"]
-            if "activity_types" in type_data_dict:
-                maint_updates["activity_types"] = type_data_dict["activity_types"]
-            if "retirement_reason" in type_data_dict:
-                maint_updates["retirement_reason"] = type_data_dict["retirement_reason"]
-            import dataclasses
-
-            validated_maint = dataclasses.replace(existing_maint, **maint_updates)
-            await gear_maintenance_data_repo.save(validated_maint)
-        else:
-            if (
-                "gear_item_id" not in type_data_dict
-                or not type_data_dict["gear_item_id"]
-            ):
-                raise ValueError(
-                    "gear_item_id is required to create a gear maintenance journal"
-                )
-            if (
-                "maintenance_type" not in type_data_dict
-                or not type_data_dict["maintenance_type"]
-            ):
-                raise ValueError(
-                    "maintenance_type is required to create a gear maintenance journal"
-                )
-
-            from core_shared.models.journals.gear_maintenance_data import (
-                GearMaintenanceData,
-            )
-
-            new_maint = GearMaintenanceData(
-                journal_id=journal_id,
-                gear_item_id=UUID(type_data_dict["gear_item_id"]),
-                maintenance_type=type_data_dict["maintenance_type"],
-                activity_types=type_data_dict.get("activity_types"),
-                retirement_reason=type_data_dict.get("retirement_reason"),
-            )
-            await gear_maintenance_data_repo.save(new_maint)
-
-    elif journal_type == JournalType.GEAR_USAGE:
-        existing_usage = await gear_usage_data_repo.find_by_journal_id(journal_id)
-        from datetime import datetime
-
-        if existing_usage:
-            usage_updates: dict[str, Any] = {}
-            if "gear_item_id" in type_data_dict and type_data_dict["gear_item_id"]:
-                usage_updates["gear_item_id"] = UUID(type_data_dict["gear_item_id"])
-            if "checkout_date" in type_data_dict:
-                usage_updates["checkout_date"] = type_data_dict["checkout_date"]
-            if "checkin_date" in type_data_dict:
-                usage_updates["checkin_date"] = type_data_dict["checkin_date"]
-
-            if usage_updates.get("checkout_date") and isinstance(
-                usage_updates["checkout_date"], str
-            ):
-                usage_updates["checkout_date"] = datetime.fromisoformat(
-                    usage_updates["checkout_date"]
-                )
-            if usage_updates.get("checkin_date") and isinstance(
-                usage_updates["checkin_date"], str
-            ):
-                usage_updates["checkin_date"] = datetime.fromisoformat(
-                    usage_updates["checkin_date"]
-                )
-            import dataclasses
-
-            validated_usage = dataclasses.replace(existing_usage, **usage_updates)
-            await gear_usage_data_repo.save(validated_usage)
-        else:
-            if (
-                "gear_item_id" not in type_data_dict
-                or not type_data_dict["gear_item_id"]
-            ):
-                raise ValueError(
-                    "gear_item_id is required to create a gear usage journal"
-                )
-
-            chk_out = type_data_dict.get("checkout_date")
-            if chk_out and isinstance(chk_out, str):
-                chk_out = datetime.fromisoformat(chk_out)
-
-            chk_in = type_data_dict.get("checkin_date")
-            if chk_in and isinstance(chk_in, str):
-                chk_in = datetime.fromisoformat(chk_in)
-
-            from core_shared.models.journals.gear_usage_data import GearUsageData
-
-            new_usage = GearUsageData(
-                journal_id=journal_id,
-                gear_item_id=UUID(type_data_dict["gear_item_id"]),
-                checkout_date=chk_out,
-                checkin_date=chk_in,
-            )
-            await gear_usage_data_repo.save(new_usage)
 
 
 def _validate_contact_relationships(
@@ -1796,17 +804,6 @@ def compute_date_window(
     )
 
 
-"""
-Register journal-related MCP tools with the FastMCP server.
-
-Args:
-    mcp: The FastMCP server instance to register tools with
-"""
-
-
-# -- Type metadata for the discovery tool --
-# Keyed by JournalType enum name (uppercase), these describe the type_data
-# fields each type accepts.  Keep this in sync with the _update_*_data helpers.
 @tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_journal_types", "journal")
 async def list_journal_types() -> str:
@@ -1857,6 +854,9 @@ async def create_journal_entry(
     request: JournalCreateRequest,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Create a new journal entry with types, type-specific data, relationships, and tags.
@@ -2012,9 +1012,7 @@ async def create_journal_entry(
     types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
 
     parent = await _fetch_parent_journal(created_journal, repos.journal_repo, user_id)
-    external_links = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    external_links = await link_service.links_for_journal(journal_id, user_id)
 
     # Convert to AI-friendly response
     response = JournalConverter.to_response(
@@ -2040,6 +1038,9 @@ async def update_journal_entry(
     request: JournalUpdateRequest,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Update an existing journal entry with partial data.
@@ -2123,9 +1124,7 @@ async def update_journal_entry(
     # Snapshot integration links so the response can state whether the update
     # preserved them (an agent cannot otherwise tell an omitted field from a
     # destroyed link).
-    links_before = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    links_before = await link_service.links_for_journal(journal_id, user_id)
 
     # Apply the requested core-field changes to the loaded journal.
     if request.title is not None:
@@ -2171,9 +1170,7 @@ async def update_journal_entry(
     types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
 
     parent = await _fetch_parent_journal(updated_journal, repos.journal_repo, user_id)
-    links_after = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    links_after = await link_service.links_for_journal(journal_id, user_id)
     links_preserved = _external_links_preserved(links_before, links_after)
 
     # Convert to AI-friendly response
@@ -2198,6 +1195,7 @@ async def _build_journal_response(
     journal_id: int,
     user_id: str,
     db_connection: AsyncConnection,
+    link_service: JournalExternalLinkService,
     *,
     include_children: bool = False,
 ) -> str:
@@ -2244,9 +1242,7 @@ async def _build_journal_response(
     ]
 
     # Fetch external links (Strava and Google Calendar)
-    external_links = await _fetch_journal_external_links(
-        journal_id, db_connection, user_id
-    )
+    external_links = await link_service.links_for_journal(journal_id, user_id)
 
     # Fetch every calendar this event lives in. One event held by two
     # calendars — where one invited the other — is a single journal linked
@@ -2287,6 +1283,9 @@ async def get_journal(
         ),
     ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Get journal details by ID for AI analysis.
@@ -2313,7 +1312,11 @@ async def get_journal(
     """
     user_id = await get_current_user_id()
     return await _build_journal_response(
-        journal_id, user_id, db_connection, include_children=include_children
+        journal_id,
+        user_id,
+        db_connection,
+        link_service,
+        include_children=include_children,
     )
 
 
@@ -2343,6 +1346,9 @@ async def get_journal_by_external_id(
         Field(default=False, description="Optional: Include child journals"),
     ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Find the journal linked to an external system's record.
@@ -2372,7 +1378,11 @@ async def get_journal_by_external_id(
             context={"source": source_filter, "external_id": normalized_id},
         )
     return await _build_journal_response(
-        journal_id, user_id, db_connection, include_children=include_children
+        journal_id,
+        user_id,
+        db_connection,
+        link_service,
+        include_children=include_children,
     )
 
 
@@ -2885,30 +1895,26 @@ async def search_activities(
         Field(default=20, description="Maximum number of results to return"),
     ] = 20,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_stats_repo: ActivityStatsRepository = mcp_depends(
+        get_activity_stats_repository
+    ),
 ) -> str:
     """Search activity journals with effective activity-type filtering."""
     user_id = await get_current_user_id()
     repos = _create_journal_tool_repositories(db_connection)
-    total_hits = await _count_activity_rows(
-        db_connection,
+    filters = _activity_filters(
         user_id,
-        search_query=query,
         activity_type=activity_type,
         start_date=start_date,
         end_date=end_date,
+        search_query=query,
     )
+    total_hits = await activity_stats_repo.count_activity_journals(filters)
 
-    activity_rows: list[_ActivityJournalRow] = []
+    activity_rows: list[ActivityJournalRow] = []
     if total_hits > 0:
-        activity_rows = await _fetch_activity_rows(
-            db_connection,
-            user_id,
-            search_query=query,
-            activity_type=activity_type,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-            offset=0,
+        activity_rows = await activity_stats_repo.list_activity_journals(
+            filters, limit=limit, offset=0
         )
 
     results = await _build_search_results(
@@ -2945,72 +1951,63 @@ async def get_activity_stats(
         str | None,
         Field(default=None, description="Optional ISO end date/datetime filter"),
     ] = None,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_stats_repo: ActivityStatsRepository = mcp_depends(
+        get_activity_stats_repository
+    ),
 ) -> str:
     """Aggregate activity totals, breakdowns, and personal records."""
     user_id = await get_current_user_id()
-    overall_stats_row = await _fetch_activity_overall_stats_row(
-        db_connection,
+    filters = _activity_filters(
         user_id,
         activity_type=activity_type,
         start_date=start_date,
         end_date=end_date,
     )
-    activity_type_rows = await _fetch_activity_type_stats_rows(
-        db_connection,
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
+    totals = await activity_stats_repo.get_totals(filters)
+    activity_type_rows = await activity_stats_repo.list_type_totals(filters)
 
     overall_totals = ActivityTotals(
-        distance=int(getattr(overall_stats_row, "total_distance", 0) or 0),
-        duration=int(getattr(overall_stats_row, "total_duration", 0) or 0),
-        elevation_gain=int(getattr(overall_stats_row, "total_elevation_gain", 0) or 0),
-        calories=int(getattr(overall_stats_row, "total_calories", 0) or 0),
+        distance=totals.total_distance,
+        duration=totals.total_duration,
+        elevation_gain=totals.total_elevation_gain,
+        calories=totals.total_calories,
     )
 
     activity_type_stats = [
         ActivityTypeStats(
             activity_type=row.activity_type,
-            count=int(row.count or 0),
-            total_distance=int(row.total_distance or 0),
-            total_duration=int(row.total_duration or 0),
-            total_elevation_gain=int(row.total_elevation_gain or 0),
-            total_calories=int(row.total_calories or 0),
+            count=row.count,
+            total_distance=row.total_distance,
+            total_duration=row.total_duration,
+            total_elevation_gain=row.total_elevation_gain,
+            total_calories=row.total_calories,
         )
         for row in activity_type_rows
     ]
 
     async def build_personal_record(
-        metric_name: str,
+        metric: ActivityMetric,
     ) -> ActivityPersonalRecord | None:
-        record_row = await _fetch_activity_personal_record_row(
-            db_connection,
-            user_id,
-            metric_name=metric_name,
-            activity_type=activity_type,
-            start_date=start_date,
-            end_date=end_date,
-        )
+        record_row = await activity_stats_repo.find_personal_record(filters, metric)
         if record_row is None:
             return None
 
         return ActivityPersonalRecord(
             activity_type=record_row.activity_type,
-            journal_id=int(record_row.journal_id),
+            journal_id=record_row.journal_id,
             journal_title=record_row.journal_title,
-            value=int(record_row.metric_value or 0),
+            value=record_row.value,
         )
 
     personal_records = {
-        "longest_distance": await build_personal_record("distance"),
-        "longest_duration": await build_personal_record("duration"),
-        "highest_elevation_gain": await build_personal_record("elevation_gain"),
-        "most_calories": await build_personal_record("calories"),
+        "longest_distance": await build_personal_record(ActivityMetric.DISTANCE),
+        "longest_duration": await build_personal_record(ActivityMetric.DURATION),
+        "highest_elevation_gain": await build_personal_record(
+            ActivityMetric.ELEVATION_GAIN
+        ),
+        "most_calories": await build_personal_record(ActivityMetric.CALORIES),
     }
-    total_activities = int(getattr(overall_stats_row, "total_activities", 0) or 0)
+    total_activities = totals.total_activities
 
     response = ActivityStatsResponse(
         total_activities=total_activities,
@@ -3047,30 +2044,33 @@ async def analyze_activity_trends(
         str | None,
         Field(default=None, description="Optional ISO end date/datetime filter"),
     ] = None,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    activity_stats_repo: ActivityStatsRepository = mcp_depends(
+        get_activity_stats_repository
+    ),
 ) -> str:
     """Analyse activity trends by day, week, month, or year buckets."""
     normalized_interval = interval.strip().lower()
-    if normalized_interval not in {"day", "week", "month", "year"}:
-        raise ValueError("interval must be one of: day, week, month, year")
+    try:
+        trend_interval = TrendInterval(normalized_interval)
+    except ValueError as exc:
+        raise ValueError("interval must be one of: day, week, month, year") from exc
 
     user_id = await get_current_user_id()
-    trend_rows = await _fetch_activity_trend_rows(
-        db_connection,
+    filters = _activity_filters(
         user_id,
-        interval=normalized_interval,
         activity_type=activity_type,
         start_date=start_date,
         end_date=end_date,
     )
+    trend_rows = await activity_stats_repo.list_trend_buckets(filters, trend_interval)
 
     periods = [
         ActivityTrendPeriod(
             period_start=row.period_start.isoformat(),
-            activity_count=int(row.activity_count or 0),
-            total_distance=int(row.total_distance or 0),
-            total_duration=int(row.total_duration or 0),
-            total_elevation_gain=int(row.total_elevation_gain or 0),
+            activity_count=row.activity_count,
+            total_distance=row.total_distance,
+            total_duration=row.total_duration,
+            total_elevation_gain=row.total_elevation_gain,
         )
         for row in trend_rows
     ]
@@ -3113,18 +2113,18 @@ async def get_route_history(
     if journal is None or journal.user_id != user_id:
         return MCPResponseBuilder.not_found_error_response("Route", route_id)
 
-    history_rows = await _fetch_route_history_rows(db_connection, user_id, route_uuid)
+    history_rows = await repos.route_repo.find_usage_history(user_id, route_uuid)
     entries = [
         RouteHistoryEntry(
-            journal_id=row.id,
-            journal_title=row.title,
+            journal_id=row.journal_id,
+            journal_title=row.journal_title,
             activity_type=row.activity_type,
             event_date_range=EventDateRangeSchema(
-                start=row.event_date_range_start,
-                end=row.event_date_range_end,
+                start=row.event_date_range.start,
+                end=row.event_date_range.end,
             ),
-            distance=int(row.distance) if row.distance is not None else None,
-            duration=int(row.duration) if row.duration is not None else None,
+            distance=row.distance,
+            duration=row.duration,
         )
         for row in history_rows
     ]
@@ -3673,26 +2673,16 @@ async def delete_calendar(
     if not calendar or calendar.user_id != user_id:
         return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
 
-    check_query = text(
-        """
-        SELECT COUNT(*) as count
-        FROM journal_calendar_info
-        WHERE calendar_id = :calendar_id
-        """
-    )
-    result = await db_connection.execute(check_query, {"calendar_id": str(calendar.id)})
-    usage_count = int(result.scalar_one())
-
-    if usage_count > 0:
-        return MCPResponseBuilder.error_response(
-            "CONFLICT",
-            f"Calendar is in use by {usage_count} journal(s)",
-        )
-
     if calendar.id is not None:
-        await calendar_service.delete_calendar(
-            calendar, user_id, transaction=db_connection
-        )
+        try:
+            await calendar_service.delete_calendar(
+                calendar, user_id, transaction=db_connection
+            )
+        except CalendarInUseError as exc:
+            return MCPResponseBuilder.error_response(
+                "CONFLICT",
+                f"Calendar is in use by {exc.usage_count} journal(s)",
+            )
 
     class DeleteCalendarResponse(BaseModel):
         summary: str
@@ -3858,41 +2848,24 @@ async def get_merge_candidates(
     if not target:
         raise JournalNotFoundError(journal_id)
 
-    # Find journals with overlapping date ranges for the same user
-    query = text("""
-        SELECT j.id, j.title, j.content,
-               j.event_date_range_start, j.event_date_range_end
-        FROM journals j
-        WHERE j.user_id = :user_id
-          AND j.id != :journal_id
-          AND j.event_date_range_start <= :end_date
-          AND j.event_date_range_end >= :start_date
-        ORDER BY j.event_date_range_start
-        LIMIT :limit
-    """)
-
-    result = await db_connection.execute(
-        query,
-        {
-            # The caller's id, not the target's. They are the same id now that
-            # the read above is owner-scoped, and saying so keeps them the same
-            # if that guard is ever moved.
-            "user_id": user_id,
-            "journal_id": journal_id,
-            "start_date": target.event_date_range.start,
-            "end_date": target.event_date_range.end,
-            "limit": max(1, min(limit, 50)),
-        },
+    # Find journals with overlapping date ranges for the same user. The caller's
+    # id, not the target's: they are the same id now that the read above is
+    # owner-scoped, and saying so keeps them the same if that guard is ever moved.
+    overlapping = await repos.journal_repo.find_overlapping_for_user(
+        user_id,
+        exclude_journal_id=journal_id,
+        date_range=target.event_date_range,
+        limit=max(1, min(limit, 50)),
     )
-    rows = result.fetchall()
 
     candidates: list[MergeCandidateResult] = []
-    for row in rows:
-        candidate_id = int(row[0])
-        candidate_title = str(row[1])
-        candidate_content = str(row[2]) if row[2] else ""
-        candidate_start = row[3]
-        candidate_end = row[4]
+    for candidate in overlapping:
+        assert candidate.id is not None, "A stored journal has an id"
+        candidate_id = candidate.id
+        candidate_title = candidate.title
+        candidate_content = candidate.content or ""
+        candidate_start = candidate.event_date_range.start
+        candidate_end = candidate.event_date_range.end
 
         # Fetch types and tags for each candidate
         c_types, _ = await read_journal_types_and_data(candidate_id, repos)
@@ -4157,13 +3130,6 @@ async def list_review_items(
             description="Filter by items status, must be 'pending' for now",
         ),
     ] = "pending",
-    user_id_override: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Only for use in tests. Override the user_id.",
-        ),
-    ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
 ) -> str:
     """
@@ -4175,10 +3141,7 @@ async def list_review_items(
     Returns AI-friendly response containing reason, confidence score, and
     candidate journal ids for review.
     """
-    # Determine the user ID using similar logic to other tools
-    # The user ID is usually extracted from the context, or we can use a helper if we have it
-    # Actually tools usually take the test_user_id from context if provided.
-    user_id = user_id_override or "dev-system-user"
+    user_id = await get_current_user_id()
 
     if status != "pending":
         return json.dumps({"error": "Only 'pending' status is currently supported"})
@@ -4244,7 +3207,6 @@ async def list_review_items(
 @mcp_unified_error_handler("dismiss_review_item", "journal")
 async def dismiss_review_item(
     item_id: int,
-    user_id_override: str | None = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     review_item_service: ReviewItemService = mcp_depends(get_review_item_service),
 ) -> str:
@@ -4254,7 +3216,7 @@ async def dismiss_review_item(
     Use this tool to dismiss a pending merge candidate review item that the user
     has determined is not a match or should not be merged.
     """
-    user_id = user_id_override or "dev-system-user"
+    user_id = await get_current_user_id()
 
     item = await review_item_service.dismiss(
         item_id, user_id, transaction=db_connection

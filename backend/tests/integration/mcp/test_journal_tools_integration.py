@@ -361,6 +361,58 @@ class TestJournalToolsIntegration:
             assert payload["message"] == "Calendar is in use by 1 journal(s)"
 
     @pytest.mark.asyncio
+    async def test_delete_calendar_conflicts_for_a_calendar_held_only_by_event_links(
+        self, authenticated_lifespan_client: Any, async_connection: AsyncConnection
+    ) -> None:
+        """A calendar a synced event is linked to is in use too.
+
+        One event held by two calendars is linked to the second only through
+        ``journal_external_event_links``; deleting that calendar must be refused
+        with the same conflict as one carrying the event's calendar info.
+        """
+        async with authenticated_lifespan_client() as authenticated_client:
+            calendar_response = await authenticated_client.post(
+                "/api/calendars",
+                json={
+                    "data": {
+                        "type": "calendars",
+                        "attributes": {"name": "Shared Calendar", "color": "#3B82F6"},
+                    }
+                },
+            )
+            assert calendar_response.status_code == 201
+            calendar_id = calendar_response.json()["data"]["id"]
+
+            journal_id = await create_journal(
+                SqlJournalRepository(async_connection), title="Synced event"
+            )
+            await async_connection.execute(
+                text(
+                    """
+                    INSERT INTO journal_external_event_links (
+                        journal_id, calendar_id, external_event_id,
+                        external_version, sync_capability, sync_status
+                    )
+                    VALUES (
+                        :journal_id, :calendar_id, 'shared-event-1',
+                        'etag-1', 'bidirectional', 'synced'
+                    )
+                    """
+                ),
+                {"journal_id": journal_id, "calendar_id": calendar_id},
+            )
+
+            payload = await call_mcp_tool(
+                authenticated_client,
+                "delete_calendar",
+                {"calendar_id": calendar_id},
+                request_id=2,
+            )
+
+            assert payload["error"] == "CONFLICT"
+            assert payload["message"] == "Calendar is in use by 1 journal(s)"
+
+    @pytest.mark.asyncio
     async def test_delete_journal_tool_will_not_touch_another_users_journal(
         self, authenticated_lifespan_client, async_connection: AsyncConnection
     ) -> None:

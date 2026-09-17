@@ -8,6 +8,7 @@ unit of work would roll the whole journal back) without running later steps.
 """
 
 from datetime import UTC, datetime
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -247,6 +248,27 @@ class TestProcessEventTypeData:
         saved = write_service.calendar_info_repo.save.await_args.args[0]
         assert saved.start_time.hour == 23
         assert saved.end_time.hour == 1
+
+
+class TestUpdatePhotoAlbumTypeData:
+    @pytest.mark.asyncio
+    async def test_photo_album_data_is_rejected_without_publishing(
+        self, write_service: JournalWriteService, mock_transaction: AsyncMock
+    ) -> None:
+        """PHOTO_ALBUM data belongs to Immich album sync, so an edit fails fast.
+
+        A validation error (not a silent no-op) is what lets the REST and MCP
+        callers tell the user nothing was saved.
+        """
+        with pytest.raises(JournalValidationError, match="managed by Immich"):
+            await write_service.update_type_data(
+                42,
+                JournalType.PHOTO_ALBUM,
+                {"immich_album_id": "album-123"},
+                mock_transaction,
+            )
+
+        cast(AsyncMock, write_service.event_publisher).publish.assert_not_awaited()
 
 
 class TestDeleteJournal:
