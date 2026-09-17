@@ -12,6 +12,8 @@ from typing import Any
 import structlog
 from structlog.types import EventDict
 
+from app.infrastructure.secret_paths import redact_secret_paths_processor
+
 
 def add_app_context(
     _logger: Any, _method_name: str, event_dict: EventDict
@@ -47,6 +49,7 @@ def setup_logging(log_level: str = "INFO") -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
+            redact_secret_paths_processor,
             structlog.processors.UnicodeDecoder(),
             structlog.processors.JSONRenderer(),
         ],

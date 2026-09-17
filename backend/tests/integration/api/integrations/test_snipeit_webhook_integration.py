@@ -7,6 +7,7 @@ notifications are sent as ``application/json``.
 """
 
 import json
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from uuid import uuid4
 
@@ -262,3 +263,26 @@ async def test_url_without_token_is_not_found(
 
     assert response.status_code == 404
     assert await read_webhook_events() == []
+
+
+@pytest.mark.asyncio
+async def test_rejected_body_does_not_log_the_token(
+    authenticated_client: AsyncClient,
+    webhook_url: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A malformed delivery to a valid URL is logged without the secret token."""
+    token = webhook_url.rsplit("/", 1)[-1]
+
+    with caplog.at_level(logging.DEBUG):
+        response = await authenticated_client.post(webhook_url, content=b"not json")
+
+    assert response.status_code == 400
+    # The test client's own httpx request log is not the backend's.
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name.startswith("app.")
+    ]
+    assert any("/webhook/{webhook_token}" in message for message in messages)
+    assert not any(token in message for message in messages)

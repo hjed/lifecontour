@@ -560,6 +560,7 @@ Snipe-IT's General webhook has no signing secret or verification handshake, so t
 1. **Token**: Saving Snipe-IT settings for the first time generates a random `webhook_token` (`secrets.token_urlsafe(32)`) in `snipeit_settings`; later saves keep it. `GET /api/integrations/snipeit/webhook-url` returns `<webhook_base_url>/api/integrations/snipeit/webhook/<token>` for the user to paste into Snipe-IT.
 2. **Event Delivery**: `POST /api/integrations/snipeit/webhook/{token}` looks up the token's owner before reading the body. An unknown token raises Starlette's own 404, identical to a path that does not exist. Each linked asset is published to `pms:domain-events` as `snipeit.webhook_received` with the owner's `user_id`.
 3. **Stream Consumer**: `SnipeItWorkerStreamConsumer` syncs the asset for that `user_id` only. Events without one are skipped, never fanned out to every configured user.
+4. **Keeping the token out of telemetry**: `app/infrastructure/secret_paths.py` replaces the token with `{webhook_token}` in every structlog event (a processor in `setup_logging`) and in the URL attributes of OpenTelemetry request spans (the `server_request_hook` passed to `setup_telemetry`). Span names already use the route template.
 
 ### 4. Bi-Directional Sync (Google Calendar)
 

@@ -2,6 +2,7 @@
 OpenTelemetry instrumentation setup for Personal Management System.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -9,8 +10,17 @@ import structlog
 _TELEMETRY_SETUP_DONE = False
 
 
-def setup_telemetry(settings: Any, app: Any | None = None) -> None:
-    """Setup OpenTelemetry instrumentation."""
+def setup_telemetry(
+    settings: Any,
+    app: Any | None = None,
+    server_request_hook: Callable[[Any, dict[str, Any]], None] | None = None,
+) -> None:
+    """
+    Setup OpenTelemetry instrumentation.
+
+    ``server_request_hook`` is called with each FastAPI request span and its
+    ASGI scope, e.g. to redact secrets from the recorded URL.
+    """
     global _TELEMETRY_SETUP_DONE
     if not getattr(settings, "enable_telemetry", False):
         return
@@ -106,7 +116,9 @@ def setup_telemetry(settings: Any, app: Any | None = None) -> None:
             from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
             FastAPIInstrumentor.instrument_app(
-                app, tracer_provider=trace.get_tracer_provider()
+                app,
+                tracer_provider=trace.get_tracer_provider(),
+                server_request_hook=server_request_hook,
             )
         except ImportError:
             logger.debug("FastAPI instrumentation not available")
