@@ -303,6 +303,9 @@ class TestLocalWindow:
             # ``time.max`` gets wrong: ``fold=0`` picks the earlier pass and the
             # window closes an hour before the day does.
             (SANTIAGO, datetime.date(2026, 3, 29), datetime.date(2026, 4, 4)),
+            # **Santiago's spring forward also happens at midnight**, so
+            # 6 September has no 00:00 at all and its first instant is 01:00.
+            (SANTIAGO, datetime.date(2026, 8, 31), datetime.date(2026, 9, 6)),
             # Beirut's, in the other hemisphere and the other half of the year.
             (BEIRUT, datetime.date(2026, 10, 18), datetime.date(2026, 10, 24)),
         ],
@@ -370,6 +373,39 @@ class TestLocalWindow:
         assert window.end.astimezone(datetime.UTC) == next_midnight.astimezone(
             datetime.UTC
         ) - datetime.timedelta(microseconds=1)
+
+    def test_a_window_ending_before_a_nonexistent_midnight_does_not_overrun(
+        self,
+    ) -> None:
+        """The gap case of the end bound, which is the mirror of the fold case.
+
+        Santiago's clocks jump **at midnight** on 6 September 2026, so the wall
+        time 00:00 never happens there: ``combine`` resolves it with the
+        pre-transition offset, which is the same instant as 01:00 after the
+        jump — the first instant the day really has. A window over 5 September
+        must therefore stop just before that instant and claim none of the 6th,
+        and a journal at 01:00 on the 6th belongs to the 6th, not the 5th.
+        """
+        window = local_day_window(datetime.date(2026, 9, 5), SANTIAGO)
+        first_instant_of_the_next_day = datetime.datetime(
+            2026, 9, 6, 1, 0, tzinfo=SANTIAGO
+        ).astimezone(datetime.UTC)
+
+        assert window.end.astimezone(datetime.UTC) == (
+            first_instant_of_the_next_day - datetime.timedelta(microseconds=1)
+        )
+        assert local_date(window.end, SANTIAGO) == datetime.date(2026, 9, 5)
+
+    def test_a_day_whose_clocks_go_forward_at_midnight_is_twenty_three_hours_long(
+        self,
+    ) -> None:
+        """The gap day itself: 6 September 2026 in Santiago starts at 01:00."""
+        window = local_day_window(datetime.date(2026, 9, 6), SANTIAGO)
+        span = window.end.astimezone(datetime.UTC) - window.start.astimezone(
+            datetime.UTC
+        )
+
+        assert span == datetime.timedelta(hours=23) - datetime.timedelta(microseconds=1)
 
     def test_a_day_whose_clocks_go_back_at_midnight_is_twenty_five_hours_long(
         self,
