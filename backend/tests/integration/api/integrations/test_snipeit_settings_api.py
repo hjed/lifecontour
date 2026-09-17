@@ -123,6 +123,32 @@ async def test_rotate_webhook_url_not_found_without_settings(
     )
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("GET", "/api/integrations/snipeit/webhook-url", id="get"),
+        pytest.param(
+            "POST", "/api/integrations/snipeit/webhook-url/rotate", id="rotate"
+        ),
+    ],
+)
+async def test_webhook_url_without_settings_is_not_found_even_without_a_base_url(
+    authenticated_client: AsyncClient,
+    test_settings: Settings,
+    method: str,
+    path: str,
+) -> None:
+    """Missing Snipe-IT settings is reported before server configuration."""
+    test_settings.webhook_base_url = ""
+
+    response = await authenticated_client.request(method, path)
+
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["detail"] == (
+        "No Snipe-IT settings found for this user"
+    )
+
+
 async def test_get_snipeit_settings_not_found(
     authenticated_client: AsyncClient,
 ) -> None:

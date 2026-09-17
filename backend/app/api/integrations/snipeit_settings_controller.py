@@ -204,12 +204,11 @@ async def get_snipeit_webhook_url(
     the URL so the user can copy it. The URL contains the user's secret
     webhook token, which is how the webhook knows whose Snipe-IT to sync.
     """
-    base_url = _webhook_base_url(settings)
     webhook_token = await repository.get_webhook_token(str(user.id))
     if webhook_token is None:
         raise HTTPException(status_code=404, detail=SETTINGS_NOT_FOUND_DETAIL)
 
-    return _webhook_url_response(base_url, webhook_token)
+    return _webhook_url_response(_webhook_base_url(settings), webhook_token)
 
 
 @router.post(
@@ -224,16 +223,21 @@ async def get_snipeit_webhook_url(
 async def rotate_snipeit_webhook_url(
     user: FromDishka[SessionUser],
     settings: FromDishka[Settings],
+    repository: FromDishka[SqlSnipeItSettingsRepository],
     service: FromDishka[SnipeItSettingsService],
     connection: FromDishka[AsyncConnection],
 ) -> dict[str, object]:
     """Regenerate the Snipe-IT webhook URL with a new secret token.
 
     The previous URL stops working immediately, so the new one must be
-    configured in Snipe-IT. The base URL is checked first so a server that
-    cannot build the new URL never invalidates the old one.
+    configured in Snipe-IT. Both checks run before rotating: missing settings
+    is reported first, and a server that cannot build the new URL never
+    invalidates the old one.
     """
+    if await repository.get_webhook_token(str(user.id)) is None:
+        raise HTTPException(status_code=404, detail=SETTINGS_NOT_FOUND_DETAIL)
     base_url = _webhook_base_url(settings)
+
     webhook_token = await service.rotate_webhook_token(
         user_id=str(user.id),
         transaction=connection,
