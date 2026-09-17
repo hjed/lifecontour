@@ -1,10 +1,157 @@
 import pytest
 from httpx import AsyncClient
 
+from app.infrastructure.config import Settings
+
 pytestmark = pytest.mark.integration
 
+WEBHOOK_BASE_URL = "https://pms.example.com"
 
-async def test_get_snipeit_settings_not_found(authenticated_client: AsyncClient):
+
+@pytest.fixture
+def test_settings(test_settings: Settings) -> Settings:
+    """The shared test settings, with a public base URL for webhook URLs."""
+    test_settings.webhook_base_url = WEBHOOK_BASE_URL
+    return test_settings
+
+
+async def _save_settings(client: AsyncClient) -> None:
+    response = await client.put(
+        "/api/integrations/snipeit/settings",
+        json={"base_url": "https://snipeit.example.com"},
+    )
+    assert response.status_code == 200
+
+
+async def _webhook_url(client: AsyncClient) -> str:
+    response = await client.get("/api/integrations/snipeit/webhook-url")
+    assert response.status_code == 200
+    return str(response.json()["data"]["attributes"]["webhook_url"])
+
+
+async def test_webhook_url_contains_the_users_token(
+    authenticated_client: AsyncClient,
+) -> None:
+    """The webhook URL carries a token that the webhook endpoint accepts."""
+    await _save_settings(authenticated_client)
+
+    webhook_url = await _webhook_url(authenticated_client)
+    prefix = f"{WEBHOOK_BASE_URL}/api/integrations/snipeit/webhook/"
+    assert webhook_url.startswith(prefix)
+    token = webhook_url.removeprefix(prefix)
+    assert len(token) == 43
+
+    webhook = await authenticated_client.post(
+        webhook_url.removeprefix(WEBHOOK_BASE_URL),
+        json={"text": "Oh hai! It looks like your webhook is working!"},
+    )
+    assert webhook.status_code == 200
+
+
+async def test_webhook_url_not_found_without_settings(
+    authenticated_client: AsyncClient,
+) -> None:
+    """Without Snipe-IT settings there is no token, so no webhook URL."""
+    response = await authenticated_client.get("/api/integrations/snipeit/webhook-url")
+
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["detail"] == (
+        "No Snipe-IT settings found for this user"
+    )
+
+
+async def test_rotate_webhook_url_replaces_the_token(
+    authenticated_client: AsyncClient,
+) -> None:
+    """Rotating returns a new URL; the old URL stops working and the new one works."""
+    await _save_settings(authenticated_client)
+    old_url = await _webhook_url(authenticated_client)
+    test_message = {"text": "Oh hai! It looks like your webhook is working!"}
+
+    response = await authenticated_client.post(
+        "/api/integrations/snipeit/webhook-url/rotate"
+    )
+
+    assert response.status_code == 200
+    new_url = str(response.json()["data"]["attributes"]["webhook_url"])
+    assert new_url != old_url
+    assert new_url.startswith(f"{WEBHOOK_BASE_URL}/api/integrations/snipeit/webhook/")
+    assert await _webhook_url(authenticated_client) == new_url
+
+    old_webhook = await authenticated_client.post(
+        old_url.removeprefix(WEBHOOK_BASE_URL), json=test_message
+    )
+    new_webhook = await authenticated_client.post(
+        new_url.removeprefix(WEBHOOK_BASE_URL), json=test_message
+    )
+    assert old_webhook.status_code == 404
+    assert new_webhook.status_code == 200
+
+
+async def test_rotate_webhook_url_keeps_the_token_without_a_base_url(
+    authenticated_client: AsyncClient,
+    test_settings: Settings,
+) -> None:
+    """A server that cannot build the new URL refuses to rotate, so the old URL keeps working."""
+    await _save_settings(authenticated_client)
+    old_url = await _webhook_url(authenticated_client)
+    test_settings.webhook_base_url = ""
+
+    response = await authenticated_client.post(
+        "/api/integrations/snipeit/webhook-url/rotate"
+    )
+
+    assert response.status_code == 400
+    old_webhook = await authenticated_client.post(
+        old_url.removeprefix(WEBHOOK_BASE_URL),
+        json={"text": "Oh hai! It looks like your webhook is working!"},
+    )
+    assert old_webhook.status_code == 200
+
+
+async def test_rotate_webhook_url_not_found_without_settings(
+    authenticated_client: AsyncClient,
+) -> None:
+    """There is no token to rotate before Snipe-IT settings are saved."""
+    response = await authenticated_client.post(
+        "/api/integrations/snipeit/webhook-url/rotate"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["detail"] == (
+        "No Snipe-IT settings found for this user"
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("GET", "/api/integrations/snipeit/webhook-url", id="get"),
+        pytest.param(
+            "POST", "/api/integrations/snipeit/webhook-url/rotate", id="rotate"
+        ),
+    ],
+)
+async def test_webhook_url_without_settings_is_not_found_even_without_a_base_url(
+    authenticated_client: AsyncClient,
+    test_settings: Settings,
+    method: str,
+    path: str,
+) -> None:
+    """Missing Snipe-IT settings is reported before server configuration."""
+    test_settings.webhook_base_url = ""
+
+    response = await authenticated_client.request(method, path)
+
+    assert response.status_code == 404
+    assert response.json()["errors"][0]["detail"] == (
+        "No Snipe-IT settings found for this user"
+    )
+
+
+async def test_get_snipeit_settings_not_found(
+    authenticated_client: AsyncClient,
+) -> None:
     """Test GET settings returns 404 when not configured."""
     response = await authenticated_client.get("/api/integrations/snipeit/settings")
 
@@ -14,7 +161,9 @@ async def test_get_snipeit_settings_not_found(authenticated_client: AsyncClient)
     assert data["errors"][0]["detail"] == "No Snipe-IT settings found for this user"
 
 
-async def test_upsert_and_get_snipeit_settings(authenticated_client: AsyncClient):
+async def test_upsert_and_get_snipeit_settings(
+    authenticated_client: AsyncClient,
+) -> None:
     """Test PUT saves settings and GET retrieves them in JSON API format."""
     # Put settings
     put_payload = {
@@ -45,7 +194,7 @@ async def test_upsert_and_get_snipeit_settings(authenticated_client: AsyncClient
     assert get_attributes["snipeit_user_id"] == "42"
 
 
-async def test_trigger_gear_sync(authenticated_client: AsyncClient):
+async def test_trigger_gear_sync(authenticated_client: AsyncClient) -> None:
     """Test Snipe-IT gear sync endpoint."""
     from unittest.mock import AsyncMock, patch
 
@@ -119,7 +268,7 @@ async def test_trigger_gear_sync(authenticated_client: AsyncClient):
         assert mock_enqueue.call_args[1].get("sync_type") == "full"
 
 
-async def test_trigger_maintenance_sync(authenticated_client: AsyncClient):
+async def test_trigger_maintenance_sync(authenticated_client: AsyncClient) -> None:
     """Test Snipe-IT maintenance sync endpoint."""
     from unittest.mock import AsyncMock, patch
 
@@ -193,7 +342,7 @@ async def test_trigger_maintenance_sync(authenticated_client: AsyncClient):
         assert mock_enqueue.call_args[1].get("sync_type") == "full"
 
 
-async def test_trigger_checkout_sync(authenticated_client: AsyncClient):
+async def test_trigger_checkout_sync(authenticated_client: AsyncClient) -> None:
     """Test Snipe-IT checkout sync endpoint respects request sync_type."""
     response = await authenticated_client.post(
         "/api/integrations/snipeit/checkout/sync",
@@ -206,7 +355,9 @@ async def test_trigger_checkout_sync(authenticated_client: AsyncClient):
     assert data["data"]["attributes"]["syncType"] == "smart"
 
 
-async def test_trigger_checkout_sync_force_full(authenticated_client: AsyncClient):
+async def test_trigger_checkout_sync_force_full(
+    authenticated_client: AsyncClient,
+) -> None:
     """Test Snipe-IT checkout sync endpoint with force_full_sync."""
     response = await authenticated_client.post(
         "/api/integrations/snipeit/checkout/sync",

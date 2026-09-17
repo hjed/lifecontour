@@ -16,6 +16,7 @@ import {
   useGenericSync,
   useDeadLetters,
   useReregisterWebhooks,
+  useRotateSnipeItWebhookUrl,
   useSnipeItWebhookUrl,
 } from '@/lib/api/integrations';
 
@@ -31,6 +32,7 @@ jest.mock('@/lib/api/integrations', () => ({
   useGenericSync: jest.fn(),
   useDeadLetters: jest.fn(),
   useReregisterWebhooks: jest.fn(),
+  useRotateSnipeItWebhookUrl: jest.fn(),
   useSnipeItWebhookUrl: jest.fn(),
 }));
 
@@ -55,6 +57,7 @@ const mockUseOAuthDisconnect = jest.mocked(useOAuthDisconnect);
 const mockUseGenericSync = jest.mocked(useGenericSync);
 const mockUseDeadLetters = jest.mocked(useDeadLetters);
 const mockUseReregisterWebhooks = jest.mocked(useReregisterWebhooks);
+const mockUseRotateSnipeItWebhookUrl = jest.mocked(useRotateSnipeItWebhookUrl);
 const mockUseSnipeItWebhookUrl = jest.mocked(useSnipeItWebhookUrl);
 
 function createWrapper() {
@@ -167,6 +170,11 @@ describe('IntegrationsPage', () => {
       isPending: false,
       error: null,
     } as unknown as ReturnType<typeof useReregisterWebhooks>);
+
+    mockUseRotateSnipeItWebhookUrl.mockReturnValue({
+      mutate: jest.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useRotateSnipeItWebhookUrl>);
 
     mockUseSnipeItWebhookUrl.mockReturnValue({
       data: undefined,

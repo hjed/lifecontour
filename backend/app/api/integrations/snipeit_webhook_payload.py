@@ -53,9 +53,18 @@ class SnipeItWebhookEvent:
     action: str
     asset_id: int
 
-    def to_event_data(self) -> dict[str, Any]:
-        """Serialise into the event data read by the Snipe-IT worker."""
-        return {"action": self.action, "item": {"id": self.asset_id}}
+    def to_event_data(self, user_id: str) -> dict[str, Any]:
+        """
+        Serialise into the event data read by the Snipe-IT worker.
+
+        ``user_id`` is the owner of the webhook URL, the only user whose Snipe-IT
+        the worker syncs the asset from.
+        """
+        return {
+            "action": self.action,
+            "item": {"id": self.asset_id},
+            "user_id": user_id,
+        }
 
 
 def _asset_id_from_link(link: str | None) -> int | None:

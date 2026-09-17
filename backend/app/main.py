@@ -25,6 +25,7 @@ from app.infrastructure.database import get_async_database_engine, get_database_
 from app.infrastructure.di.container import create_container
 from app.infrastructure.events.outbox_relay import run_outbox_relay_loop
 from app.infrastructure.logging import setup_logging
+from app.infrastructure.secret_paths import redact_secret_path_span_attributes
 from app.infrastructure.tasks.attendance_transition_task import (
     run_attendance_transition_loop,
 )
@@ -328,7 +329,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     setup_logging(settings.log_level)
 
     # Setup OpenTelemetry BEFORE middleware and routes are compiled by Uvicorn/Starlette
-    setup_telemetry(settings, app)
+    setup_telemetry(
+        settings, app, server_request_hook=redact_secret_path_span_attributes
+    )
 
     # Setup Dishka dependency injection
     app.state.settings = settings

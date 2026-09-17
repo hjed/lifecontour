@@ -63,6 +63,8 @@ export const integrationKeys = {
     [...integrationKeys.all, 'strava', 'unmatched', journalId] as const,
   immichConflicts: () =>
     [...integrationKeys.all, 'immich', 'conflicts'] as const,
+  snipeItWebhookUrl: () =>
+    [...integrationKeys.all, 'snipeit', 'webhook-url'] as const,
 };
 
 // Error handling helper
@@ -1010,10 +1012,45 @@ export async function fetchSnipeItWebhookUrl(): Promise<WebhookUrlResponse> {
 
 export function useSnipeItWebhookUrl(enabled: boolean = false) {
   return useQuery({
-    queryKey: [...integrationKeys.all, 'snipeit', 'webhook-url'],
+    queryKey: integrationKeys.snipeItWebhookUrl(),
     queryFn: fetchSnipeItWebhookUrl,
     enabled,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+/**
+ * Regenerate the Snipe-IT webhook URL with a new secret token.
+ * The previous URL stops working immediately.
+ * POST /api/integrations/snipeit/webhook-url/rotate
+ */
+export async function rotateSnipeItWebhookUrl(): Promise<WebhookUrlResponse> {
+  const response = await fetch('/api/integrations/snipeit/webhook-url/rotate', {
+    method: 'POST',
+    credentials: 'include',
+  });
+  return handleApiResponse<WebhookUrlResponse>(response);
+}
+
+export function useRotateSnipeItWebhookUrl() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: rotateSnipeItWebhookUrl,
+    onSuccess: async (data: WebhookUrlResponse) => {
+      // A URL request still in flight would otherwise land afterwards and put
+      // the old, now-rejected URL back in the dialog.
+      await queryClient.cancelQueries({
+        queryKey: integrationKeys.snipeItWebhookUrl(),
+      });
+      queryClient.setQueryData(integrationKeys.snipeItWebhookUrl(), data);
+      toast.success(
+        'Webhook URL regenerated. Update it in Snipe-IT to keep receiving changes.'
+      );
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to regenerate webhook URL: ${error.message}`);
+    },
   });
 }
 

@@ -23,7 +23,11 @@ import {
   triggerGoogleSync,
   useDeleteStravaMapping,
   integrationKeys,
+  rotateSnipeItWebhookUrl,
+  fetchSnipeItWebhookUrl,
+  useRotateSnipeItWebhookUrl,
 } from '../integrations';
+import { WebhookUrlResponse } from '@/types/integrations';
 
 // Mock fetch globally
 globalThis.fetch = jest.fn() as unknown as typeof fetch;
@@ -474,5 +478,120 @@ describe('Integration React Query Hooks', () => {
         'a2',
       ]);
     });
+  });
+});
+
+describe('Snipe-IT webhook URL rotation', () => {
+  const rotatedUrl: WebhookUrlResponse = {
+    data: {
+      type: 'webhook-url',
+      attributes: {
+        webhook_url: 'https://pms.example/api/integrations/snipeit/webhook/new',
+        message: 'Configure this URL in your Snipe-IT instance.',
+      },
+    },
+  };
+
+  beforeEach(() => {
+    mockFetch.mockClear();
+  });
+
+  it('POSTs to the rotate endpoint and returns the new URL', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => rotatedUrl,
+    } as Response);
+
+    const result = await rotateSnipeItWebhookUrl();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/integrations/snipeit/webhook-url/rotate',
+      { method: 'POST', credentials: 'include' }
+    );
+    expect(result).toEqual(rotatedUrl);
+  });
+
+  it('shows the new URL from the cache once rotation succeeds', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    queryClient.setQueryData(integrationKeys.snipeItWebhookUrl(), {
+      data: {
+        ...rotatedUrl.data,
+        attributes: {
+          ...rotatedUrl.data.attributes,
+          webhook_url:
+            'https://pms.example/api/integrations/snipeit/webhook/old',
+        },
+      },
+    });
+    const TestWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => rotatedUrl,
+    } as Response);
+
+    const { result } = renderHook(() => useRotateSnipeItWebhookUrl(), {
+      wrapper: TestWrapper,
+    });
+    await result.current.mutateAsync();
+
+    expect(
+      queryClient.getQueryData(integrationKeys.snipeItWebhookUrl())
+    ).toEqual(rotatedUrl);
+  });
+
+  it('keeps the rotated URL when an earlier URL request finishes afterwards', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    const TestWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const staleUrl: WebhookUrlResponse = {
+      data: {
+        ...rotatedUrl.data,
+        attributes: {
+          ...rotatedUrl.data.attributes,
+          webhook_url:
+            'https://pms.example/api/integrations/snipeit/webhook/old',
+        },
+      },
+    };
+    let resolveInitialRequest: (response: Response) => void = () => {};
+    mockFetch.mockImplementation(input =>
+      String(input).endsWith('/rotate')
+        ? Promise.resolve({
+            ok: true,
+            json: async () => rotatedUrl,
+          } as Response)
+        : new Promise<Response>(resolve => {
+            resolveInitialRequest = resolve;
+          })
+    );
+
+    // The dialog's first URL request is still in flight when the user rotates.
+    const initialRequest = queryClient
+      .fetchQuery({
+        queryKey: integrationKeys.snipeItWebhookUrl(),
+        queryFn: fetchSnipeItWebhookUrl,
+      })
+      .catch(() => undefined);
+    const { result } = renderHook(() => useRotateSnipeItWebhookUrl(), {
+      wrapper: TestWrapper,
+    });
+    await result.current.mutateAsync();
+    resolveInitialRequest({ ok: true, json: async () => staleUrl } as Response);
+    await initialRequest;
+
+    expect(
+      queryClient.getQueryData(integrationKeys.snipeItWebhookUrl())
+    ).toEqual(rotatedUrl);
+    mockFetch.mockReset();
   });
 });

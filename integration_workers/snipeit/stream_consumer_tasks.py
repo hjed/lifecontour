@@ -84,11 +84,14 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
     async def _handle_webhook_received(self, event: StreamEvent) -> None:
         """Process a ``snipeit.webhook_received`` event.
 
-        Extracts the asset ID and synchronizes it for all users that have a
-        Snipe-IT configuration. The item is always an asset: the backend
-        publishes only notifications that link an asset, and Snipe-IT sends no
-        maintenance notifications, so maintenance records are imported only by
-        the maintenance sync job (``sync_snipeit_maintenances``).
+        Extracts the asset ID and synchronizes it for the user who owns the
+        webhook URL (``user_id``), whose token authenticated the notification.
+        An event without an owner is skipped rather than synced for everyone,
+        so an unauthenticated notification can never fan out across users.
+        The item is always an asset: the backend publishes only notifications
+        that link an asset, and Snipe-IT sends no maintenance notifications, so
+        maintenance records are imported only by the maintenance sync job
+        (``sync_snipeit_maintenances``).
         """
         self._log_processed(event)
 
@@ -102,6 +105,15 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             logger.debug("Skipping webhook event: missing item.id")
             return
 
+        user_id = event.event_data.get("user_id")
+        if not user_id or not isinstance(user_id, str):
+            logger.warning(
+                "Skipping webhook event: missing owning user",
+                event_id=event.event_id,
+                asset_id=asset_id,
+            )
+            return
+
         from sqlalchemy import text
 
         from snipeit_api_client import SnipeItAPIError
@@ -111,72 +123,76 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
 
         worker_settings = SnipeItWorkerSettings()
 
-        # Query all users with Snipe-IT configured
         async with self._session_factory() as session:
             result = await session.execute(
                 text("""
                     SELECT user_id, base_url, snipeit_user_id
                     FROM snipeit_settings
-                """)
+                    WHERE user_id = :user_id
+                """),
+                {"user_id": user_id},
             )
-            settings_rows = result.fetchall()
+            settings_row = result.fetchone()
 
-        for row in settings_rows:
-            user_id = row.user_id
-            base_url = row.base_url
-            snipeit_user_id = row.snipeit_user_id
-
-            auth_data = await _get_auth_data(self._session_factory, user_id)
-            if not auth_data:
-                continue
-
-            sync_service = _create_sync_service(
+        if settings_row is None:
+            logger.info(
+                "Skipping webhook event: user no longer has Snipe-IT configured",
+                asset_id=asset_id,
                 user_id=user_id,
-                auth_data=auth_data,
-                base_url=base_url,
-                snipeit_user_id=snipeit_user_id,
-                worker_settings=worker_settings,
+            )
+            return
+
+        auth_data = await _get_auth_data(self._session_factory, user_id)
+        if not auth_data:
+            return
+
+        sync_service = _create_sync_service(
+            user_id=user_id,
+            auth_data=auth_data,
+            base_url=settings_row.base_url,
+            snipeit_user_id=settings_row.snipeit_user_id,
+            worker_settings=worker_settings,
+            session_factory=self._session_factory,
+        )
+
+        try:
+            await sync_service._sync_single_asset_with_retry(
+                asset_id=asset_id,
                 session_factory=self._session_factory,
             )
-
-            try:
-                await sync_service._sync_single_asset_with_retry(
-                    asset_id=asset_id,
-                    session_factory=self._session_factory,
-                )
-                logger.info(
-                    "Successfully processed webhook sync for asset",
+            logger.info(
+                "Successfully processed webhook sync for asset",
+                asset_id=asset_id,
+                user_id=user_id,
+            )
+        except _AssetSkipped:
+            # Asset hasn't changed, ignore safely
+            pass
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                # Asset likely doesn't exist in this user's instance
+                logger.debug(
+                    "Skipped webhook sync for asset (not found/forbidden)",
                     asset_id=asset_id,
                     user_id=user_id,
+                    status_code=exc.status_code,
                 )
-            except _AssetSkipped:
-                # Asset hasn't changed, ignore safely
-                pass
-            except SnipeItAPIError as exc:
-                if exc.status_code in (403, 404):
-                    # Asset likely doesn't exist in this user's instance
-                    logger.debug(
-                        "Skipped webhook sync for asset (not found/forbidden)",
-                        asset_id=asset_id,
-                        user_id=user_id,
-                        status_code=exc.status_code,
-                    )
-                else:
-                    logger.warning(
-                        "Failed to sync asset from webhook",
-                        asset_id=asset_id,
-                        user_id=user_id,
-                        exc_info=True,
-                    )
-            except Exception:  # noqa: BLE001
+            else:
                 logger.warning(
                     "Failed to sync asset from webhook",
                     asset_id=asset_id,
                     user_id=user_id,
                     exc_info=True,
                 )
-            finally:
-                await sync_service._api_client.close()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to sync asset from webhook",
+                asset_id=asset_id,
+                user_id=user_id,
+                exc_info=True,
+            )
+        finally:
+            await sync_service._api_client.close()
 
     async def _handle_gear_item_updated(self, event: StreamEvent) -> None:
         """Process GearItemUpdated outbox events to push changes to Snipe-IT."""

@@ -7,6 +7,7 @@ import {
   useOAuthDisconnect,
   useGenericSync,
   useReregisterWebhooks,
+  useRotateSnipeItWebhookUrl,
   useSnipeItWebhookUrl,
 } from '@/lib/api/integrations';
 
@@ -18,6 +19,7 @@ jest.mock('@/lib/api/integrations', () => ({
   useOAuthDisconnect: jest.fn(),
   useGenericSync: jest.fn(),
   useReregisterWebhooks: jest.fn(),
+  useRotateSnipeItWebhookUrl: jest.fn(),
   useSnipeItWebhookUrl: jest.fn(),
 }));
 
@@ -41,6 +43,7 @@ beforeEach(() => {
   (useOAuthDisconnect as jest.Mock).mockReturnValue(mutationResult);
   (useGenericSync as jest.Mock).mockReturnValue(mutationResult);
   (useReregisterWebhooks as jest.Mock).mockReturnValue(mutationResult);
+  (useRotateSnipeItWebhookUrl as jest.Mock).mockReturnValue(mutationResult);
   (useSnipeItWebhookUrl as jest.Mock).mockReturnValue({ data: undefined });
 });
 

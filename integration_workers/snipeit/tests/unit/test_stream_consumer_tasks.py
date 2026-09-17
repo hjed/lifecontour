@@ -77,11 +77,11 @@ async def test_handle_event_skips_invalid_payload(
 
 
 @pytest.mark.asyncio
-async def test_handle_event_processes_asset(
+async def test_webhook_without_user_is_skipped(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """Valid webhook processes the asset for configured users."""
+    """A webhook event without an owner syncs nobody rather than every user."""
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
@@ -95,13 +95,77 @@ async def test_handle_event_processes_asset(
         occurred_at="2024-01-01T00:00:00Z",
     )
 
+    with patch("worker._get_auth_data") as mock_get_auth_data:
+        await consumer._handle_event(event)
+
+    mock_session_factory.assert_not_called()
+    mock_get_auth_data.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_webhook_for_user_without_settings_is_skipped(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """An owner whose Snipe-IT settings have since been removed is not synced."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="snipeit.webhook_received",
+        aggregate_id=0,
+        event_data={
+            "action": "hardware_created",
+            "item": {"id": 42},
+            "user_id": "user1",
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+    mock_result = MagicMock()
+    mock_result.fetchone.return_value = None
+    mock_session.execute.return_value = mock_result
+
+    with patch("worker._get_auth_data") as mock_get_auth_data:
+        await consumer._handle_event(event)
+
+    mock_get_auth_data.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_event_processes_asset(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """A valid webhook syncs the asset for the webhook's owner only."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    event = StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="snipeit.webhook_received",
+        aggregate_id=0,
+        event_data={
+            "action": "hardware_created",
+            "item": {"id": 42},
+            "user_id": "user1",
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
     # Mock database session returning one user with Snipe-IT configured
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
     mock_result = MagicMock()
-    mock_result.fetchall.return_value = [
-        MagicMock(user_id="user1", base_url="http://snipeit", snipeit_user_id="s1")
-    ]
+    mock_result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
     mock_session.execute.return_value = mock_result
 
     # Mock sync service creation and execution
@@ -117,8 +181,11 @@ async def test_handle_event_processes_asset(
     ):
         await consumer._handle_event(event)
 
+        query_params = mock_session.execute.call_args.args[1]
+        assert query_params == {"user_id": "user1"}
         mock_get_auth.assert_called_once_with(mock_session_factory, "user1")
         mock_create_service.assert_called_once()
+        assert mock_create_service.call_args.kwargs["user_id"] == "user1"
 
         # Verify it tries to sync asset 42
         mock_sync_service._sync_single_asset_with_retry.assert_called_once_with(
@@ -207,6 +274,7 @@ async def test_handle_event_syncs_asset_when_action_mentions_maintenance(
         event_data={
             "action": "Asset Checkin Notification: returned after maintenance",
             "item": {"id": 77},
+            "user_id": "user1",
         },
         occurred_at="2024-01-01T00:00:00Z",
     )
@@ -215,9 +283,9 @@ async def test_handle_event_syncs_asset_when_action_mentions_maintenance(
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
     mock_result = MagicMock()
-    mock_result.fetchall.return_value = [
-        MagicMock(user_id="user1", base_url="http://snipeit", snipeit_user_id="s1")
-    ]
+    mock_result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
     mock_session.execute.return_value = mock_result
 
     # Mock sync service

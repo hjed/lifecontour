@@ -287,28 +287,7 @@ test.describe('Snipe-IT Integration Settings', () => {
     authenticatedPage,
   }) => {
     // Override base routes to make Snipe-IT connected
-    await authenticatedPage.route('**/api/integrations', route => {
-      if (new URL(route.request().url()).pathname !== '/api/integrations')
-        return route.fallback();
-      return route.fulfill(
-        json({
-          data: [
-            {
-              id: 'snipeit',
-              type: 'integration',
-              attributes: {
-                name: 'Snipe-IT',
-                status: 'connected',
-                capabilities: [],
-                sync_summary: { sync_count: 0, error_count: 0 },
-                needs_reauth: false,
-                needs_reconsent: false,
-              },
-            },
-          ],
-        })
-      );
-    });
+    await routeSnipeItOnlyIntegration(authenticatedPage, 'connected');
     await authenticatedPage.route('**/api/integrations/health', route =>
       route.fulfill(
         json({
@@ -327,28 +306,7 @@ test.describe('Snipe-IT Integration Settings', () => {
         if (route.request().method() === 'DELETE') {
           deleteCalled = true;
           // Mock the disconnected state
-          await authenticatedPage.route('**/api/integrations', r => {
-            if (new URL(r.request().url()).pathname !== '/api/integrations')
-              return r.fallback();
-            return r.fulfill(
-              json({
-                data: [
-                  {
-                    id: 'snipeit',
-                    type: 'integration',
-                    attributes: {
-                      name: 'Snipe-IT',
-                      status: 'disconnected',
-                      capabilities: [],
-                      sync_summary: { sync_count: 0, error_count: 0 },
-                      needs_reauth: false,
-                      needs_reconsent: false,
-                    },
-                  },
-                ],
-              })
-            );
-          });
+          await routeSnipeItOnlyIntegration(authenticatedPage, 'disconnected');
           return route.fulfill(
             json({
               success: true,
@@ -386,6 +344,95 @@ test.describe('Snipe-IT Integration Settings', () => {
     }).toPass({ timeout: 5000 });
   });
 });
+
+test.describe('Snipe-IT Webhook URL', () => {
+  const webhookUrl = (token: string) => ({
+    data: {
+      id: 'snipeit-webhook-url',
+      type: 'webhook-url',
+      attributes: {
+        webhook_url: `https://pms.example.com/api/integrations/snipeit/webhook/${token}`,
+        message:
+          'Configure this URL in your Snipe-IT instance under Admin > Settings > Webhooks.',
+      },
+    },
+  });
+
+  test('regenerating the webhook URL shows the new URL once confirmed', async ({
+    authenticatedPage,
+  }) => {
+    await setupBaseRoutes(authenticatedPage);
+    await routeSnipeItOnlyIntegration(authenticatedPage, 'connected');
+
+    let rotateRequests = 0;
+    await authenticatedPage.route(
+      '**/api/integrations/snipeit/webhook-url',
+      route => route.fulfill(json(webhookUrl('old-token')))
+    );
+    await authenticatedPage.route(
+      '**/api/integrations/snipeit/webhook-url/rotate',
+      route => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        rotateRequests += 1;
+        return route.fulfill(json(webhookUrl('new-token')));
+      }
+    );
+
+    await authenticatedPage.goto('/integrations');
+
+    const snipeitPanel = authenticatedPage.getByTestId(
+      'integration-panel-snipeit'
+    );
+    await snipeitPanel.getByTestId('get-webhook-url-snipeit').click();
+
+    const urlDialog = authenticatedPage.getByRole('dialog', {
+      name: 'Snipe-IT Webhook URL',
+    });
+    await expect(urlDialog).toContainText('/webhook/old-token');
+
+    await urlDialog.getByTestId('regenerate-webhook-url').click();
+    const confirmation = authenticatedPage.getByRole('alertdialog', {
+      name: 'Regenerate the webhook URL?',
+    });
+    await confirmation.getByRole('button', { name: 'Regenerate URL' }).click();
+
+    await expect(confirmation).toBeHidden();
+    await expect(urlDialog).toContainText('/webhook/new-token');
+    await expect(urlDialog).not.toContainText('/webhook/old-token');
+    expect(rotateRequests).toBe(1);
+  });
+});
+
+/**
+ * Helper: stub the integration list with only Snipe-IT, in the given status.
+ */
+async function routeSnipeItOnlyIntegration(
+  page: import('@playwright/test').Page,
+  status: 'connected' | 'disconnected'
+) {
+  await page.route('**/api/integrations', route => {
+    if (new URL(route.request().url()).pathname !== '/api/integrations')
+      return route.fallback();
+    return route.fulfill(
+      json({
+        data: [
+          {
+            id: 'snipeit',
+            type: 'integration',
+            attributes: {
+              name: 'Snipe-IT',
+              status,
+              capabilities: [],
+              sync_summary: { sync_count: 0, error_count: 0 },
+              needs_reauth: false,
+              needs_reconsent: false,
+            },
+          },
+        ],
+      })
+    );
+  });
+}
 
 /**
  * Helper: mock snipeit settings endpoint to return 404 (no settings configured).

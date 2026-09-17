@@ -8,6 +8,7 @@ and update the database.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -62,35 +63,41 @@ class TestStreamConsumerIntegration:
         async_connection: Any,
         mock_transport: MockTransport,
     ) -> None:
-        """Verify that receiving a stream event triggers gear item upsert."""
+        """A webhook event upserts the asset for its owner and no other user."""
 
-        # 1. Setup DB state: user, auth, and settings
+        # 1. Setup DB state: two users with Snipe-IT auth and settings
         user_id = "test-user-for-webhook"
+        other_user_id = "other-user-for-webhook"
         snipeit_user_id = "123"
 
-        await async_connection.execute(
-            text("""
-                INSERT INTO user_snipe_it_auth (
-                    user_id, encrypted_api_key,
-                    created_at, updated_at
-                ) VALUES (
-                    :user_id, 'enc-api-key',
-                    now(), now()
-                )
-            """),
-            {"user_id": user_id},
-        )
-
-        await async_connection.execute(
-            text("""
-                INSERT INTO snipeit_settings (
-                    user_id, base_url, snipeit_user_id, created_at, updated_at
-                ) VALUES (
-                    :user_id, 'https://snipeit.example.com', :snipeit_user_id, now(), now()
-                )
-            """),
-            {"user_id": user_id, "snipeit_user_id": snipeit_user_id},
-        )
+        for configured_user_id in (user_id, other_user_id):
+            await async_connection.execute(
+                text("""
+                    INSERT INTO user_snipe_it_auth (
+                        user_id, encrypted_api_key,
+                        created_at, updated_at
+                    ) VALUES (
+                        :user_id, 'enc-api-key',
+                        now(), now()
+                    )
+                """),
+                {"user_id": configured_user_id},
+            )
+            await async_connection.execute(
+                text("""
+                    INSERT INTO snipeit_settings (
+                        user_id, base_url, snipeit_user_id, webhook_token, created_at, updated_at
+                    ) VALUES (
+                        :user_id, 'https://snipeit.example.com', :snipeit_user_id,
+                        :webhook_token, now(), now()
+                    )
+                """),
+                {
+                    "user_id": configured_user_id,
+                    "snipeit_user_id": snipeit_user_id,
+                    "webhook_token": f"webhook-token-{configured_user_id}",
+                },
+            )
         # 2. Setup mock API response
         asset_id = 142
         mock_transport.add_response(
@@ -110,7 +117,7 @@ class TestStreamConsumerIntegration:
         from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
 
         @asynccontextmanager
-        async def mock_session_factory():
+        async def mock_session_factory() -> AsyncIterator[SqlAsyncSession]:
             async with SqlAsyncSession(
                 async_connection,
                 expire_on_commit=False,
@@ -130,7 +137,11 @@ class TestStreamConsumerIntegration:
             event_id="abc",
             event_type="snipeit.webhook_received",
             aggregate_id=0,
-            event_data={"action": "hardware_created", "item": {"id": asset_id}},
+            event_data={
+                "action": "hardware_created",
+                "item": {"id": asset_id},
+                "user_id": user_id,
+            },
             occurred_at="2024-01-01T00:00:00Z",
         )
 
@@ -164,8 +175,13 @@ class TestStreamConsumerIntegration:
 
         with patch("worker._create_sync_service", side_effect=mock_create_service):
             # We also need to mock _get_auth_data since it's called
-            with patch("worker._get_auth_data", return_value={"mock": "data"}):
+            with patch(
+                "worker._get_auth_data", return_value={"mock": "data"}
+            ) as mock_get_auth_data:
                 await consumer._handle_event(event)
+
+        # Only the webhook's owner is synced
+        mock_get_auth_data.assert_called_once_with(mock_session_factory, user_id)
 
         # 5. Verify the gear item was inserted
         gear_result = await db_session.execute(
@@ -178,6 +194,11 @@ class TestStreamConsumerIntegration:
         assert gear_row is not None
         assert gear_row.name == "Webhook Rope"
         assert gear_row.serial_number == "SN-WH-999"
+        other_gear = await db_session.execute(
+            text("SELECT id FROM gear_items WHERE user_id = :user_id"),
+            {"user_id": other_user_id},
+        )
+        assert other_gear.fetchall() == []
 
     @pytest.mark.asyncio
     async def test_gear_item_updated_event_pushes_to_snipeit(
@@ -201,10 +222,14 @@ class TestStreamConsumerIntegration:
         )
         await async_connection.execute(
             text("""
-                INSERT INTO snipeit_settings (user_id, base_url, snipeit_user_id, created_at, updated_at)
-                VALUES (:user_id, 'https://snipeit.example.com', :snipeit_user_id, now(), now())
+                INSERT INTO snipeit_settings (user_id, base_url, snipeit_user_id, webhook_token, created_at, updated_at)
+                VALUES (:user_id, 'https://snipeit.example.com', :snipeit_user_id, :webhook_token, now(), now())
             """),
-            {"user_id": user_id, "snipeit_user_id": snipeit_user_id},
+            {
+                "user_id": user_id,
+                "snipeit_user_id": snipeit_user_id,
+                "webhook_token": f"webhook-token-{user_id}",
+            },
         )
         await async_connection.execute(
             text("""
@@ -261,7 +286,7 @@ class TestStreamConsumerIntegration:
         from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
 
         @asynccontextmanager
-        async def mock_session_factory():
+        async def mock_session_factory() -> AsyncIterator[SqlAsyncSession]:
             async with SqlAsyncSession(
                 async_connection,
                 expire_on_commit=False,
@@ -310,8 +335,13 @@ class TestStreamConsumerIntegration:
             )
 
         with patch("worker._create_sync_service", side_effect=mock_create_service):
-            with patch("worker._get_auth_data", return_value={"mock": "data"}):
+            with patch(
+                "worker._get_auth_data", return_value={"mock": "data"}
+            ) as mock_get_auth_data:
                 await consumer._handle_event(event)
+
+        # Only the webhook's owner is synced
+        mock_get_auth_data.assert_called_once_with(mock_session_factory, user_id)
 
         # Verify sync metadata was updated with the new version hash
         meta_result = await db_session.execute(
