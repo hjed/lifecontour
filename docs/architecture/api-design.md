@@ -118,6 +118,8 @@ destructive tool cannot be introduced without someone saying so.
 ### Domain-Based Organization
 
 - Organize tools by domain: `app/mcp/domains/{domain}/tools.py`
+- Split a domain that outgrows one module into a `tools/` package with one module per area, each with its own `register_{area}_tools(mcp)` that `register_{domain}_tools` calls. The journal domain works this way: `app/mcp/domains/journals/tools/` has `journals.py`, `journal_entries.py`, `search.py`, `activities.py`, `calendars.py` and so on, with helpers more than one area needs in `_shared.py`
+- Keep tools as adapters: argument parsing and validation, a call to a service or repository in `app/core`, and the response. SQL and domain rules belong in `app/core`, where the REST controllers can reach them too, not in the tool module
 - Separate schemas: `app/mcp/domains/{domain}/schemas.py`
 - Register domain tools in main server: `register_{domain}_tools(mcp)`
 - Allow future domain expansion (journal, calendar, photos)
