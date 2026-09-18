@@ -5,12 +5,12 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
+from app.core.journal.services.journal_search_service import compute_date_window
 from app.mcp.domains.journals.schemas import (
     EventDateRangeSchema,
     JournalDateWindowResponse,
     JournalSearchResult,
 )
-from app.mcp.domains.journals.tools import compute_date_window
 
 
 class TestJournalDateWindowResponse:

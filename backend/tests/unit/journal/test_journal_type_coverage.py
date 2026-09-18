@@ -26,7 +26,7 @@ from app.core.journal.services.journal_write_service import JournalWriteService
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.reindex_service import ReindexService
 from app.mcp.domains.journals import schemas as mcp_schemas
-from app.mcp.domains.journals import tools as mcp_tools
+from app.mcp.domains.journals.tools import _shared as mcp_tool_shared
 
 # Types with no type-data table of their own, and why.
 _NO_TABLE: dict[JournalType, str] = {
@@ -62,7 +62,8 @@ def test_mcp_read_path_reads_every_type() -> None:
 
 def test_mcp_repositories_expose_every_reader_repo() -> None:
     repo_fields = {
-        f.name for f in mcp_tools._JournalToolRepositories.__dataclass_fields__.values()
+        f.name
+        for f in mcp_tool_shared.JournalToolRepositories.__dataclass_fields__.values()
     }
     for journal_type, reader in type_reader.TYPE_DATA_READERS.items():
         assert reader.repo_attr in repo_fields, (

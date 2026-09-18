@@ -3,12 +3,13 @@ Journal domain MCP tools.
 
 Provides AI access to journal management functionality through MCP tools.
 Each tool is designed to return AI-friendly, contextual information.
+Tools are moving into one module per area; ``register_journal_tools``
+registers every one of them.
 """
 
 import dataclasses
 import json
-from datetime import UTC, date, datetime, timedelta
-from datetime import time as dt_time
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -34,7 +35,6 @@ from fastmcp.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
@@ -47,83 +47,15 @@ from app.core.integrations.link_sources import (
     journal_source_names,
     resolve_journal_source,
 )
-from app.core.journal.adapters.sql.abseiling_data_repository import (
-    SqlAbseilingDataRepository,
-)
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
 )
-from app.core.journal.adapters.sql.album_sync_read_repository import (
-    AlbumSyncReadRepository,
-)
-from app.core.journal.adapters.sql.bushwalking_data_repository import (
-    SqlBushwalkingDataRepository,
-)
-from app.core.journal.adapters.sql.calendar_info_repository import (
-    SqlCalendarInfoRepository,
-)
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
-from app.core.journal.adapters.sql.canoeing_data_repository import (
-    SqlCanoeingDataRepository,
-)
-from app.core.journal.adapters.sql.canyoning_data_repository import (
-    SqlCanyoningDataRepository,
-)
-from app.core.journal.adapters.sql.caving_data_repository import (
-    SqlCavingDataRepository,
-)
-from app.core.journal.adapters.sql.climbing_data_repository import (
-    SqlClimbingDataRepository,
-)
-from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
-    SqlCrossCountrySkiingDataRepository,
-)
-from app.core.journal.adapters.sql.diving_data_repository import (
-    SqlDivingDataRepository,
-)
-from app.core.journal.adapters.sql.downhill_skiing_data_repository import (
-    SqlDownhillSkiingDataRepository,
-)
-from app.core.journal.adapters.sql.fitness_data_repository import (
-    SqlFitnessDataRepository,
-)
-from app.core.journal.adapters.sql.gear_item_repository import (
-    SqlGearItemRepository,
-)
-from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
-    SqlGearMaintenanceDataRepository,
-)
-from app.core.journal.adapters.sql.gear_usage_data_repository import (
-    SqlGearUsageDataRepository,
-)
-from app.core.journal.adapters.sql.jogging_data_repository import (
-    SqlJoggingDataRepository,
-)
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
-from app.core.journal.adapters.sql.kayaking_data_repository import (
-    SqlKayakingDataRepository,
-)
-from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
-from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
-    SqlOutdoorActivityDataRepository,
-)
-from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
-    SqlOutdoorPlanningDataRepository,
-)
-from app.core.journal.adapters.sql.outdoor_training_data_repository import (
-    SqlOutdoorTrainingDataRepository,
-)
-from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
-from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
-from app.core.journal.adapters.sql.snorkelling_data_repository import (
-    SqlSnorkellingDataRepository,
-)
-from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRepository
 from app.core.journal.models.activity_stats import (
     ActivityFilters,
     ActivityJournalRow,
@@ -134,7 +66,6 @@ from app.core.journal.models.activity_stats import (
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import (
     ActivityStatsRepository,
-    JournalTagRepository,
 )
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
@@ -158,14 +89,12 @@ from app.core.journal.services.journal_search_service import (
     SEARCH_SUGGESTIONS,
     SEARCH_UNAVAILABLE_HINT,
     WINDOW_SUGGESTIONS,
+    JournalSearchFilters,
     JournalSearchHit,
+    JournalSearchService,
     explain_empty_result,
-    search_journals_text,
 )
 from app.core.journal.services.journal_service import JournalService
-from app.core.journal.services.journal_tag_hierarchy_service import (
-    JournalTagHierarchyService,
-)
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_type_data_reader import (
     read_journal_types_and_data,
@@ -188,7 +117,6 @@ from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.journals.converters import (
     ActivityTemplateMCPConverter,
     GearItemMCPConverter,
@@ -234,6 +162,19 @@ from app.mcp.domains.journals.schemas import (
     build_dashboard_summary,
     validate_type_data,
 )
+from app.mcp.domains.journals.tools._shared import (
+    JournalToolRepositories,
+    build_search_results,
+    create_journal_tool_repositories,
+    fetch_contact_relationships_with_names,
+    fetch_parent_journal,
+    fetch_types_for_journal,
+    journal_to_search_result,
+    parse_optional_datetime_filter,
+    parse_type_filters,
+)
+from app.mcp.domains.journals.tools.routes import register_journal_route_tools
+from app.mcp.domains.journals.tools.series import register_journal_series_tools
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
     DESTRUCTIVE_WRITE,
@@ -253,232 +194,21 @@ from app.mcp.shared.dependencies import (
     get_incomplete_outdoor_activity_service,
     get_journal_contact_service,
     get_journal_external_link_service,
+    get_journal_search_service,
     get_journal_tag_service,
     get_journal_write_service,
     get_outbox_event_publisher,
     get_outdoor_activity_dismissal_service,
     get_outdoor_dashboard_service,
     get_review_item_service,
-    get_search_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
 
 
-@dataclasses.dataclass(frozen=True)
-class _JournalToolRepositories:
-    """Concrete SQL repositories used by journal MCP tools."""
-
-    journal_repo: SqlJournalRepository
-    calendar_info_repo: SqlCalendarInfoRepository
-    mood_data_repo: SqlMoodDataRepository
-    plan_data_repo: SqlPlanDataRepository
-    travel_data_repo: SqlTravelDataRepository
-    photo_album_data_repo: AlbumSyncReadRepository
-    fitness_data_repo: SqlFitnessDataRepository
-    outdoor_activity_data_repo: SqlOutdoorActivityDataRepository
-    bushwalking_data_repo: SqlBushwalkingDataRepository
-    jogging_data_repo: SqlJoggingDataRepository
-    abseiling_data_repo: SqlAbseilingDataRepository
-    canyoning_data_repo: SqlCanyoningDataRepository
-    caving_data_repo: SqlCavingDataRepository
-    climbing_data_repo: SqlClimbingDataRepository
-    kayaking_data_repo: SqlKayakingDataRepository
-    cross_country_skiing_data_repo: SqlCrossCountrySkiingDataRepository
-    canoeing_data_repo: SqlCanoeingDataRepository
-    snorkelling_data_repo: SqlSnorkellingDataRepository
-    diving_data_repo: SqlDivingDataRepository
-    downhill_skiing_data_repo: SqlDownhillSkiingDataRepository
-    outdoor_planning_data_repo: SqlOutdoorPlanningDataRepository
-    outdoor_training_data_repo: SqlOutdoorTrainingDataRepository
-    gear_maintenance_data_repo: SqlGearMaintenanceDataRepository
-    gear_usage_data_repo: SqlGearUsageDataRepository
-    route_repo: SqlRouteRepository
-    contact_relationship_repo: SqlJournalContactRelationshipRepository
-    contact_repo: SqlContactRepository
-    tag_repo: SqlJournalTagRepository
-    activity_template_repo: SqlActivityTemplateRepository
-    gear_item_repo: SqlGearItemRepository
-
-
-def _create_journal_tool_repositories(
-    db_connection: AsyncConnection,
-) -> _JournalToolRepositories:
-    """Build the concrete repositories needed by journal MCP tools."""
-
-    return _JournalToolRepositories(
-        journal_repo=SqlJournalRepository(db_connection),
-        calendar_info_repo=SqlCalendarInfoRepository(db_connection),
-        mood_data_repo=SqlMoodDataRepository(db_connection),
-        plan_data_repo=SqlPlanDataRepository(db_connection),
-        travel_data_repo=SqlTravelDataRepository(db_connection),
-        photo_album_data_repo=AlbumSyncReadRepository(db_connection),
-        fitness_data_repo=SqlFitnessDataRepository(db_connection),
-        outdoor_activity_data_repo=SqlOutdoorActivityDataRepository(db_connection),
-        bushwalking_data_repo=SqlBushwalkingDataRepository(db_connection),
-        jogging_data_repo=SqlJoggingDataRepository(db_connection),
-        abseiling_data_repo=SqlAbseilingDataRepository(db_connection),
-        canyoning_data_repo=SqlCanyoningDataRepository(db_connection),
-        caving_data_repo=SqlCavingDataRepository(db_connection),
-        climbing_data_repo=SqlClimbingDataRepository(db_connection),
-        kayaking_data_repo=SqlKayakingDataRepository(db_connection),
-        cross_country_skiing_data_repo=SqlCrossCountrySkiingDataRepository(
-            db_connection
-        ),
-        canoeing_data_repo=SqlCanoeingDataRepository(db_connection),
-        snorkelling_data_repo=SqlSnorkellingDataRepository(db_connection),
-        diving_data_repo=SqlDivingDataRepository(db_connection),
-        downhill_skiing_data_repo=SqlDownhillSkiingDataRepository(db_connection),
-        outdoor_planning_data_repo=SqlOutdoorPlanningDataRepository(db_connection),
-        outdoor_training_data_repo=SqlOutdoorTrainingDataRepository(db_connection),
-        gear_maintenance_data_repo=SqlGearMaintenanceDataRepository(db_connection),
-        gear_usage_data_repo=SqlGearUsageDataRepository(db_connection),
-        route_repo=SqlRouteRepository(db_connection),
-        contact_relationship_repo=SqlJournalContactRelationshipRepository(
-            db_connection
-        ),
-        contact_repo=SqlContactRepository(db_connection),
-        tag_repo=SqlJournalTagRepository(db_connection),
-        activity_template_repo=SqlActivityTemplateRepository(db_connection),
-        gear_item_repo=SqlGearItemRepository(db_connection),
-    )
-
-
-def _journal_to_search_result(
-    journal: Journal, *, types: list[str] | None = None, summary: str | None = None
-) -> JournalSearchResult:
-    """
-    Convert a Journal entity to a JournalSearchResult.
-
-    Args:
-        journal: The journal entity to convert
-
-    Returns:
-        JournalSearchResult with basic journal information
-    """
-    return JournalSearchResult(
-        id=journal.id or 0,
-        title=journal.title,
-        content_excerpt=journal.content[:200] + "..."
-        if len(journal.content) > 200
-        else journal.content,
-        event_date_range=EventDateRangeSchema(
-            start=journal.event_date_range.start,
-            end=journal.event_date_range.end,
-        ),
-        types=types or [],
-        tags=[],
-        highlighted={},
-        summary=summary or f"Journal: {journal.title}",
-    )
-
-
-def _parse_type_filters(types: str | None) -> list[str]:
-    """Parse and validate comma-separated journal types."""
-    if not types:
-        return []
-
-    parsed_types: list[str] = []
-    for raw_type in types.split(","):
-        normalized = raw_type.strip().lower()
-        if not normalized:
-            continue
-        try:
-            journal_type = JournalType(normalized)
-        except ValueError as exc:
-            allowed_types = ", ".join(
-                sorted(journal_type.value for journal_type in JournalType)
-            )
-            raise ValueError(
-                f"Invalid journal type '{raw_type.strip()}'. Must be one of: {allowed_types}"
-            ) from exc
-        if journal_type.value not in parsed_types:
-            parsed_types.append(journal_type.value)
-
-    return parsed_types
-
-
 def _parse_integration_source_filter(value: str | None) -> str | None:
     """Normalise an integration source filter (None passes through)."""
     return None if value is None else resolve_journal_source(value)
-
-
-async def _resolve_tag_filters(
-    tags: str | None, tag_repo: JournalTagRepository
-) -> list[str] | None:
-    """Resolve a comma-separated ``tags`` filter to journal tag ids.
-
-    Each entry is either a tag UUID or a tag name, because a name is what an AI
-    client actually has to hand; names match case-insensitively, as the
-    repository does. A name that resolves to nothing raises rather than being
-    dropped, which would silently widen the search instead of narrowing it.
-
-    Every id is then expanded to its whole subtree, so filtering by a parent tag
-    returns journals tagged with a descendant — the behaviour the REST journal
-    list gets from ``JournalService._expand_tag_ids_with_descendants``.
-    """
-    if not tags:
-        return None
-
-    resolved: dict[str, None] = {}
-    for raw_tag in tags.split(","):
-        value = raw_tag.strip()
-        if not value:
-            continue
-        try:
-            resolved[str(UUID(value))] = None
-            continue
-        except ValueError:
-            pass
-        tag = await tag_repo.find_by_name(value)
-        if tag is None or tag.id is None:
-            raise ValueError(
-                f"Unknown journal tag '{value}'. Pass a tag name or id from "
-                "list_journal_tags."
-            )
-        resolved[str(tag.id)] = None
-
-    if not resolved:
-        return None
-
-    descendants = await JournalTagHierarchyService(tag_repo).get_all_descendants_bulk(
-        [UUID(tag_id) for tag_id in resolved]
-    )
-    for descendant in descendants:
-        if descendant.id is not None:
-            resolved[str(descendant.id)] = None
-
-    return list(resolved)
-
-
-def _parse_optional_datetime_filter(
-    value: str | None, field_name: str, *, is_end: bool = False
-) -> datetime | None:
-    """Validate ISO date/datetime filter strings and normalize to aware datetimes."""
-    if value is None:
-        return None
-
-    normalized = value.strip()
-    try:
-        if "T" not in normalized:
-            parsed_date = date.fromisoformat(normalized)
-            parsed_datetime = datetime.combine(
-                parsed_date,
-                dt_time.max if is_end else dt_time.min,
-                tzinfo=UTC,
-            )
-        else:
-            parsed_datetime = datetime.fromisoformat(normalized)
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid {field_name} '{value}'. Must be a valid ISO date or datetime."
-        ) from exc
-
-    return (
-        parsed_datetime
-        if parsed_datetime.tzinfo
-        else parsed_datetime.replace(tzinfo=UTC)
-    )
 
 
 def _activity_filters(
@@ -493,35 +223,10 @@ def _activity_filters(
     return ActivityFilters(
         user_id=user_id,
         activity_type=parse_activity_type(activity_type),
-        start_date=_parse_optional_datetime_filter(start_date, "start_date"),
-        end_date=_parse_optional_datetime_filter(end_date, "end_date", is_end=True),
+        start_date=parse_optional_datetime_filter(start_date, "start_date"),
+        end_date=parse_optional_datetime_filter(end_date, "end_date", is_end=True),
         search_query=search_query,
     )
-
-
-async def _fetch_types_for_journal(
-    journal_id: int, repos: _JournalToolRepositories
-) -> tuple[list[str], dict[str, Any]]:
-    """Fetch the concrete types and type-specific data for a journal."""
-    return await read_journal_types_and_data(journal_id, repos)
-
-
-async def _fetch_parent_journal(
-    journal: Journal, journal_repo: SqlJournalRepository, user_id: str
-) -> Journal | None:
-    """Resolve the parent a journal hangs off, for the ``parent`` response field.
-
-    Every tool that returns a journal resolves the parent through here, so a
-    persisted ``parent_id`` cannot show up on one response and be missing from
-    the next — a read that omitted it made ``parent_id`` look ignored on create
-    even though the link was written.
-
-    The lookup is owner-scoped: somebody else's journal is reported as absent
-    rather than having its title read back to the caller (#1267).
-    """
-    if journal.parent_id is None:
-        return None
-    return await journal_repo.find_by_id_for_user(journal.parent_id, str(user_id))
 
 
 def _external_links_preserved(
@@ -535,40 +240,12 @@ def _external_links_preserved(
     return before_keys <= after_keys
 
 
-async def _build_search_results(
-    journals: list[Journal],
-    repos: _JournalToolRepositories,
-    *,
-    activity_rows_by_id: dict[int, ActivityJournalRow] | None = None,
-) -> list[JournalSearchResult]:
-    """Build AI-friendly journal search results with concrete types included."""
-    results: list[JournalSearchResult] = []
-    for journal in journals:
-        if journal.id is None:
-            continue
-        types, _ = await _fetch_types_for_journal(journal.id, repos)
-        activity_row = (
-            activity_rows_by_id.get(journal.id)
-            if activity_rows_by_id is not None
-            else None
-        )
-        summary = None
-        if activity_row is not None:
-            activity_label = activity_row.activity_type.replace("_", " ")
-            summary = (
-                f"{activity_label.title()} activity '{journal.title}' covering "
-                f"{activity_row.distance}m in {activity_row.duration}s"
-            )
-        results.append(_journal_to_search_result(journal, types=types, summary=summary))
-    return results
-
-
 async def _build_hierarchy_node(
-    node: HierarchyNode, repos: _JournalToolRepositories
+    node: HierarchyNode, repos: JournalToolRepositories
 ) -> JournalHierarchyNode:
     """Build an AI-friendly hierarchy node from a HierarchyNode."""
     assert node.journal.id is not None, "Hierarchy node journal must have an ID"
-    types, _ = await _fetch_types_for_journal(node.journal.id, repos)
+    types, _ = await fetch_types_for_journal(node.journal.id, repos)
     children = []
     for child_node in node.children:
         children.append(await _build_hierarchy_node(child_node, repos))
@@ -591,45 +268,6 @@ async def _build_hierarchy_node(
         children_count=node.children_count,
         children=children,
     )
-
-
-async def _fetch_contact_relationships_with_names(
-    journal_id: int,
-    contact_relationship_repo: SqlJournalContactRelationshipRepository,
-    contact_repo: SqlContactRepository,
-) -> list[ContactRelationshipSummary]:
-    """
-    Fetch contact relationships with contact names for a journal.
-
-    Args:
-        journal_id: The journal ID to fetch relationships for
-        contact_relationship_repo: Contact relationship repository
-        contact_repo: Contact repository
-
-    Returns:
-        List of ContactRelationshipSummary objects
-    """
-    contact_relationships = await contact_relationship_repo.get_by_journal(journal_id)
-
-    contacts: list[ContactRelationshipSummary] = []
-    for rel in contact_relationships:
-        contact = await contact_repo.find_by_id(rel.contact_id)
-        if contact:
-            contact_name = f"{contact.first_name} {contact.last_name}".strip()
-            if not contact_name:
-                contact_name = f"Contact {rel.contact_id}"
-
-            contacts.append(
-                ContactRelationshipSummary(
-                    id=rel.contact_id,
-                    name=contact_name,
-                    relationship_type=rel.relationship_type.value,
-                    status=rel.status.value if rel.status else None,
-                    role=rel.role.value if rel.role else None,
-                )
-            )
-
-    return contacts
 
 
 _NOTE_IMPLIED_CONTEXT = (
@@ -769,39 +407,20 @@ def _to_service_relationships(
 
 
 async def _fetch_enrichment_data(
-    journal_id: int, repos: _JournalToolRepositories
+    journal_id: int, repos: JournalToolRepositories
 ) -> tuple[
     list[str], dict[str, Any], list[ContactRelationshipSummary], list[JournalTag]
 ]:
     """Fetch all enrichment data for a journal (types, type_data, contacts, tags)."""
     types, type_data = await read_journal_types_and_data(journal_id, repos)
 
-    contacts = await _fetch_contact_relationships_with_names(
+    contacts = await fetch_contact_relationships_with_names(
         journal_id, repos.contact_relationship_repo, repos.contact_repo
     )
 
     tags = await repos.tag_repo.get_tags_for_journal(journal_id)
 
     return types, type_data, contacts, tags
-
-
-def compute_date_window(
-    anchor: date, days_back: int, days_forward: int
-) -> tuple[date, date]:
-    """Compute a date window around an anchor date.
-
-    Args:
-        anchor: The centre date for the window.
-        days_back: How many days before the anchor to include.
-        days_forward: How many days after the anchor to include.
-
-    Returns:
-        Tuple of (window_start, window_end) as date objects.
-    """
-    return (
-        anchor - timedelta(days=days_back),
-        anchor + timedelta(days=days_forward),
-    )
 
 
 @tool(annotations=READ_ONLY)
@@ -952,7 +571,7 @@ async def create_journal_entry(
 
     # Repositories are needed to resolve the template below, and to read back
     # enrichment data for the response.
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     # A template contributes its standard pitches and its own type fields — the
     # same thing selecting one in the UI does (the abseil counts then follow from
@@ -1011,7 +630,7 @@ async def create_journal_entry(
     # Fetch all enrichment data
     types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
 
-    parent = await _fetch_parent_journal(created_journal, repos.journal_repo, user_id)
+    parent = await fetch_parent_journal(created_journal, repos.journal_repo, user_id)
     external_links = await link_service.links_for_journal(journal_id, user_id)
 
     # Convert to AI-friendly response
@@ -1108,7 +727,7 @@ async def update_journal_entry(
 
     # Repositories are still needed to load the journal and read back enrichment
     # data for the response.
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     # Get the existing journal, owner-scoped. Somebody else's is reported as
     # missing, exactly as the read and delete tools report it (#1267) — without
@@ -1169,7 +788,7 @@ async def update_journal_entry(
     # Fetch all enrichment data
     types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
 
-    parent = await _fetch_parent_journal(updated_journal, repos.journal_repo, user_id)
+    parent = await fetch_parent_journal(updated_journal, repos.journal_repo, user_id)
     links_after = await link_service.links_for_journal(journal_id, user_id)
     links_preserved = _external_links_preserved(links_before, links_after)
 
@@ -1201,7 +820,7 @@ async def _build_journal_response(
 ) -> str:
     """Full owner-scoped journal payload shared by the get_journal* tools."""
     # Create repositories
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
     journal_repo = repos.journal_repo
 
     # Get journal
@@ -1211,7 +830,7 @@ async def _build_journal_response(
 
     # Resolve the parent this journal hangs off, so a child created with a
     # parent_id reads back as one.
-    parent = await _fetch_parent_journal(journal, journal_repo, user_id)
+    parent = await fetch_parent_journal(journal, journal_repo, user_id)
 
     # Get children if requested
     children = None
@@ -1222,7 +841,7 @@ async def _build_journal_response(
     types, type_data = await read_journal_types_and_data(journal_id, repos)
 
     # Fetch contact relationships and contact details
-    contacts = await _fetch_contact_relationships_with_names(
+    contacts = await fetch_contact_relationships_with_names(
         journal_id, repos.contact_relationship_repo, repos.contact_repo
     )
 
@@ -1439,13 +1058,13 @@ async def get_journal_hierarchy(
 
     start_time = time.time()
     user_id = await get_current_user_id()
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
-    type_filters = _parse_type_filters(types)
+    type_filters = parse_type_filters(types)
     journal_type = type_filters[0] if len(type_filters) == 1 else None
 
-    start = _parse_optional_datetime_filter(start_date, "start_date")
-    end = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
+    start = parse_optional_datetime_filter(start_date, "start_date")
+    end = parse_optional_datetime_filter(end_date, "end_date", is_end=True)
 
     start_str = start.isoformat() if start else None
     end_str = end.isoformat() if end else None
@@ -1463,7 +1082,7 @@ async def get_journal_hierarchy(
     if len(type_filters) > 1:
         for j in journals:
             if j.id is not None:
-                j_types, _ = await _fetch_types_for_journal(j.id, repos)
+                j_types, _ = await fetch_types_for_journal(j.id, repos)
                 if any(t in type_filters for t in j_types):
                     filtered_journals.append(j)
         journals = filtered_journals
@@ -1515,31 +1134,8 @@ def _search_hit_to_result(hit: JournalSearchHit) -> JournalSearchResult:
     )
 
 
-def _meili_search_journals(
-    search_service: SearchService,
-    *,
-    query: str,
-    user_id: str,
-    limit: int,
-    offset: int = 0,
-    type_filters: list[str] | None = None,
-    journal_ids: set[int] | None = None,
-) -> tuple[list[JournalSearchResult], int, int]:
-    """Full-text search returning MCP result schemas."""
-    hits, total, ms = search_journals_text(
-        search_service,
-        query=query,
-        user_id=user_id,
-        limit=limit,
-        offset=offset,
-        type_filters=type_filters,
-        journal_ids=journal_ids,
-    )
-    return [_search_hit_to_result(hit) for hit in hits], total, ms
-
-
 async def _zero_result_diagnostics(
-    repos: _JournalToolRepositories,
+    repos: JournalToolRepositories,
     user_id: str,
     *,
     search_backend: str,
@@ -1642,7 +1238,10 @@ async def search_journals(
         Field(default=0, ge=0, description="Number of results to skip (default: 0)"),
     ] = 0,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    search_service: SearchService = mcp_depends(get_search_service),
+    journal_search_service: JournalSearchService = mcp_depends(
+        get_journal_search_service
+    ),
+    tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
 ) -> str:
     """
     Search journals with filtering options.
@@ -1681,23 +1280,16 @@ async def search_journals(
         ValueError: If invalid filter values are provided
     """
     user_id = await get_current_user_id()
-    repos = _create_journal_tool_repositories(db_connection)
-    type_filters = _parse_type_filters(types)
+    repos = create_journal_tool_repositories(db_connection)
+    type_filters = parse_type_filters(types)
     source_filter = _parse_integration_source_filter(integration_source)
-    start_filter = _parse_optional_datetime_filter(start_date, "start_date")
-    end_filter = _parse_optional_datetime_filter(end_date, "end_date", is_end=True)
-    tag_filters = await _resolve_tag_filters(tags, repos.tag_repo)
+    start_filter = parse_optional_datetime_filter(start_date, "start_date")
+    end_filter = parse_optional_datetime_filter(end_date, "end_date", is_end=True)
+    tag_filters = (
+        await tag_service.resolve_filter_tag_ids(tags.split(",")) if tags else None
+    )
 
-    # The filters the database resolves, in the spelling get_all/count_all use.
-    relational_filters: dict[str, Any] = {
-        "start_date": start_filter.isoformat() if start_filter else None,
-        "end_date": end_filter.isoformat() if end_filter else None,
-        "contact_id": str(contact_id) if contact_id is not None else None,
-        "tag_ids": tag_filters,
-        "calendar_id": calendar_id,
-        "parent_id": parent_id,
-    }
-    # ...and the same filters as the agent spelled them, for the diagnostics.
+    # The filters as the agent spelled them, for the diagnostics.
     reported_filters: dict[str, Any] = {
         "types": types,
         "integration_source": source_filter,
@@ -1709,162 +1301,102 @@ async def search_journals(
         "parent_id": parent_id,
     }
 
-    # When integration_source filter is active, fetch journal IDs matching
-    # the source first, then intersect with other filters.
-    source_journal_ids: set[int] | None = None
-    if source_filter is not None:
-        source_journal_ids = await repos.journal_repo.find_ids_by_integration_source(
-            user_id, source_filter
-        )
-        if not source_journal_ids:
-            # No journals match the integration source — return empty, and say
-            # whether anything is linked to that source at all.
-            response = JournalSearchResponse(
-                results=[],
-                query=query,
-                total_hits=0,
-                processing_time_ms=0,
-                summary=f"Found 0 journal(s) linked to {source_filter}",
-                diagnostics=await _zero_result_diagnostics(
-                    repos,
-                    user_id,
-                    search_backend="database",
-                    filters=reported_filters,
-                    journals_linked_to_source=0,
-                    suggestions=[
-                        f"No journal is linked to {source_filter}. Check "
-                        "list_integrations, or trigger_sync if the integration "
-                        "is connected but has not imported yet.",
-                        *SEARCH_SUGGESTIONS[:2],
-                    ],
-                ),
-            )
-            return MCPResponseBuilder.success_response(response)
+    async def read_types(journal_id: int) -> list[str]:
+        journal_types, _ = await fetch_types_for_journal(journal_id, repos)
+        return journal_types
 
-    summary_suffix = f" linked to {source_filter}" if source_filter else ""
-
-    if query and query.strip():
-        # MeiliSearch indexes the event dates as ISO strings and its range
-        # operators are numeric-only, so the relational filters are resolved to
-        # candidate ids here and intersected through Meili's `id IN [...]`,
-        # the same way the integration_source filter already is.
-        candidate_ids = source_journal_ids
-        if any(value is not None for value in relational_filters.values()):
-            candidate_ids = await repos.journal_repo.find_ids_by_filters(
-                user_id=user_id,
-                journal_ids=(
-                    sorted(source_journal_ids)
-                    if source_journal_ids is not None
-                    else None
-                ),
-                **relational_filters,
-            )
-        try:
-            results, total_hits, processing_time_ms = _meili_search_journals(
-                search_service,
-                query=query.strip(),
-                user_id=user_id,
-                limit=limit,
-                offset=offset,
-                type_filters=type_filters,
-                journal_ids=candidate_ids,
-            )
-        except SearchServiceUnavailableError as exc:
-            return MCPResponseBuilder.error_response(
-                error_type="Search unavailable",
-                message=exc.message,
-                context={"query": query, "hint": SEARCH_UNAVAILABLE_HINT},
-            )
-        response = JournalSearchResponse(
-            results=results,
+    try:
+        outcome = await journal_search_service.search(
+            user_id,
             query=query,
-            total_hits=total_hits,
-            processing_time_ms=processing_time_ms,
-            summary=f"Found {total_hits} journal(s){summary_suffix}",
+            filters=JournalSearchFilters(
+                type_filters=type_filters,
+                source_filter=source_filter,
+                start_date=start_filter,
+                end_date=end_filter,
+                tag_ids=tag_filters,
+                contact_id=contact_id,
+                calendar_id=calendar_id,
+                parent_id=parent_id,
+            ),
+            limit=limit,
+            offset=offset,
+            read_types=read_types,
+        )
+    except SearchServiceUnavailableError as exc:
+        return MCPResponseBuilder.error_response(
+            error_type="Search unavailable",
+            message=exc.message,
+            context={"query": query, "hint": SEARCH_UNAVAILABLE_HINT},
+        )
+
+    source_journal_ids = outcome.source_journal_ids
+    if source_filter is not None and not source_journal_ids:
+        # No journals match the integration source — return empty, and say
+        # whether anything is linked to that source at all.
+        response = JournalSearchResponse(
+            results=[],
+            query=query,
+            total_hits=0,
+            processing_time_ms=0,
+            summary=f"Found 0 journal(s) linked to {source_filter}",
             diagnostics=await _zero_result_diagnostics(
                 repos,
                 user_id,
-                search_backend="meilisearch",
-                filters={"query": query, **reported_filters},
-                source_filter=source_filter,
-                journals_linked_to_source=(
-                    len(source_journal_ids) if source_journal_ids else None
-                ),
-                suggestions=SEARCH_SUGGESTIONS,
-            )
-            if total_hits == 0
-            else None,
+                search_backend="database",
+                filters=reported_filters,
+                journals_linked_to_source=0,
+                suggestions=[
+                    f"No journal is linked to {source_filter}. Check "
+                    "list_integrations, or trigger_sync if the integration "
+                    "is connected but has not imported yet.",
+                    *SEARCH_SUGGESTIONS[:2],
+                ],
+            ),
         )
         return MCPResponseBuilder.success_response(response)
 
-    journal_ids = list(source_journal_ids) if source_journal_ids is not None else None
-    if len(type_filters) <= 1:
-        journal_type = type_filters[0] if type_filters else None
-        total_hits = await repos.journal_repo.count_all(
-            user_id=user_id,
-            journal_type=journal_type,
-            journal_ids=journal_ids,
-            **relational_filters,
-        )
-        journals = await repos.journal_repo.get_all(
-            user_id=user_id,
-            limit=limit,
-            offset=offset,
-            journal_type=journal_type,
-            journal_ids=journal_ids,
-            **relational_filters,
-        )
-        results = await _build_search_results(journals, repos)
+    summary_suffix = f" linked to {source_filter}" if source_filter else ""
+    total_hits = outcome.total_hits
+
+    if outcome.backend == "meilisearch":
+        results = [_search_hit_to_result(hit) for hit in outcome.hits]
+        diagnostic_filters = {"query": query, **reported_filters}
+        suggestions = SEARCH_SUGGESTIONS
     else:
-        # Several types cannot be expressed as one SQL filter, so every
-        # candidate the other filters allow is fetched and typed in Python.
-        candidate_count = await repos.journal_repo.count_all(
-            user_id=user_id, journal_ids=journal_ids, **relational_filters
+        journal_types = outcome.journal_types
+        results = (
+            await build_search_results(outcome.journals, repos)
+            if journal_types is None
+            else [
+                journal_to_search_result(journal, types=journal_types[journal.id])
+                for journal in outcome.journals
+                if journal.id is not None
+            ]
         )
-        journals = (
-            await repos.journal_repo.get_all(
-                user_id=user_id,
-                limit=candidate_count,
-                offset=0,
-                journal_ids=journal_ids,
-                **relational_filters,
-            )
-            if candidate_count
-            else []
-        )
-        requested_types = set(type_filters)
-        results = []
-        for journal in journals:
-            if journal.id is None:
-                continue
-            journal_types, _ = await _fetch_types_for_journal(journal.id, repos)
-            if requested_types.isdisjoint(journal_types):
-                continue
-            results.append(_journal_to_search_result(journal, types=journal_types))
-        total_hits = len(results)
-        results = results[offset : offset + limit]
+        diagnostic_filters = reported_filters
+        suggestions = SEARCH_SUGGESTIONS[1:]
 
     response = JournalSearchResponse(
         results=results,
         query=query,
         total_hits=total_hits,
-        processing_time_ms=0,
+        processing_time_ms=outcome.processing_time_ms,
         summary=f"Found {total_hits} journal(s){summary_suffix}",
         diagnostics=await _zero_result_diagnostics(
             repos,
             user_id,
-            search_backend="database",
-            filters=reported_filters,
+            search_backend=outcome.backend,
+            filters=diagnostic_filters,
             source_filter=source_filter,
             journals_linked_to_source=(
                 len(source_journal_ids) if source_journal_ids else None
             ),
-            suggestions=SEARCH_SUGGESTIONS[1:],
+            suggestions=suggestions,
         )
         if total_hits == 0
         else None,
     )
-
     return MCPResponseBuilder.success_response(response)
 
 
@@ -1901,7 +1433,7 @@ async def search_activities(
 ) -> str:
     """Search activity journals with effective activity-type filtering."""
     user_id = await get_current_user_id()
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
     filters = _activity_filters(
         user_id,
         activity_type=activity_type,
@@ -1917,7 +1449,7 @@ async def search_activities(
             filters, limit=limit, offset=0
         )
 
-    results = await _build_search_results(
+    results = await build_search_results(
         [activity_row.journal for activity_row in activity_rows],
         repos,
         activity_rows_by_id={
@@ -2096,7 +1628,7 @@ async def get_route_history(
 ) -> str:
     """Return route usage history across route-aware activity journals."""
     user_id = await get_current_user_id()
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     try:
         route_uuid = UUID(route_id)
@@ -2202,7 +1734,7 @@ async def get_journal_history(
     appear.
     """
     user_id = await get_current_user_id()
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     # Scope to the authenticated user: a journal owned by someone else is
     # reported as not-found so history cannot leak across users (mirrors
@@ -2380,7 +1912,7 @@ async def get_contact_journals(
             journals.append(journal)
 
     # Convert to search results
-    results = [_journal_to_search_result(journal) for journal in journals]
+    results = [journal_to_search_result(journal) for journal in journals]
 
     response = JournalSearchResponse(
         results=results,
@@ -2462,7 +1994,7 @@ async def link_journal_to_contact(
             raise ValueError(f"Invalid role: {role}") from e
 
     # Create repositories
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     # Check that contact and journal exist. The journal is read owner-scoped:
     # linking writes a row to it, so somebody else's must be as unreachable
@@ -2745,7 +2277,7 @@ async def merge_journals(
     """
     merge_request = MergeJournalMCPRequest.model_validate_json(merge_data)
 
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     # Verify ownership — both journals must belong to the current user
     user_id = await get_current_user_id()
@@ -2783,7 +2315,7 @@ async def merge_journals(
     # Fetch enriched target
     types, type_data = await read_journal_types_and_data(target_journal_id, repos)
 
-    contacts = await _fetch_contact_relationships_with_names(
+    contacts = await fetch_contact_relationships_with_names(
         target_journal_id,
         repos.contact_relationship_repo,
         repos.contact_repo,
@@ -2793,7 +2325,7 @@ async def merge_journals(
 
     # The merge leaves the survivor's parent_id alone, so the response has to
     # report it — otherwise the target reads back as orphaned.
-    parent = await _fetch_parent_journal(merged_journal, repos.journal_repo, user_id)
+    parent = await fetch_parent_journal(merged_journal, repos.journal_repo, user_id)
 
     response = JournalConverter.to_response(
         journal=merged_journal,
@@ -2837,7 +2369,7 @@ async def get_merge_candidates(
     Returns:
         JSON string with merge candidate summaries and AI recommendations
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     # Owner-scoped, and it matters more here than anywhere else: the candidate
     # query below used to scope itself to ``target.user_id`` — the *owner's* id,
@@ -2970,7 +2502,9 @@ async def browse_journals_by_date_window(
         ),
     ] = 0,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    search_service: SearchService = mcp_depends(get_search_service),
+    journal_search_service: JournalSearchService = mcp_depends(
+        get_journal_search_service
+    ),
 ) -> str:
     """
     Browse journals within a date window anchored on a given date.
@@ -2995,7 +2529,7 @@ async def browse_journals_by_date_window(
         JSON with journals in the window, window boundaries, and pagination info
     """
     user_id = await get_current_user_id()
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     # Resolve anchor date
     if anchor_date is not None:
@@ -3008,66 +2542,34 @@ async def browse_journals_by_date_window(
     else:
         resolved_anchor = datetime.now(UTC).date()
 
-    window_start, window_end = compute_date_window(
-        resolved_anchor, days_back, days_forward
-    )
+    type_filters = parse_type_filters(types)
 
-    start_iso = window_start.isoformat()
-    # Use end-of-day for window_end so journals occurring later on that
-    # day are included (the repo compares event_date_range_start <= end_date,
-    # and date.isoformat() alone yields midnight which would exclude them).
-    end_iso = datetime.combine(window_end, dt_time(23, 59, 59), tzinfo=UTC).isoformat()
-
-    type_filters = _parse_type_filters(types)
-    journal_type = type_filters[0] if len(type_filters) == 1 else None
-
-    total_count = await repos.journal_repo.count_all(
-        user_id=user_id,
-        journal_type=journal_type,
-        start_date=start_iso,
-        end_date=end_iso,
-    )
-
-    if search and search.strip():
-        # Text search inside the window goes through MeiliSearch (word matching
-        # and typo tolerance, as in the web UI) restricted to the window's
-        # journal ids, rather than a literal substring match.
-        in_window = await repos.journal_repo.get_all(
-            user_id=user_id,
-            limit=max(total_count, 1),
-            offset=0,
-            journal_type=journal_type,
-            start_date=start_iso,
-            end_date=end_iso,
-        )
-        window_ids = {j.id for j in in_window if j.id is not None}
-        try:
-            matched, _total, _ms = _meili_search_journals(
-                search_service,
-                query=search.strip(),
-                user_id=user_id,
-                limit=max(len(window_ids), 1),
-                type_filters=type_filters,
-                journal_ids=window_ids,
-            )
-        except SearchServiceUnavailableError as exc:
-            return MCPResponseBuilder.error_response(
-                error_type="Search unavailable",
-                message=exc.message,
-                context={"search": search, "hint": SEARCH_UNAVAILABLE_HINT},
-            )
-        total_count = len(matched)
-        results = matched[offset : offset + limit]
-    else:
-        journals = await repos.journal_repo.get_all(
-            user_id=user_id,
+    try:
+        window = await journal_search_service.browse_window(
+            user_id,
+            anchor=resolved_anchor,
+            days_back=days_back,
+            days_forward=days_forward,
+            type_filters=type_filters,
+            search=search,
             limit=limit,
             offset=offset,
-            journal_type=journal_type,
-            start_date=start_iso,
-            end_date=end_iso,
         )
-        results = await _build_search_results(journals, repos)
+    except SearchServiceUnavailableError as exc:
+        return MCPResponseBuilder.error_response(
+            error_type="Search unavailable",
+            message=exc.message,
+            context={"search": search, "hint": SEARCH_UNAVAILABLE_HINT},
+        )
+
+    results = (
+        [_search_hit_to_result(hit) for hit in window.hits]
+        if window.searched
+        else await build_search_results(window.journals, repos)
+    )
+    total_count = window.total_count
+    start_iso = window.start_iso
+    window_end = window.window_end
 
     has_more = (offset + limit) < total_count
 
@@ -3300,7 +2802,7 @@ async def _journal_owned_by_user(
     db_connection: AsyncConnection, user_id: str, journal_id: int
 ) -> bool:
     """Whether the journal exists and belongs to the user."""
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
     journal = await repos.journal_repo.find_by_id(journal_id)
     return journal is not None and journal.user_id == user_id
 
@@ -3620,7 +3122,7 @@ async def get_template(
     """
     Get a specific activity template by ID.
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     try:
         import uuid
@@ -3655,7 +3157,7 @@ async def get_journal_template(
     edited. ``has_template`` is false when the journal has no template reference
     (or is not abseiling-derived).
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     journal = await repos.journal_repo.find_by_id(journal_id)
     if not journal or journal.user_id != user_id:
@@ -3706,7 +3208,7 @@ async def search_templates(
     """
     Search activity templates for the user.
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     templates = await repos.activity_template_repo.find_by_user(user_id)
 
@@ -3763,7 +3265,7 @@ async def update_template(
     """
     Update an existing activity template.
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     try:
         import uuid
@@ -3877,7 +3379,7 @@ async def list_gear_items(
     """
     List all gear items for the current user.
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     items = await repos.gear_item_repo.find_by_user(user_id)
 
@@ -3895,7 +3397,7 @@ async def get_gear_item(
     """
     Get a specific gear item by ID.
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     try:
         import uuid as uuid_mod
@@ -3952,7 +3454,7 @@ async def update_gear_item(
     """
     Update an existing gear item.
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     try:
         import uuid as uuid_mod
@@ -4026,7 +3528,7 @@ async def list_journal_tags(
         JSON string containing journal tags ordered by name, each with its
         colour, description, and parent_id for reconstructing the hierarchy.
     """
-    repos = _create_journal_tool_repositories(db_connection)
+    repos = create_journal_tool_repositories(db_connection)
 
     all_tags = await repos.tag_repo.get_all()
     tags = all_tags[:limit]
@@ -4262,22 +3764,21 @@ async def merge_journal_tag(
 
 
 def register_journal_tools(mcp: FastMCP[None]) -> None:
-    """
-    Register journal-related MCP tools with the FastMCP server.
-    """
+    """Register every journal-domain MCP tool with the FastMCP server."""
     mcp.add_tool(list_journal_types)
-    mcp.add_tool(create_journal_entry)
-    mcp.add_tool(update_journal_entry)
     mcp.add_tool(get_journal)
     mcp.add_tool(get_journal_by_external_id)
-    mcp.add_tool(get_journal_hierarchy)
+    mcp.add_tool(delete_journal)
+    mcp.add_tool(create_journal_entry)
+    mcp.add_tool(update_journal_entry)
     mcp.add_tool(search_journals)
+    mcp.add_tool(browse_journals_by_date_window)
+    mcp.add_tool(get_journal_hierarchy)
     mcp.add_tool(search_activities)
     mcp.add_tool(get_activity_stats)
     mcp.add_tool(analyze_activity_trends)
     mcp.add_tool(get_route_history)
     mcp.add_tool(get_journal_history)
-    mcp.add_tool(delete_journal)
     mcp.add_tool(get_contact_journals)
     mcp.add_tool(link_journal_to_contact)
     mcp.add_tool(list_calendars)
@@ -4286,7 +3787,6 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(delete_calendar)
     mcp.add_tool(merge_journals)
     mcp.add_tool(get_merge_candidates)
-    mcp.add_tool(browse_journals_by_date_window)
     mcp.add_tool(list_review_items)
     mcp.add_tool(dismiss_review_item)
     mcp.add_tool(list_incomplete_outdoor_activities)
@@ -4307,3 +3807,5 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(update_journal_tag)
     mcp.add_tool(delete_journal_tag)
     mcp.add_tool(merge_journal_tag)
+    register_journal_series_tools(mcp)
+    register_journal_route_tools(mcp)

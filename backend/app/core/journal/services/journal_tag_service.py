@@ -402,6 +402,53 @@ class JournalTagService:
             )
         )
 
+    async def resolve_filter_tag_ids(self, values: list[str]) -> list[str] | None:
+        """Resolve a journal tag filter to the ids of every tag it covers.
+
+        Each value is either a tag UUID or a tag name, because a name is what an
+        AI client actually has to hand; names match case-insensitively, as the
+        repository does. A name that resolves to nothing raises rather than being
+        dropped, which would silently widen the search instead of narrowing it.
+
+        Every id is then expanded to its whole subtree, so filtering by a parent
+        tag returns journals tagged with a descendant — the behaviour the REST
+        journal list gets from ``JournalService._expand_tag_ids_with_descendants``.
+
+        Returns ``None`` (no filter) when no value is given.
+
+        Raises:
+            ValueError: If a value is neither a UUID nor an existing tag's name.
+        """
+        resolved: dict[str, None] = {}
+        for raw_value in values:
+            value = raw_value.strip()
+            if not value:
+                continue
+            try:
+                resolved[str(UUID(value))] = None
+                continue
+            except ValueError:
+                pass
+            tag = await self.tag_repo.find_by_name(value)
+            if tag is None or tag.id is None:
+                raise ValueError(
+                    f"Unknown journal tag '{value}'. Pass a tag name or id from "
+                    "list_journal_tags."
+                )
+            resolved[str(tag.id)] = None
+
+        if not resolved:
+            return None
+
+        descendants = await self.hierarchy_service.get_all_descendants_bulk(
+            [UUID(tag_id) for tag_id in resolved]
+        )
+        for descendant in descendants:
+            if descendant.id is not None:
+                resolved[str(descendant.id)] = None
+
+        return list(resolved)
+
     async def _require_tag(self, tag_id: UUID) -> JournalTag:
         """Load the tag or raise, so the service owns the existence rule.
 

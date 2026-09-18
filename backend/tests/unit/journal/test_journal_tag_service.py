@@ -1289,3 +1289,74 @@ class TestRenameTagEvents:
             )
 
         mock_event_publisher.publish.assert_not_awaited()
+
+
+class TestResolveFilterTagIds:
+    """``resolve_filter_tag_ids`` turns tag names or ids into a subtree filter."""
+
+    @staticmethod
+    def _saved_tag(name: str) -> JournalTag:
+        return JournalTag(id=uuid4(), name=name, color="#FF0000")
+
+    @pytest.mark.asyncio
+    async def test_uuids_pass_through(
+        self, tag_service: JournalTagService, mock_tag_repo: AsyncMock
+    ) -> None:
+        tag_id = uuid4()
+        mock_tag_repo.get_descendants_for_tags.return_value = []
+
+        assert await tag_service.resolve_filter_tag_ids([str(tag_id)]) == [str(tag_id)]
+        mock_tag_repo.find_by_name.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_names_are_resolved_to_ids(
+        self, tag_service: JournalTagService, mock_tag_repo: AsyncMock
+    ) -> None:
+        hiking = self._saved_tag("hiking")
+        mock_tag_repo.find_by_name.side_effect = lambda name: (
+            hiking if name.lower() == "hiking" else None
+        )
+        mock_tag_repo.get_descendants_for_tags.return_value = []
+
+        assert await tag_service.resolve_filter_tag_ids([" Hiking "]) == [
+            str(hiking.id)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_descendant_tags_are_included(
+        self, tag_service: JournalTagService, mock_tag_repo: AsyncMock
+    ) -> None:
+        outdoors = self._saved_tag("outdoors")
+        climbing = self._saved_tag("climbing")
+        mock_tag_repo.find_by_name.return_value = outdoors
+        mock_tag_repo.get_descendants_for_tags.return_value = [climbing]
+
+        resolved = await tag_service.resolve_filter_tag_ids(["outdoors"])
+
+        assert resolved is not None
+        assert set(resolved) == {str(outdoors.id), str(climbing.id)}
+        mock_tag_repo.get_descendants_for_tags.assert_awaited_once_with([outdoors.id])
+
+    @pytest.mark.asyncio
+    async def test_unknown_name_is_an_error_not_a_silent_empty_filter(
+        self, tag_service: JournalTagService, mock_tag_repo: AsyncMock
+    ) -> None:
+        """Dropping an unresolvable tag would widen the search without saying so."""
+        mock_tag_repo.find_by_name.return_value = None
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"^Unknown journal tag 'nonexistent-tag'\. Pass a tag name or id "
+                r"from list_journal_tags\.$"
+            ),
+        ):
+            await tag_service.resolve_filter_tag_ids(["nonexistent-tag"])
+
+    @pytest.mark.asyncio
+    async def test_blank_input_means_no_filter(
+        self, tag_service: JournalTagService, mock_tag_repo: AsyncMock
+    ) -> None:
+        assert await tag_service.resolve_filter_tag_ids([]) is None
+        assert await tag_service.resolve_filter_tag_ids(["  ", ""]) is None
+        mock_tag_repo.get_descendants_for_tags.assert_not_called()

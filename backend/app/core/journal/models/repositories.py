@@ -172,6 +172,34 @@ class JournalRepository(ABC):
         pass
 
     @abstractmethod
+    async def find_ids_by_filters(
+        self,
+        user_id: str,
+        journal_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        contact_id: str | None = None,
+        tag_ids: list[str] | None = None,
+        calendar_id: str | None = None,
+        parent_id: int | None = None,
+        search: str | None = None,
+        journal_ids: list[int] | None = None,
+    ) -> set[int]:
+        """Ids of the user's journals matching the same filters as :meth:`get_all`.
+
+        Unpaginated: for callers that intersect the matching set with another,
+        such as a full-text search restricted to candidate ids.
+        """
+        pass
+
+    @abstractmethod
+    async def find_ids_by_integration_source(
+        self, user_id: str, integration_source: str
+    ) -> set[int]:
+        """Ids of the user's journals linked to ``integration_source``."""
+        pass
+
+    @abstractmethod
     async def find_overlapping_for_user(
         self,
         user_id: str,

@@ -42,10 +42,8 @@ from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from app.mcp.domains.journals.tools import (
-    _create_journal_tool_repositories,
-    register_journal_tools,
-)
+from app.mcp.domains.journals.tools import register_journal_tools
+from app.mcp.domains.journals.tools._shared import create_journal_tool_repositories
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     extract_mcp_json_payload,
@@ -1227,7 +1225,7 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
     ) -> tuple[list[str], dict[str, Any]]:
         """Helper: call _fetch_journal_types_and_data with all repos."""
         return await _fetch_journal_types_and_data(
-            journal_id, _create_journal_tool_repositories(conn)
+            journal_id, create_journal_tool_repositories(conn)
         )
 
     @pytest.mark.asyncio
