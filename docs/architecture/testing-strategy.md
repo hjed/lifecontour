@@ -327,7 +327,7 @@ model — so a *generated* summary can be created from fixtures. The flag reache
 contact summaries and similarity assessment still see an unconfigured AI. It defaults to `false` and
 must never be set outside test/CI.
 
-Three rules follow from a summary being **one row per user per day**, shared by the whole run:
+Four rules follow from a summary being **one row per user per day**, shared by the whole run:
 
 - **Establish the summary state a test asserts; never inherit it.** Press Regenerate until the
   regeneration's own response says `generated` — a journal or task seeded moments before invalidates
@@ -335,6 +335,14 @@ Three rules follow from a summary being **one row per user per day**, shared by 
   row pending, so a single press is not deterministic.
 - **Read the server's summary state from `GET /api/home-dashboard`**, which never writes. The
   daily-summary `GET` regenerates what it reads, so polling it changes the thing being observed.
+- **Before a load that must not be overtaken, wait for every invalidation to land, not the first.**
+  The outbox relay publishes on a poll, so a test's writes reach the summary-invalidation consumer
+  as one burst, and "today reads stale" is already true after the burst's first invalidation. The
+  rest then overtake the page's generating read. `waitForDomainEventsSettled(page,
+  SUMMARY_INVALIDATION_GROUP)` (`tests/e2e/utils/domain-events.ts`) waits until
+  `GET /api/health/outbox-backlog` reports nothing unrelayed and, after that,
+  `GET /api/health/consumer-lag` reports no `lag` or `pending` for the group. After it returns,
+  assert the stale state once rather than polling for it.
 - **Clear the day before asserting its journal count.** The summary counts every journal on the day,
   and specs that create journals through the UI leave today's behind, so a full run always holds
   some. `TestDataManager.clearJournalsOn(day)` deletes them — destructively, which `workers: 1` makes

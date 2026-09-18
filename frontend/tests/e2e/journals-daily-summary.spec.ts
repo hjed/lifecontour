@@ -228,12 +228,15 @@ test.describe('Journals AI Daily Summary', () => {
       }
     );
 
-    // Mock the regenerate POST to return the regenerated, completed summary.
+    // Mock the regenerate POST to return the regenerated, completed summary,
+    // counting the presses that reach it.
+    let regenerations = 0;
     await authenticatedPage.route(
       `**/api/journals/daily-summary/${journalDateId}/regenerate`,
       async route => {
         if (route.request().method() === 'POST') {
           regenerated = true;
+          regenerations += 1;
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -260,25 +263,18 @@ test.describe('Journals AI Daily Summary', () => {
       authenticatedPage.getByTestId(`summary-text-${journalDateId}`)
     ).toContainText('Initial summary');
 
-    // Arm the response wait BEFORE the click so the round-trip can't be missed.
-    const regenerateResponse = authenticatedPage.waitForResponse(
-      response =>
-        response
-          .url()
-          .includes(
-            `/api/journals/daily-summary/${journalDateId}/regenerate`
-          ) && response.request().method() === 'POST'
+    // Press refresh until one press actually reaches the endpoint. Firefox can
+    // report a click that fires no event when the row moves under the pointer,
+    // leaving the button focused and the summary untouched (#1512), and a
+    // single armed wait then times out. Re-pressing is safe: a regeneration is
+    // idempotent, and the mock answers every press with the same summary.
+    const refresh = authenticatedPage.getByTestId(
+      `refresh-summary-btn-${journalDateId}`
     );
-
-    // Click refresh
-    await authenticatedPage
-      .getByTestId(`refresh-summary-btn-${journalDateId}`)
-      .click();
-
-    // Deterministically confirm the regenerate request fired and succeeded,
-    // rather than asserting on a transient "Generating..." badge.
-    const response = await regenerateResponse;
-    expect(response.status()).toBe(200);
+    await expect(async () => {
+      await refresh.click({ timeout: 5000 });
+      expect(regenerations).toBeGreaterThan(0);
+    }).toPass({ timeout: 30000 });
 
     // Verify the persistent, user-visible outcome: the summary updates to the
     // regenerated text. Playwright auto-retries until the new summary settles.

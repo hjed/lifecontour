@@ -127,6 +127,21 @@ class OutboxRepository:
             )
             raise
 
+    async def count_unrelayed(self) -> int:
+        """
+        Count the events the relay has not yet published to the Redis Stream.
+
+        Every such row is still due to be relayed: the relay retries a failed
+        publish on its next poll rather than giving up on the row.
+
+        Returns:
+            Number of outbox events with no ``relayed_at``
+        """
+        result = await self.conn.execute(
+            text("SELECT COUNT(*) FROM outbox_events WHERE relayed_at IS NULL")
+        )
+        return int(result.scalar_one())
+
     async def mark_as_relayed(self, event_id: str) -> None:
         """
         Mark an event as relayed to the Redis Stream.

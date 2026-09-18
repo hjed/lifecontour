@@ -236,3 +236,55 @@ class TestBaseConsumerIntegration:
             for g in groups
         ]
         assert group_name in group_names
+
+    @pytest.mark.asyncio
+    async def test_group_info_reports_lag_and_pending_until_a_batch_is_acknowledged(
+        self,
+        test_stream_name: str,
+        stream_client: StreamClient,
+    ) -> None:
+        """A group started at ``$`` on a stream with history reports its backlog.
+
+        ``lag`` and ``pending`` are what the e2e suite waits on to know a group
+        has applied every event published so far, so both must be integers that
+        reach zero once a batch is read and acknowledged — including for a group
+        created with ``$`` after the stream already held events, as the
+        summary-invalidation group is.
+        """
+        group_name = f"test-group-{uuid.uuid4().hex[:8]}"
+
+        async def publish(event_id: str) -> None:
+            await stream_client.publish(
+                stream_name=test_stream_name,
+                event_id=event_id,
+                event_type="contact.created",
+                aggregate_id=42,
+                event_data={"contact_id": 42},
+                occurred_at="2024-01-01T12:00:00Z",
+            )
+
+        async def group_backlog() -> tuple[object, object]:
+            groups = await stream_client.get_consumer_group_info(test_stream_name)
+            info = next(group for group in groups if group["name"] == group_name)
+            return info["lag"], info["pending"]
+
+        await publish("evt-before-group")
+        await stream_client.ensure_consumer_group(
+            test_stream_name, group_name, start_id="$"
+        )
+        await publish("evt-1")
+        await publish("evt-2")
+        consumer = ConcreteTestConsumer(
+            stream_client=stream_client,
+            stream_name=test_stream_name,
+            group_name=group_name,
+            consumer_name="test-consumer-1",
+            event_type_patterns=["contact."],
+            block_ms=100,
+        )
+
+        assert await group_backlog() == (2, 0)
+
+        await consumer._process_batch()
+
+        assert await group_backlog() == (0, 0)
