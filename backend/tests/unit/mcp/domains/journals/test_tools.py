@@ -13,11 +13,9 @@ from core_shared.models.history import Provenance
 from fastmcp import Client, FastMCP
 
 from app.core.history.models import FieldHistoryEntry
-from app.mcp.domains.journals.tools import (
-    _journal_history_entry_to_schema,
-    register_journal_tools,
-)
+from app.mcp.domains.journals.tools import register_journal_tools
 from app.mcp.domains.journals.tools._shared import parse_optional_datetime_filter
+from app.mcp.domains.journals.tools.history import _journal_history_entry_to_schema
 
 
 class TestJournalTools:

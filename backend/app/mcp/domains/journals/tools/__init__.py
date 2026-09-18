@@ -7,9 +7,8 @@ Tools are moving into one module per area; ``register_journal_tools``
 registers every one of them.
 """
 
-import dataclasses
 import json
-from datetime import UTC, date, datetime
+from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -30,27 +29,9 @@ from fastmcp.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.history.adapters.sql.field_history_repository import (
-    SqlFieldHistoryRepository,
-)
-from app.core.history.models import FieldHistoryEntry
-from app.core.history.services.journal_history_service import JournalHistoryService
-from app.core.integrations.link_sources import (
-    resolve_journal_source,
-)
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
-from app.core.journal.models.activity_stats import (
-    ActivityFilters,
-    ActivityJournalRow,
-    ActivityMetric,
-    TrendInterval,
-    parse_activity_type,
-)
-from app.core.journal.models.repositories import (
-    ActivityStatsRepository,
-)
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
 )
@@ -60,20 +41,10 @@ from app.core.journal.services.calendar_service import (
 )
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.core.journal.services.gear_item_service import GearItemService
-from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
 from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.journal.services.journal_search_service import (
-    SEARCH_SUGGESTIONS,
-    SEARCH_UNAVAILABLE_HINT,
-    WINDOW_SUGGESTIONS,
-    JournalSearchFilters,
-    JournalSearchHit,
-    JournalSearchService,
-    explain_empty_result,
-)
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_type_data_reader import (
     read_journal_types_and_data,
@@ -85,7 +56,6 @@ from app.core.journal.services.outdoor_dashboard_service import (
     OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
-from app.core.search.exceptions import SearchServiceUnavailableError
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
@@ -97,24 +67,11 @@ from app.mcp.domains.journals.converters import (
     JournalConverter,
 )
 from app.mcp.domains.journals.schemas import (
-    ActivityPersonalRecord,
-    ActivityStatsResponse,
-    ActivityTotals,
-    ActivityTrendPeriod,
-    ActivityTrendsResponse,
-    ActivityTypeStats,
     CheckedOutGearMCPEntry,
     DailySummaryMCPResponse,
     EventDateRangeSchema,
     IncompleteOutdoorActivitiesMCPResponse,
     IncompleteOutdoorActivityMCPEntry,
-    JournalDateWindowResponse,
-    JournalHierarchyNode,
-    JournalHierarchyResponse,
-    JournalHistoryEntry,
-    JournalHistoryResponse,
-    JournalSearchResponse,
-    JournalSearchResult,
     JournalTagInfo,
     JournalTagListMCPResponse,
     JournalTemplateMCPResponse,
@@ -123,30 +80,24 @@ from app.mcp.domains.journals.schemas import (
     MergeJournalMCPRequest,
     OutdoorActivityDismissalMCPResponse,
     OutdoorDashboardMCPResponse,
-    RouteHistoryEntry,
-    RouteHistoryResponse,
-    RouteSummary,
-    SearchDiagnostics,
     TemplateDoneMCPEntry,
     TemplatePitchInput,
     UpcomingOutdoorActivityMCPEntry,
     build_dashboard_summary,
 )
 from app.mcp.domains.journals.tools._shared import (
-    JournalToolRepositories,
-    build_search_results,
     create_journal_tool_repositories,
     fetch_contact_relationships_with_names,
     fetch_parent_journal,
-    fetch_types_for_journal,
-    journal_to_search_result,
-    parse_optional_datetime_filter,
-    parse_type_filters,
 )
+from app.mcp.domains.journals.tools.activities import register_activity_tools
 from app.mcp.domains.journals.tools.contacts import register_journal_contact_tools
+from app.mcp.domains.journals.tools.hierarchy import register_journal_hierarchy_tools
+from app.mcp.domains.journals.tools.history import register_journal_history_tools
 from app.mcp.domains.journals.tools.journal_entries import register_journal_entry_tools
 from app.mcp.domains.journals.tools.journals import register_journal_read_tools
 from app.mcp.domains.journals.tools.routes import register_journal_route_tools
+from app.mcp.domains.journals.tools.search import register_journal_search_tools
 from app.mcp.domains.journals.tools.series import register_journal_series_tools
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
@@ -157,7 +108,6 @@ from app.mcp.shared.annotations import (
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
-    get_activity_stats_repository,
     get_activity_template_service,
     get_async_connection,
     get_calendar_service,
@@ -165,7 +115,6 @@ from app.mcp.shared.dependencies import (
     get_daily_summary_service,
     get_gear_item_service,
     get_incomplete_outdoor_activity_service,
-    get_journal_search_service,
     get_journal_tag_service,
     get_outbox_event_publisher,
     get_outdoor_activity_dismissal_service,
@@ -175,61 +124,8 @@ from app.mcp.shared.dependencies import (
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
 
-
-def _parse_integration_source_filter(value: str | None) -> str | None:
-    """Normalise an integration source filter (None passes through)."""
-    return None if value is None else resolve_journal_source(value)
-
-
-def _activity_filters(
-    user_id: str,
-    *,
-    activity_type: str | None,
-    start_date: str | None,
-    end_date: str | None,
-    search_query: str | None = None,
-) -> ActivityFilters:
-    """Validate the activity tools' filter arguments into ``ActivityFilters``."""
-    return ActivityFilters(
-        user_id=user_id,
-        activity_type=parse_activity_type(activity_type),
-        start_date=parse_optional_datetime_filter(start_date, "start_date"),
-        end_date=parse_optional_datetime_filter(end_date, "end_date", is_end=True),
-        search_query=search_query,
-    )
-
-
-async def _build_hierarchy_node(
-    node: HierarchyNode, repos: JournalToolRepositories
-) -> JournalHierarchyNode:
-    """Build an AI-friendly hierarchy node from a HierarchyNode."""
-    assert node.journal.id is not None, "Hierarchy node journal must have an ID"
-    types, _ = await fetch_types_for_journal(node.journal.id, repos)
-    children = []
-    for child_node in node.children:
-        children.append(await _build_hierarchy_node(child_node, repos))
-
-    return JournalHierarchyNode(
-        id=node.journal.id or 0,
-        title=node.journal.title,
-        content_excerpt=node.journal.content[:200] + "..."
-        if len(node.journal.content) > 200
-        else node.journal.content,
-        event_date_range=EventDateRangeSchema(
-            start=node.journal.event_date_range.start,
-            end=node.journal.event_date_range.end,
-        ),
-        types=types,
-        tags=[],
-        highlighted={},
-        summary=f"Hierarchical Journal: {node.journal.title}",
-        depth=node.depth,
-        children_count=node.children_count,
-        children=children,
-    )
-
-    # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
-    # These will be created when the user provides type_data
+# EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
+# These will be created when the user provides type_data
 
 
 def _parse_calendar_id(calendar_id: Any) -> UUID | None:
@@ -248,772 +144,6 @@ def _parse_calendar_id(calendar_id: Any) -> UUID | None:
             ) from exc
 
     raise ValueError(f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.")
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("get_journal_hierarchy", "journal")
-async def get_journal_hierarchy(
-    start_date: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Start date (ISO format) to filter journals",
-        ),
-    ] = None,
-    end_date: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: End date (ISO format) to filter journals",
-        ),
-    ] = None,
-    types: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Comma-separated list of journal types to filter by",
-        ),
-    ] = None,
-    limit: Annotated[
-        int,
-        Field(
-            default=100,
-            description="Maximum number of journals to retrieve before building hierarchy (default: 100)",
-        ),
-    ] = 100,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
-    """
-    Get a hierarchical view of journals.
-
-    Retrieves journals and their descendants matching the given filters,
-    returning them in a nested tree structure. Useful for exploring
-    trips, projects, or multi-day events.
-
-    Args:
-        start_date: Optional start date
-        end_date: Optional end date
-        types: Optional comma-separated list of journal types
-        limit: Maximum number of journals to retrieve
-
-    Returns:
-        JSON string containing the journal hierarchy tree and summary.
-    """
-    import time
-
-    start_time = time.time()
-    user_id = await get_current_user_id()
-    repos = create_journal_tool_repositories(db_connection)
-
-    type_filters = parse_type_filters(types)
-    journal_type = type_filters[0] if len(type_filters) == 1 else None
-
-    start = parse_optional_datetime_filter(start_date, "start_date")
-    end = parse_optional_datetime_filter(end_date, "end_date", is_end=True)
-
-    start_str = start.isoformat() if start else None
-    end_str = end.isoformat() if end else None
-
-    journals = await repos.journal_repo.get_all(
-        user_id=user_id,
-        limit=limit,
-        offset=0,
-        journal_type=journal_type,
-        start_date=start_str,
-        end_date=end_str,
-    )
-
-    filtered_journals = []
-    if len(type_filters) > 1:
-        for j in journals:
-            if j.id is not None:
-                j_types, _ = await fetch_types_for_journal(j.id, repos)
-                if any(t in type_filters for t in j_types):
-                    filtered_journals.append(j)
-        journals = filtered_journals
-
-    returned_ids_list = [j.id for j in journals if j.id is not None]
-    children_count_by_parent_id = await repos.journal_repo.count_children_for_parents(
-        user_id=user_id, parent_ids=returned_ids_list
-    )
-
-    depth_map = await HierarchyService.compute_depth_map(
-        returned_ids_list, repos.journal_repo
-    )
-
-    hierarchy_nodes = HierarchyService.build_tree_nodes(
-        journals, children_count_by_parent_id, depth_map
-    )
-
-    root_nodes = []
-    for h_node in hierarchy_nodes:
-        root_nodes.append(await _build_hierarchy_node(h_node, repos))
-
-    processing_time_ms = int((time.time() - start_time) * 1000)
-    summary = (
-        f"Found {len(journals)} journal(s), representing {len(root_nodes)} "
-        f"root-level item(s) in the hierarchy. (Processing time: {processing_time_ms}ms)"
-    )
-
-    response = JournalHierarchyResponse(
-        nodes=root_nodes,
-        total_nodes=len(journals),
-        processing_time_ms=processing_time_ms,
-        summary=summary,
-    )
-
-    return MCPResponseBuilder.success_response(response)
-
-
-def _search_hit_to_result(hit: JournalSearchHit) -> JournalSearchResult:
-    """Render a search hit as the MCP search result schema."""
-    return JournalSearchResult(
-        id=hit.id,
-        title=hit.title,
-        content_excerpt=hit.content_excerpt,
-        event_date_range=EventDateRangeSchema(start=hit.start, end=hit.end),
-        types=hit.types,
-        tags=[],
-        highlighted=hit.highlighted,
-        summary=f"Journal: {hit.title}",
-    )
-
-
-async def _zero_result_diagnostics(
-    repos: JournalToolRepositories,
-    user_id: str,
-    *,
-    search_backend: str,
-    filters: dict[str, Any],
-    source_filter: str | None = None,
-    journals_linked_to_source: int | None = None,
-    suggestions: list[str],
-) -> SearchDiagnostics:
-    """MCP schema for :func:`explain_empty_result`."""
-    explained = await explain_empty_result(
-        repos.journal_repo,
-        user_id,
-        search_backend=search_backend,
-        filters=filters,
-        source_filter=source_filter,
-        journals_linked_to_source=journals_linked_to_source,
-        suggestions=suggestions,
-    )
-    return SearchDiagnostics(**dataclasses.asdict(explained))
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("search_journals", "journal")
-async def search_journals(
-    query: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Search query for full-text search",
-        ),
-    ] = None,
-    types: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Comma-separated list of journal types to filter by",
-        ),
-    ] = None,
-    integration_source: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Filter by integration source (e.g. 'strava', "
-            "'google_calendar', 'immich_album'). "
-            "Returns only journals linked to the specified external system.",
-        ),
-    ] = None,
-    start_date: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: ISO date or datetime lower bound. Journals "
-            "whose event range overlaps the window are returned.",
-        ),
-    ] = None,
-    end_date: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: ISO date or datetime upper bound. A bare "
-            "date includes the whole day.",
-        ),
-    ] = None,
-    tags: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional: Comma-separated journal tag names or tag ids "
-            "(see list_journal_tags). A journal matching any of them — or any "
-            "of their descendant tags — is returned.",
-        ),
-    ] = None,
-    contact_id: Annotated[
-        int | None,
-        Field(
-            default=None, description="Optional: Only journals linked to this contact"
-        ),
-    ] = None,
-    calendar_id: Annotated[
-        str | None,
-        Field(default=None, description="Optional: Only journals on this calendar"),
-    ] = None,
-    parent_id: Annotated[
-        int | None,
-        Field(
-            default=None,
-            description="Optional: Only the direct children of this journal "
-            "(e.g. the days of a trip)",
-        ),
-    ] = None,
-    limit: Annotated[
-        int,
-        Field(
-            default=20,
-            description="Maximum number of results to return (default: 20)",
-        ),
-    ] = 20,
-    offset: Annotated[
-        int,
-        Field(default=0, ge=0, description="Number of results to skip (default: 0)"),
-    ] = 0,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    journal_search_service: JournalSearchService = mcp_depends(
-        get_journal_search_service
-    ),
-    tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
-) -> str:
-    """
-    Search journals with filtering options.
-
-    With a ``query``, the search runs through MeiliSearch exactly like the web
-    UI (word matching, typo tolerance, relevance ranking) — not a literal
-    substring match — so "Zion canyoning" finds a canyoning journal whose text
-    mentions Zion. Without a query, journals are listed from the database
-    (newest first). Every other argument is a filter, and they combine: they
-    narrow the listing and the full-text query alike, so
-    ``query="canyon", start_date="2025-10-01", tags="trips"`` searches the text
-    of October's trip journals only.
-    If MeiliSearch is unreachable the tool returns an explicit
-    "Search unavailable" error, never a silent empty result.
-
-    Args:
-        query: Optional search query for full-text search
-        types: Optional comma-separated list of journal types
-        integration_source: Optional integration source filter (strava, google_calendar)
-        start_date: Optional ISO date/datetime lower bound for the event range
-        end_date: Optional ISO date/datetime upper bound for the event range
-        tags: Optional comma-separated tag names or tag ids
-        contact_id: Optional contact the journal must be linked to
-        calendar_id: Optional calendar the journal must belong to
-        parent_id: Optional parent journal whose direct children to return
-        limit: Maximum number of results to return
-        offset: Number of results to skip, for paging
-
-    Returns:
-        JSON string containing AI-friendly search results with:
-        - List of matching journals with excerpts
-        - Search metadata (total hits, processing time)
-        - Contextual summary for AI understanding
-
-    Raises:
-        ValueError: If invalid filter values are provided
-    """
-    user_id = await get_current_user_id()
-    repos = create_journal_tool_repositories(db_connection)
-    type_filters = parse_type_filters(types)
-    source_filter = _parse_integration_source_filter(integration_source)
-    start_filter = parse_optional_datetime_filter(start_date, "start_date")
-    end_filter = parse_optional_datetime_filter(end_date, "end_date", is_end=True)
-    tag_filters = (
-        await tag_service.resolve_filter_tag_ids(tags.split(",")) if tags else None
-    )
-
-    # The filters as the agent spelled them, for the diagnostics.
-    reported_filters: dict[str, Any] = {
-        "types": types,
-        "integration_source": source_filter,
-        "start_date": start_date,
-        "end_date": end_date,
-        "tags": tags,
-        "contact_id": contact_id,
-        "calendar_id": calendar_id,
-        "parent_id": parent_id,
-    }
-
-    async def read_types(journal_id: int) -> list[str]:
-        journal_types, _ = await fetch_types_for_journal(journal_id, repos)
-        return journal_types
-
-    try:
-        outcome = await journal_search_service.search(
-            user_id,
-            query=query,
-            filters=JournalSearchFilters(
-                type_filters=type_filters,
-                source_filter=source_filter,
-                start_date=start_filter,
-                end_date=end_filter,
-                tag_ids=tag_filters,
-                contact_id=contact_id,
-                calendar_id=calendar_id,
-                parent_id=parent_id,
-            ),
-            limit=limit,
-            offset=offset,
-            read_types=read_types,
-        )
-    except SearchServiceUnavailableError as exc:
-        return MCPResponseBuilder.error_response(
-            error_type="Search unavailable",
-            message=exc.message,
-            context={"query": query, "hint": SEARCH_UNAVAILABLE_HINT},
-        )
-
-    source_journal_ids = outcome.source_journal_ids
-    if source_filter is not None and not source_journal_ids:
-        # No journals match the integration source — return empty, and say
-        # whether anything is linked to that source at all.
-        response = JournalSearchResponse(
-            results=[],
-            query=query,
-            total_hits=0,
-            processing_time_ms=0,
-            summary=f"Found 0 journal(s) linked to {source_filter}",
-            diagnostics=await _zero_result_diagnostics(
-                repos,
-                user_id,
-                search_backend="database",
-                filters=reported_filters,
-                journals_linked_to_source=0,
-                suggestions=[
-                    f"No journal is linked to {source_filter}. Check "
-                    "list_integrations, or trigger_sync if the integration "
-                    "is connected but has not imported yet.",
-                    *SEARCH_SUGGESTIONS[:2],
-                ],
-            ),
-        )
-        return MCPResponseBuilder.success_response(response)
-
-    summary_suffix = f" linked to {source_filter}" if source_filter else ""
-    total_hits = outcome.total_hits
-
-    if outcome.backend == "meilisearch":
-        results = [_search_hit_to_result(hit) for hit in outcome.hits]
-        diagnostic_filters = {"query": query, **reported_filters}
-        suggestions = SEARCH_SUGGESTIONS
-    else:
-        journal_types = outcome.journal_types
-        results = (
-            await build_search_results(outcome.journals, repos)
-            if journal_types is None
-            else [
-                journal_to_search_result(journal, types=journal_types[journal.id])
-                for journal in outcome.journals
-                if journal.id is not None
-            ]
-        )
-        diagnostic_filters = reported_filters
-        suggestions = SEARCH_SUGGESTIONS[1:]
-
-    response = JournalSearchResponse(
-        results=results,
-        query=query,
-        total_hits=total_hits,
-        processing_time_ms=outcome.processing_time_ms,
-        summary=f"Found {total_hits} journal(s){summary_suffix}",
-        diagnostics=await _zero_result_diagnostics(
-            repos,
-            user_id,
-            search_backend=outcome.backend,
-            filters=diagnostic_filters,
-            source_filter=source_filter,
-            journals_linked_to_source=(
-                len(source_journal_ids) if source_journal_ids else None
-            ),
-            suggestions=suggestions,
-        )
-        if total_hits == 0
-        else None,
-    )
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("search_activities", "journal")
-async def search_activities(
-    query: Annotated[
-        str | None,
-        Field(default=None, description="Optional search query for title/content"),
-    ] = None,
-    activity_type: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional effective activity type filter",
-        ),
-    ] = None,
-    start_date: Annotated[
-        str | None,
-        Field(default=None, description="Optional ISO start date/datetime filter"),
-    ] = None,
-    end_date: Annotated[
-        str | None,
-        Field(default=None, description="Optional ISO end date/datetime filter"),
-    ] = None,
-    limit: Annotated[
-        int,
-        Field(default=20, description="Maximum number of results to return"),
-    ] = 20,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    activity_stats_repo: ActivityStatsRepository = mcp_depends(
-        get_activity_stats_repository
-    ),
-) -> str:
-    """Search activity journals with effective activity-type filtering."""
-    user_id = await get_current_user_id()
-    repos = create_journal_tool_repositories(db_connection)
-    filters = _activity_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-        search_query=query,
-    )
-    total_hits = await activity_stats_repo.count_activity_journals(filters)
-
-    activity_rows: list[ActivityJournalRow] = []
-    if total_hits > 0:
-        activity_rows = await activity_stats_repo.list_activity_journals(
-            filters, limit=limit, offset=0
-        )
-
-    results = await build_search_results(
-        [activity_row.journal for activity_row in activity_rows],
-        repos,
-        activity_rows_by_id={
-            activity_row.journal.id: activity_row
-            for activity_row in activity_rows
-            if activity_row.journal.id is not None
-        },
-    )
-    response = JournalSearchResponse(
-        results=results,
-        query=query,
-        total_hits=total_hits,
-        processing_time_ms=0,
-        summary=f"Found {total_hits} activity journal(s)",
-    )
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("get_activity_stats", "journal")
-async def get_activity_stats(
-    activity_type: Annotated[
-        str | None,
-        Field(default=None, description="Optional effective activity type filter"),
-    ] = None,
-    start_date: Annotated[
-        str | None,
-        Field(default=None, description="Optional ISO start date/datetime filter"),
-    ] = None,
-    end_date: Annotated[
-        str | None,
-        Field(default=None, description="Optional ISO end date/datetime filter"),
-    ] = None,
-    activity_stats_repo: ActivityStatsRepository = mcp_depends(
-        get_activity_stats_repository
-    ),
-) -> str:
-    """Aggregate activity totals, breakdowns, and personal records."""
-    user_id = await get_current_user_id()
-    filters = _activity_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    totals = await activity_stats_repo.get_totals(filters)
-    activity_type_rows = await activity_stats_repo.list_type_totals(filters)
-
-    overall_totals = ActivityTotals(
-        distance=totals.total_distance,
-        duration=totals.total_duration,
-        elevation_gain=totals.total_elevation_gain,
-        calories=totals.total_calories,
-    )
-
-    activity_type_stats = [
-        ActivityTypeStats(
-            activity_type=row.activity_type,
-            count=row.count,
-            total_distance=row.total_distance,
-            total_duration=row.total_duration,
-            total_elevation_gain=row.total_elevation_gain,
-            total_calories=row.total_calories,
-        )
-        for row in activity_type_rows
-    ]
-
-    async def build_personal_record(
-        metric: ActivityMetric,
-    ) -> ActivityPersonalRecord | None:
-        record_row = await activity_stats_repo.find_personal_record(filters, metric)
-        if record_row is None:
-            return None
-
-        return ActivityPersonalRecord(
-            activity_type=record_row.activity_type,
-            journal_id=record_row.journal_id,
-            journal_title=record_row.journal_title,
-            value=record_row.value,
-        )
-
-    personal_records = {
-        "longest_distance": await build_personal_record(ActivityMetric.DISTANCE),
-        "longest_duration": await build_personal_record(ActivityMetric.DURATION),
-        "highest_elevation_gain": await build_personal_record(
-            ActivityMetric.ELEVATION_GAIN
-        ),
-        "most_calories": await build_personal_record(ActivityMetric.CALORIES),
-    }
-    total_activities = totals.total_activities
-
-    response = ActivityStatsResponse(
-        total_activities=total_activities,
-        overall_totals=overall_totals,
-        activity_types=activity_type_stats,
-        personal_records=personal_records,
-        summary=(
-            f"Analysed {total_activities} activity journal(s) across "
-            f"{len(activity_type_stats)} activity type(s)"
-        ),
-    )
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("analyze_activity_trends", "journal")
-async def analyze_activity_trends(
-    interval: Annotated[
-        str,
-        Field(
-            default="month",
-            description="Trend interval: day, week, month, or year",
-        ),
-    ] = "month",
-    activity_type: Annotated[
-        str | None,
-        Field(default=None, description="Optional effective activity type filter"),
-    ] = None,
-    start_date: Annotated[
-        str | None,
-        Field(default=None, description="Optional ISO start date/datetime filter"),
-    ] = None,
-    end_date: Annotated[
-        str | None,
-        Field(default=None, description="Optional ISO end date/datetime filter"),
-    ] = None,
-    activity_stats_repo: ActivityStatsRepository = mcp_depends(
-        get_activity_stats_repository
-    ),
-) -> str:
-    """Analyse activity trends by day, week, month, or year buckets."""
-    normalized_interval = interval.strip().lower()
-    try:
-        trend_interval = TrendInterval(normalized_interval)
-    except ValueError as exc:
-        raise ValueError("interval must be one of: day, week, month, year") from exc
-
-    user_id = await get_current_user_id()
-    filters = _activity_filters(
-        user_id,
-        activity_type=activity_type,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    trend_rows = await activity_stats_repo.list_trend_buckets(filters, trend_interval)
-
-    periods = [
-        ActivityTrendPeriod(
-            period_start=row.period_start.isoformat(),
-            activity_count=row.activity_count,
-            total_distance=row.total_distance,
-            total_duration=row.total_duration,
-            total_elevation_gain=row.total_elevation_gain,
-        )
-        for row in trend_rows
-    ]
-    total_activities = sum(period.activity_count for period in periods)
-
-    response = ActivityTrendsResponse(
-        interval=normalized_interval,
-        total_activities=total_activities,
-        periods=periods,
-        summary=(
-            f"Analysed {total_activities} activity journal(s) across "
-            f"{len(periods)} {normalized_interval} bucket(s)"
-        ),
-    )
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("get_route_history", "journal")
-async def get_route_history(
-    route_id: Annotated[str, Field(description="Route UUID")],
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
-    """Return route usage history across route-aware activity journals."""
-    user_id = await get_current_user_id()
-    repos = create_journal_tool_repositories(db_connection)
-
-    try:
-        route_uuid = UUID(route_id)
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid route_id '{route_id}'. Must be a valid UUID."
-        ) from exc
-
-    route = await repos.route_repo.find_by_id(route_uuid)
-    if route is None:
-        return MCPResponseBuilder.not_found_error_response("Route", route_id)
-
-    journal = await repos.journal_repo.find_by_id(route.journal_id)
-    if journal is None or journal.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Route", route_id)
-
-    history_rows = await repos.route_repo.find_usage_history(user_id, route_uuid)
-    entries = [
-        RouteHistoryEntry(
-            journal_id=row.journal_id,
-            journal_title=row.journal_title,
-            activity_type=row.activity_type,
-            event_date_range=EventDateRangeSchema(
-                start=row.event_date_range.start,
-                end=row.event_date_range.end,
-            ),
-            distance=row.distance,
-            duration=row.duration,
-        )
-        for row in history_rows
-    ]
-    activity_types = sorted(
-        {entry.activity_type for entry in entries if entry.activity_type is not None}
-    )
-
-    response = RouteHistoryResponse(
-        route=RouteSummary(
-            id=str(route.id or route_uuid),
-            name=route.name,
-            description=route.description,
-        ),
-        usage_count=len(entries),
-        activity_types=activity_types,
-        entries=entries,
-        summary=(
-            f"Route '{route.name}' has been used {len(entries)} time(s) across "
-            f"{len(activity_types)} activity type(s)"
-        ),
-    )
-    return MCPResponseBuilder.success_response(response)
-
-
-def _journal_history_entry_to_schema(
-    entry: FieldHistoryEntry,
-) -> JournalHistoryEntry:
-    """Map a domain ``FieldHistoryEntry`` to the MCP schema.
-
-    Mirrors the REST ``HistoryConverter`` value coercion (Provenance enum →
-    string, ISO string → datetime) so the MCP tool returns exactly the same
-    field-level detail and provenance the UI shows.
-    """
-    created_at: datetime | None = None
-    if entry.created_at:
-        if isinstance(entry.created_at, str):
-            try:
-                created_at = datetime.fromisoformat(entry.created_at)
-            except ValueError:
-                created_at = None
-        else:
-            created_at = entry.created_at
-
-    source = entry.source.value if hasattr(entry.source, "value") else str(entry.source)
-
-    return JournalHistoryEntry(
-        entity_type=entry.entity_type,
-        entity_id=entry.entity_id,
-        field_name=entry.field_name,
-        old_value=entry.old_value,
-        new_value=entry.new_value,
-        changed_by=entry.changed_by,
-        source=source,
-        created_at=created_at,
-    )
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("get_journal_history", "journal")
-async def get_journal_history(
-    journal_id: Annotated[
-        int, Field(description="The unique identifier of the journal")
-    ],
-    page: Annotated[int, Field(description="Page number (1-based)", ge=1)] = 1,
-    limit: Annotated[int, Field(description="Entries per page", ge=1, le=100)] = 20,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
-    """Return a journal's field-level change history with provenance.
-
-    Provides AI-agent parity with the REST ``GET /api/journals/{id}/history``
-    endpoint: paginated, most-recent-first entries covering the journal's own
-    fields plus its type-specific data, routes, and gear, each tagged with its
-    origin (UI, MCP, an external sync, etc.). History is produced asynchronously
-    by the projection consumer, so a just-made change may take a moment to
-    appear.
-    """
-    user_id = await get_current_user_id()
-    repos = create_journal_tool_repositories(db_connection)
-
-    # Scope to the authenticated user: a journal owned by someone else is
-    # reported as not-found so history cannot leak across users (mirrors
-    # get_route_history and the REST endpoint).
-    journal = await repos.journal_repo.find_by_id(journal_id)
-    if journal is None or journal.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
-
-    history_service = JournalHistoryService(SqlFieldHistoryRepository(db_connection))
-
-    offset = (page - 1) * limit
-    history_entries = await history_service.get_journal_history(
-        journal_id=journal_id,
-        limit=limit,
-        offset=offset,
-    )
-    total_count = await history_service.get_journal_history_count(
-        journal_id=journal_id,
-    )
-
-    entries = [_journal_history_entry_to_schema(entry) for entry in history_entries]
-
-    response = JournalHistoryResponse(
-        journal_id=journal_id,
-        total_count=total_count,
-        page=page,
-        limit=limit,
-        entries=entries,
-        summary=(
-            f"Journal {journal_id} has {total_count} recorded change(s); "
-            f"showing {len(entries)} on page {page}."
-        ),
-    )
-    return MCPResponseBuilder.success_response(response)
 
 
 @tool(annotations=READ_ONLY)
@@ -1406,179 +536,6 @@ async def get_merge_candidates(
         target_title=target.title,
         candidates=candidates,
         summary=summary_text,
-    )
-
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("browse_journals_by_date_window", "journal")
-async def browse_journals_by_date_window(
-    anchor_date: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description=(
-                "Optional ISO date to anchor the window on (defaults to today "
-                "in the user's configured timezone). Example: '2026-04-02'"
-            ),
-        ),
-    ] = None,
-    days_back: Annotated[
-        int,
-        Field(
-            default=2,
-            ge=0,
-            description="Number of days before the anchor date to include (default: 2)",
-        ),
-    ] = 2,
-    days_forward: Annotated[
-        int,
-        Field(
-            default=4,
-            ge=0,
-            description="Number of days after the anchor date to include (default: 4)",
-        ),
-    ] = 4,
-    types: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional comma-separated journal types to filter by",
-        ),
-    ] = None,
-    search: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional text search query within the window",
-        ),
-    ] = None,
-    limit: Annotated[
-        int,
-        Field(
-            default=50,
-            ge=1,
-            description="Maximum results to return per page (default: 50)",
-        ),
-    ] = 50,
-    offset: Annotated[
-        int,
-        Field(
-            default=0,
-            ge=0,
-            description="Number of results to skip for pagination (default: 0)",
-        ),
-    ] = 0,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    journal_search_service: JournalSearchService = mcp_depends(
-        get_journal_search_service
-    ),
-) -> str:
-    """
-    Browse journals within a date window anchored on a given date.
-
-    Returns journals falling within [anchor - days_back, anchor + days_forward].
-    Defaults to a 7-day window (2 days back, 4 days forward from today).
-    Days are the user's local days: "today" and each day's midnight are taken in
-    the user's configured timezone (UTC when none is set), which the response
-    reports as ``timezone``.
-    Supports pagination via offset/limit and optional type/search filters.
-
-    Use this tool for time-oriented journal browsing, such as seeing
-    what happened recently or what is coming up.
-
-    Args:
-        anchor_date: ISO date string to centre the window on (defaults to today
-            in the user's timezone)
-        days_back: Days before the anchor to include
-        days_forward: Days after the anchor to include
-        types: Comma-separated journal types to filter by
-        search: Text search query
-        limit: Page size
-        offset: Pagination offset
-
-    Returns:
-        JSON with journals in the window, window boundaries, and pagination info
-    """
-    user_id = await get_current_user_id()
-    repos = create_journal_tool_repositories(db_connection)
-
-    # Parsed here, but left unresolved: the service defaults it to today in the
-    # user's timezone, which is also the zone its day boundaries are drawn in.
-    requested_anchor: date | None = None
-    if anchor_date is not None:
-        try:
-            requested_anchor = date.fromisoformat(anchor_date.strip())
-        except ValueError as exc:
-            raise ValueError(
-                f"Invalid anchor_date '{anchor_date}'. Must be ISO format (YYYY-MM-DD)."
-            ) from exc
-
-    type_filters = parse_type_filters(types)
-
-    try:
-        window = await journal_search_service.browse_window(
-            user_id,
-            anchor=requested_anchor,
-            days_back=days_back,
-            days_forward=days_forward,
-            type_filters=type_filters,
-            search=search,
-            limit=limit,
-            offset=offset,
-        )
-    except SearchServiceUnavailableError as exc:
-        return MCPResponseBuilder.error_response(
-            error_type="Search unavailable",
-            message=exc.message,
-            context={"search": search, "hint": SEARCH_UNAVAILABLE_HINT},
-        )
-
-    results = (
-        [_search_hit_to_result(hit) for hit in window.hits]
-        if window.searched
-        else await build_search_results(window.journals, repos)
-    )
-    total_count = window.total_count
-    start_iso = window.start_iso
-    end_iso = window.window_end.isoformat()
-    anchor_iso = window.anchor.isoformat()
-
-    has_more = (offset + limit) < total_count
-
-    response = JournalDateWindowResponse(
-        results=results,
-        window_start=start_iso,
-        window_end=end_iso,
-        anchor_date=anchor_iso,
-        timezone=window.timezone,
-        total_count=total_count,
-        has_more=has_more,
-        summary=(
-            f"Found {total_count} journal(s) between "
-            f"{start_iso} and {end_iso} "
-            f"(anchored on {anchor_iso}, {window.timezone})"
-        ),
-        diagnostics=await _zero_result_diagnostics(
-            repos,
-            user_id,
-            search_backend="meilisearch" if search and search.strip() else "database",
-            filters={
-                "window_start": start_iso,
-                "window_end": end_iso,
-                "timezone": window.timezone,
-                "types": types,
-                "search": search,
-            },
-            suggestions=(
-                [*WINDOW_SUGGESTIONS, SEARCH_SUGGESTIONS[0]]
-                if search
-                else WINDOW_SUGGESTIONS
-            ),
-        )
-        if total_count == 0
-        else None,
     )
 
     return MCPResponseBuilder.success_response(response)
@@ -2743,14 +1700,10 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     """Register every journal-domain MCP tool with the FastMCP server."""
     register_journal_read_tools(mcp)
     register_journal_entry_tools(mcp)
-    mcp.add_tool(search_journals)
-    mcp.add_tool(browse_journals_by_date_window)
-    mcp.add_tool(get_journal_hierarchy)
-    mcp.add_tool(search_activities)
-    mcp.add_tool(get_activity_stats)
-    mcp.add_tool(analyze_activity_trends)
-    mcp.add_tool(get_route_history)
-    mcp.add_tool(get_journal_history)
+    register_journal_search_tools(mcp)
+    register_journal_hierarchy_tools(mcp)
+    register_activity_tools(mcp)
+    register_journal_history_tools(mcp)
     register_journal_contact_tools(mcp)
     mcp.add_tool(list_calendars)
     mcp.add_tool(create_calendar)
