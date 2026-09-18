@@ -17,6 +17,7 @@ from app.mcp.domains.journals.schemas import (
     ExternalLinkSchema,
     JournalResponse,
 )
+from app.mcp.domains.journals.tools.search import _parse_integration_source_filter
 
 
 class TestExternalLinkSchema:
@@ -250,36 +251,26 @@ class TestIntegrationSourceFilterParsing:
 
     def test_returns_none_for_none_input(self) -> None:
         """Returns None when no filter is provided."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         assert _parse_integration_source_filter(None) is None
 
     def test_normalizes_valid_strava_source(self) -> None:
         """Normalizes 'strava' source correctly."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         assert _parse_integration_source_filter("strava") == "strava"
         assert _parse_integration_source_filter("Strava") == "strava"
         assert _parse_integration_source_filter("  STRAVA  ") == "strava"
 
     def test_normalizes_valid_google_calendar_source(self) -> None:
         """Normalizes 'google_calendar' source correctly."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         assert _parse_integration_source_filter("google_calendar") == "google_calendar"
         assert _parse_integration_source_filter("Google_Calendar") == "google_calendar"
 
     def test_normalizes_valid_snipeit_source(self) -> None:
         """Normalizes 'snipeit' source correctly."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         assert _parse_integration_source_filter("snipeit") == "snipeit"
         assert _parse_integration_source_filter("SnipeIt") == "snipeit"
 
     def test_normalizes_valid_snipeit_maintenance_source(self) -> None:
         """Normalizes 'snipeit_maintenance' source correctly."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         assert (
             _parse_integration_source_filter("snipeit_maintenance")
             == "snipeit_maintenance"
@@ -291,37 +282,27 @@ class TestIntegrationSourceFilterParsing:
 
     def test_normalizes_valid_immich_album_source(self) -> None:
         """Normalizes 'immich_album' source correctly."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         assert _parse_integration_source_filter("immich_album") == "immich_album"
         assert _parse_integration_source_filter("Immich_Album") == "immich_album"
         assert _parse_integration_source_filter("  IMMICH_ALBUM  ") == "immich_album"
 
     def test_rejects_invalid_source(self) -> None:
         """Raises ValueError for unrecognized integration source."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         with pytest.raises(ValueError, match="Invalid integration_source"):
             _parse_integration_source_filter("invalid_source")
 
     def test_invalid_source_message_lists_immich_album(self) -> None:
         """The error message advertises immich_album as an allowed source."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         with pytest.raises(ValueError, match="immich_album"):
             _parse_integration_source_filter("not_a_source")
 
     def test_rejects_empty_string(self) -> None:
         """Raises ValueError for empty string integration source."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         with pytest.raises(ValueError, match="Invalid integration_source"):
             _parse_integration_source_filter("")
 
     def test_rejects_whitespace_only(self) -> None:
         """Raises ValueError for whitespace-only integration source."""
-        from app.mcp.domains.journals.tools import _parse_integration_source_filter
-
         with pytest.raises(ValueError, match="Invalid integration_source"):
             _parse_integration_source_filter("   ")
 
