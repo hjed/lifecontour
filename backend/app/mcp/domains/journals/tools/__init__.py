@@ -19,13 +19,8 @@ from core_shared.models.journals import (
     Calendar,
     CanyonType,
     ClimbingType,
-    EventDateRange,
     GearItem,
-    Journal,
-    JournalContactRelationship,
-    JournalContactRelationshipType,
     JournalNotFoundError,
-    JournalType,
     JournalValidationError,
     TemplatePitch,
     TemplateType,
@@ -40,20 +35,10 @@ from app.core.history.adapters.sql.field_history_repository import (
 )
 from app.core.history.models import FieldHistoryEntry
 from app.core.history.services.journal_history_service import JournalHistoryService
-from app.core.integrations.external_link_helpers import (
-    ExternalLinkInfo,
-)
 from app.core.integrations.link_sources import (
-    journal_source_names,
     resolve_journal_source,
 )
-from app.core.journal.adapters.sql.activity_template_repository import (
-    SqlActivityTemplateRepository,
-)
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
-from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
-    SqlJournalContactRelationshipRepository,
-)
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
 from app.core.journal.models.activity_stats import (
@@ -63,7 +48,6 @@ from app.core.journal.models.activity_stats import (
     TrendInterval,
     parse_activity_type,
 )
-from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import (
     ActivityStatsRepository,
 )
@@ -80,10 +64,6 @@ from app.core.journal.services.hierarchy_service import HierarchyNode, Hierarchy
 from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
-from app.core.journal.services.journal_contact_service import JournalContactService
-from app.core.journal.services.journal_external_link_service import (
-    JournalExternalLinkService,
-)
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_search_service import (
     SEARCH_SUGGESTIONS,
@@ -94,13 +74,10 @@ from app.core.journal.services.journal_search_service import (
     JournalSearchService,
     explain_empty_result,
 )
-from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_type_data_reader import (
     read_journal_types_and_data,
 )
-from app.core.journal.services.journal_type_metadata import describe_journal_types
-from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.outdoor_activity_dismissal_service import (
     OutdoorActivityDismissalService,
 )
@@ -108,9 +85,6 @@ from app.core.journal.services.outdoor_dashboard_service import (
     OutdoorDashboardService,
 )
 from app.core.journal.services.review_item_service import ReviewItemService
-from app.core.journal.services.template_application import (
-    apply_template_to_type_data,
-)
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.services.task_journal_merge_service import (
@@ -130,12 +104,10 @@ from app.mcp.domains.journals.schemas import (
     ActivityTrendsResponse,
     ActivityTypeStats,
     CheckedOutGearMCPEntry,
-    ContactRelationshipSummary,
     DailySummaryMCPResponse,
     EventDateRangeSchema,
     IncompleteOutdoorActivitiesMCPResponse,
     IncompleteOutdoorActivityMCPEntry,
-    JournalCreateRequest,
     JournalDateWindowResponse,
     JournalHierarchyNode,
     JournalHierarchyResponse,
@@ -146,7 +118,6 @@ from app.mcp.domains.journals.schemas import (
     JournalTagInfo,
     JournalTagListMCPResponse,
     JournalTemplateMCPResponse,
-    JournalUpdateRequest,
     MergeCandidateResult,
     MergeCandidatesResponse,
     MergeJournalMCPRequest,
@@ -160,7 +131,6 @@ from app.mcp.domains.journals.schemas import (
     TemplatePitchInput,
     UpcomingOutdoorActivityMCPEntry,
     build_dashboard_summary,
-    validate_type_data,
 )
 from app.mcp.domains.journals.tools._shared import (
     JournalToolRepositories,
@@ -173,6 +143,9 @@ from app.mcp.domains.journals.tools._shared import (
     parse_optional_datetime_filter,
     parse_type_filters,
 )
+from app.mcp.domains.journals.tools.contacts import register_journal_contact_tools
+from app.mcp.domains.journals.tools.journal_entries import register_journal_entry_tools
+from app.mcp.domains.journals.tools.journals import register_journal_read_tools
 from app.mcp.domains.journals.tools.routes import register_journal_route_tools
 from app.mcp.domains.journals.tools.series import register_journal_series_tools
 from app.mcp.shared.annotations import (
@@ -192,11 +165,8 @@ from app.mcp.shared.dependencies import (
     get_daily_summary_service,
     get_gear_item_service,
     get_incomplete_outdoor_activity_service,
-    get_journal_contact_service,
-    get_journal_external_link_service,
     get_journal_search_service,
     get_journal_tag_service,
-    get_journal_write_service,
     get_outbox_event_publisher,
     get_outdoor_activity_dismissal_service,
     get_outdoor_dashboard_service,
@@ -229,17 +199,6 @@ def _activity_filters(
     )
 
 
-def _external_links_preserved(
-    before: list[ExternalLinkInfo], after: list[ExternalLinkInfo]
-) -> bool | None:
-    """Whether every pre-update link survived; None when there were none."""
-    if not before:
-        return None
-    before_keys = {(link.source, link.external_id) for link in before}
-    after_keys = {(link.source, link.external_id) for link in after}
-    return before_keys <= after_keys
-
-
 async def _build_hierarchy_node(
     node: HierarchyNode, repos: JournalToolRepositories
 ) -> JournalHierarchyNode:
@@ -269,22 +228,6 @@ async def _build_hierarchy_node(
         children=children,
     )
 
-
-_NOTE_IMPLIED_CONTEXT = (
-    "NOTE was requested alongside other types; NOTE is implicit (a journal with "
-    "no typed data) so it is not stored separately and will not appear in types."
-)
-
-
-def _note_implied_context(requested_types: list[str] | None) -> str:
-    """Explain why NOTE is absent when it was requested with other types."""
-    if not requested_types:
-        return ""
-    names = {t.upper() for t in requested_types}
-    if JournalType.NOTE.name in names and len(names) > 1:
-        return _NOTE_IMPLIED_CONTEXT
-    return ""
-
     # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
     # These will be created when the user provides type_data
 
@@ -305,704 +248,6 @@ def _parse_calendar_id(calendar_id: Any) -> UUID | None:
             ) from exc
 
     raise ValueError(f"Invalid calendar_id '{calendar_id}'. Must be a valid UUID.")
-
-
-def _validate_contact_relationships(
-    contact_relationships: list[dict[str, Any]],
-) -> None:
-    """
-    Validate contact relationship inputs without any DB operations.
-
-    Call this BEFORE any DB writes to ensure all inputs are valid.
-    Raises ValueError with a clear message if any relationship has invalid
-    or missing required fields, wrong types, or unrecognised enum values.
-    """
-    from core_shared.models.journals.attendee_status import AttendeeStatus
-    from core_shared.models.journals.contact_event_role import ContactEventRole
-
-    valid_relationship_types = {t.name for t in JournalContactRelationshipType}
-
-    for i, rel in enumerate(contact_relationships):
-        if not isinstance(rel, dict):
-            raise ValueError(
-                f"contact_relationships[{i}]: expected a dict, got {type(rel).__name__}"
-            )
-
-        contact_id = rel.get("contact_id")
-        relationship_type_str = rel.get("relationship_type")
-
-        if not contact_id:
-            raise ValueError(
-                f"contact_relationships[{i}]: missing required field 'contact_id'"
-            )
-        if not isinstance(contact_id, int):
-            raise ValueError(
-                f"contact_relationships[{i}]: 'contact_id' must be an int, "
-                f"got {type(contact_id).__name__}"
-            )
-        if not relationship_type_str:
-            raise ValueError(
-                f"contact_relationships[{i}]: missing required field 'relationship_type'"
-            )
-        if not isinstance(relationship_type_str, str):
-            raise ValueError(
-                f"contact_relationships[{i}]: 'relationship_type' must be a string, "
-                f"got {type(relationship_type_str).__name__}"
-            )
-        if relationship_type_str.upper() not in valid_relationship_types:
-            raise ValueError(
-                f"contact_relationships[{i}]: invalid relationship_type "
-                f"'{relationship_type_str}'. "
-                f"Valid types are: {', '.join(sorted(valid_relationship_types))}"
-            )
-
-        status_raw = rel.get("status")
-        if isinstance(status_raw, str):
-            try:
-                AttendeeStatus[status_raw.upper()]
-            except KeyError:
-                valid_statuses = {s.name for s in AttendeeStatus}
-                raise ValueError(
-                    f"contact_relationships[{i}]: invalid status '{status_raw}'. "
-                    f"Valid statuses are: {', '.join(sorted(valid_statuses))}"
-                ) from None
-
-        role_raw = rel.get("role")
-        if isinstance(role_raw, str):
-            try:
-                ContactEventRole[role_raw.upper()]
-            except KeyError:
-                valid_roles = {r.name for r in ContactEventRole}
-                raise ValueError(
-                    f"contact_relationships[{i}]: invalid role '{role_raw}'. "
-                    f"Valid roles are: {', '.join(sorted(valid_roles))}"
-                ) from None
-
-
-def _to_service_relationships(
-    contact_relationships: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Normalise the MCP flat relationship dicts to the JSON:API-nested shape.
-
-    ``JournalWriteService._process_journal_contact_relationships`` (shared with
-    the REST controllers) expects ``{"attributes": {...}}`` items with a string
-    ``contact_id`` and an upper-cased ``relationship_type`` enum name. The MCP
-    request uses flat ``{contact_id: int, relationship_type: str, ...}`` items,
-    so we adapt them here at the call boundary rather than changing the shared
-    helper's contract. Inputs are assumed already validated by
-    :func:`_validate_contact_relationships`.
-    """
-    nested: list[dict[str, Any]] = []
-    for rel in contact_relationships:
-        attributes: dict[str, Any] = {
-            "contact_id": str(rel["contact_id"]),
-            "relationship_type": rel["relationship_type"].upper(),
-        }
-        if rel.get("status") is not None:
-            attributes["status"] = rel["status"]
-        if rel.get("role") is not None:
-            attributes["role"] = rel["role"]
-        nested.append({"attributes": attributes})
-    return nested
-
-
-async def _fetch_enrichment_data(
-    journal_id: int, repos: JournalToolRepositories
-) -> tuple[
-    list[str], dict[str, Any], list[ContactRelationshipSummary], list[JournalTag]
-]:
-    """Fetch all enrichment data for a journal (types, type_data, contacts, tags)."""
-    types, type_data = await read_journal_types_and_data(journal_id, repos)
-
-    contacts = await fetch_contact_relationships_with_names(
-        journal_id, repos.contact_relationship_repo, repos.contact_repo
-    )
-
-    tags = await repos.tag_repo.get_tags_for_journal(journal_id)
-
-    return types, type_data, contacts, tags
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("list_journal_types", "journal")
-async def list_journal_types() -> str:
-    """
-    List all valid journal types, their descriptions, dependencies, and type_data fields.
-
-    Call this BEFORE create_journal_entry or update_journal_entry to discover
-    valid type names, what type_data fields each type accepts, the unit each
-    numeric field is stored in, and the allowed values of closed vocabularies
-    (anchor types, canyon types, climbing types, pitch types, grades).
-
-    Returns:
-        JSON with all available journal types and their schemas
-    """
-    return json.dumps(describe_journal_types(), indent=2)
-
-
-async def _load_own_template(
-    template_id: str,
-    user_id: str,
-    activity_template_repo: SqlActivityTemplateRepository,
-) -> ActivityTemplate:
-    """Load a template the caller owns, refusing anything they cannot use.
-
-    Another user's template is reported as missing rather than forbidden: the
-    caller has no way to tell it exists, and no way to act on the difference.
-    """
-    try:
-        UUID(template_id)
-    except ValueError as e:
-        raise JournalValidationError(
-            "template_id", f"Template ID {template_id!r} must be a valid UUID"
-        ) from e
-
-    template = await activity_template_repo.find_by_id(template_id)
-    if template is None or template.user_id != user_id:
-        raise JournalValidationError(
-            "template_id",
-            f"Template {template_id} not found. Call search_templates to list "
-            "your templates.",
-        )
-    return template
-
-
-@tool(annotations=ADDITIVE_WRITE)
-@mcp_unified_error_handler("create_journal_entry", "journal")
-async def create_journal_entry(
-    request: JournalCreateRequest,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    write_service: JournalWriteService = mcp_depends(get_journal_write_service),
-    link_service: JournalExternalLinkService = mcp_depends(
-        get_journal_external_link_service
-    ),
-) -> str:
-    """
-    Create a new journal entry with types, type-specific data, relationships, and tags.
-
-    IMPORTANT: Call list_journal_types first if you are unsure which type names
-    or type_data fields are valid. Invalid type names will be rejected.
-
-    Creates a journal entry with support for multiple types, type-specific data
-    (e.g. calendar_id for EVENT), contact relationships, and tags.
-    Type dependencies are added automatically (e.g. BUSHWALKING adds
-    OUTDOOR_ACTIVITY and FITNESS).
-
-    For a trip down a known canyon, cave or climb, pass that activity template's
-    id as ``template_id`` (find one with search_templates) instead of copying its
-    pitches yourself: the journal records the template reference and is filled in
-    with the template's standard pitches, the abseil counts derived from them,
-    and the template's own type fields. Anything you also pass in ``type_data``
-    wins over the template — your own ``pitches`` replace the template's, and the
-    abseil counts are derived from whichever pitches are stored unless you set
-    the counts yourself.
-
-    Returns:
-        JSON string containing AI-friendly journal information including:
-        - Journal details (title, content, date range)
-        - Types and type-specific data
-        - Contact relationships
-        - Tags
-        - Contextual summary for AI understanding
-
-    Raises:
-        JournalValidationError: If validation fails
-        ValueError: If invalid type/relationship_type/status/role values are provided
-    """
-    # No JSON parsing needed, FastMCP handles request model conversion directly
-
-    # Get current user ID from auth context
-    user_id = await get_current_user_id()
-
-    # --- Validate ALL inputs upfront BEFORE any DB writes ---
-    # This ensures ValueError is raised before the journal INSERT,
-    # preventing partial data commits when the error handler catches it.
-    valid_type_names = {t.name for t in JournalType}
-
-    if request.types:
-        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
-        if invalid_types:
-            raise ValueError(
-                f"Invalid journal type(s): {', '.join(invalid_types)}. "
-                f"Valid types are: {', '.join(sorted(valid_type_names))}"
-            )
-
-        # Enforce type_data requirements for GEAR_MAINTENANCE and GEAR_USAGE
-        req_types_upper = {t.upper() for t in request.types}
-
-        def has_non_empty_type_data(target_type: str) -> bool:
-            if not request.type_data:
-                return False
-            for k, v in request.type_data.items():
-                if k.upper() == target_type:
-                    return bool(v)
-            return False
-
-        if "GEAR_MAINTENANCE" in req_types_upper and not has_non_empty_type_data(
-            "GEAR_MAINTENANCE"
-        ):
-            raise ValueError(
-                "Type GEAR_MAINTENANCE requires corresponding non-empty type_data to be provided"
-            )
-        if "GEAR_USAGE" in req_types_upper and not has_non_empty_type_data(
-            "GEAR_USAGE"
-        ):
-            raise ValueError(
-                "Type GEAR_USAGE requires corresponding non-empty type_data to be provided"
-            )
-
-    if request.type_data:
-        invalid_type_data_keys = [
-            k for k in request.type_data if k.upper() not in valid_type_names
-        ]
-        if invalid_type_data_keys:
-            raise ValueError(
-                f"Invalid type_data key(s): {', '.join(invalid_type_data_keys)}. "
-                f"Valid types are: {', '.join(sorted(valid_type_names))}"
-            )
-
-    # Check every value against its type's write model before anything is
-    # written, so a bad one is refused with the field named rather than
-    # reaching the column (see validate_type_data).
-    validated_type_data = validate_type_data(request.type_data)
-
-    if request.contact_relationships:
-        _validate_contact_relationships(request.contact_relationships)
-
-    # Repositories are needed to resolve the template below, and to read back
-    # enrichment data for the response.
-    repos = create_journal_tool_repositories(db_connection)
-
-    # A template contributes its standard pitches and its own type fields — the
-    # same thing selecting one in the UI does (the abseil counts then follow from
-    # the pitches, in AbseilingService). Resolved here, before any write, so an
-    # unusable template_id creates no journal.
-    type_data = validated_type_data
-    # ``is not None`` rather than truthiness: an explicit empty string is a
-    # malformed id, and must be refused rather than quietly creating an
-    # untemplated journal.
-    if request.template_id is not None:
-        template = await _load_own_template(
-            request.template_id, user_id, repos.activity_template_repo
-        )
-        type_data = apply_template_to_type_data(template, request.types, type_data)
-
-    # --- All inputs validated, proceed with DB writes ---
-
-    # Create journal entity
-    journal = Journal(
-        user_id=user_id,
-        title=request.title,
-        content=request.content,
-        event_date_range=EventDateRange(
-            start=request.event_date_range.start,
-            end=request.event_date_range.end,
-        ),
-        parent_id=request.parent_id,
-    )
-
-    # Delegate the whole composite write (journal + types + type-data +
-    # relationships + tags) to the @transactional service, which owns the commit
-    # before the response is returned (issue #945/#967). This tool opens no
-    # transaction itself.
-    relationships = (
-        _to_service_relationships(request.contact_relationships)
-        if request.contact_relationships
-        else None
-    )
-    created_journal = await write_service.create_journal(
-        journal,
-        request.types,
-        type_data,
-        relationships,
-        db_connection,
-        tags=request.tags,
-        changed_by="mcp",
-        source=Provenance.MCP,
-    )
-
-    # Ensure journal_id is not None (it should always be set after creation)
-    if created_journal.id is None:
-        msg = "Journal ID should be set after creation"
-        raise ValueError(msg)
-    journal_id = created_journal.id
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
-
-    parent = await fetch_parent_journal(created_journal, repos.journal_repo, user_id)
-    external_links = await link_service.links_for_journal(journal_id, user_id)
-
-    # Convert to AI-friendly response
-    response = JournalConverter.to_response(
-        journal=created_journal,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
-        parent=parent,
-        additional_context=_note_implied_context(request.types),
-        external_links=external_links,
-    )
-
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=IDEMPOTENT_WRITE)
-@mcp_unified_error_handler("update_journal_entry", "journal")
-async def update_journal_entry(
-    journal_id: Annotated[
-        int, Field(description="The unique identifier of the journal to update")
-    ],
-    request: JournalUpdateRequest,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    write_service: JournalWriteService = mcp_depends(get_journal_write_service),
-    link_service: JournalExternalLinkService = mcp_depends(
-        get_journal_external_link_service
-    ),
-) -> str:
-    """
-    Update an existing journal entry with partial data.
-
-    IMPORTANT: Call list_journal_types first if you are unsure which type names
-    or type_data fields are valid. Invalid values will be rejected.
-
-    Only provided fields are updated; omitted fields remain unchanged.
-    When types, tags, or contact_relationships are provided they REPLACE all
-    existing values (not merge). Types are expanded through their dependencies
-    first, so re-typing (e.g. BUSHWALKING -> CANYONING) keeps the type_data of
-    every type that remains, including shared dependencies such as FITNESS and
-    its Strava link. Only genuinely dropped types lose data; the response lists
-    them in ``types_removed`` and the populated fields lost in
-    ``type_data_discarded``.
-
-    To edit safely, pass the ``version`` from get_journal as
-    ``expected_version``: the update is then refused, with nothing written, if
-    the journal changed in between. The refusal carries ``current_version`` to
-    retry with after re-reading.
-
-    Returns:
-        JSON string containing AI-friendly updated journal information
-
-    Raises:
-        JournalNotFoundError: If the journal with the given ID does not exist
-        JournalValidationError: If validation fails
-        PreconditionFailedError: If expected_version names a superseded version
-        ValueError: If invalid type/relationship values provided
-    """
-    # No JSON parsing needed, FastMCP handles request model conversion directly
-
-    # --- Validate ALL inputs upfront BEFORE any DB writes ---
-    valid_type_names = {t.name for t in JournalType}
-
-    if request.types is not None:
-        invalid_types = [t for t in request.types if t.upper() not in valid_type_names]
-        if invalid_types:
-            raise ValueError(
-                f"Invalid journal type(s): {', '.join(invalid_types)}. "
-                f"Valid types are: {', '.join(sorted(valid_type_names))}"
-            )
-
-    if request.type_data is not None:
-        invalid_type_data_keys = [
-            k for k in request.type_data if k.upper() not in valid_type_names
-        ]
-        if invalid_type_data_keys:
-            raise ValueError(
-                f"Invalid type_data key(s): {', '.join(invalid_type_data_keys)}. "
-                f"Valid types are: {', '.join(sorted(valid_type_names))}"
-            )
-
-    if request.contact_relationships is not None:
-        _validate_contact_relationships(request.contact_relationships)
-
-    # Check every value against its type's write model before anything is
-    # written. The composite update reaches the type-data write down two
-    # different branches and only one of them ran the domain's checks, so an
-    # over-long value came back as a bare "Internal error" when ``types`` was
-    # sent alongside it (see validate_type_data).
-    validated_type_data = validate_type_data(request.type_data, partial=True)
-
-    # --- All inputs validated, proceed with DB writes ---
-
-    # Repositories are still needed to load the journal and read back enrichment
-    # data for the response.
-    repos = create_journal_tool_repositories(db_connection)
-
-    # Get the existing journal, owner-scoped. Somebody else's is reported as
-    # missing, exactly as the read and delete tools report it (#1267) — without
-    # this the tool rewrote another user's journal and read it back in its own
-    # success response.
-    user_id = await get_current_user_id()
-    existing_journal = await repos.journal_repo.find_by_id_for_user(
-        journal_id, str(user_id)
-    )
-    if not existing_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Snapshot integration links so the response can state whether the update
-    # preserved them (an agent cannot otherwise tell an omitted field from a
-    # destroyed link).
-    links_before = await link_service.links_for_journal(journal_id, user_id)
-
-    # Apply the requested core-field changes to the loaded journal.
-    if request.title is not None:
-        existing_journal.title = request.title
-    if request.content is not None:
-        existing_journal.content = request.content
-    if request.event_date_range is not None:
-        existing_journal.event_date_range = EventDateRange(
-            start=request.event_date_range.start,
-            end=request.event_date_range.end,
-        )
-
-    if "parent_id" in request.model_fields_set:
-        existing_journal.parent_id = request.parent_id
-
-    # Delegate the whole composite update (core fields + replace-all types /
-    # type-data / relationships / tags) to the @transactional service, which
-    # owns the commit before the response (issue #945/#967). Tri-state: a field
-    # left as None on the request is not touched; a provided list replaces all.
-    relationships = (
-        _to_service_relationships(request.contact_relationships)
-        if request.contact_relationships is not None
-        else None
-    )
-    update_result = await write_service.update_journal_composite(
-        existing_journal,
-        db_connection,
-        types=request.types,
-        type_data=validated_type_data,
-        relationships=relationships,
-        tags=request.tags,
-        changed_by="mcp",
-        source=Provenance.MCP,
-        # Checked inside the service's unit of work, under the row lock, so a
-        # stale version refuses before any part of the composite is written.
-        expected_etags=(
-            [request.expected_version] if request.expected_version is not None else None
-        ),
-    )
-    updated_journal = update_result.journal
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
-
-    parent = await fetch_parent_journal(updated_journal, repos.journal_repo, user_id)
-    links_after = await link_service.links_for_journal(journal_id, user_id)
-    links_preserved = _external_links_preserved(links_before, links_after)
-
-    # Convert to AI-friendly response
-    response = JournalConverter.to_response(
-        journal=updated_journal,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
-        parent=parent,
-        additional_context=_note_implied_context(request.types),
-        external_links=links_after,
-        external_links_preserved=links_preserved,
-        types_removed=update_result.types_removed,
-        type_data_discarded=update_result.type_data_discarded,
-    )
-
-    return MCPResponseBuilder.success_response(response)
-
-
-async def _build_journal_response(
-    journal_id: int,
-    user_id: str,
-    db_connection: AsyncConnection,
-    link_service: JournalExternalLinkService,
-    *,
-    include_children: bool = False,
-) -> str:
-    """Full owner-scoped journal payload shared by the get_journal* tools."""
-    # Create repositories
-    repos = create_journal_tool_repositories(db_connection)
-    journal_repo = repos.journal_repo
-
-    # Get journal
-    journal = await journal_repo.find_by_id(journal_id)
-    if not journal or str(journal.user_id) != str(user_id):
-        raise JournalNotFoundError(journal_id)
-
-    # Resolve the parent this journal hangs off, so a child created with a
-    # parent_id reads back as one.
-    parent = await fetch_parent_journal(journal, journal_repo, user_id)
-
-    # Get children if requested
-    children = None
-    if include_children:
-        children = await journal_repo.get_children(journal_id)
-
-    # Fetch types and type-specific data
-    types, type_data = await read_journal_types_and_data(journal_id, repos)
-
-    # Fetch contact relationships and contact details
-    contacts = await fetch_contact_relationships_with_names(
-        journal_id, repos.contact_relationship_repo, repos.contact_repo
-    )
-
-    # Fetch tags
-    journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
-
-    # Fetch series memberships
-    from app.core.journal.adapters.sql.journal_series_repository import (
-        SqlJournalSeriesRepository,
-    )
-
-    journal_series = await SqlJournalSeriesRepository(
-        db_connection
-    ).get_series_for_journal(journal_id, user_id)
-    series = [
-        {"id": str(s.id), "name": s.name} for s in journal_series if s.id is not None
-    ]
-
-    # Fetch external links (Strava and Google Calendar)
-    external_links = await link_service.links_for_journal(journal_id, user_id)
-
-    # Fetch every calendar this event lives in. One event held by two
-    # calendars — where one invited the other — is a single journal linked
-    # to each, so reporting only the one it is displayed in would hide the
-    # rest.
-    linked_calendars = await SqlCalendarRepository(
-        db_connection
-    ).find_linked_to_journal(journal_id)
-
-    # Convert to AI-friendly response
-    response = JournalConverter.to_response(
-        journal=journal,
-        types=types,
-        type_data=type_data,
-        linked_calendars=linked_calendars,
-        contacts=contacts,
-        tags=journal_tags,
-        parent=parent,
-        children=children,
-        external_links=external_links,
-        series=series,
-    )
-
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("get_journal", "journal")
-async def get_journal(
-    journal_id: Annotated[
-        int, Field(description="The unique identifier of the journal")
-    ],
-    include_children: Annotated[
-        bool,
-        Field(
-            default=False,
-            description="Optional: Include child journals in the response",
-        ),
-    ] = False,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    link_service: JournalExternalLinkService = mcp_depends(
-        get_journal_external_link_service
-    ),
-) -> str:
-    """
-    Get journal details by ID for AI analysis.
-
-    Retrieves comprehensive journal information including title, content, types,
-    type-specific data, contact relationships, tags, and a contextual summary.
-    Optionally includes child journals.
-
-    Args:
-        journal_id: The unique identifier of the journal
-        include_children: Optional flag to include child journals
-
-    Returns:
-        JSON string containing AI-friendly journal information including:
-        - Journal details (title, content, date range)
-        - Types and type-specific data
-        - Contact relationships
-        - Tags
-        - Optional child journals
-        - Contextual summary for AI understanding
-
-    Raises:
-        JournalNotFoundError: If the journal with the given ID does not exist
-    """
-    user_id = await get_current_user_id()
-    return await _build_journal_response(
-        journal_id,
-        user_id,
-        db_connection,
-        link_service,
-        include_children=include_children,
-    )
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("get_journal_by_external_id", "journal")
-async def get_journal_by_external_id(
-    source: Annotated[
-        str,
-        Field(
-            description="Integration source the id belongs to. One of: "
-            + ", ".join(journal_source_names())
-            + ". Any other value is rejected."
-        ),
-    ],
-    external_id: Annotated[
-        str,
-        Field(
-            description="The external system's identifier exactly as a journal's "
-            "external_links report it: a Strava activity id ('16152597201'), a "
-            "Google Calendar event id, an Immich album UUID, a Snipe-IT "
-            "maintenance id, or (source 'snipeit') the Snipe-IT asset id of the "
-            "gear checked out on the journal."
-        ),
-    ],
-    include_children: Annotated[
-        bool,
-        Field(default=False, description="Optional: Include child journals"),
-    ] = False,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    link_service: JournalExternalLinkService = mcp_depends(
-        get_journal_external_link_service
-    ),
-) -> str:
-    """
-    Find the journal linked to an external system's record.
-
-    Resolves ``(source, external_id)`` — e.g. ('strava', '16152597201') — to
-    the user's journal and returns the same payload as get_journal. Use this
-    instead of searching by title when you already hold an integration id.
-
-    Raises:
-        ValueError: If ``source`` is not a recognised integration source
-
-    Returns a "Not found" error payload when no journal is linked to that id.
-    """
-    source_filter = resolve_journal_source(source)
-    normalized_id = external_id.strip()
-    if not normalized_id:
-        raise ValueError("external_id must not be empty")
-
-    user_id = await get_current_user_id()
-    journal_id = await SqlJournalRepository(db_connection).find_id_by_external_id(
-        user_id, source_filter, normalized_id
-    )
-    if journal_id is None:
-        return MCPResponseBuilder.error_response(
-            error_type="Not found",
-            message=f"No journal is linked to {source_filter} id '{normalized_id}'",
-            context={"source": source_filter, "external_id": normalized_id},
-        )
-    return await _build_journal_response(
-        journal_id,
-        user_id,
-        db_connection,
-        link_service,
-        include_children=include_children,
-    )
 
 
 @tool(annotations=READ_ONLY)
@@ -1768,282 +1013,6 @@ async def get_journal_history(
             f"showing {len(entries)} on page {page}."
         ),
     )
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=DESTRUCTIVE_WRITE)
-@mcp_unified_error_handler("delete_journal", "journal")
-async def delete_journal(
-    journal_id: Annotated[
-        int, Field(description="The unique identifier of the journal to delete")
-    ],
-    delete_children: Annotated[
-        bool,
-        Field(
-            default=False,
-            description="Optional: Delete child journals as well",
-        ),
-    ] = False,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
-) -> str:
-    """
-    Delete a journal entry.
-
-    Deletes a journal entry and optionally its children.
-    Returns confirmation response.
-
-    Deletion is refused while any task is anchored to this journal as its
-    creating or due journal — whatever that task's status, since a done task's
-    link to the journal it was created in is part of the record. Cancel,
-    complete or retarget those tasks first, or cancel the journal instead of
-    deleting it. A journal a task merely mentions can be deleted; the mention
-    goes with it and the task is unaffected.
-
-    The refusal is resolvable without a UI: it comes back with
-    ``code: "JOURNAL_HAS_ANCHORED_TASKS"``, an explanatory ``message``, the
-    ``journal_id`` that could not be deleted, and a ``blocking_tasks`` list.
-    Each entry gives the task's ``task_id``, ``text``, ``status`` and
-    ``blocking_roles`` (``creating`` and/or ``due``) plus the
-    ``action_journal_id`` and ``action_journal_title`` of the journal that
-    surfaces it — normally the task's due journal, or its creating journal when
-    the due journal is the one being deleted. Read that journal, deal with the
-    task there, and retry.
-
-    Args:
-        journal_id: The unique identifier of the journal to delete
-        delete_children: Optional flag to delete child journals
-
-    Returns:
-        JSON string containing deletion confirmation
-
-    Raises:
-        JournalNotFoundError: If the journal with the given ID does not exist
-        JournalHasAnchoredTasksError: If a task is anchored to the journal
-    """
-    # Explicitly reject unsupported delete_children behavior to avoid silent misuse
-    if delete_children:
-        raise NotImplementedError(
-            "The 'delete_children' flag is not yet supported. "
-            "Child journals are not deleted automatically."
-        )
-
-    # Create repositories
-    journal_repo = SqlJournalRepository(db_connection)
-    contact_relationship_repo = SqlJournalContactRelationshipRepository(db_connection)
-
-    # Somebody else's journal is reported as missing rather than refused, so
-    # neither the deletion nor the explanation it can now return says anything
-    # about a journal that is not yours. Same check as the read tool above.
-    user_id = await get_current_user_id()
-    journal = await journal_repo.find_by_id(journal_id)
-    if not journal or str(journal.user_id) != str(user_id):
-        raise JournalNotFoundError(journal_id)
-
-    journal_service = JournalService(
-        journal_repo,
-        event_publisher,
-        contact_relationship_repo,
-        task_anchor_repo=SqlTaskAnchorRepository(db_connection),
-    )
-
-    # Delete journal
-    await journal_service.delete_journal(
-        journal_id, db_connection, changed_by="mcp", source=Provenance.MCP
-    )
-
-    class DeleteResponse(BaseModel):
-        journal_id: int
-        deleted: bool
-        summary: str
-
-    response = DeleteResponse(
-        journal_id=journal_id,
-        deleted=True,
-        summary=f"Successfully deleted journal {journal_id}",
-    )
-
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=READ_ONLY)
-@mcp_unified_error_handler("get_contact_journals", "journal")
-async def get_contact_journals(
-    contact_id: Annotated[
-        int, Field(description="The unique identifier of the contact")
-    ],
-    limit: Annotated[
-        int,
-        Field(
-            default=20,
-            description="Maximum number of results to return (default: 20)",
-        ),
-    ] = 20,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
-    """
-    Get journals associated with a contact.
-
-    Retrieves journals that have relationships with the specified contact.
-    Returns AI-friendly summaries.
-
-    Args:
-        contact_id: The unique identifier of the contact
-        limit: Maximum number of results to return
-
-    Returns:
-        JSON string containing AI-friendly journal summaries
-
-    Raises:
-        ContactNotFoundError: If the contact with the given ID does not exist
-    """
-    # Create repositories
-    contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
-    journal_repo = SqlJournalRepository(db_connection)
-
-    # Get relationships
-    relationships = await contact_rel_repo.get_by_contact(contact_id)
-
-    # Get journals
-    journals = []
-    for rel in relationships[:limit]:
-        journal = await journal_repo.find_by_id(rel.journal_id)
-        if journal:
-            journals.append(journal)
-
-    # Convert to search results
-    results = [journal_to_search_result(journal) for journal in journals]
-
-    response = JournalSearchResponse(
-        results=results,
-        query=None,
-        total_hits=len(results),
-        processing_time_ms=0,
-        summary=f"Found {len(results)} journal(s) for contact {contact_id}",
-    )
-
-    return MCPResponseBuilder.success_response(response)
-
-
-@tool(annotations=IDEMPOTENT_WRITE)
-@mcp_unified_error_handler("link_journal_to_contact", "journal")
-async def link_journal_to_contact(
-    journal_id: Annotated[
-        int, Field(description="The unique identifier of the journal")
-    ],
-    contact_id: Annotated[
-        int, Field(description="The unique identifier of the contact")
-    ],
-    relationship_type: Annotated[
-        str,
-        Field(description="Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)"),
-    ],
-    status: Annotated[
-        str | None,
-        Field(
-            description="Attendee status: ATTENDING, ATTENDED, MAYBE, NO_REPLY, DECLINED"
-        ),
-    ] = None,
-    role: Annotated[
-        str | None,
-        Field(description="Event role: ORGANISER, FACILITATOR_HELPER"),
-    ] = None,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
-    journal_contact_service: JournalContactService = mcp_depends(
-        get_journal_contact_service
-    ),
-) -> str:
-    """
-    Link a journal to a contact with a specific relationship type.
-
-    Creates a relationship between a journal and a contact.
-    Returns confirmation response.
-
-    Args:
-        journal_id: The unique identifier of the journal
-        contact_id: The unique identifier of the contact
-        relationship_type: Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)
-
-    Returns:
-        JSON string containing relationship creation confirmation
-
-    Raises:
-        ValueError: If relationship is invalid, or if journal or contact do not exist.
-    """
-    # Validate relationship type
-    try:
-        relationship_enum = JournalContactRelationshipType[relationship_type.upper()]
-    except KeyError as e:
-        raise ValueError(f"Invalid relationship_type: {relationship_type}") from e
-
-    # Parse status and role if present
-    from core_shared.models.journals.attendee_status import AttendeeStatus
-    from core_shared.models.journals.contact_event_role import ContactEventRole
-
-    status_enum, role_enum = None, None
-    if status is not None:
-        try:
-            status_enum = AttendeeStatus[status.upper()]
-        except KeyError as e:
-            raise ValueError(f"Invalid status: {status}") from e
-
-    if role is not None:
-        try:
-            role_enum = ContactEventRole[role.upper()]
-        except KeyError as e:
-            raise ValueError(f"Invalid role: {role}") from e
-
-    # Create repositories
-    repos = create_journal_tool_repositories(db_connection)
-
-    # Check that contact and journal exist. The journal is read owner-scoped:
-    # linking writes a row to it, so somebody else's must be as unreachable
-    # here as it is through the read tool (#1267).
-    user_id = await get_current_user_id()
-    journal = await repos.journal_repo.find_by_id_for_user(journal_id, str(user_id))
-    if not journal:
-        raise ValueError(f"Could not find journal with ID {journal_id}")
-
-    contact = await repos.contact_repo.find_by_id(contact_id)
-    if not contact:
-        raise ValueError(f"Could not find contact with ID {contact_id}")
-
-    rel = JournalContactRelationship(
-        journal_id=journal_id,
-        contact_id=contact_id,
-        relationship_type=relationship_enum,
-        status=status_enum,
-        role=role_enum,
-    )
-
-    import sqlalchemy.exc
-
-    try:
-        await journal_contact_service.add_contact_to_journal(
-            rel, transaction=db_connection
-        )
-    except sqlalchemy.exc.IntegrityError as e:
-        raise ValueError("Relationship already exists") from e
-
-    class LinkResponse(BaseModel):
-        journal_id: int
-        contact_id: int
-        relationship_type: str
-        status: str | None
-        role: str | None
-        linked: bool
-        summary: str
-
-    response = LinkResponse(
-        journal_id=journal_id,
-        contact_id=contact_id,
-        relationship_type=relationship_enum.value,
-        status=status_enum.value if status_enum is not None else None,
-        role=role_enum.value if role_enum is not None else None,
-        linked=True,
-        summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_enum.value}",
-    )
-
     return MCPResponseBuilder.success_response(response)
 
 
@@ -3772,12 +2741,8 @@ async def merge_journal_tag(
 
 def register_journal_tools(mcp: FastMCP[None]) -> None:
     """Register every journal-domain MCP tool with the FastMCP server."""
-    mcp.add_tool(list_journal_types)
-    mcp.add_tool(get_journal)
-    mcp.add_tool(get_journal_by_external_id)
-    mcp.add_tool(delete_journal)
-    mcp.add_tool(create_journal_entry)
-    mcp.add_tool(update_journal_entry)
+    register_journal_read_tools(mcp)
+    register_journal_entry_tools(mcp)
     mcp.add_tool(search_journals)
     mcp.add_tool(browse_journals_by_date_window)
     mcp.add_tool(get_journal_hierarchy)
@@ -3786,8 +2751,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(analyze_activity_trends)
     mcp.add_tool(get_route_history)
     mcp.add_tool(get_journal_history)
-    mcp.add_tool(get_contact_journals)
-    mcp.add_tool(link_journal_to_contact)
+    register_journal_contact_tools(mcp)
     mcp.add_tool(list_calendars)
     mcp.add_tool(create_calendar)
     mcp.add_tool(update_calendar)
