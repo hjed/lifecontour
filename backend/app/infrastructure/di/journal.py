@@ -743,11 +743,16 @@ class JournalProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def journal_search_service(
-        self, journal_repo: JournalRepository, search_service: SearchService
+        self,
+        journal_repo: JournalRepository,
+        search_service: SearchService,
+        date_resolver: JournalDateResolver,
     ) -> JournalSearchService:
         """Provide a JournalSearchService instance."""
         return JournalSearchService(
-            journal_repo=journal_repo, search_service=search_service
+            journal_repo=journal_repo,
+            search_service=search_service,
+            date_resolver=date_resolver,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -342,9 +342,18 @@ class JournalDateWindowResponse(BaseModel):
     results: list[JournalSearchResult] = Field(
         description="Journals within the date window"
     )
-    window_start: str = Field(description="Window start date (ISO format)")
-    window_end: str = Field(description="Window end date (ISO format)")
+    window_start: str = Field(
+        description="Window start date (ISO format), a local date in `timezone`"
+    )
+    window_end: str = Field(
+        description="Window end date (ISO format, inclusive), a local date in "
+        "`timezone`"
+    )
     anchor_date: str = Field(description="The anchor date used for the window")
+    timezone: str = Field(
+        description="IANA timezone the window's days were taken in: the user's "
+        "configured timezone, or UTC when none is set"
+    )
     total_count: int = Field(description="Total journals in the window")
     has_more: bool = Field(
         description="Whether there are more journals beyond the current offset+limit"

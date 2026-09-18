@@ -989,10 +989,11 @@ commitments a journal is waiting on, and must not be handed the ability to chang
 
 **No MCP surface.** Delivery rule 5 is about capabilities, and this adds none an agent lacks —
 `list_journal_tasks` already returns a journal's tasks grouped by role, which is strictly more than a
-count. The sibling list-level indicator `has_pending_reviews` is REST-only for the same reason, and
-MCP's list analogue `browse_journals_by_date_window` anchors its window on `datetime.now(UTC)` rather
-than the configured zone, so a timezone-derived lapse verdict on that payload would disagree with
-itself about what day it is. That is a defect worth fixing on its own terms.
+count. The sibling list-level indicator `has_pending_reviews` is REST-only for the same reason.
+(MCP's list analogue `browse_journals_by_date_window` once anchored its window on `datetime.now(UTC)`,
+so a timezone-derived lapse verdict on that payload would have disagreed with itself about what day
+it was; since #1507 it anchors "today" and draws its day boundaries in the configured zone with
+`JournalDateResolver` and `local_window`, and reports that zone as `timezone`.)
 
 ### Upcoming important dates
 

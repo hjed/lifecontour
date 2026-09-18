@@ -1,14 +1,28 @@
-"""Integration tests for MCP browse_journals_by_date_window tool."""
+"""Integration tests for MCP browse_journals_by_date_window tool.
 
-from datetime import UTC, datetime, timedelta
+The window is anchored, and its day boundaries drawn, in the acting user's
+configured timezone (UTC when none is set). Every timezone case here is one a
+UTC reading would answer differently.
+"""
+
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.services.journal_date_resolver import local_date
+from app.core.settings.adapters.sql.user_settings_repository import (
+    SqlUserSettingsRepository,
+)
+from app.core.settings.models import UserSettings
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
+
+USER_ID = "test-user-123"
+SYDNEY = ZoneInfo("Australia/Sydney")
 
 
 async def _insert_journal(
@@ -226,6 +240,8 @@ class TestBrowseJournalsByDateWindowIntegration:
             assert payload["anchor_date"] == "2026-04-02"
             assert payload["window_start"] == "2026-03-31"
             assert payload["window_end"] == "2026-04-06"
+            # No saved timezone: the window is read in UTC.
+            assert payload["timezone"] == "UTC"
 
     @pytest.mark.asyncio
     async def test_journals_on_window_end_day_are_included(
@@ -267,3 +283,87 @@ class TestBrowseJournalsByDateWindowIntegration:
             assert payload["total_count"] == 1
             titles = [r["title"] for r in payload["results"]]
             assert "Evening Journal on End Day" in titles
+
+
+@pytest.mark.integration
+class TestBrowseJournalsByDateWindowInUserTimezone:
+    """The window is the user's local days, not UTC's."""
+
+    @pytest.mark.asyncio
+    async def test_day_boundaries_are_the_users_local_midnights(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        user_settings_repository: SqlUserSettingsRepository,
+    ) -> None:
+        """A single Sydney day (June, AEST +10) against the UTC day it overlaps.
+
+        The early-morning journal is the previous day in UTC and the next
+        morning's is the same day in UTC, so a UTC window would swap them.
+        """
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone="Australia/Sydney")
+        )
+        day = date(2026, 6, 15)
+        for title, local_start in [
+            ("Early morning", datetime(2026, 6, 15, 1, 0, tzinfo=SYDNEY)),
+            ("Local evening", datetime(2026, 6, 15, 20, 0, tzinfo=SYDNEY)),
+            ("Next morning", datetime(2026, 6, 16, 7, 0, tzinfo=SYDNEY)),
+        ]:
+            await _insert_journal(
+                clean_database,
+                user_id=USER_ID,
+                title=title,
+                start=local_start.astimezone(UTC),
+            )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool(
+                client,
+                "browse_journals_by_date_window",
+                {"anchor_date": day.isoformat(), "days_back": 0, "days_forward": 0},
+                request_id=2,
+            )
+
+        assert "error" not in payload
+        assert sorted(r["title"] for r in payload["results"]) == [
+            "Early morning",
+            "Local evening",
+        ]
+        assert payload["total_count"] == 2
+        assert payload["window_start"] == "2026-06-15"
+        assert payload["window_end"] == "2026-06-15"
+        assert payload["timezone"] == "Australia/Sydney"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("timezone", ["Pacific/Kiritimati", "Pacific/Midway"])
+    async def test_default_anchor_is_today_in_the_users_timezone(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        user_settings_repository: SqlUserSettingsRepository,
+        timezone: str,
+    ) -> None:
+        """Omitting ``anchor_date`` anchors on the user's today.
+
+        The two zones are 25 hours apart, so at any instant at least one of them
+        is on a different date from UTC and fails a UTC anchor. The resolved
+        date is sandwiched between clock readings taken either side of the call
+        so a local midnight passing mid-test cannot fail it.
+        """
+        await user_settings_repository.save(
+            UserSettings(user_id=USER_ID, timezone=timezone)
+        )
+        tz = ZoneInfo(timezone)
+
+        async with authenticated_lifespan_client() as client:
+            before = datetime.now(UTC)
+            payload = await call_mcp_tool(
+                client, "browse_journals_by_date_window", {}, request_id=2
+            )
+            after = datetime.now(UTC)
+
+        assert "error" not in payload
+        anchor = date.fromisoformat(payload["anchor_date"])
+        assert local_date(before, tz) <= anchor <= local_date(after, tz)
+        assert payload["timezone"] == timezone

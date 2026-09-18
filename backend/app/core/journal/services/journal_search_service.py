@@ -9,12 +9,13 @@ caller can report it loudly rather than as an empty result, and
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 from meilisearch.errors import MeilisearchError
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_date_resolver import local_window, today_in
 from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.search.search_service import SearchService
 
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from core_shared.models.journals import Journal
 
     from app.core.journal.models.repositories import JournalRepository
+    from app.core.journal.services.journal_date_resolver import JournalDateResolver
 
 SEARCH_UNAVAILABLE_HINT = (
     "The search backend (MeiliSearch) could not be reached, so this is NOT an "
@@ -153,7 +155,8 @@ SEARCH_SUGGESTIONS = [
 
 WINDOW_SUGGESTIONS = [
     "Widen the window (days_back / days_forward) or move anchor_date.",
-    "Dates are matched on the journal's event date range, in UTC.",
+    "Dates are matched on the journal's event date range, in the user's "
+    "configured timezone (reported as timezone; UTC when none is set).",
     "Use search_journals for a text search without a date restriction.",
 ]
 
@@ -185,10 +188,16 @@ class DateWindowOutcome:
     (``hits``) or a database listing (``journals``); the other list is empty.
     ``start_iso`` is the window's first day; ``total_count`` counts every match,
     not just this page.
+
+    The days are **local days**: ``anchor``, ``window_start`` and ``window_end``
+    are dates in ``timezone``, the acting user's configured zone, which is the
+    zone the query's instant bounds were drawn in too.
     """
 
     window_start: date
     window_end: date
+    anchor: date
+    timezone: str
     start_iso: str
     total_count: int
     searched: bool
@@ -239,10 +248,14 @@ class JournalSearchService:
     """Finds a user's journals by date window, filters and full text."""
 
     def __init__(
-        self, journal_repo: JournalRepository, search_service: SearchService
+        self,
+        journal_repo: JournalRepository,
+        search_service: SearchService,
+        date_resolver: JournalDateResolver,
     ) -> None:
         self.journal_repo = journal_repo
         self.search_service = search_service
+        self.date_resolver = date_resolver
 
     async def search(
         self,
@@ -409,7 +422,7 @@ class JournalSearchService:
         self,
         user_id: str,
         *,
-        anchor: date,
+        anchor: date | None,
         days_back: int,
         days_forward: int,
         type_filters: list[str],
@@ -419,6 +432,12 @@ class JournalSearchService:
     ) -> DateWindowOutcome:
         """The journals whose event range overlaps the window around ``anchor``.
 
+        The window is a span of **local days** in the user's configured timezone
+        (UTC when none is set), and ``anchor`` defaults to today in that zone —
+        the anchoring the outdoor and home dashboards use, so the same day means
+        the same thing wherever it is asked for. An omitted anchor read as UTC's
+        date would be yesterday for an AEST user each evening.
+
         One type filter is applied by the database; several are applied only
         to a text search. A non-blank ``search`` runs through MeiliSearch
         restricted to the window's journals.
@@ -427,20 +446,26 @@ class JournalSearchService:
             SearchServiceUnavailableError: If the text search cannot reach
                 MeiliSearch.
         """
+        tz = await self.date_resolver.timezone_for(user_id)
+        anchor = anchor if anchor is not None else today_in(tz)
         window_start, window_end = compute_date_window(anchor, days_back, days_forward)
 
         start_iso = window_start.isoformat()
-        # Use end-of-day for window_end so journals occurring later on that
-        # day are included (the repo compares event_date_range_start <= end_date,
-        # and date.isoformat() alone yields midnight which would exclude them).
-        end_iso = datetime.combine(window_end, time(23, 59, 59), tzinfo=UTC).isoformat()
+        # The local days as instants, for a comparison against stored timestamps:
+        # local midnight on the first day through the last microsecond before the
+        # day after the last one begins. Built from the *next* midnight rather
+        # than 23:59:59, so a zone whose clocks move at midnight keeps its whole
+        # last hour (see ``local_window``).
+        instants = local_window(window_start, window_end, tz)
+        range_start_iso = instants.start.isoformat()
+        end_iso = instants.end.isoformat()
 
         journal_type = type_filters[0] if len(type_filters) == 1 else None
 
         total_count = await self.journal_repo.count_all(
             user_id=user_id,
             journal_type=journal_type,
-            start_date=start_iso,
+            start_date=range_start_iso,
             end_date=end_iso,
         )
 
@@ -453,7 +478,7 @@ class JournalSearchService:
                 limit=max(total_count, 1),
                 offset=0,
                 journal_type=journal_type,
-                start_date=start_iso,
+                start_date=range_start_iso,
                 end_date=end_iso,
             )
             window_ids = {j.id for j in in_window if j.id is not None}
@@ -468,6 +493,8 @@ class JournalSearchService:
             return DateWindowOutcome(
                 window_start=window_start,
                 window_end=window_end,
+                anchor=anchor,
+                timezone=tz.key,
                 start_iso=start_iso,
                 total_count=len(matched),
                 searched=True,
@@ -480,12 +507,14 @@ class JournalSearchService:
             limit=limit,
             offset=offset,
             journal_type=journal_type,
-            start_date=start_iso,
+            start_date=range_start_iso,
             end_date=end_iso,
         )
         return DateWindowOutcome(
             window_start=window_start,
             window_end=window_end,
+            anchor=anchor,
+            timezone=tz.key,
             start_iso=start_iso,
             total_count=total_count,
             searched=False,

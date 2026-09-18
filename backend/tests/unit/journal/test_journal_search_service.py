@@ -1,12 +1,22 @@
-"""Unit tests for JournalSearchService: filtered search and date-window browsing."""
+"""Unit tests for JournalSearchService: filtered search and date-window browsing.
+
+A window's days are the acting user's **local** days, so the bounds the service
+hands the repository are instants in the user's configured timezone. The cases
+below fix a zone whose offset would give a UTC reading a different answer.
+"""
 
 from datetime import UTC, date, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from core_shared.models.journals import EventDateRange, Journal
 
+from app.core.journal.services.journal_date_resolver import (
+    JournalDateResolver,
+    local_date,
+)
 from app.core.journal.services.journal_search_service import (
     JournalSearchFilters,
     JournalSearchService,
@@ -15,7 +25,18 @@ from app.core.journal.services.journal_search_service import (
 
 ANCHOR = date(2026, 4, 2)
 WINDOW_START_ISO = "2026-03-31"
-WINDOW_END_ISO = "2026-04-06T23:59:59+00:00"
+# The window's instants: local midnight on its first day, through the last
+# microsecond before the day after its last one begins. UTC here, since the
+# default test user has no timezone saved.
+WINDOW_RANGE_START_ISO = "2026-03-31T00:00:00+00:00"
+WINDOW_END_ISO = "2026-04-06T23:59:59.999999+00:00"
+
+
+def _date_resolver(timezone: str | None = None) -> JournalDateResolver:
+    """A resolver over a settings repository that reports one timezone."""
+    user_settings_repo = AsyncMock()
+    user_settings_repo.get_timezone.return_value = timezone
+    return JournalDateResolver(user_settings_repo=user_settings_repo)
 
 
 def _journal(journal_id: int) -> Journal:
@@ -41,7 +62,11 @@ def _document(journal_id: int) -> dict[str, Any]:
 
 
 def _service(
-    *, count: int, journals: list[Journal], documents: list[dict[str, Any]]
+    *,
+    count: int,
+    journals: list[Journal],
+    documents: list[dict[str, Any]],
+    timezone: str | None = None,
 ) -> tuple[JournalSearchService, AsyncMock, MagicMock]:
     journal_repo = AsyncMock()
     journal_repo.count_all.return_value = count
@@ -53,7 +78,11 @@ def _service(
         "processing_time_ms": 3,
     }
     return (
-        JournalSearchService(journal_repo=journal_repo, search_service=search_service),
+        JournalSearchService(
+            journal_repo=journal_repo,
+            search_service=search_service,
+            date_resolver=_date_resolver(timezone),
+        ),
         journal_repo,
         search_service,
     )
@@ -96,7 +125,7 @@ class TestBrowseWindow:
         window = {
             "user_id": "user-1",
             "journal_type": "event",
-            "start_date": WINDOW_START_ISO,
+            "start_date": WINDOW_RANGE_START_ISO,
             "end_date": WINDOW_END_ISO,
         }
         journal_repo.count_all.assert_awaited_once_with(**window)
@@ -148,7 +177,7 @@ class TestBrowseWindow:
             limit=3,
             offset=0,
             journal_type="note",
-            start_date=WINDOW_START_ISO,
+            start_date=WINDOW_RANGE_START_ISO,
             end_date=WINDOW_END_ISO,
         )
         search_service.search_journals.assert_called_once_with(
@@ -372,4 +401,87 @@ class TestSearch:
             offset=0,
             journal_ids=None,
             **_NO_RELATIONAL_FILTERS,
+        )
+
+
+@pytest.mark.unit
+class TestBrowseWindowInTheUsersTimezone:
+    """The window's days are the user's local days, not UTC's."""
+
+    @pytest.mark.asyncio
+    async def test_the_bounds_are_the_users_local_midnights(self) -> None:
+        """Sydney is +10 in June, so its day opens 10 hours before UTC's.
+
+        Asserted on what the repository is asked for, because that is the
+        comparison that decides which journals are in the window.
+        """
+        service, journal_repo, _ = _service(
+            count=0, journals=[], documents=[], timezone="Australia/Sydney"
+        )
+
+        await service.browse_window(
+            "user-1",
+            anchor=date(2026, 6, 15),
+            days_back=0,
+            days_forward=0,
+            type_filters=[],
+            search=None,
+            limit=50,
+            offset=0,
+        )
+
+        bounds = journal_repo.count_all.await_args.kwargs
+        assert bounds["start_date"] == "2026-06-15T00:00:00+10:00"
+        assert bounds["end_date"] == "2026-06-15T23:59:59.999999+10:00"
+
+    @pytest.mark.asyncio
+    async def test_an_omitted_anchor_is_today_in_the_users_timezone(self) -> None:
+        """Kiritimati is +14, so its date differs from UTC's every afternoon.
+
+        Sandwiched between two readings of the clock rather than compared with a
+        third: a bare equality would fail whenever the readings landed either
+        side of the local midnight.
+        """
+        service, _, _ = _service(
+            count=0, journals=[], documents=[], timezone="Pacific/Kiritimati"
+        )
+        tz = ZoneInfo("Pacific/Kiritimati")
+
+        before = datetime.now(UTC)
+        outcome = await service.browse_window(
+            "user-1",
+            anchor=None,
+            days_back=0,
+            days_forward=0,
+            type_filters=[],
+            search=None,
+            limit=50,
+            offset=0,
+        )
+        after = datetime.now(UTC)
+
+        assert local_date(before, tz) <= outcome.anchor <= local_date(after, tz)
+        assert outcome.timezone == "Pacific/Kiritimati"
+
+    @pytest.mark.asyncio
+    async def test_a_user_with_no_timezone_is_read_in_utc(self) -> None:
+        """The fallback, stated where the zone-specific cases are."""
+        service, journal_repo, _ = _service(count=0, journals=[], documents=[])
+
+        outcome = await service.browse_window(
+            "user-1",
+            anchor=ANCHOR,
+            days_back=2,
+            days_forward=4,
+            type_filters=[],
+            search=None,
+            limit=50,
+            offset=0,
+        )
+
+        assert outcome.timezone == "UTC"
+        assert outcome.anchor == ANCHOR
+        assert (
+            journal_repo.count_all.await_args.kwargs["start_date"]
+            == WINDOW_RANGE_START_ISO
         )
