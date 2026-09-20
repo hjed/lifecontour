@@ -54,7 +54,12 @@ from api_models import ListConnectionsResponse
 # Import worker-specific services
 from event_transformer import google_event_times
 from google_auth_service import GoogleAuthService
-from google_client import GoogleAPIClient, is_event_type_restriction
+from google_client import (
+    GoogleAPIClient,
+    google_error_reasons,
+    is_event_type_restriction,
+    is_permission_denied,
+)
 from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
@@ -2068,6 +2073,7 @@ async def _process_journal_deleted_event(
 
         deleted_ids = []
         read_only_ids = []
+        forbidden_ids = []
         errors = []
         from googleapiclient.errors import HttpError
 
@@ -2115,6 +2121,18 @@ async def _process_journal_deleted_event(
                         journal_id=journal_id,
                     )
                     deleted_ids.append(google_event_id)
+                elif is_permission_denied(e):
+                    # The account may not delete from this calendar. The copy
+                    # stays on Google and no retry can change that, so the
+                    # deletion is recorded as refused rather than failing the
+                    # job and leaving the event to be attempted forever.
+                    logger.warning(
+                        "Not allowed to delete this event from Google Calendar",
+                        google_event_id=google_event_id,
+                        journal_id=journal_id,
+                        error=str(e),
+                    )
+                    forbidden_ids.append(google_event_id)
                 else:
                     logger.error(
                         "HTTP error deleting journal event from Google Calendar",
@@ -2138,6 +2156,7 @@ async def _process_journal_deleted_event(
             "action": "delete",
             "external_event_ids": deleted_ids,
             "read_only_event_ids": read_only_ids,
+            "forbidden_event_ids": forbidden_ids,
         }
 
 
@@ -2547,28 +2566,53 @@ async def _process_journal_upsert_event(
 
         except HttpError as e:
             await _mark_link_errored(session, journal_id, row.calendar_id)
-            if not is_event_type_restriction(e):
-                raise
 
-            # Google owns this event and derives it — a birthday from a
-            # contact, an event from Gmail — so it accepts almost no change.
-            # No retry and no reshaping of the payload makes the same write
-            # land, so the message is acknowledged rather than left pending to
-            # be redelivered until it dead-letters. The journal keeps the
-            # local edit; the errored link is where the divergence shows.
-            logger.warning(
-                "Skipping outbound push: Google event type is not modifiable",
-                journal_id=journal_id,
-                external_event_id=external_event_id,
-                calendar_id=row.calendar_id,
-                error=str(e),
-            )
-            return {
-                "status": "ignored",
-                "reason": "event_type_not_modifiable",
-                "journal_id": journal_id,
-                "external_event_id": external_event_id,
-            }
+            if is_event_type_restriction(e):
+                # Google owns this event and derives it — a birthday from a
+                # contact, an event from Gmail — so it accepts almost no
+                # change. No retry and no reshaping of the payload makes the
+                # same write land, so the message is acknowledged rather than
+                # left pending to be redelivered until it dead-letters. The
+                # journal keeps the local edit; the errored link is where the
+                # divergence shows.
+                logger.warning(
+                    "Skipping outbound push: Google event type is not modifiable",
+                    journal_id=journal_id,
+                    external_event_id=external_event_id,
+                    calendar_id=row.calendar_id,
+                    error=str(e),
+                )
+                return {
+                    "status": "ignored",
+                    "reason": "event_type_not_modifiable",
+                    "journal_id": journal_id,
+                    "external_event_id": external_event_id,
+                }
+
+            if is_permission_denied(e):
+                # Refusing the write is an answer, not a fault: the account
+                # may not write to this calendar, or to this event. Raising
+                # would ride the same retries to the same dead-letter for the
+                # same reply, so the push stops here and the stored access
+                # role is refreshed — a stale role is why the read-only guard
+                # above let this push through at all.
+                logger.warning(
+                    "Google refused the outbound push, skipping this calendar",
+                    journal_id=journal_id,
+                    calendar_id=row.calendar_id,
+                    google_calendar_id=target_calendar_id,
+                    action=action,
+                    error=str(e),
+                )
+                await _refresh_calendar_access_roles(session, client, row.user_id)
+                return {
+                    "status": "ignored",
+                    "reason": "forbidden",
+                    "journal_id": journal_id,
+                    "action": action,
+                }
+
+            raise
 
         except Exception:
             await _mark_link_errored(session, journal_id, row.calendar_id)
@@ -3794,18 +3838,10 @@ async def sync_calendar_events(
                         client, list_kwargs
                     )
                 except HttpError as e:
-                    is_sync_token_error = e.resp.status == 410
-                    if e.resp.status == 400:
-                        try:
-                            import json
-
-                            error_details = json.loads(e.content.decode())
-                            for err in error_details.get("error", {}).get("errors", []):
-                                if err.get("reason") == "syncTokenInvalid":
-                                    is_sync_token_error = True
-                                    break
-                        except Exception:  # noqa: BLE001
-                            pass
+                    is_sync_token_error = e.resp.status == 410 or (
+                        e.resp.status == 400
+                        and "syncTokenInvalid" in google_error_reasons(e)
+                    )
                     if is_sync_token_error:
                         logger.warning(
                             "Sync token invalid, falling back to full sync",

@@ -608,6 +608,38 @@ inference only holds while the user has **one** connected Google account —
 speak for another's calendars — and the sweep stands down when there is more
 than one.
 
+#### Transient vs Permanent Google Errors
+
+Google answers `403` to two unrelated situations, and they need opposite
+handling. `google_client.py` classifies them, alongside the `400` it uses for
+event-type restrictions:
+
+| Status and reason | Meaning | Handling |
+|---|---|---|
+| `403` `rateLimitExceeded`, `userRateLimitExceeded`, `quotaExceeded` | Going too fast | **Transient** — raise, retry with backoff |
+| `403` `forbidden`, `forbiddenForNonOrganizer`, `requiredAccessLevel`, `insufficientPermissions` | Not allowed | **Permanent** — stop, do not retry |
+| `403` with an unreadable body | unknown | Treated as permanent: an unreadable `403` is far more likely a refusal, and mis-classifying a quota `403` costs one skipped request rather than an endless retry |
+| `400` `eventTypeRestriction` | Google derives this event (a birthday, a Gmail event) and accepts almost no change | **Permanent** — stop, do not retry |
+
+On either permanent rejection the push marks the link `errored` and returns
+without raising; a refusal also refreshes the stored access role, since a
+stale role is why the push was attempted at all. See
+<https://developers.google.com/workspace/calendar/api/guides/errors>.
+
+#### Handler Convention: Returning vs Raising
+
+Stream-consumed handlers signal retryability by **whether they raise**, not by
+their return value, which the consumer discards:
+
+- **Return** `{"status": "ignored", "reason": "..."}` — the work cannot succeed
+  and retrying will not change that. The message is acknowledged.
+- **Raise** — the failure may be transient. The message stays pending, is
+  retried up to `max_delivery_count`, and is then dead-lettered.
+
+Anything a retry cannot fix (a read-only calendar, a refused write, a journal
+that no longer exists) must return rather than raise, or it burns the full
+retry budget on every occurrence before dead-lettering.
+
 ## Deployment Architecture
 
 ### Development Environment

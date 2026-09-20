@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from googleapiclient.errors import HttpError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -915,6 +916,22 @@ class TestProcessJournalEventSkipsIntegration:
                 event_data={"journal_id": journal_id, **event_data},
             )
 
+    @staticmethod
+    def _refusing_client() -> AsyncMock:
+        """A Google that refuses the write and reports the calendar read-only."""
+        client = AsyncMock()
+        client.update_event.side_effect = HttpError(
+            resp=MagicMock(status=403, reason="Forbidden"),
+            content=(
+                b'{"error": {"code": 403, "errors": [{"domain": "global", '
+                b'"reason": "forbidden", "message": "Forbidden"}]}}'
+            ),
+        )
+        client.list_calendars.return_value = {
+            "items": [{"id": "shared@example.com", "accessRole": "reader"}]
+        }
+        return client
+
     async def test_restricted_event_type_commits_the_divergence(
         self, db_session, event_type_restriction_error
     ) -> None:
@@ -1024,6 +1041,59 @@ class TestProcessJournalEventSkipsIntegration:
 
         assert result["read_only_event_ids"] == ["existing_event_id_123"]
         mock_client.delete_event.assert_not_called()
+
+    async def test_a_refused_push_is_not_reported_as_a_failure(
+        self, db_session
+    ) -> None:
+        """Raising here would retry a refusal the stream consumer cannot fix."""
+        journal_id, calendar_id = await self._seed(db_session)
+        await _connect_calendar_to_google(
+            db_session, calendar_id, "shared@example.com", "writer"
+        )
+
+        result = await self._run(
+            db_session,
+            journal_id,
+            self._refusing_client(),
+            {"changed_fields": {"title": ("Old", "New")}, "source": "ui"},
+        )
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "forbidden"
+
+    async def test_a_refused_push_marks_the_link_errored(self, db_session) -> None:
+        journal_id, calendar_id = await self._seed(db_session)
+        await _connect_calendar_to_google(
+            db_session, calendar_id, "shared@example.com", "writer"
+        )
+
+        await self._run(
+            db_session,
+            journal_id,
+            self._refusing_client(),
+            {"changed_fields": {"title": ("Old", "New")}, "source": "ui"},
+        )
+
+        link = await self._link(db_session, journal_id, calendar_id)
+        assert link.sync_status == "errored"
+
+    async def test_a_refused_push_corrects_the_stored_access_role(
+        self, db_session
+    ) -> None:
+        """The stale "writer" is why the push was attempted at all."""
+        journal_id, calendar_id = await self._seed(db_session)
+        await _connect_calendar_to_google(
+            db_session, calendar_id, "shared@example.com", "writer"
+        )
+
+        await self._run(
+            db_session,
+            journal_id,
+            self._refusing_client(),
+            {"changed_fields": {"title": ("Old", "New")}, "source": "ui"},
+        )
+
+        assert await _read_access_role(db_session, calendar_id) == "reader"
 
 
 @pytest.mark.asyncio
