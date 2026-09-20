@@ -406,6 +406,45 @@ class SnipeItAPIClient:
 
         return SnipeItMaintenanceWriteResponse.model_validate(maintenance_payload)
 
+    async def delete_maintenance(self, maintenance_id: int) -> bool:
+        """Delete an asset maintenance record.
+
+        Called when the ``GEAR_MAINTENANCE`` journal that pushed the record is
+        deleted, so the record does not outlive its journal and come back as a
+        new one on the next import.
+
+        Args:
+            maintenance_id: Snipe-IT maintenance numeric ID.
+
+        Returns:
+            ``True`` when Snipe-IT deleted the record, ``False`` when it has no
+            such record: already gone is the state the caller asked for.
+
+        Raises:
+            SnipeItAPIError: If the record could not be deleted, including a
+                response whose ``status`` is not ``"success"``.
+            SnipeItRateLimitError: If Snipe-IT rate limited the request.
+        """
+        try:
+            data = await self._delete(f"maintenances/{maintenance_id}")
+        except SnipeItAPIError as exc:
+            if exc.status_code == 404:
+                logger.debug(
+                    "Snipe-IT maintenance already deleted",
+                    maintenance_id=maintenance_id,
+                )
+                return False
+            raise
+
+        if data.get("status") != "success":
+            messages = data.get("messages", "Unknown error")
+            raise SnipeItAPIError(
+                f"Snipe-IT DELETE /maintenances/{maintenance_id} failed: {messages}",
+                status_code=200,
+            )
+
+        return True
+
     async def close(self) -> None:
         """Close the underlying HTTP client."""
         await self._client.aclose()
@@ -433,28 +472,7 @@ class SnipeItAPIClient:
 
         response = await self._client.get(path, params=params)
 
-        # Handle 401 — API key invalid or revoked
-        if response.status_code == 401:
-            raise SnipeItAPIError(
-                "Snipe-IT authentication failed (invalid API key)",
-                status_code=401,
-            )
-
-        # Handle 429 — rate limited by server
-        if response.status_code == 429:
-            retry_after = _parse_retry_after(response.headers.get("Retry-After"))
-            retry_msg = f"{retry_after}s" if retry_after is not None else "unknown time"
-            raise SnipeItRateLimitError(
-                f"Snipe-IT API rate limited (429). Retry after {retry_msg}.",
-                retry_after=retry_after,
-            )
-
-        # Handle other non-successful responses
-        if response.status_code >= 300:
-            raise SnipeItAPIError(
-                f"Snipe-IT API error: {response.status_code}",
-                status_code=response.status_code,
-            )
+        _raise_for_response(response)
 
         return response.json()
 
@@ -477,28 +495,7 @@ class SnipeItAPIClient:
 
         response = await self._client.patch(path, json=json_data)
 
-        # Handle 401 — API key invalid or revoked
-        if response.status_code == 401:
-            raise SnipeItAPIError(
-                "Snipe-IT authentication failed (invalid API key)",
-                status_code=401,
-            )
-
-        # Handle 429 — rate limited by server
-        if response.status_code == 429:
-            retry_after = _parse_retry_after(response.headers.get("Retry-After"))
-            retry_msg = f"{retry_after}s" if retry_after is not None else "unknown time"
-            raise SnipeItRateLimitError(
-                f"Snipe-IT API rate limited (429). Retry after {retry_msg}.",
-                retry_after=retry_after,
-            )
-
-        # Handle other non-successful responses
-        if response.status_code >= 300:
-            raise SnipeItAPIError(
-                f"Snipe-IT API error: {response.status_code}",
-                status_code=response.status_code,
-            )
+        _raise_for_response(response)
 
         return response.json()
 
@@ -521,30 +518,61 @@ class SnipeItAPIClient:
 
         response = await self._client.post(path, json=json_data)
 
-        # Handle 401 — API key invalid or revoked
-        if response.status_code == 401:
-            raise SnipeItAPIError(
-                "Snipe-IT authentication failed (invalid API key)",
-                status_code=401,
-            )
-
-        # Handle 429 — rate limited by server
-        if response.status_code == 429:
-            retry_after = _parse_retry_after(response.headers.get("Retry-After"))
-            retry_msg = f"{retry_after}s" if retry_after is not None else "unknown time"
-            raise SnipeItRateLimitError(
-                f"Snipe-IT API rate limited (429). Retry after {retry_msg}.",
-                retry_after=retry_after,
-            )
-
-        # Handle other non-successful responses
-        if response.status_code >= 300:
-            raise SnipeItAPIError(
-                f"Snipe-IT API error: {response.status_code}",
-                status_code=response.status_code,
-            )
+        _raise_for_response(response)
 
         return response.json()
+
+    async def _delete(self, path: str) -> Any:
+        """Execute a DELETE request with rate limiting.
+
+        Args:
+            path: API path relative to base URL (e.g. ``maintenances/1``).
+
+        Returns:
+            Parsed JSON response body.
+        """
+        # Pre-emptive rate limit check and record
+        self._rate_limiter.acquire()
+
+        response = await self._client.delete(path)
+
+        _raise_for_response(response)
+
+        return response.json()
+
+
+def _raise_for_response(response: httpx.Response) -> None:
+    """Turn a non-successful Snipe-IT response into this module's errors.
+
+    Shared by every verb, so a verb added later cannot quietly skip the 401
+    and 429 handling the others do.
+
+    Raises:
+        SnipeItAPIError: On 401, or on any other status at or above 300.
+        SnipeItRateLimitError: On 429, carrying the ``Retry-After`` delay.
+    """
+    # Handle 401 — API key invalid or revoked
+    if response.status_code == 401:
+        raise SnipeItAPIError(
+            "Snipe-IT authentication failed (invalid API key)",
+            status_code=401,
+        )
+
+    # Handle 429 — rate limited by server
+    if response.status_code == 429:
+        retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+        retry_msg = f"{retry_after}s" if retry_after is not None else "unknown time"
+        raise SnipeItRateLimitError(
+            f"Snipe-IT API rate limited (429). Retry after {retry_msg}.",
+            retry_after=retry_after,
+        )
+
+    # Handle other non-successful responses
+    if response.status_code >= 300:
+        raise SnipeItAPIError(
+            f"Snipe-IT API error: {response.status_code}",
+            status_code=response.status_code,
+        )
 
 
 def _parse_retry_after(value: str | None) -> float | None:

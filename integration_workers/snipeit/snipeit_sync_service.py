@@ -1851,6 +1851,95 @@ class SnipeItSyncService:
             snipeit_maintenance_id=snipeit_maintenance_id,
         )
 
+    async def delete_pushed_maintenance(
+        self, journal_id: int, session_factory: Any
+    ) -> bool:
+        """Delete the Snipe-IT maintenance a now-deleted journal pushed.
+
+        Snipe-IT keeps whatever it is not told to remove, and the inbound sync
+        would import a record no journal holds as a new journal — so leaving the
+        record behind would undo the deletion. The journal's sync rows go with
+        it: the push row that named the record, and the claim an attempt that
+        failed after posting may have left.
+
+        The journal itself is already gone, so the record is resolved from its
+        push row rather than from the journal. This is a no-op for a journal
+        that never reached Snipe-IT.
+
+        A journal deleted with only a claim posts nothing: whether its lost POST
+        created a record is unknowable, and matching one by title and date could
+        delete a record somebody entered by hand. Such a record still imports as
+        a new journal, which Part 3 of the specification records as a known gap.
+
+        Args:
+            journal_id: The deleted journal.
+            session_factory: Factory for database sessions.
+
+        Returns:
+            ``True`` when the record is gone from Snipe-IT, whether this call
+            deleted it or found it already deleted.
+
+        Raises:
+            SnipeItAPIError: If Snipe-IT could not be reached or refused the
+                delete for a reason worth retrying the event for.
+        """
+        async with session_factory() as session:
+            external_id = await _recorded_maintenance(session, journal_id)
+
+        if external_id is None:
+            # No record to delete: an unsynced journal, or one whose push never
+            # got past its claim. Either way the claim is inert now.
+            await self._release_maintenance_claim(journal_id, session_factory)
+            logger.debug(
+                "Deleted journal had no Snipe-IT maintenance",
+                journal_id=journal_id,
+            )
+            return False
+
+        snipeit_maintenance_id = _snipeit_maintenance_id(external_id)
+        if snipeit_maintenance_id is None:
+            logger.warning(
+                "Invalid maintenance sync metadata external_id",
+                external_id=external_id,
+                journal_id=journal_id,
+            )
+            return False
+
+        try:
+            await self._api_client.delete_maintenance(snipeit_maintenance_id)
+        except SnipeItAPIError as exc:
+            if exc.status_code == 403:
+                # The record is still there, so its row stays: dropping the row
+                # would import the record as a new journal, which is the outcome
+                # deleting it prevents. A later sync surfaces it instead.
+                logger.warning(
+                    "Snipe-IT maintenance delete forbidden; keeping its sync row",
+                    journal_id=journal_id,
+                    snipeit_maintenance_id=snipeit_maintenance_id,
+                    status_code=exc.status_code,
+                )
+                return False
+            raise
+
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        DELETE FROM sync_metadata
+                        WHERE integration_source = 'snipeit_maintenance'
+                          AND internal_uuid = :journal_id
+                    """),
+                    {"journal_id": str(journal_id)},
+                )
+                await _delete_maintenance_claim(session, journal_id)
+
+        logger.info(
+            "Deleted the Snipe-IT maintenance of a deleted journal",
+            journal_id=journal_id,
+            snipeit_maintenance_id=snipeit_maintenance_id,
+        )
+        return True
+
     # -- Outbound Checkout Sync Methods -------------------------------------
 
     async def _fetch_journal_and_gear_usage_data(

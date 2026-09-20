@@ -674,6 +674,96 @@ async def test_handle_event_journal_updated_gear_usage_reconciles(
     mock_sync_service._api_client.close.assert_called_once()
 
 
+def _sync_rows(*integration_sources: str) -> MagicMock:
+    """The sync rows naming a deleted journal, as the handler's fast path reads them."""
+    result = MagicMock()
+    result.fetchall.return_value = [
+        MagicMock(integration_source=source) for source in integration_sources
+    ]
+    return result
+
+
+def _settings_row() -> MagicMock:
+    """The journal owner's Snipe-IT settings."""
+    result = MagicMock()
+    result.fetchone.return_value = MagicMock(
+        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    )
+    return result
+
+
+def _journal_deleted_event() -> StreamEvent:
+    """A ``JournalDeleted`` for journal 100, which carries no journal type."""
+    return StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="JournalDeleted",
+        aggregate_id=100,
+        event_data={"journal_id": 100, "user_id": "user1"},
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_journal_deleted_deletes_the_pushed_maintenance(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """A journal with a maintenance push row has its Snipe-IT record deleted."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+    mock_session.execute = AsyncMock(
+        side_effect=[_sync_rows("snipeit_maintenance"), _settings_row()]
+    )
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(_journal_deleted_event())
+
+    mock_sync_service.delete_pushed_maintenance.assert_called_once()
+    call = mock_sync_service.delete_pushed_maintenance.call_args
+    assert call.kwargs["journal_id"] == 100
+    mock_sync_service.push_checkin_create.assert_not_called()
+    mock_sync_service._api_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_journal_deleted_clears_a_leftover_claim(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """A claim is all a push that failed before recording leaves, and it must go."""
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+    mock_session.execute = AsyncMock(
+        side_effect=[_sync_rows("snipeit_maintenance_claim"), _settings_row()]
+    )
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(_journal_deleted_event())
+
+    mock_sync_service.delete_pushed_maintenance.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_handle_journal_deleted_checks_in_asset(
     mock_stream_client: AsyncMock,
@@ -696,13 +786,9 @@ async def test_handle_journal_deleted_checks_in_asset(
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
 
-    checkout_check = MagicMock()
-    checkout_check.fetchone.return_value = (1,)  # checkout exists
-    settings_result = MagicMock()
-    settings_result.fetchone.return_value = MagicMock(
-        user_id="user1", base_url="http://snipeit", snipeit_user_id="s1"
+    mock_session.execute = AsyncMock(
+        side_effect=[_sync_rows("snipeit_checkout"), _settings_row()]
     )
-    mock_session.execute = AsyncMock(side_effect=[checkout_check, settings_result])
 
     mock_sync_service = AsyncMock()
     mock_sync_service._api_client = AsyncMock()
@@ -715,15 +801,16 @@ async def test_handle_journal_deleted_checks_in_asset(
 
     mock_sync_service.push_checkin_create.assert_called_once()
     assert mock_sync_service.push_checkin_create.call_args.kwargs["journal_id"] == 100
+    mock_sync_service.delete_pushed_maintenance.assert_not_called()
     mock_sync_service._api_client.close.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_handle_journal_deleted_skips_without_checkout(
+async def test_handle_journal_deleted_skips_without_any_sync_row(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """JournalDeleted for a journal with no recorded checkout is a no-op."""
+    """JournalDeleted for a journal Snipe-IT never recorded is a no-op."""
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
@@ -740,9 +827,7 @@ async def test_handle_journal_deleted_skips_without_checkout(
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
 
-    checkout_check = MagicMock()
-    checkout_check.fetchone.return_value = None  # no checkout recorded
-    mock_session.execute = AsyncMock(side_effect=[checkout_check])
+    mock_session.execute = AsyncMock(side_effect=[_sync_rows()])
 
     with (
         patch("worker._get_auth_data") as mock_get_auth,
