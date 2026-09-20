@@ -863,21 +863,32 @@ class TestMaintenanceEchoPrevention:
 
 
 async def _seed_import_record(
-    async_connection: AsyncConnection, *, maintenance_id: int, version_hash: str
+    async_connection: AsyncConnection,
+    *,
+    maintenance_id: int,
+    version_hash: str,
+    age_seconds: int = 0,
 ) -> None:
-    """The sync row an import writes: the record's hash and no journal id."""
+    """The sync row an import writes: the record's hash and no journal id.
+
+    ``last_synced_at`` is when the import's outbox event was enqueued, so
+    ``age_seconds`` ages that event: how long the row has gone without the
+    journal link the backend answers it with.
+    """
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
                 (integration_source, external_id, last_synced_at,
                  version_hash, sync_status, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit_maintenance', :external_id, now(),
+                ('snipeit_maintenance', :external_id,
+                 now() - CAST(:age_seconds AS integer) * interval '1 second',
                  :version_hash, 'success', 0, now(), now())
         """),
         {
             "external_id": f"snipeit_maint:{maintenance_id}",
             "version_hash": version_hash,
+            "age_seconds": age_seconds,
         },
     )
 
@@ -2201,3 +2212,108 @@ class TestOrphanedPushRowsRecover:
         ]
         assert await _push_rows(async_connection, journal_id) == []
         assert await _claim_row(async_connection, journal_id) is None
+
+
+async def _an_import_whose_journal_is_gone(
+    async_connection: AsyncConnection,
+    *,
+    maintenance_id: int,
+    age_seconds: int,
+) -> None:
+    """Leave the state deleting a journal imported from Snipe-IT leaves behind.
+
+    The journal's external event link is cascade-deleted with it, so the
+    record's sync row is all that is left: the record's hash, and no journal
+    id, which is also what a row whose create event has not been answered yet
+    looks like. ``age_seconds`` is how long ago that create was enqueued.
+    """
+    gear_item_id = await _seed_synced_asset(async_connection, 51)
+    journal_id = await _seed_maintenance_journal(
+        async_connection,
+        gear_item_id=gear_item_id,
+        title="Split Canyoneroo 50 -> 34 + 15",
+        imported_from=maintenance_id,
+    )
+    await _seed_import_record(
+        async_connection,
+        maintenance_id=maintenance_id,
+        version_hash="the-hash-it-was-imported-with",
+        age_seconds=age_seconds,
+    )
+    await _delete_journal(async_connection, journal_id)
+
+
+async def _sync_the_edited_record(
+    snipeit_sync_service: Any,
+    mock_transport: Any,
+    async_connection: AsyncConnection,
+    *,
+    maintenance_id: int,
+) -> dict[str, int]:
+    """Sync the record after someone edited it in Snipe-IT.
+
+    The edit is what makes this urgent: while the record is unchanged its hash
+    still matches and the sync skips it, but an edited record falls through to
+    the branch that has no journal to update.
+    """
+    mock_transport.add_response(
+        f"/maintenances/{maintenance_id}",
+        json_data={**_SNIPEIT_MAINTENANCE_17, "title": "Re-taped the sheath"},
+    )
+    result: dict[str, int] = await snipeit_sync_service.sync_maintenance_batch(
+        maintenance_ids=[maintenance_id],
+        session_factory=_joined_session_factory(async_connection),
+    )
+    return result
+
+
+class TestAnUnansweredImportRecovers:
+    """A sync row with no journal link must not fail every run for ever.
+
+    The row looks the same whether the backend has not yet turned the import's
+    create event into a link or the journal that link belonged to has been
+    deleted. Raising for both made a deleted import's record fail on every
+    sync once it was edited in Snipe-IT, permanently.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_create_never_answered_is_imported_again(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Past the grace the create will never be answered: import the record."""
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=17, age_seconds=3600
+        )
+
+        result = await _sync_the_edited_record(
+            snipeit_sync_service, mock_transport, async_connection, maintenance_id=17
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert await _journal_events(async_connection) == ["journal_event.created"]
+
+    @pytest.mark.asyncio
+    async def test_a_create_still_within_the_grace_waits(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The backend answers a create in seconds, so a fresh row is still pending.
+
+        Importing it would be a second journal for the record the create is
+        about, which is the duplicate the raise exists to prevent.
+        """
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=17, age_seconds=0
+        )
+
+        result = await _sync_the_edited_record(
+            snipeit_sync_service, mock_transport, async_connection, maintenance_id=17
+        )
+
+        assert result == {"synced": 0, "skipped": 0, "failed": 1}
+        assert await _journal_events(async_connection) == []

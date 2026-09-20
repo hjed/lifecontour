@@ -279,6 +279,19 @@ _SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
 # consumer tells a Snipe-IT-applied update from a user's edit.
 INBOUND_SYNC_CHANGED_BY = "snipeit_maintenance"
 
+# How long an import's create event has to be answered with a journal link
+# before the record is imported again instead.
+#
+# A row with no link means one of two things, and nothing in the schema tells
+# them apart: the backend has not turned the create event into a link yet, or
+# the journal that link belonged to has been deleted. The row's
+# ``last_synced_at`` is when that create was enqueued — an import writes it and
+# nothing else does, since a push of an imported journal deliberately leaves
+# the row alone — so its age is how long the create has gone unanswered. The
+# backend answers one in seconds; a row older than this is not waiting for
+# anything.
+IMPORT_LINK_GRACE_SECONDS = 900
+
 
 def _snipeit_maintenance_id(external_id: str) -> int | None:
     """Return the Snipe-IT maintenance id in a ``snipeit_maint:{id}`` external id."""
@@ -463,6 +476,20 @@ async def _recorded_maintenance(session: Any, journal_id: int) -> str | None:
     )
     external_id: str | None = result.scalar_one_or_none()
     return external_id
+
+
+def _unanswered_create_has_expired(meta_row: Any) -> bool:
+    """Has this row waited too long for the journal link its create promised?
+
+    ``True`` means the create will never be answered — the journal it made was
+    deleted, or the event was lost — so the record belongs to nothing and is
+    imported again. A row whose age cannot be read is treated as still waiting:
+    retrying costs a sync, while importing wrongly costs a duplicate journal.
+    """
+    age_seconds = getattr(meta_row, "age_seconds", None)
+    if age_seconds is None:
+        return False
+    return float(age_seconds) >= IMPORT_LINK_GRACE_SECONDS
 
 
 def _raise_if_claim_in_flight(journal_id: int, claim_row: Any) -> None:
@@ -1075,7 +1102,9 @@ class SnipeItSyncService:
                 # Check existing metadata for dedup
                 meta_result = await session.execute(
                     text("""
-                        SELECT version_hash, internal_uuid
+                        SELECT version_hash, internal_uuid,
+                               EXTRACT(EPOCH FROM now() - last_synced_at)
+                                   AS age_seconds
                         FROM sync_metadata
                         WHERE integration_source = 'snipeit_maintenance'
                           AND external_id = :external_id
@@ -1150,12 +1179,27 @@ class SnipeItSyncService:
                         {"external_id": external_id},
                     )
                 elif existing_meta and existing_journal_id is None:
-                    # An outbox event for creation was enqueued but hasn't been processed
-                    # by the backend yet, so the external event link doesn't exist.
-                    # We cannot emit an update without the journal ID, and emitting another
-                    # create could duplicate the journal. Fail this record so it retries.
-                    raise RuntimeError(
-                        "Outbox creation event pending, cannot update yet"
+                    # No link, and no journal named: either the create event
+                    # this row's import enqueued has not been turned into a
+                    # link yet, or the journal it was turned into has since
+                    # been deleted, taking the link with it. The row looks the
+                    # same, so they are told apart by how long it has waited.
+                    if not _unanswered_create_has_expired(existing_meta):
+                        # Still plausibly in flight. An update needs the journal
+                        # id, and a second create would duplicate the journal,
+                        # so fail the record and let the next sync look again.
+                        raise RuntimeError(
+                            "Outbox creation event pending, cannot update yet"
+                        )
+
+                    # Long past that. Whatever became of the create, nothing in
+                    # the app holds this record any more, so it is imported as
+                    # a new journal rather than failing on every sync for ever.
+                    logger.warning(
+                        "Importing a Snipe-IT maintenance whose create was never "
+                        "answered with a journal",
+                        maintenance_id=maintenance_id,
+                        age_seconds=existing_meta.age_seconds,
                     )
 
                 # Determine sync action
