@@ -34,14 +34,17 @@ from core_shared.logging import (
 )
 from core_shared.metrics import MetricsCollector
 from core_shared.models.contacts.serialization import serialize_contact
+from core_shared.models.history import Provenance
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncCapability,
+    ExternalEventLinkSyncStatus,
 )
 from core_shared.models.journals import CalendarInfo
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
+from googleapiclient.errors import HttpError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,7 +54,7 @@ from api_models import ListConnectionsResponse
 # Import worker-specific services
 from event_transformer import google_event_times
 from google_auth_service import GoogleAuthService
-from google_client import GoogleAPIClient
+from google_client import GoogleAPIClient, is_event_type_restriction
 from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
@@ -68,6 +71,11 @@ configure_logging(
 )
 
 logger = get_logger(__name__)
+
+# The provenance a journal domain event carries when the Google inbound sync
+# is what applied it. Derived from the enum rather than spelled out, so a
+# rename of the provenance value cannot silently disable the echo guard.
+INBOUND_SYNC_SOURCE = Provenance.GOOGLE_CALENDAR.value
 
 # Initialize metrics collector for this worker
 metrics_collector = MetricsCollector(worker_type="google")
@@ -2077,6 +2085,35 @@ async def _process_journal_deleted_event(
         }
 
 
+async def _mark_link_errored(session: Any, journal_id: int, calendar_id: Any) -> None:
+    """Record that this journal's event did not reach the calendar.
+
+    Upserts rather than updates because the push may have failed before any
+    link row existed — a create that never got an id still has to leave the
+    failure visible rather than nothing at all.
+    """
+    await session.execute(
+        text("""
+            INSERT INTO journal_external_event_links (
+                journal_id, calendar_id, sync_capability, sync_status,
+                created_at, updated_at
+            ) VALUES (
+                :journal_id, :calendar_id, :capability, :status, now(), now()
+            )
+            ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
+                sync_status = :status,
+                updated_at = now()
+        """),
+        {
+            "journal_id": journal_id,
+            "calendar_id": calendar_id,
+            "capability": ExternalEventLinkSyncCapability.OUTBOUND.value,
+            "status": ExternalEventLinkSyncStatus.ERRORED.value,
+        },
+    )
+    await session.commit()
+
+
 async def _process_journal_upsert_event(
     session_factory: Any,
     event_type: str,
@@ -2084,6 +2121,21 @@ async def _process_journal_upsert_event(
     journal_id: int,
     started_at: datetime,
 ) -> dict[str, Any]:
+    # A journal the Google inbound sync just applied came *from* Google, and
+    # its external event link is written in the same transaction as the
+    # journal — so by the time the event reaches here the push would take the
+    # update branch and PATCH the event the journal was built from. Besides
+    # being a wasted round trip on every imported event, Google refuses it for
+    # the event types it derives itself: a contact-linked birthday accepts
+    # almost no change and answers with eventTypeRestriction.
+    if event_data.get("source") == INBOUND_SYNC_SOURCE:
+        logger.debug(
+            "Skipping outbound push: the Google inbound sync applied this",
+            journal_id=journal_id,
+            event_type=event_type,
+        )
+        return {"status": "ignored", "reason": "inbound_sync_echo"}
+
     async with session_factory() as session:
         stmt = text("""
             SELECT
@@ -2270,7 +2322,6 @@ async def _process_journal_upsert_event(
         """)
         links_result = await session.execute(links_stmt, {"journal_id": journal_id})
         existing_links = links_result.fetchall()
-        from googleapiclient.errors import HttpError
 
         for link_row in existing_links:
             never_confirmed_upstream = (
@@ -2432,26 +2483,33 @@ async def _process_journal_upsert_event(
                 "duration_seconds": duration,
             }
 
-        except Exception:
-            # Update link status to errored on failure
-            link_stmt = text("""
-                INSERT INTO journal_external_event_links (
-                    journal_id, calendar_id, sync_capability, sync_status, created_at, updated_at
-                ) VALUES (
-                    :journal_id, :calendar_id, 'outbound', 'errored', now(), now()
-                )
-                ON CONFLICT (journal_id, calendar_id) DO UPDATE SET
-                    sync_status = 'errored',
-                    updated_at = now()
-            """)
-            await session.execute(
-                link_stmt,
-                {
-                    "journal_id": journal_id,
-                    "calendar_id": row.calendar_id,
-                },
+        except HttpError as e:
+            await _mark_link_errored(session, journal_id, row.calendar_id)
+            if not is_event_type_restriction(e):
+                raise
+
+            # Google owns this event and derives it — a birthday from a
+            # contact, an event from Gmail — so it accepts almost no change.
+            # No retry and no reshaping of the payload makes the same write
+            # land, so the message is acknowledged rather than left pending to
+            # be redelivered until it dead-letters. The journal keeps the
+            # local edit; the errored link is where the divergence shows.
+            logger.warning(
+                "Skipping outbound push: Google event type is not modifiable",
+                journal_id=journal_id,
+                external_event_id=external_event_id,
+                calendar_id=row.calendar_id,
+                error=str(e),
             )
-            await session.commit()
+            return {
+                "status": "ignored",
+                "reason": "event_type_not_modifiable",
+                "journal_id": journal_id,
+                "external_event_id": external_event_id,
+            }
+
+        except Exception:
+            await _mark_link_errored(session, journal_id, row.calendar_id)
             raise
 
 

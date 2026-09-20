@@ -1,12 +1,15 @@
 """Integration tests for process_journal_event flow."""
 
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from worker import process_journal_event
 
@@ -810,3 +813,117 @@ class TestProcessJournalEventTimezoneIntegration:
         payload = mock_client.create_event.call_args[0][0]
         assert payload["start"] == {"date": "2026-09-05"}
         assert payload["end"] == {"date": "2026-09-06"}
+
+
+@pytest.mark.asyncio
+class TestProcessJournalEventSkipsIntegration:
+    """The two ways an outbound push declines to write, proved against the DB.
+
+    Both decisions are about what is *committed* on the link row afterwards,
+    which is the part a mocked session cannot demonstrate.
+    """
+
+    @staticmethod
+    @asynccontextmanager
+    async def _factory(db_session: AsyncConnection) -> AsyncIterator[AsyncConnection]:
+        yield db_session
+
+    async def _seed(self, db_session: AsyncConnection) -> tuple[int, str]:
+        user_id = str(uuid.uuid4())
+        calendar_id = str(uuid.uuid4())
+        journal_id = await _setup_journal_event_test_data(
+            db_session,
+            user_id,
+            f"test_{uuid.uuid4().hex[:8]}@example.com",
+            calendar_id,
+            "Birthday",
+            True,
+        )
+        return journal_id, calendar_id
+
+    @staticmethod
+    async def _link(
+        db_session: AsyncConnection, journal_id: int, calendar_id: str
+    ) -> Any:
+        result = await db_session.execute(
+            text("""
+                SELECT external_event_id, external_version, sync_status
+                FROM journal_external_event_links
+                WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+            """),
+            {"journal_id": journal_id, "calendar_id": calendar_id},
+        )
+        return result.fetchone()
+
+    async def _run(
+        self,
+        db_session: AsyncConnection,
+        journal_id: int,
+        mock_client: AsyncMock,
+        event_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            return await process_journal_event(
+                ctx={
+                    "session_factory": lambda: self._factory(db_session),
+                    "job_id": "test_skip",
+                },
+                event_type="JournalUpdated",
+                event_data={"journal_id": journal_id, **event_data},
+            )
+
+    async def test_restricted_event_type_commits_the_divergence(
+        self, db_session, event_type_restriction_error
+    ) -> None:
+        """Google refuses the write, so the link records that it did not land —
+        and the task returns rather than raising it back to the stream."""
+        journal_id, calendar_id = await self._seed(db_session)
+
+        mock_client = AsyncMock()
+        mock_client.update_event.side_effect = event_type_restriction_error
+
+        result = await self._run(
+            db_session,
+            journal_id,
+            mock_client,
+            {"changed_fields": {"title": ("Old", "New")}, "source": "ui"},
+        )
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "event_type_not_modifiable"
+
+        link = await self._link(db_session, journal_id, calendar_id)
+        assert link.sync_status == "errored"
+        # The event id survives: the journal is still that Google event's,
+        # it is just no longer in step with it.
+        assert link.external_event_id == "existing_event_id_123"
+
+    async def test_inbound_sync_echo_leaves_the_link_untouched(
+        self, db_session
+    ) -> None:
+        """A journal the inbound sync applied is already in step with Google,
+        so the push must neither call the API nor disturb the link."""
+        journal_id, calendar_id = await self._seed(db_session)
+        before = await self._link(db_session, journal_id, calendar_id)
+
+        mock_client = AsyncMock()
+
+        result = await self._run(
+            db_session,
+            journal_id,
+            mock_client,
+            {
+                "changed_fields": {"title": ("Old", "New")},
+                "source": "google_calendar",
+            },
+        )
+
+        assert result == {"status": "ignored", "reason": "inbound_sync_echo"}
+        mock_client.update_event.assert_not_called()
+        mock_client.create_event.assert_not_called()
+
+        after = await self._link(db_session, journal_id, calendar_id)
+        assert after == before

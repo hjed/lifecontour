@@ -16,6 +16,31 @@ from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
 
 logger = structlog.get_logger()
 
+# Google's reason code for "this event's type does not allow that change".
+# A contact-linked birthday event accepts only colorId, summary and reminders;
+# an event from Gmail accepts even less. See
+# https://developers.google.com/workspace/calendar/api/guides/event-types
+_EVENT_TYPE_RESTRICTION_REASON = "eventtyperestriction"
+
+
+def is_event_type_restriction(error: HttpError) -> bool:
+    """Return True if Google rejected the write because of the event's type.
+
+    This is a **permanent** rejection: the event is one Google owns and
+    derives (a birthday from Contacts, an event from Gmail), so no retry and
+    no reshaping of the payload will make the same write land. Callers treat
+    it as "this event is not ours to modify" rather than as a fault.
+
+    Matched on the rendered error the way
+    :meth:`GoogleAPIClient._is_etag_conflict` matches its own 400: the reason
+    code travels in the error body, and ``HttpError.__str__`` is what renders
+    the parsed ``errors`` details — reading ``error_details`` directly returns
+    ``""`` until something has forced that parse.
+    """
+    if error.resp.status != 400:
+        return False
+    return _EVENT_TYPE_RESTRICTION_REASON in str(error).lower()
+
 
 class GoogleAPIClient:
     """Client for Google People API operations."""
@@ -781,6 +806,19 @@ class GoogleAPIClient:
             )
             return cast(dict[str, Any], result)
         except HttpError as e:
+            # A type restriction is Google declining to be written to, not a
+            # fault: it is re-raised so the caller can decide what the journal
+            # should do about it, but it is not an error in this client.
+            if is_event_type_restriction(e):
+                logger.warning(
+                    "Google rejected the event update: this event type is not "
+                    "modifiable",
+                    google_account_email=self.google_account_email,
+                    calendar_id=calendar_id,
+                    event_id=event_id,
+                    error=str(e),
+                )
+                raise e
             logger.error("Error updating event", error=str(e))
             raise e
 

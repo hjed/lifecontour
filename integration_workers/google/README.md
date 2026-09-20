@@ -32,6 +32,22 @@ The worker uses ARQ (Async Redis Queue) for task processing and supports:
 2. Pushes changes to Google People API
 3. Updates sync metadata with Google resource names and ETags
 
+### What the outbound journal push declines to do
+
+`_process_journal_upsert_event` pushes an EVENT journal to Google Calendar. Two
+things stop it, each returning `{"status": "ignored", …}` rather than raising —
+a raise leaves the stream message unacknowledged and redelivers it until it
+dead-letters, which is the wrong answer for both.
+
+| `reason` | When | Why |
+|---|---|---|
+| `inbound_sync_echo` | The journal event's `source` is `google_calendar`, i.e. the Google inbound sync is what applied it | The inbound sync writes the journal *and* its external event link in one transaction, so the push would PATCH the very event the journal was built from. Nothing to send, and Google rejects it outright for the event types it derives. |
+| `event_type_not_modifiable` | Google answered the write with a 400 `eventTypeRestriction` | The event is one Google owns and derives — a birthday from Contacts, an event from Gmail — and accepts almost no change ([event types](https://developers.google.com/workspace/calendar/api/guides/event-types)). A permanent rejection: no retry and no reshaped payload makes it land. The journal keeps the local edit and the link is left `sync_status = 'errored'`, which is where the divergence from Google shows. |
+
+The echo guard reads the event's provenance, not the journal's origin: a user's
+own edit to a journal that arrived from Google still carries `source = ui` and
+still reaches Google.
+
 ### Stream Consumer
 
 `GoogleWorkerStreamConsumer` (in [`stream_consumer_tasks.py`](stream_consumer_tasks.py))

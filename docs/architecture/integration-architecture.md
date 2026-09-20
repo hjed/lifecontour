@@ -1261,6 +1261,27 @@ The system supports bidirectional synchronization:
    - InboundEventConsumer processes events via its consumer group
    - Domain services create/update local entities
 
+#### The two halves meet: echoes and permanent rejections
+
+The two directions share one event stream, so **an inbound sync's own writes come
+back round to the outbound push**. Applying an external entity locally publishes
+an ordinary domain event, and the worker that consumes those events is the same
+worker that just fetched the entity. A worker must therefore not push back what
+it applied itself: it reads the event's provenance (`event_data["source"]`, or
+`changed_by` where a worker has no `Provenance` of its own) and skips its own.
+The Google calendar push skips `google_calendar`; the Snipe-IT worker skips
+`snipeit_maintenance`. The guard is on the *event's* provenance rather than the
+entity's origin, so a user's later edit to an imported entity still syncs.
+
+The other half is knowing when a provider's refusal is **final**. Raising leaves
+the stream message unacknowledged, so the consumer redelivers it until it
+dead-letters — right for a timeout or a 500, wrong for a rejection that no retry
+can change. A permanently rejected push is acknowledged instead: the failure is
+recorded on the link (`sync_status = 'errored'`) so the divergence is visible,
+and the handler returns rather than raises. Google Calendar's
+`eventTypeRestriction` is this case — birthday and from-Gmail events are derived
+by Google and accept almost no change.
+
 #### Inbound Sync Flow Diagram
 
 ```
