@@ -741,27 +741,41 @@ async def test_handle_journal_deleted_clears_a_leftover_claim(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """A claim is all a push that failed before recording leaves, and it must go."""
+    """A claim is all a push that failed before recording leaves, and it must go.
+
+    Clearing it is a database write, so it must not wait on Snipe-IT
+    credentials: a user who disconnected the integration would otherwise leave
+    the claim behind for good.
+    """
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
     )
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=None)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    mock_session.begin = MagicMock(return_value=transaction)
     mock_session.execute = AsyncMock(
-        side_effect=[_sync_rows("snipeit_maintenance_claim"), _settings_row()]
+        side_effect=[_sync_rows("snipeit_maintenance_claim"), MagicMock()]
     )
 
-    mock_sync_service = AsyncMock()
-    mock_sync_service._api_client = AsyncMock()
-
     with (
-        patch("worker._get_auth_data", return_value={"mock": "auth"}),
-        patch("worker._create_sync_service", return_value=mock_sync_service),
+        patch("worker._get_auth_data") as mock_get_auth,
+        patch("worker._create_sync_service") as mock_create,
     ):
         await consumer._handle_event(_journal_deleted_event())
 
-    mock_sync_service.delete_pushed_maintenance.assert_called_once()
+    # The claim is deleted directly; nothing here needs a Snipe-IT call.
+    deletes = [
+        call
+        for call in mock_session.execute.call_args_list
+        if "DELETE FROM sync_metadata" in str(call.args[0])
+    ]
+    assert len(deletes) == 1
+    mock_get_auth.assert_not_called()
+    mock_create.assert_not_called()
 
 
 @pytest.mark.asyncio

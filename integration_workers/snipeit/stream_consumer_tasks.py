@@ -454,6 +454,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
 
         from snipeit_api_client import SnipeItAPIError
         from snipeit_settings import SnipeItWorkerSettings
+        from snipeit_sync_service import _delete_maintenance_claim
         from worker import _create_sync_service, _get_auth_data
 
         # Fast path: only proceed if this journal put something in Snipe-IT. A
@@ -476,6 +477,19 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             if not sources:
                 logger.debug(
                     "Skipping JournalDeleted: nothing recorded in Snipe-IT",
+                    journal_id=journal_id,
+                )
+                return
+
+            # A claim with no record beside it is cleared here, before anything
+            # asks for credentials: clearing it is a database write, and a user
+            # who has disconnected Snipe-IT would otherwise leave it behind for
+            # good. A claim alongside a push row goes with that record instead.
+            if sources == {"snipeit_maintenance_claim"}:
+                async with session.begin():
+                    await _delete_maintenance_claim(session, journal_id)
+                logger.info(
+                    "Cleared the maintenance claim of a deleted journal",
                     journal_id=journal_id,
                 )
                 return
