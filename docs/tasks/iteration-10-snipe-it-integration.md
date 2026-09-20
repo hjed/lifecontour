@@ -179,9 +179,13 @@ Push local maintenance to the remote API.
 - [x] Worker listens for `JournalCreated` and `JournalUpdated` where type is `GEAR_MAINTENANCE`.
 - [x] Worker pushes a new or updated maintenance record to Snipe-IT.
 - [x] Deleting a `GEAR_MAINTENANCE` journal deletes the record it pushed and removes its sync and claim rows.
+- [x] Deleting a journal **imported** from Snipe-IT deletes the record it came from, named on the deletion event since an import's sync row names no journal.
+- [x] A record no live journal holds is imported as a new journal rather than hidden as unchanged or failing every sync.
 **Required Test Coverage:**
 - **Integration:** Local journal creation results in an API mock call to create the maintenance record in Snipe-IT. ✅
 - **Integration:** Deleting a pushed journal deletes its Snipe-IT record; a journal with only a claim posts nothing. ✅
+- **Integration:** Deleting an imported journal deletes its record, keeps a forbidden one's row, and never deletes a record a live journal holds. ✅
+- **Integration:** A record whose journal is gone is imported again, unchanged or edited; one whose create is still pending waits. ✅
 
 ### ITER10-005: Gear Usage Journal Type and Checkouts
 **Objective:** Introduce the `GEAR_USAGE` journal type to record gear being used, syncing outbound to Snipe-IT as an asset checkout.

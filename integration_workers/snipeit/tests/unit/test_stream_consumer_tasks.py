@@ -3,6 +3,7 @@ Unit tests for Snipe-IT worker stream consumer tasks.
 """
 
 import os
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -692,16 +693,103 @@ def _settings_row() -> MagicMock:
     return result
 
 
-def _journal_deleted_event() -> StreamEvent:
-    """A ``JournalDeleted`` for journal 100, which carries no journal type."""
+def _journal_deleted_event(*imported: str) -> StreamEvent:
+    """A ``JournalDeleted`` for journal 100, which carries no journal type.
+
+    ``imported`` are the Snipe-IT records the journal was imported from, as
+    the event carries them: an import's sync row names no journal, so its
+    external id reaches the worker only here.
+    """
+    event_data: dict[str, Any] = {"journal_id": 100, "user_id": "user1"}
+    if imported:
+        event_data["external_identifiers"] = {
+            "snipeit_maintenance": [
+                {
+                    "external_event_id": external_id,
+                    "calendar_id": "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a",
+                    "google_calendar_id": None,
+                }
+                for external_id in imported
+            ]
+        }
     return StreamEvent(
         message_id="123",
         event_id="abc",
         event_type="JournalDeleted",
         aggregate_id=100,
-        event_data={"journal_id": 100, "user_id": "user1"},
+        event_data=event_data,
         occurred_at="2024-01-01T00:00:00Z",
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_journal_deleted_deletes_an_imported_record(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """An imported journal's record is reached through the event, not a sync row.
+
+    Its row names no journal, so the handler's "did this journal put anything
+    in Snipe-IT?" query finds nothing and used to return before doing anything.
+    """
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+    mock_session.execute = AsyncMock(side_effect=[_sync_rows(), _settings_row()])
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}),
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(_journal_deleted_event("snipeit_maint:17"))
+
+    mock_sync_service.delete_maintenance_record.assert_called_once()
+    call = mock_sync_service.delete_maintenance_record.call_args
+    assert call.kwargs["external_id"] == "snipeit_maint:17"
+    mock_sync_service.delete_pushed_maintenance.assert_not_called()
+    mock_sync_service._api_client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_journal_deleted_takes_credentials_for_an_import_with_a_claim(
+    mock_stream_client: AsyncMock,
+    mock_session_factory: MagicMock,
+) -> None:
+    """A claim beside an imported record must not take the credential-free path.
+
+    Clearing a lone claim is a database write and deliberately skips the
+    credential lookup. Deleting a record is not: routing this journal that way
+    would leave its record in Snipe-IT to import again as a new journal.
+    """
+    consumer = SnipeItWorkerStreamConsumer(
+        stream_client=mock_stream_client,
+        session_factory=mock_session_factory,
+    )
+    mock_session = AsyncMock()
+    mock_session_factory.return_value.__aenter__.return_value = mock_session
+    mock_session.execute = AsyncMock(
+        side_effect=[_sync_rows("snipeit_maintenance_claim"), _settings_row()]
+    )
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service._api_client = AsyncMock()
+
+    with (
+        patch("worker._get_auth_data", return_value={"mock": "auth"}) as mock_get_auth,
+        patch("worker._create_sync_service", return_value=mock_sync_service),
+    ):
+        await consumer._handle_event(_journal_deleted_event("snipeit_maint:17"))
+
+    mock_get_auth.assert_called_once()
+    mock_sync_service.delete_maintenance_record.assert_called_once()
+    # The claim goes with the record, as it does for a pushed journal.
+    mock_sync_service.delete_pushed_maintenance.assert_called_once()
 
 
 @pytest.mark.asyncio

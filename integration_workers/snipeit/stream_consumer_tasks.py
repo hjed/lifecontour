@@ -28,6 +28,35 @@ RETRY_MIN_IDLE_MS = 60_000
 MAX_DELIVERY_COUNT = math.ceil(IN_FLIGHT_LOCK_SECONDS * 1000 / RETRY_MIN_IDLE_MS) + 2
 
 
+def _imported_maintenance_ids(event: StreamEvent) -> list[str]:
+    """The Snipe-IT records a deleted journal was imported from.
+
+    ``JournalDeleted`` carries the external ids of the links it is about to
+    lose, filed under the integration that owns each. This is the only way an
+    imported record can be reached afterwards: its sync row names no journal,
+    so nothing left in the database connects the two.
+
+    Never raises. The payload arrives as JSON over Redis, so it is data rather
+    than a call — an event published before the identifiers were filed by
+    source, or one carrying a shape this worker does not know, must leave the
+    rest of the deletion to get on with its work.
+    """
+    identifiers = event.event_data.get("external_identifiers")
+    if not isinstance(identifiers, dict):
+        return []
+    entries = identifiers.get(INBOUND_SYNC_CHANGED_BY)
+    if not isinstance(entries, list):
+        return []
+    external_ids = []
+    for entry in entries:
+        external_id = (
+            entry.get("external_event_id") if isinstance(entry, dict) else entry
+        )
+        if isinstance(external_id, str) and external_id:
+            external_ids.append(external_id)
+    return external_ids
+
+
 class SnipeItWorkerStreamConsumer(StreamConsumer):
     """Stream consumer for Snipe-IT integration event processing.
 
@@ -440,6 +469,13 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         - ``snipeit_maintenance_claim``: the claim an attempt that failed after
           posting left is removed; it is inert once its journal is gone.
 
+        A journal *imported* from Snipe-IT has no such row — its record's row
+        names no journal — so the record it was imported from is read from the
+        event's own ``external_identifiers`` instead, and deleted the same way.
+        A journal can have both: an import whose edit was echoed into a second
+        record holds a link and a push row naming different records, and each
+        is undone by its own route.
+
         A journal is gear usage or maintenance, never both, so in practice one
         path runs. This is a no-op for a journal Snipe-IT never recorded.
         """
@@ -475,7 +511,9 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             )
             sources = {row.integration_source for row in rows_result.fetchall()}
 
-        if not sources:
+        imported_records = _imported_maintenance_ids(event)
+
+        if not sources and not imported_records:
             logger.debug(
                 "Skipping JournalDeleted: nothing recorded in Snipe-IT",
                 journal_id=journal_id,
@@ -485,11 +523,12 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         # A claim with no record beside it is cleared before anything asks for
         # credentials: clearing it is a database write, and a user who has
         # disconnected Snipe-IT would otherwise leave it behind for good. A
-        # claim alongside a push row goes with that record instead.
+        # claim alongside a push row or an imported record goes with that
+        # record instead, and deleting a record does need credentials.
         #
         # In its own session: the query above has already opened a transaction
         # on that one, and asking it to begin a second raises.
-        if sources == {"snipeit_maintenance_claim"}:
+        if sources == {"snipeit_maintenance_claim"} and not imported_records:
             async with self._session_factory() as session:
                 async with session.begin():
                     await _delete_maintenance_claim(session, journal_id)
@@ -541,6 +580,11 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             if sources & {"snipeit_maintenance", "snipeit_maintenance_claim"}:
                 await sync_service.delete_pushed_maintenance(
                     journal_id=journal_id,
+                    session_factory=self._session_factory,
+                )
+            for external_id in imported_records:
+                await sync_service.delete_maintenance_record(
+                    external_id=external_id,
                     session_factory=self._session_factory,
                 )
         except SnipeItAPIError as exc:
