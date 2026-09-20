@@ -25,6 +25,33 @@ from app.infrastructure.search.meilisearch_client import (
 
 logger = structlog.get_logger()
 
+# Contact-scoped events whose type does not start with "Contact". Kept as a
+# named set because ``SearchIndexerConsumer`` subscribes to a list of event
+# types, and a type subscribed but absent here is acknowledged and dropped -
+# the document silently goes stale. ``test_search_indexer_consumer`` pins the
+# two together in both directions.
+CONTACT_SCOPED_EVENT_TYPES = frozenset(
+    {
+        "TagAssigned",
+        "TagRemoved",
+        "ImportantDateAdded",
+        "ImportantDateUpdated",
+        "ImportantDateDeleted",
+    }
+)
+
+# Events that make a contact's indexed document stale and so re-index it whole.
+CONTACT_REINDEX_EVENT_TYPES = frozenset(
+    {
+        "ContactUpdated",
+        "ContactSummaryRefreshRequested",
+        "ContactSummaryRefreshDue",
+        "ImportantDateAdded",
+        "ImportantDateUpdated",
+        "ImportantDateDeleted",
+    }
+)
+
 
 class SearchIndexer:
     """Handles MeiliSearch indexing based on domain events."""
@@ -42,12 +69,10 @@ class SearchIndexer:
             event: Outbox event to process
         """
         try:
-            if event.event_type.startswith("Contact") or event.event_type in [
-                "TagAssigned",
-                "TagRemoved",
-                "ImportantDateAdded",
-                "ImportantDateDeleted",
-            ]:
+            if (
+                event.event_type.startswith("Contact")
+                or event.event_type in CONTACT_SCOPED_EVENT_TYPES
+            ):
                 await self._process_contact_event(event)
             elif event.event_type.startswith("Journal"):
                 journal_indexer = JournalIndexingService(
@@ -85,13 +110,7 @@ class SearchIndexer:
 
             if event.event_type == "ContactCreated":
                 await self._index_contact_created(contact_index_name, event)
-            elif event.event_type in [
-                "ContactUpdated",
-                "ContactSummaryRefreshRequested",
-                "ContactSummaryRefreshDue",
-                "ImportantDateAdded",
-                "ImportantDateDeleted",
-            ]:
+            elif event.event_type in CONTACT_REINDEX_EVENT_TYPES:
                 await self._index_contact_updated(contact_index_name, event)
             elif event.event_type == "ContactDeleted":
                 self._index_contact_deleted(contact_index_name, event)

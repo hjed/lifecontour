@@ -11,7 +11,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from core_shared.stream_client import StreamClient, StreamEvent
 
-from app.infrastructure.events.search_indexer_consumer import SearchIndexerConsumer
+from app.infrastructure.events.search_indexer_consumer import (
+    _SEARCH_EVENT_TYPES,
+    SearchIndexerConsumer,
+)
+from app.infrastructure.search.search_indexer import (
+    CONTACT_REINDEX_EVENT_TYPES,
+    CONTACT_SCOPED_EVENT_TYPES,
+)
 from tests.task_event_inventory import task_event_types
 
 
@@ -305,3 +312,72 @@ class TestSearchIndexerConsumerHandleEvent:
         from app.infrastructure.events import search_indexer_consumer
 
         assert not hasattr(search_indexer_consumer, "_JOURNAL_INVALIDATION_EVENTS")
+
+
+class TestSubscriptionMatchesIndexerDispatch:
+    """The subscription and the indexer's dispatch must describe the same set.
+
+    ``SearchIndexer.process_event`` logs and drops an event type it does not
+    recognise, and the consumer acknowledges it either way. So a type added to
+    the subscription but not to the dispatch is consumed and silently discarded
+    - the contact's indexed document just goes stale, with nothing in the logs
+    above debug and no test failing.
+
+    That is exactly how ``ImportantDateUpdated`` shipped subscribed-but-ignored
+    in the first cut of LOCAL-176. The history projection has had this guard in
+    both directions for a while (``test_history_projection_consumer``); the
+    search indexer had only the half that checks the subscription matches.
+    """
+
+    @staticmethod
+    def _subscribed_contact_event_types() -> set[str]:
+        """Contact-scoped types on the live subscription.
+
+        Journal types are dispatched by prefix to a different service, so they
+        are not this pairing's business.
+        """
+        return {
+            event_type
+            for event_type in _SEARCH_EVENT_TYPES
+            if not event_type.startswith("Journal")
+        }
+
+    def test_every_subscribed_contact_event_reaches_the_contact_dispatch(
+        self,
+    ) -> None:
+        """Nothing is subscribed that ``process_event`` would drop."""
+        unroutable = {
+            event_type
+            for event_type in self._subscribed_contact_event_types()
+            if not event_type.startswith("Contact")
+            and event_type not in CONTACT_SCOPED_EVENT_TYPES
+        }
+
+        assert unroutable == set(), (
+            "these event types are consumed and silently dropped by the indexer"
+        )
+
+    def test_no_contact_scoped_event_is_dispatched_without_a_subscription(
+        self,
+    ) -> None:
+        """The reverse: dispatch for an event the consumer never receives.
+
+        Harmless at runtime but a lie in the code - it reads as though the
+        indexer handles something it can never be handed.
+        """
+        assert CONTACT_SCOPED_EVENT_TYPES <= set(_SEARCH_EVENT_TYPES)
+
+    def test_every_reindexing_event_is_subscribed(self) -> None:
+        """A type that should re-index a contact has to arrive first."""
+        # ContactSummaryRefreshDue reaches the indexer through the summary
+        # consumer's own republish rather than this subscription, so it is the
+        # one member excluded here.
+        reindexing = CONTACT_REINDEX_EVENT_TYPES - {"ContactSummaryRefreshDue"}
+
+        assert reindexing <= set(_SEARCH_EVENT_TYPES)
+
+    def test_important_date_edits_reindex_the_contact(self) -> None:
+        """The specific regression: an edited date must refresh the document."""
+        assert "ImportantDateUpdated" in _SEARCH_EVENT_TYPES
+        assert "ImportantDateUpdated" in CONTACT_SCOPED_EVENT_TYPES
+        assert "ImportantDateUpdated" in CONTACT_REINDEX_EVENT_TYPES

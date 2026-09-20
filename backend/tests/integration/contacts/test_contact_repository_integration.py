@@ -527,25 +527,32 @@ class TestImportantDateRepositoryIntegration:
     """Integration tests for the repository's important-date writes."""
 
     @pytest.fixture
-    def contact_repo(self, clean_database: AsyncConnection):
+    def contact_repo(self, clean_database: AsyncConnection) -> SqlContactRepository:
         """Create ContactRepository instance with real database connection."""
         return SqlContactRepository(clean_database)
 
     @pytest.fixture
-    def custom_date_type_repo(self, clean_database: AsyncConnection):
+    def custom_date_type_repo(
+        self, clean_database: AsyncConnection
+    ) -> SqlCustomDateTypeRepository:
         """Create CustomDateTypeRepository instance with real database connection."""
         return SqlCustomDateTypeRepository(clean_database)
 
     @staticmethod
-    async def _contact_with_date(contact_repo, date: ImportantDate):
+    async def _contact_with_date(
+        contact_repo: SqlContactRepository, date: ImportantDate
+    ) -> tuple[Contact, ImportantDate]:
         """Persist a contact carrying one important date, returning both."""
         contact = await contact_repo.save(Contact(first_name="Date", last_name="Owner"))
+        assert contact.id is not None
         date.contact_id = contact.id
         saved_date = await contact_repo.add_important_date(contact.id, date)
         return contact, saved_date
 
     @pytest.mark.asyncio
-    async def test_update_important_date_rewrites_every_column(self, contact_repo):
+    async def test_update_important_date_rewrites_every_column(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
         """An update replaces type, precision and all three date components."""
         # Arrange - a year-only work anniversary
         contact, saved_date = await self._contact_with_date(
@@ -557,6 +564,8 @@ class TestImportantDateRepositoryIntegration:
                 year=2020,
             ),
         )
+
+        assert contact.id is not None
 
         # Act - become a full-precision first-met date
         saved_date.date_type = ImportantDateType.FIRST_MET
@@ -581,8 +590,8 @@ class TestImportantDateRepositoryIntegration:
 
     @pytest.mark.asyncio
     async def test_update_important_date_clears_components_precision_drops(
-        self, contact_repo
-    ):
+        self, contact_repo: SqlContactRepository
+    ) -> None:
         """Narrowing precision nulls the components the new precision excludes."""
         # Arrange - a full-precision first-met date
         contact, saved_date = await self._contact_with_date(
@@ -596,6 +605,8 @@ class TestImportantDateRepositoryIntegration:
                 day=9,
             ),
         )
+
+        assert contact.id is not None
 
         # Act - drop to year-only
         saved_date.precision = DatePrecision.YEAR
@@ -612,8 +623,8 @@ class TestImportantDateRepositoryIntegration:
 
     @pytest.mark.asyncio
     async def test_update_birthday_in_place_does_not_violate_uniqueness(
-        self, contact_repo
-    ):
+        self, contact_repo: SqlContactRepository
+    ) -> None:
         """Editing the contact's only birthday is not a second birthday.
 
         ``uq_contact_birthday`` is a partial unique index on ``contact_id``
@@ -634,6 +645,8 @@ class TestImportantDateRepositoryIntegration:
             ),
         )
 
+        assert contact.id is not None
+
         # Act
         saved_date.year = 1991
         await contact_repo.update_important_date(saved_date)
@@ -645,8 +658,8 @@ class TestImportantDateRepositoryIntegration:
 
     @pytest.mark.asyncio
     async def test_update_to_second_birthday_raises_duplicate_birthday(
-        self, contact_repo
-    ):
+        self, contact_repo: SqlContactRepository
+    ) -> None:
         """Retyping a second date as a birthday hits the partial unique index."""
         # Arrange - a contact with a birthday and a work anniversary
         contact, _birthday = await self._contact_with_date(
@@ -659,6 +672,7 @@ class TestImportantDateRepositoryIntegration:
                 day=15,
             ),
         )
+        assert contact.id is not None
         other = await contact_repo.add_important_date(
             contact.id,
             ImportantDate(
@@ -676,8 +690,10 @@ class TestImportantDateRepositoryIntegration:
 
     @pytest.mark.asyncio
     async def test_update_important_date_to_custom_type(
-        self, contact_repo, custom_date_type_repo
-    ):
+        self,
+        contact_repo: SqlContactRepository,
+        custom_date_type_repo: SqlCustomDateTypeRepository,
+    ) -> None:
         """A date can be retyped as custom, and reads back with the type name."""
         # Arrange
         contact, saved_date = await self._contact_with_date(
@@ -689,6 +705,7 @@ class TestImportantDateRepositoryIntegration:
                 year=2015,
             ),
         )
+        assert contact.id is not None
         custom_type = await custom_date_type_repo.create("Adoption Day")
 
         # Act
@@ -703,7 +720,9 @@ class TestImportantDateRepositoryIntegration:
         assert stored[0].custom_date_type_name == "Adoption Day"
 
     @pytest.mark.asyncio
-    async def test_update_important_date_unknown_custom_type_raises(self, contact_repo):
+    async def test_update_important_date_unknown_custom_type_raises(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
         """A custom type id with no row behind it is refused by the FK."""
         # Arrange
         _contact, saved_date = await self._contact_with_date(
@@ -724,11 +743,12 @@ class TestImportantDateRepositoryIntegration:
 
     @pytest.mark.asyncio
     async def test_update_important_date_unknown_id_raises_not_found(
-        self, contact_repo
-    ):
+        self, contact_repo: SqlContactRepository
+    ) -> None:
         """Updating a date that does not exist is reported, not silently ignored."""
         # Arrange
         contact = await contact_repo.save(Contact(first_name="No", last_name="Date"))
+        assert contact.id is not None
         missing = ImportantDate(
             id=999999,
             contact_id=contact.id,
