@@ -367,3 +367,9 @@ class TestLockCalendar:
             await CalendarWatchRepository(other).lock_calendar(
                 user_id="lock-user", google_calendar_id="cal-b"
             )
+
+            # Both locks are now held concurrently, on separate connections.
+            held = await other.execute(
+                text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+            )
+            assert held.scalar_one() >= 2

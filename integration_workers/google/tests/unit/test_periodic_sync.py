@@ -139,7 +139,12 @@ class TestPeriodicSyncConfiguration:
                 )
 
     def test_cron_schedule_matches_sync_interval(self) -> None:
-        """Test that cron schedule is generated correctly based on sync_interval_hours."""
+        """Test that cron schedule is generated correctly based on sync_interval_hours.
+
+        This asserted nothing until the webhook-renewal work touched the shared
+        schedule builder: the loop body was a ``pass`` with a note to fill it in
+        "once implementation is complete".
+        """
         test_cases = [
             (
                 1,
@@ -175,7 +180,7 @@ class TestPeriodicSyncConfiguration:
             (24, {0}),  # Daily
         ]
 
-        for interval_hours, _expected_hours in test_cases:
+        for interval_hours, expected_hours in test_cases:
             with patch.dict(
                 os.environ,
                 {
@@ -187,6 +192,18 @@ class TestPeriodicSyncConfiguration:
                     "SYNC_INTERVAL_HOURS": str(interval_hours),
                 },
             ):
-                # This test will verify the cron schedule once implementation is complete
-                # For now, we're just testing the configuration structure
-                pass
+                import importlib
+
+                import worker
+
+                importlib.reload(worker)
+
+                periodic = next(
+                    job
+                    for job in worker.GoogleWorkerSettings.cron_jobs
+                    if job.coroutine.__name__ == "periodic_sync_all_accounts"
+                )
+                assert periodic.hour == expected_hours, (
+                    f"sync_interval_hours={interval_hours} should schedule "
+                    f"{sorted(expected_hours)}"
+                )
