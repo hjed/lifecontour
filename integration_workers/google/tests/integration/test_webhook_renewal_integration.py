@@ -12,7 +12,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from core_shared.repositories import CalendarWatchRenewal, CalendarWatchRepository
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 # Renewal horizon used by every case below: a channel expiring inside this
 # window is due, one expiring after it is not.
@@ -315,3 +316,54 @@ class TestSelectCalendarsDueForRenewal:
         due = await select_due(db_session, now + THRESHOLD)
 
         assert [row for row in due if row.user_id == user_id] == []
+
+
+@pytest.mark.asyncio
+class TestLockCalendar:
+    """The per-calendar lock serialises setup regardless of the account used."""
+
+    async def test_blocks_a_second_concurrent_holder_for_the_same_calendar(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """Two runs setting up the same calendar contend for one lock.
+
+        The key is the calendar alone, so callers that disagree about the
+        Google account still contend — renewal locks under the account its
+        existing channel belongs to while manual re-registration picks one of
+        the user's accounts unordered. ``lock_calendar`` no longer accepts an
+        account at all, so that divergence cannot reach the key.
+
+        Two real connections are needed: advisory locks are held per session,
+        so a single pooled connection would always succeed against itself.
+        """
+        async with (
+            async_engine.connect() as holder,
+            async_engine.connect() as contender,
+        ):
+            await CalendarWatchRepository(holder).lock_calendar(
+                user_id="lock-user", google_calendar_id="shared-cal"
+            )
+
+            # Fail fast instead of hanging for the length of the test run.
+            await contender.execute(text("SET LOCAL lock_timeout = '750ms'"))
+            with pytest.raises(DBAPIError):
+                await CalendarWatchRepository(contender).lock_calendar(
+                    user_id="lock-user", google_calendar_id="shared-cal"
+                )
+
+    async def test_allows_a_different_calendar_through(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """Contention is per calendar, so unrelated calendars never queue."""
+        async with (
+            async_engine.connect() as holder,
+            async_engine.connect() as other,
+        ):
+            await CalendarWatchRepository(holder).lock_calendar(
+                user_id="lock-user", google_calendar_id="cal-a"
+            )
+
+            await other.execute(text("SET LOCAL lock_timeout = '750ms'"))
+            await CalendarWatchRepository(other).lock_calendar(
+                user_id="lock-user", google_calendar_id="cal-b"
+            )

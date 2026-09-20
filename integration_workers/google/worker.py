@@ -4385,7 +4385,6 @@ async def setup_calendar_webhook(
             conn = await session.connection()
             await CalendarWatchRepository(conn).lock_calendar(
                 user_id=str(user_id),
-                google_account_email=google_account_email,
                 google_calendar_id=google_calendar_id,
             )
 

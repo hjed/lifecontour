@@ -298,9 +298,11 @@ Two properties are worth knowing when reading this code:
   also skips the stop entirely when the stored expiry has passed.
 - **Setup is serialised per calendar.** Registering a channel is read-then-write
   across two Google calls, so `setup_calendar_webhook` takes a transaction-scoped
-  advisory lock on (user, account, calendar) first. Renewal jobs additionally
-  carry a job id keyed to the calendar, so ARQ rejects a duplicate rather than
-  dispatching a second setup that would race the first.
+  advisory lock on (user, calendar) first. The account is deliberately not part
+  of the key: renewal and manual re-registration can resolve different accounts
+  for the same calendar, and keying on it would hand them separate locks.
+  Renewal jobs additionally carry a job id keyed to the calendar, so ARQ rejects
+  a duplicate rather than dispatching a second setup that would race the first.
 - **The account is chosen from the existing channel.** A calendar records no
   Google account of its own, so renewal reuses the account its current channel
   was registered under, falling back to a deterministically chosen connected

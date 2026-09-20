@@ -463,8 +463,9 @@ class TestSetupCalendarWebhook:
             )
 
         assert result["status"] == "success"
+        # Keyed by the calendar alone: the account differs between callers, so
+        # including it would hand concurrent runs different locks.
         repo.lock_calendar.assert_awaited_once_with(
             user_id="user-1",
-            google_account_email="test@example.com",
             google_calendar_id="cal-1",
         )

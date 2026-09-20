@@ -34,9 +34,7 @@ class CalendarWatchRepository:
         """
         self.conn = conn
 
-    async def lock_calendar(
-        self, user_id: str, google_account_email: str, google_calendar_id: str
-    ) -> None:
+    async def lock_calendar(self, user_id: str, google_calendar_id: str) -> None:
         """
         Serialise watch-channel setup for one calendar.
 
@@ -47,20 +45,24 @@ class CalendarWatchRepository:
         live at Google and delivers notifications the webhook endpoint rejects
         until it expires.
 
+        The key is the calendar, deliberately **not** the Google account. The
+        account is an attribute of the channel being written rather than part of
+        the resource being protected, and callers disagree about it: renewal
+        uses the account the existing channel was registered under, while manual
+        re-registration picks one of the user's accounts unordered. Including it
+        would hand those two runs different locks — exactly the concurrent pair
+        this exists to prevent.
+
         The lock is transaction-scoped: it is released by the caller's commit or
         rollback, so it must be taken inside the same transaction that writes
         the channel, and it deliberately spans the Google calls in between.
 
         Args:
             user_id: Owner of the calendar
-            google_account_email: Google account the channel is registered under
             google_calendar_id: The Google Calendar being registered
         """
         stmt = text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
-        await self.conn.execute(
-            stmt,
-            {"key": f"{user_id}:{google_account_email}:{google_calendar_id}"},
-        )
+        await self.conn.execute(stmt, {"key": f"{user_id}:{google_calendar_id}"})
 
     async def select_due_for_renewal(
         self, deadline: datetime
