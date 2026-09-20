@@ -7,7 +7,7 @@ This repository answers the question the renewal cron asks: which synced
 calendars have a channel close enough to expiry to be re-registered?
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 from sqlalchemy import text
@@ -20,6 +20,15 @@ class CalendarWatchRenewal(NamedTuple):
     user_id: str
     google_account_email: str
     google_calendar_id: str
+
+
+class ActiveCalendarChannel(NamedTuple):
+    """The push notification channel a calendar is currently registered with."""
+
+    google_account_email: str
+    channel_id: str
+    channel_resource_id: str
+    channel_expiration: datetime | None
 
 
 class CalendarWatchRepository:
@@ -64,6 +73,91 @@ class CalendarWatchRepository:
         stmt = text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
         await self.conn.execute(stmt, {"key": f"{user_id}:{google_calendar_id}"})
 
+    async def get_active_channel(
+        self, user_id: str, google_calendar_id: str
+    ) -> ActiveCalendarChannel | None:
+        """
+        Return the channel a calendar is currently registered with, if any.
+
+        Deliberately **not** scoped to a Google account. A calendar has one live
+        channel, but which account registered it varies: renewal reuses the
+        account already on the channel, while manual re-registration picks one
+        of the user's accounts unordered. Filtering by account would hide a
+        channel registered under the other one, so the caller would register a
+        second channel and leave the first live — Google would then deliver on
+        both, and the webhook endpoint rejects whichever is no longer recorded.
+
+        Args:
+            user_id: Owner of the calendar
+            google_calendar_id: The Google Calendar to look up
+
+        Returns:
+            The recorded channel, or None when the calendar has none
+        """
+        stmt = text("""
+            SELECT google_account_email, channel_id, channel_resource_id,
+                   channel_expiration
+            FROM calendar_sync_tokens
+            WHERE user_id = :user_id
+              AND google_calendar_id = :google_calendar_id
+              AND channel_id IS NOT NULL
+              AND channel_resource_id IS NOT NULL
+            ORDER BY channel_expiration DESC NULLS LAST, google_account_email
+            LIMIT 1
+        """)
+        result = await self.conn.execute(
+            stmt,
+            {"user_id": user_id, "google_calendar_id": google_calendar_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        return ActiveCalendarChannel(
+            google_account_email=row.google_account_email,
+            channel_id=row.channel_id,
+            channel_resource_id=row.channel_resource_id,
+            channel_expiration=row.channel_expiration,
+        )
+
+    async def clear_channels_for_other_accounts(
+        self, user_id: str, google_calendar_id: str, keep_account: str
+    ) -> None:
+        """
+        Drop channel metadata this calendar holds under any other account.
+
+        ``calendar_sync_tokens`` is keyed by (user, account, calendar), so
+        registering a calendar under a second account inserts a *new* row rather
+        than replacing the old one, leaving two rows each claiming a channel.
+        The stopped one must be cleared or the renewal sweep will keep finding
+        it. Only the channel columns are cleared: the row's sync token belongs
+        to that account's own incremental sync and stays.
+
+        Args:
+            user_id: Owner of the calendar
+            google_calendar_id: The Google Calendar just registered
+            keep_account: The account the live channel now belongs to
+        """
+        stmt = text("""
+            UPDATE calendar_sync_tokens
+            SET channel_id = NULL,
+                channel_resource_id = NULL,
+                channel_expiration = NULL,
+                updated_at = :now
+            WHERE user_id = :user_id
+              AND google_calendar_id = :google_calendar_id
+              AND google_account_email <> :keep_account
+              AND channel_id IS NOT NULL
+        """)
+        await self.conn.execute(
+            stmt,
+            {
+                "user_id": user_id,
+                "google_calendar_id": google_calendar_id,
+                "keep_account": keep_account,
+                "now": datetime.now(UTC),
+            },
+        )
+
     async def select_due_for_renewal(
         self, deadline: datetime
     ) -> list[CalendarWatchRenewal]:
@@ -84,6 +178,11 @@ class CalendarWatchRepository:
         - Prefer the account the calendar's **existing channel** was registered
           under. Renewing under a different account would leave the real channel
           to expire while writing a second, competing token row.
+        - Count a row as a channel only when it actually carries one.
+          ``calendar_sync_tokens`` also holds plain sync-token rows, written by
+          the calendar sync with ``channel_id`` NULL; treating those as channels
+          would let an arbitrary account win the tie for a calendar that has
+          never been registered, instead of the deterministic fallback.
         - Ignore a recorded channel whose account has since been disconnected,
           so the calendar falls back to an account that can still serve it.
         - Fall back to one deterministically chosen connected account, so a user
@@ -108,9 +207,12 @@ class CalendarWatchRepository:
                 JOIN user_google_auth g
                   ON g.user_id = t.user_id
                  AND g.google_account_email = t.google_account_email
+                WHERE t.channel_id IS NOT NULL
+                  AND t.channel_resource_id IS NOT NULL
                 ORDER BY t.user_id,
                          t.google_calendar_id,
-                         t.channel_expiration DESC NULLS LAST
+                         t.channel_expiration DESC NULLS LAST,
+                         t.google_account_email
             ),
             fallback_accounts AS (
                 SELECT DISTINCT ON (user_id) user_id, google_account_email

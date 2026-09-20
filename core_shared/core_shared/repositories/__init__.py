@@ -7,6 +7,7 @@ and integration workers.
 """
 
 from core_shared.repositories.calendar_watch_repository import (
+    ActiveCalendarChannel,
     CalendarWatchRenewal,
     CalendarWatchRepository,
 )
@@ -16,6 +17,7 @@ from core_shared.repositories.integration_link_repository import (
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 
 __all__ = [
+    "ActiveCalendarChannel",
     "CalendarWatchRenewal",
     "CalendarWatchRepository",
     "IntegrationLinkRepository",

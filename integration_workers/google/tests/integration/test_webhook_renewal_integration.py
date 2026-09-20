@@ -73,24 +73,31 @@ async def seed_channel(
     google_calendar_id: str,
     *,
     expiration: datetime | None,
+    with_channel: bool = True,
 ) -> None:
-    """Insert a calendar_sync_tokens row carrying a watch channel."""
+    """Insert a calendar_sync_tokens row.
+
+    With ``with_channel=False`` it writes the plain sync-token row the calendar
+    sync creates, which carries no channel at all.
+    """
     await session.execute(
         text("""
             INSERT INTO calendar_sync_tokens
                 (user_id, google_account_email, google_calendar_id,
-                 channel_id, channel_resource_id, channel_expiration,
+                 sync_token, channel_id, channel_resource_id, channel_expiration,
                  created_at, updated_at)
             VALUES (:user_id, :email, :google_calendar_id,
-                    :channel_id, :resource_id, :expiration, :now, :now)
+                    :sync_token, :channel_id, :resource_id, :expiration,
+                    :now, :now)
         """),
         {
             "user_id": user_id,
             "email": email,
             "google_calendar_id": google_calendar_id,
-            "channel_id": f"channel-{google_calendar_id}",
-            "resource_id": f"resource-{google_calendar_id}",
-            "expiration": expiration,
+            "sync_token": f"synctoken-{google_calendar_id}",
+            "channel_id": f"channel-{google_calendar_id}" if with_channel else None,
+            "resource_id": f"resource-{google_calendar_id}" if with_channel else None,
+            "expiration": expiration if with_channel else None,
             "now": datetime.now(UTC),
         },
     )
@@ -316,6 +323,49 @@ class TestSelectCalendarsDueForRenewal:
         due = await select_due(db_session, now + THRESHOLD)
 
         assert [row for row in due if row.user_id == user_id] == []
+
+    async def test_sync_only_rows_do_not_decide_the_account(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A row with no channel must not be mistaken for one.
+
+        The calendar sync writes calendar_sync_tokens rows carrying only a sync
+        token. Treating those as channels lets an arbitrary account win the
+        choice for a calendar that has never been registered, instead of the
+        deterministic fallback.
+        """
+        now = datetime.now(UTC)
+        user_id = "renew-user-7"
+
+        await seed_google_account(db_session, user_id, "aaa@example.com")
+        await seed_google_account(db_session, user_id, "zzz@example.com")
+        await seed_calendar(db_session, user_id, "cal-7")
+        # Only the non-fallback account has synced this calendar, and its row
+        # carries no channel. Seeding just this one keeps the assertion
+        # deterministic: counting it as a channel yields zzz, ignoring it falls
+        # back to aaa. Seeding a row for both accounts instead would leave the
+        # buggy path picking between two tied rows arbitrarily, so the test
+        # could pass by luck.
+        await seed_channel(
+            db_session,
+            user_id,
+            "zzz@example.com",
+            "cal-7",
+            expiration=None,
+            with_channel=False,
+        )
+        await db_session.commit()
+
+        due = await select_due(db_session, now + THRESHOLD)
+
+        rows = [row for row in due if row.user_id == user_id]
+        assert rows == [
+            CalendarWatchRenewal(
+                user_id=user_id,
+                google_account_email="aaa@example.com",
+                google_calendar_id="cal-7",
+            )
+        ]
 
 
 @pytest.mark.asyncio

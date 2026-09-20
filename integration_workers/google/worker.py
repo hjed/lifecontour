@@ -4383,36 +4383,26 @@ async def setup_calendar_webhook(
             # so the Google stop/watch pair below cannot interleave with
             # another run's.
             conn = await session.connection()
-            await CalendarWatchRepository(conn).lock_calendar(
+            repo = CalendarWatchRepository(conn)
+            await repo.lock_calendar(
                 user_id=str(user_id),
                 google_calendar_id=google_calendar_id,
             )
 
-            # Stop existing channel if one exists
-            stmt = text("""
-                SELECT channel_id, channel_resource_id, channel_expiration
-                FROM calendar_sync_tokens
-                WHERE user_id = :user_id
-                AND google_account_email = :email
-                AND google_calendar_id = :google_calendar_id
-                AND channel_id IS NOT NULL
-                AND channel_resource_id IS NOT NULL
-            """)
-            existing_result = await session.execute(
-                stmt,
-                {
-                    "user_id": str(user_id),
-                    "email": google_account_email,
-                    "google_calendar_id": google_calendar_id,
-                },
-            )
-            existing_row = existing_result.fetchone()
-            if existing_row:
+            # Stop the calendar's existing channel, whichever account holds it.
+            # Scoping this to our own account would miss a channel registered
+            # under the user's other one and leave it live alongside the new.
+            existing = await repo.get_active_channel(str(user_id), google_calendar_id)
+            if existing:
+                # Stop it with credentials for the account that registered it;
+                # another account's token cannot address that channel.
                 await _stop_previous_watch_channel(
-                    client,
-                    channel_id=existing_row.channel_id,
-                    resource_id=existing_row.channel_resource_id,
-                    channel_expiration=existing_row.channel_expiration,
+                    _create_google_client(
+                        session, user_id, existing.google_account_email
+                    ),
+                    channel_id=existing.channel_id,
+                    resource_id=existing.channel_resource_id,
+                    channel_expiration=existing.channel_expiration,
                 )
 
             # Register watch channel with Google
@@ -4469,6 +4459,14 @@ async def setup_calendar_webhook(
                     "channel_expiration": channel_expiration,
                     "now": now,
                 },
+            )
+
+            # The table is keyed by (user, account, calendar), so registering
+            # under a different account than before inserts a second row rather
+            # than replacing the first. Clear the channel it still claims, or
+            # the renewal sweep keeps finding a channel that is no longer live.
+            await repo.clear_channels_for_other_accounts(
+                str(user_id), google_calendar_id, google_account_email
             )
             await session.commit()
 

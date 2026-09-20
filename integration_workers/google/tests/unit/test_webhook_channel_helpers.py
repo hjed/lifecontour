@@ -174,6 +174,36 @@ class TestStopChannel:
             await client.stop_channel("channel-uuid", "resource-id-456")
 
 
+def patch_watch_repo(active_channel: Any = None) -> tuple[Any, Any]:
+    """Patch CalendarWatchRepository, reporting ``active_channel`` as recorded.
+
+    Returns the repo mock and the patcher, so tests can assert on the calls the
+    task makes through it (lock, lookup, stale-row cleanup).
+    """
+    repo = MagicMock()
+    repo.lock_calendar = AsyncMock()
+    repo.get_active_channel = AsyncMock(return_value=active_channel)
+    repo.clear_channels_for_other_accounts = AsyncMock()
+    return repo, patch("worker.CalendarWatchRepository", MagicMock(return_value=repo))
+
+
+def make_active_channel(
+    google_account_email: str = "test@example.com",
+    channel_id: str = "old-channel-id",
+    channel_resource_id: str = "old-resource-id",
+    channel_expiration: datetime | None = None,
+) -> Any:
+    """Build an ActiveCalendarChannel as the repository would return one."""
+    from core_shared.repositories import ActiveCalendarChannel
+
+    return ActiveCalendarChannel(
+        google_account_email=google_account_email,
+        channel_id=channel_id,
+        channel_resource_id=channel_resource_id,
+        channel_expiration=channel_expiration,
+    )
+
+
 class TestSetupCalendarWebhook:
     """Tests for the setup_calendar_webhook ARQ task."""
 
@@ -225,13 +255,12 @@ class TestSetupCalendarWebhook:
             }
         )
 
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = None
-        mock_session.execute.return_value = mock_result
+        _, repo_patch = patch_watch_repo(None)
 
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
         ):
             mock_settings.webhook_base_url = "https://example.com"
 
@@ -242,7 +271,9 @@ class TestSetupCalendarWebhook:
         assert result["status"] == "success"
         assert result["resource_id"] == "res-id-789"
         mock_client.watch_events.assert_called_once()
-        assert mock_session.execute.call_count == 2  # SELECT existing, then UPSERT
+        # Only the UPSERT runs on the session now; reading the existing
+        # channel moved to CalendarWatchRepository.
+        assert mock_session.execute.call_count == 1
         mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
@@ -261,18 +292,16 @@ class TestSetupCalendarWebhook:
         )
         mock_client.stop_channel = AsyncMock()
 
-        mock_existing_row = MagicMock()
-        mock_existing_row.channel_id = "old-channel-id"
-        mock_existing_row.channel_resource_id = "old-resource-id"
-        mock_existing_row.channel_expiration = datetime.now(UTC) + timedelta(days=3)
-
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = mock_existing_row
-        mock_session.execute.return_value = mock_result
+        _, repo_patch = patch_watch_repo(
+            make_active_channel(
+                channel_expiration=datetime.now(UTC) + timedelta(days=3)
+            )
+        )
 
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
         ):
             mock_settings.webhook_base_url = "https://example.com"
 
@@ -301,13 +330,12 @@ class TestSetupCalendarWebhook:
             }
         )
 
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = None
-        mock_session.execute.return_value = mock_result
+        _, repo_patch = patch_watch_repo(None)
 
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
         ):
             mock_settings.webhook_base_url = "https://my-app.example.com/"
 
@@ -331,13 +359,12 @@ class TestSetupCalendarWebhook:
         mock_client = MagicMock()
         mock_client.watch_events = AsyncMock(side_effect=Exception("API Error"))
 
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = None
-        mock_session.execute.return_value = mock_result
+        _, repo_patch = patch_watch_repo(None)
 
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
         ):
             mock_settings.webhook_base_url = "https://example.com"
 
@@ -364,18 +391,18 @@ class TestSetupCalendarWebhook:
         )
         mock_client.stop_channel = AsyncMock()
 
-        mock_existing_row = MagicMock()
-        mock_existing_row.channel_id = "expired-channel-id"
-        mock_existing_row.channel_resource_id = "expired-resource-id"
-        mock_existing_row.channel_expiration = datetime.now(UTC) - timedelta(days=1)
-
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = mock_existing_row
-        mock_session.execute.return_value = mock_result
+        _, repo_patch = patch_watch_repo(
+            make_active_channel(
+                channel_id="expired-channel-id",
+                channel_resource_id="expired-resource-id",
+                channel_expiration=datetime.now(UTC) - timedelta(days=1),
+            )
+        )
 
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
         ):
             mock_settings.webhook_base_url = "https://example.com"
 
@@ -403,18 +430,12 @@ class TestSetupCalendarWebhook:
         )
         mock_client.stop_channel = AsyncMock()
 
-        mock_existing_row = MagicMock()
-        mock_existing_row.channel_id = "old-channel-id"
-        mock_existing_row.channel_resource_id = "old-resource-id"
-        mock_existing_row.channel_expiration = None
-
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = mock_existing_row
-        mock_session.execute.return_value = mock_result
+        _, repo_patch = patch_watch_repo(make_active_channel(channel_expiration=None))
 
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
         ):
             mock_settings.webhook_base_url = "https://example.com"
 
@@ -443,18 +464,12 @@ class TestSetupCalendarWebhook:
             return_value={"resourceId": "res-id", "expiration": "1711580400000"}
         )
 
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = None
-        mock_session.execute.return_value = mock_result
-
-        repo = MagicMock()
-        repo.lock_calendar = AsyncMock()
-        repo_cls = MagicMock(return_value=repo)
+        repo, repo_patch = patch_watch_repo(None)
 
         with (
             patch("worker.settings") as mock_settings,
             patch("worker._create_google_client", return_value=mock_client),
-            patch("worker.CalendarWatchRepository", repo_cls),
+            repo_patch,
         ):
             mock_settings.webhook_base_url = "https://example.com"
 
@@ -468,4 +483,82 @@ class TestSetupCalendarWebhook:
         repo.lock_calendar.assert_awaited_once_with(
             user_id="user-1",
             google_calendar_id="cal-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_stops_a_channel_held_by_another_account(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """A channel registered under the user's other account is still replaced.
+
+        Looking it up per account would miss it, so setup would open a second
+        channel and leave the first live — Google then delivers on both.
+        """
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            return_value={"resourceId": "res-id", "expiration": "1711580400000"}
+        )
+        mock_client.stop_channel = AsyncMock()
+
+        repo, repo_patch = patch_watch_repo(
+            make_active_channel(
+                google_account_email="other@example.com",
+                channel_expiration=datetime.now(UTC) + timedelta(days=3),
+            )
+        )
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch(
+                "worker._create_google_client", return_value=mock_client
+            ) as make_client,
+            repo_patch,
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            result = await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+        assert result["status"] == "success"
+        mock_client.stop_channel.assert_awaited_once()
+        # The stop must use the account that registered the channel, since
+        # another account's token cannot address it.
+        assert make_client.call_args_list[-1].args[2] == "other@example.com"
+
+    @pytest.mark.asyncio
+    async def test_clears_the_channel_left_on_another_accounts_row(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """The superseded row must not keep claiming a channel.
+
+        calendar_sync_tokens is keyed by (user, account, calendar), so a
+        different account inserts a new row instead of replacing the old; the
+        renewal sweep would otherwise keep finding the dead channel.
+        """
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            return_value={"resourceId": "res-id", "expiration": "1711580400000"}
+        )
+
+        repo, repo_patch = patch_watch_repo(None)
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            result = await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+        assert result["status"] == "success"
+        repo.clear_channels_for_other_accounts.assert_awaited_once_with(
+            "user-1", "cal-1", "test@example.com"
         )
