@@ -299,6 +299,16 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
+    async def update_important_date(self, date: ImportantDate) -> ImportantDate:
+        """Update an important date in place, keeping its id.
+
+        Editing rather than replacing matters to the history feed: a
+        delete-and-reinsert writes a new id, so the feed loses the thread
+        connecting an edit to the date it edited.
+        """
+        pass
+
+    @abstractmethod
     async def get_important_dates(self, contact_id: int) -> list[ImportantDate]:
         """Get all important dates for a contact."""
         pass

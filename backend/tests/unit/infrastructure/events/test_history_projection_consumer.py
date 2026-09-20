@@ -52,6 +52,7 @@ _CONTACT_EVENT_TYPES = {
     "ContactAddressDeleted",
     "ContactNoteAdded",
     "ImportantDateAdded",
+    "ImportantDateUpdated",
     "ImportantDateDeleted",
     "TagAssigned",
     "TagRemoved",

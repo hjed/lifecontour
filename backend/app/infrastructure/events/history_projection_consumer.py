@@ -57,6 +57,7 @@ _CONTACT_HISTORY_EVENT_TYPES: list[str] = [
     "ContactAddressDeleted",
     "ContactNoteAdded",
     "ImportantDateAdded",
+    "ImportantDateUpdated",
     "ImportantDateDeleted",
     "TagAssigned",
     "TagRemoved",

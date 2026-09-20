@@ -604,6 +604,77 @@ class TestContactProjectionEndToEnd:
         ) == [("status", None, "created", "ui", "ui")]
 
     @pytest.mark.asyncio
+    async def test_important_date_edit_projects_changed_fields(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """An in-place edit reaches the feed as the fields that moved.
+
+        The add and delete either side of it are bare status markers; an edit
+        has something to say, and says it through the same changed-fields
+        projection a relationship edit uses.
+        """
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(first_name="Edith"),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        saved_date = await service.add_contact_important_date(
+            created.id,
+            ImportantDate(
+                contact_id=created.id,
+                date_type=ImportantDateType.BIRTHDAY,
+                precision=DatePrecision.FULL,
+                year=1990,
+                month=5,
+                day=15,
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert saved_date.id is not None
+        # Drain the add so only the edit's rows are under test.
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        await service.update_contact_important_date(
+            created.id,
+            saved_date.id,
+            ImportantDate(
+                id=saved_date.id,
+                contact_id=created.id,
+                date_type=ImportantDateType.BIRTHDAY,
+                precision=DatePrecision.FULL,
+                year=1991,
+                month=5,
+                day=15,
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        rows = await _rows_for(
+            async_connection,
+            entity_type="contact_important_date",
+            entity_id=saved_date.id,
+        )
+        # The whole history of this date: the add's marker, then one row for
+        # the single field the edit moved. Asserted as a set rather than a
+        # membership check, so an edit that reported month and day as having
+        # "changed" from themselves would fail here.
+        assert set(rows) == {
+            ("status", None, "created", "ui", "ui"),
+            ("year", "1990", "1991", "ui", "ui"),
+        }
+
+    @pytest.mark.asyncio
     async def test_bulk_update_produces_no_spurious_subentity_markers(
         self,
         test_stream_name: str,

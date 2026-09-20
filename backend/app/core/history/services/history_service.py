@@ -487,6 +487,23 @@ class HistoryService:
             id_key="date_id",
         )
 
+    def _project_important_date_updated(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """An in-place edit, reported as the fields that actually moved.
+
+        Unlike the add and delete markers either side of it, an edit has
+        something to say beyond "it happened", so it reuses the same
+        changed-fields projection a relationship edit does.
+        """
+        return self._rows_from_changed_fields(
+            event,
+            data,
+            entity_type=_CONTACT_IMPORTANT_DATE_ENTITY_TYPE,
+            entity_id=data["date_id"],
+            changed_fields=data.get("changed_fields"),
+        )
+
     def _project_important_date_deleted(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
@@ -913,6 +930,7 @@ _HANDLERS = {
     "ContactAddressDeleted": HistoryService._project_contact_address_deleted,
     "ContactNoteAdded": HistoryService._project_contact_note_added,
     "ImportantDateAdded": HistoryService._project_important_date_added,
+    "ImportantDateUpdated": HistoryService._project_important_date_updated,
     "ImportantDateDeleted": HistoryService._project_important_date_deleted,
     "TagAssigned": HistoryService._project_tag_assigned,
     "TagRemoved": HistoryService._project_tag_removed,

@@ -43,6 +43,7 @@ _SEARCH_EVENT_TYPES: list[str] = [
     "TagRemoved",
     # Contact-scoped important date events
     "ImportantDateAdded",
+    "ImportantDateUpdated",
     "ImportantDateDeleted",
     # Journal events
     "JournalCreated",

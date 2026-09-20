@@ -427,6 +427,44 @@ class ImportantDateAdded(DomainEvent):
 
 
 @dataclass(frozen=True)
+class ImportantDateUpdated(DomainEvent):
+    """Event raised when an important date is edited in place.
+
+    Carries ``changed_fields`` as ``{field: (old, new)}`` rather than a bare
+    "updated" marker, so the history projection can reuse
+    ``_rows_from_changed_fields`` and the feed shows *what* moved. Enum-valued
+    fields are passed by value, because the payload is serialised to JSON in
+    the outbox.
+    """
+
+    def __init__(
+        self,
+        contact_id: int,
+        date_id: int,
+        date_type: str,
+        changed_fields: dict[str, Any],
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        super().__init__(
+            event_id=f"contact_important_date_updated_{contact_id}_{date_id}_{datetime.now(tz=UTC).isoformat()}",
+            occurred_at=datetime.now(tz=UTC),
+            aggregate_id=contact_id,
+            event_type="ImportantDateUpdated",
+            event_data={
+                "contact_id": contact_id,
+                "date_id": date_id,
+                "date_type": date_type,
+                "changed_fields": changed_fields,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
 class ImportantDateDeleted(DomainEvent):
     """Event raised when an important date is deleted from a contact."""
 
