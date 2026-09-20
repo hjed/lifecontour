@@ -353,3 +353,77 @@ class TestStreamConsumerIntegration:
         assert (
             meta_row.version_hash != version_hash
         )  # Hash should be updated to the new one
+
+    @pytest.mark.asyncio
+    async def test_journal_deleted_clears_a_claim_without_snipeit_settings(
+        self,
+        async_connection: Any,
+    ) -> None:
+        """A claim-only deletion is cleared against a real session.
+
+        The unit test for this path mocks ``session.begin()``, which hides
+        whether the handler's transaction handling is valid on a real
+        ``AsyncSession`` that the fast-path query has already opened one on.
+        """
+        from contextlib import asynccontextmanager
+
+        from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
+
+        user_id = "user-with-a-deleted-maintenance-journal"
+        journal_id = 987654
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (internal_uuid, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status, retry_count,
+                     reference_data, created_at, updated_at)
+                VALUES
+                    (:journal_id, 'snipeit_maintenance_claim', :journal_id,
+                     now(), 'PENDING', 'failed', 0,
+                     '{"asset_id": 51, "title": "Retire Harness",
+                       "start_date": "2026-09-11"}', now(), now())
+            """),
+            {"journal_id": str(journal_id)},
+        )
+
+        @asynccontextmanager
+        async def session_factory() -> AsyncIterator[SqlAsyncSession]:
+            async with SqlAsyncSession(
+                async_connection,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            ) as session:
+                yield session
+
+        consumer = SnipeItWorkerStreamConsumer(
+            stream_client=AsyncMock(),
+            session_factory=session_factory,
+        )
+        event = StreamEvent(
+            message_id="123",
+            event_id="abc",
+            event_type="JournalDeleted",
+            aggregate_id=journal_id,
+            event_data={"journal_id": journal_id, "user_id": user_id},
+            occurred_at="2026-09-20T00:00:00Z",
+        )
+
+        # No snipeit_settings row for this user: clearing a claim is a database
+        # write and must not wait on credentials.
+        with (
+            patch("worker._get_auth_data") as mock_get_auth,
+            patch("worker._create_sync_service") as mock_create,
+        ):
+            await consumer._handle_event(event)
+
+        mock_get_auth.assert_not_called()
+        mock_create.assert_not_called()
+        remaining = await async_connection.execute(
+            text("""
+                SELECT 1 FROM sync_metadata
+                WHERE integration_source = 'snipeit_maintenance_claim'
+                  AND external_id = :journal_id
+            """),
+            {"journal_id": str(journal_id)},
+        )
+        assert remaining.fetchone() is None

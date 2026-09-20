@@ -427,12 +427,21 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             await sync_service._api_client.close()
 
     async def _handle_journal_deleted(self, event: StreamEvent) -> None:
-        """Process JournalDeleted events: check in any asset the journal held.
+        """Process JournalDeleted events: undo what the journal put in Snipe-IT.
 
-        The journal and its cascade-deleted gear-usage data are already gone, so
-        the asset is resolved from the recorded ``snipeit_checkout`` sync metadata
-        inside ``push_checkin_create``. This is a no-op unless the journal had an
-        active Snipe-IT checkout.
+        The journal and its cascade-deleted type data are already gone, so there
+        is no journal type to dispatch on. What the journal put in Snipe-IT is
+        read from the sync rows that name it instead, and each is undone:
+
+        - ``snipeit_checkout``: the asset it held is checked in, resolved from
+          the row inside ``push_checkin_create``.
+        - ``snipeit_maintenance``: the record it pushed is deleted, so it cannot
+          outlive the journal and import again as a new one.
+        - ``snipeit_maintenance_claim``: the claim an attempt that failed after
+          posting left is removed; it is inert once its journal is gone.
+
+        A journal is gear usage or maintenance, never both, so in practice one
+        path runs. This is a no-op for a journal Snipe-IT never recorded.
         """
         self._log_processed(event)
         journal_id = event.event_data.get("journal_id")
@@ -445,26 +454,52 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
 
         from snipeit_api_client import SnipeItAPIError
         from snipeit_settings import SnipeItWorkerSettings
+        from snipeit_sync_service import _delete_maintenance_claim
         from worker import _create_sync_service, _get_auth_data
 
-        # Fast path: only proceed if this journal recorded a Snipe-IT checkout.
+        # Fast path: only proceed if this journal put something in Snipe-IT. A
+        # claim is keyed by journal id on ``external_id``, the others on
+        # ``internal_uuid``.
         async with self._session_factory() as session:
-            checkout_result = await session.execute(
+            rows_result = await session.execute(
                 text("""
-                    SELECT 1
+                    SELECT integration_source
                     FROM sync_metadata
-                    WHERE integration_source = 'snipeit_checkout'
-                      AND internal_uuid = :journal_id
+                    WHERE (integration_source IN
+                               ('snipeit_checkout', 'snipeit_maintenance')
+                           AND internal_uuid = :journal_id)
+                       OR (integration_source = 'snipeit_maintenance_claim'
+                           AND external_id = :journal_id)
                 """),
                 {"journal_id": str(journal_id)},
             )
-            if not checkout_result.fetchone():
-                logger.debug(
-                    "Skipping JournalDeleted: no Snipe-IT checkout for journal",
-                    journal_id=journal_id,
-                )
-                return
+            sources = {row.integration_source for row in rows_result.fetchall()}
 
+        if not sources:
+            logger.debug(
+                "Skipping JournalDeleted: nothing recorded in Snipe-IT",
+                journal_id=journal_id,
+            )
+            return
+
+        # A claim with no record beside it is cleared before anything asks for
+        # credentials: clearing it is a database write, and a user who has
+        # disconnected Snipe-IT would otherwise leave it behind for good. A
+        # claim alongside a push row goes with that record instead.
+        #
+        # In its own session: the query above has already opened a transaction
+        # on that one, and asking it to begin a second raises.
+        if sources == {"snipeit_maintenance_claim"}:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    await _delete_maintenance_claim(session, journal_id)
+            logger.info(
+                "Cleared the maintenance claim of a deleted journal",
+                journal_id=journal_id,
+            )
+            return
+
+        async with self._session_factory() as session:
             settings_result = await session.execute(
                 text("""
                     SELECT user_id, base_url, snipeit_user_id
@@ -501,25 +536,17 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         )
 
         try:
-            checked_in = await sync_service.push_checkin_create(
-                journal_id=journal_id,
-                session_factory=self._session_factory,
-                note="Gear usage journal deleted",
-            )
-            if checked_in:
-                logger.info(
-                    "Checked in asset on journal deletion",
+            if "snipeit_checkout" in sources:
+                await self._checkin_deleted_journal(sync_service, journal_id)
+            if sources & {"snipeit_maintenance", "snipeit_maintenance_claim"}:
+                await sync_service.delete_pushed_maintenance(
                     journal_id=journal_id,
-                )
-            else:
-                logger.debug(
-                    "Journal deletion checkin was a no-op",
-                    journal_id=journal_id,
+                    session_factory=self._session_factory,
                 )
         except SnipeItAPIError as exc:
             if exc.status_code in (403, 404):
                 logger.debug(
-                    "Skipping journal deletion checkin (not found/forbidden)",
+                    "Skipping journal deletion cleanup (not found/forbidden)",
                     journal_id=journal_id,
                     status_code=exc.status_code,
                 )
@@ -527,6 +554,26 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 raise
         finally:
             await sync_service._api_client.close()
+
+    async def _checkin_deleted_journal(
+        self, sync_service: Any, journal_id: int
+    ) -> None:
+        """Check in the asset a deleted gear-usage journal held."""
+        checked_in = await sync_service.push_checkin_create(
+            journal_id=journal_id,
+            session_factory=self._session_factory,
+            note="Gear usage journal deleted",
+        )
+        if checked_in:
+            logger.info(
+                "Checked in asset on journal deletion",
+                journal_id=journal_id,
+            )
+        else:
+            logger.debug(
+                "Journal deletion checkin was a no-op",
+                journal_id=journal_id,
+            )
 
 
 async def run_snipeit_stream_consumer(

@@ -81,6 +81,12 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
   - `retiring gear` has no Snipe-IT kind and is sent as `Maintenance`. A re-import keeps `retiring gear` while the record is still `Maintenance`; any other kind replaces it.
   - An unknown or missing kind imports as `routine maintenance`.
   - Imports synced under the earlier, lossy mapping are re-synced and corrected by the next full maintenance sync.
+- **Deletion**: Deleting a `GEAR_MAINTENANCE` journal removes the maintenance it put in Snipe-IT, so the deletion is not undone by the next sync.
+  - The record the journal pushed is deleted, and its sync row and any claim go with it. A record Snipe-IT says it no longer has counts as deleted.
+  - Nothing is deleted for a journal that pushed no record. A claim is all a push that failed before recording its record leaves, and it is removed unused: matching a record by title and start date could delete one entered by hand.
+  - A record the system is not allowed to delete keeps its sync row, so it reappears on a later sync as a new journal rather than being lost silently.
+  - A record whose journal is gone is imported as a new journal rather than skipped as one pushed from a journal. This recovers records orphaned before the system deleted them, and is why a journal deleted while its record was being posted has that record deleted instead of recorded.
+  - A push whose journal is deleted before it posts gives up instead: it neither claims, links nor posts. A journal is held against deletion while its record's sync row is being written, so the deletion always sees the row it has to clean up.
 - **Local-Only Fields**: Snipe-IT has no activity types or retirement reason, so a re-import leaves a journal's `activity_types` and `retirement_reason` untouched.
 - **Deduplication**: Uses the `SyncMetadata` table to map the internal journal ID to the external Snipe-IT maintenance ID.
   - **Retries**: A push claims the record it creates before posting it. The journal's claim row (`snipeit_maintenance_claim`) holds the asset, title and start date sent, and is replaced by the record's own row once that is written. An attempt that fails after posting keeps its claim, marked failed: Snipe-IT may have created the record even though the response was lost.
@@ -92,7 +98,9 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
   - The inbound maintenance sync checks claims before importing a record it has no sync row for. A record that exactly one of the user's journals' claims matches is linked to that journal instead of imported. This covers a record whose response was lost, and one fetched before its push recorded it. A record that several claims match is left unimported, and a later sync looks again once those pushes resolve. A claim whose journal already has its record is spent and ignored, so it can never link a second record to that journal. A claim made for an asset its journal has since moved from is ignored as well, as the push ignores it.
   - Known gaps:
     - A push whose search missed a matching record (beyond the first 500) can still create a second record. This is logged as a warning, and that record imports as a separate journal.
-    - A journal deleted while its push was failing leaves a claim that is ignored, so a record its lost POST created imports as a new journal.
+    - A journal deleted while its push was failing has its claim removed, but whether that push's lost POST created a record is unknowable, so a record it did create imports as a new journal.
+    - A record that a journal's push recorded before that journal was deleted, and which the deletion could not remove, imports as a new journal on the next full sync rather than staying hidden.
+    - A journal deleted in the moment between its record being posted and being recorded has that record deleted, but nothing retries that delete if it fails. The record then imports as a new journal, as a record left by any other lost attempt does.
 - **Loop Prevention**: A record must never travel back to the system it came from.
   - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created in Snipe-IT again.
   - A journal update the inbound sync applied (`changed_by` is `snipeit_maintenance`) is not pushed; only a user's edit is.

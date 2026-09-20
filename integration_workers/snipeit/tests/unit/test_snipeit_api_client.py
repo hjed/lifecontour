@@ -661,6 +661,69 @@ class TestSnipeItAPIClientUpdateMaintenance:
         assert path == "maintenances/101"
 
 
+class TestSnipeItAPIClientDeleteMaintenance:
+    """Tests for delete_maintenance method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_delete(self, client_no_refresh: SnipeItAPIClient) -> None:
+        """A deleted record reports True and uses the correct relative path."""
+        resp = _ok_response(
+            {"status": "success", "messages": "Asset Maintenance deleted successfully."}
+        )
+        with patch.object(
+            client_no_refresh._client, "delete", return_value=resp
+        ) as mock_delete:
+            deleted = await client_no_refresh.delete_maintenance(101)
+
+        assert deleted is True
+        assert mock_delete.call_args.args[0] == "maintenances/101"
+
+    @pytest.mark.asyncio
+    async def test_already_deleted_reports_false(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """A 404 means the record is already gone, which is not an error."""
+        mock_404 = MagicMock()
+        mock_404.status_code = 404
+        with patch.object(client_no_refresh._client, "delete", return_value=mock_404):
+            assert await client_no_refresh.delete_maintenance(101) is False
+
+    @pytest.mark.asyncio
+    async def test_forbidden_raises(self, client_no_refresh: SnipeItAPIClient) -> None:
+        """A 403 raises so the caller can leave the sync rows in place."""
+        mock_403 = MagicMock()
+        mock_403.status_code = 403
+        with patch.object(client_no_refresh._client, "delete", return_value=mock_403):
+            with pytest.raises(SnipeItAPIError) as exc_info:
+                await client_no_refresh.delete_maintenance(101)
+
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """DELETE shares the other verbs' 429 handling."""
+        mock_429 = MagicMock()
+        mock_429.status_code = 429
+        mock_429.headers = {"Retry-After": "30"}
+        with patch.object(client_no_refresh._client, "delete", return_value=mock_429):
+            with pytest.raises(SnipeItRateLimitError, match="rate limited"):
+                await client_no_refresh.delete_maintenance(101)
+
+    @pytest.mark.asyncio
+    async def test_error_status_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """A 200 body reporting an error raises rather than claiming success."""
+        resp = _ok_response(
+            {"status": "error", "messages": "Asset Maintenance does not exist."}
+        )
+        with patch.object(client_no_refresh._client, "delete", return_value=resp):
+            with pytest.raises(SnipeItAPIError, match="failed"):
+                await client_no_refresh.delete_maintenance(101)
+
+
 class TestSnipeItAPIClientCheckoutAsset:
     """Tests for checkout_asset method."""
 
