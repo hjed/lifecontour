@@ -214,6 +214,28 @@ class TestSnipeItMaintenanceImportLink:
         )
         assert maintenance.scalar_one() == gear_item_id
 
+    async def test_the_maintenance_calendar_records_which_integration_owns_it(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The synthetic calendar is created carrying its source.
+
+        Deleting the journal reads it back to file the record's external id
+        under Snipe-IT's own key, which is the only way the worker can find the
+        record an imported journal came from once the link above is gone.
+        """
+        gear_item_id = await _create_gear_item(async_connection)
+        processor = build_processor(async_connection)
+
+        await processor.process_event(
+            _maintenance_event(gear_item_id, maintenance_id=17)
+        )
+
+        source = await async_connection.execute(
+            text("SELECT integration_source FROM calendars WHERE id = :calendar_id"),
+            {"calendar_id": SNIPEIT_MAINTENANCE_CALENDAR_ID},
+        )
+        assert source.scalar_one() == "snipeit_maintenance"
+
 
 @pytest.mark.integration
 class TestSnipeItMaintenanceResyncKeepsLocalFields:
