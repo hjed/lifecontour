@@ -133,6 +133,11 @@ class TestStopChannel:
 
         await client.stop_channel("channel-uuid", "resource-id-456")
 
+        # The request was attempted and its 404 swallowed — asserting this
+        # keeps the test honest, since it would otherwise also pass if
+        # stop_channel skipped the call altogether.
+        mock_service.channels().stop().execute.assert_called()
+
     @pytest.mark.asyncio
     async def test_stop_channel_treats_410_as_already_stopped(
         self, mock_service: MagicMock
@@ -148,6 +153,8 @@ class TestStopChannel:
         client._get_calendar_service = AsyncMock(return_value=mock_service)
 
         await client.stop_channel("channel-uuid", "resource-id-456")
+
+        mock_service.channels().stop().execute.assert_called()
 
     @pytest.mark.asyncio
     async def test_stop_channel_reraises_other_http_errors(
