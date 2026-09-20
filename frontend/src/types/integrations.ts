@@ -85,6 +85,8 @@ export interface GoogleCalendarItem {
     description?: string;
     backgroundColor?: string;
     primary: boolean;
+    /** owner | writer | reader | freeBusyReader — what Google lets us do here. */
+    accessRole?: string | null;
   };
 }
 
