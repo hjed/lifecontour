@@ -4336,7 +4336,7 @@ async def setup_calendar_webhook(
 
             # Stop existing channel if one exists
             stmt = text("""
-                SELECT channel_id, channel_resource_id
+                SELECT channel_id, channel_resource_id, channel_expiration
                 FROM calendar_sync_tokens
                 WHERE user_id = :user_id
                 AND google_account_email = :email
@@ -4354,21 +4354,32 @@ async def setup_calendar_webhook(
             )
             existing_row = existing_result.fetchone()
             if existing_row:
-                try:
-                    await client.stop_channel(
+                # A channel past its expiry has already been discarded by
+                # Google, so stopping it would only spend a round trip to be
+                # told it does not exist.
+                expiration = existing_row.channel_expiration
+                if expiration is not None and expiration <= datetime.now(UTC):
+                    logger.debug(
+                        "Previous calendar webhook channel already expired",
                         channel_id=existing_row.channel_id,
-                        resource_id=existing_row.channel_resource_id,
+                        channel_expiration=expiration.isoformat(),
                     )
-                    logger.info(
-                        "Stopped previous calendar webhook channel",
-                        channel_id=existing_row.channel_id,
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(
-                        "Failed to stop previous watch channel",
-                        channel_id=existing_row.channel_id,
-                        error=str(e),
-                    )
+                else:
+                    try:
+                        await client.stop_channel(
+                            channel_id=existing_row.channel_id,
+                            resource_id=existing_row.channel_resource_id,
+                        )
+                        logger.info(
+                            "Stopped previous calendar webhook channel",
+                            channel_id=existing_row.channel_id,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(
+                            "Failed to stop previous watch channel",
+                            channel_id=existing_row.channel_id,
+                            error=str(e),
+                        )
 
             # Register watch channel with Google
             result = await client.watch_events(

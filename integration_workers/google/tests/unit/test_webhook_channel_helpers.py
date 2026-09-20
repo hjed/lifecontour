@@ -5,13 +5,23 @@ setup_calendar_webhook ARQ task.
 """
 
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from core_shared.testing import make_arq_ctx, make_mock_redis
+from googleapiclient.errors import HttpError
 
 sys.path.insert(0, "/core_shared")
+
+
+def make_http_error(status: int, reason: str = "Error") -> HttpError:
+    """Build a googleapiclient HttpError carrying the given HTTP status."""
+    response = MagicMock()
+    type(response).status = PropertyMock(return_value=status)
+    response.reason = reason
+    return HttpError(resp=response, content=reason.encode())
 
 
 class TestWatchEvents:
@@ -107,6 +117,55 @@ class TestStopChannel:
         assert body["id"] == "channel-uuid"
         assert body["resourceId"] == "resource-id-456"
 
+    @pytest.mark.asyncio
+    async def test_stop_channel_treats_404_as_already_stopped(
+        self, mock_service: MagicMock
+    ) -> None:
+        """A channel Google has already forgotten is not an error to stop."""
+        from google_client import GoogleAPIClient
+
+        mock_service.channels().stop().execute.side_effect = make_http_error(
+            404, "Not Found"
+        )
+
+        client = GoogleAPIClient.__new__(GoogleAPIClient)
+        client._get_calendar_service = AsyncMock(return_value=mock_service)
+
+        await client.stop_channel("channel-uuid", "resource-id-456")
+
+    @pytest.mark.asyncio
+    async def test_stop_channel_treats_410_as_already_stopped(
+        self, mock_service: MagicMock
+    ) -> None:
+        """A channel reported as gone is likewise already in the desired state."""
+        from google_client import GoogleAPIClient
+
+        mock_service.channels().stop().execute.side_effect = make_http_error(
+            410, "Gone"
+        )
+
+        client = GoogleAPIClient.__new__(GoogleAPIClient)
+        client._get_calendar_service = AsyncMock(return_value=mock_service)
+
+        await client.stop_channel("channel-uuid", "resource-id-456")
+
+    @pytest.mark.asyncio
+    async def test_stop_channel_reraises_other_http_errors(
+        self, mock_service: MagicMock
+    ) -> None:
+        """A genuine failure to stop the channel still propagates."""
+        from google_client import GoogleAPIClient
+
+        mock_service.channels().stop().execute.side_effect = make_http_error(
+            500, "Internal Server Error"
+        )
+
+        client = GoogleAPIClient.__new__(GoogleAPIClient)
+        client._get_calendar_service = AsyncMock(return_value=mock_service)
+
+        with pytest.raises(HttpError):
+            await client.stop_channel("channel-uuid", "resource-id-456")
+
 
 class TestSetupCalendarWebhook:
     """Tests for the setup_calendar_webhook ARQ task."""
@@ -198,6 +257,7 @@ class TestSetupCalendarWebhook:
         mock_existing_row = MagicMock()
         mock_existing_row.channel_id = "old-channel-id"
         mock_existing_row.channel_resource_id = "old-resource-id"
+        mock_existing_row.channel_expiration = datetime.now(UTC) + timedelta(days=3)
 
         mock_result = MagicMock()
         mock_result.fetchone.return_value = mock_existing_row
@@ -280,3 +340,82 @@ class TestSetupCalendarWebhook:
 
         assert result["status"] == "error"
         assert "API Error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_skips_stop_for_expired_channel(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """An expired channel is already gone, so do not ask Google to stop it."""
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            return_value={
+                "resourceId": "res-id-123",
+                "expiration": "1711580400000",
+            }
+        )
+        mock_client.stop_channel = AsyncMock()
+
+        mock_existing_row = MagicMock()
+        mock_existing_row.channel_id = "expired-channel-id"
+        mock_existing_row.channel_resource_id = "expired-resource-id"
+        mock_existing_row.channel_expiration = datetime.now(UTC) - timedelta(days=1)
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = mock_existing_row
+        mock_session.execute.return_value = mock_result
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            result = await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+        assert result["status"] == "success"
+        mock_client.stop_channel.assert_not_called()
+        mock_client.watch_events.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stops_channel_with_unknown_expiration(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """Without a recorded expiry the channel may still be live, so stop it."""
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            return_value={
+                "resourceId": "res-id-123",
+                "expiration": "1711580400000",
+            }
+        )
+        mock_client.stop_channel = AsyncMock()
+
+        mock_existing_row = MagicMock()
+        mock_existing_row.channel_id = "old-channel-id"
+        mock_existing_row.channel_resource_id = "old-resource-id"
+        mock_existing_row.channel_expiration = None
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = mock_existing_row
+        mock_session.execute.return_value = mock_result
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            result = await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+        assert result["status"] == "success"
+        mock_client.stop_channel.assert_called_once_with(
+            channel_id="old-channel-id", resource_id="old-resource-id"
+        )
