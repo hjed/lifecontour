@@ -50,6 +50,8 @@ from app.api.contacts.schemas import (
     ContactSummaryUpdateRequest,
     ContactUpdateRequest,
     FieldUpdateRequest,
+    ImportantDateCreateRequest,
+    ImportantDateUpdateRequest,
     MergeContactRequest,
     MethodFieldUpdateRequest,
     NoteFieldUpdateRequest,
@@ -925,6 +927,21 @@ async def delete_contact_method(
     )
 
 
+async def _contact_response(
+    contact_service: ContactService, contact_id: int, base_url: str
+) -> ContactResponse:
+    """Re-read the contact and render it, for the sub-resource writes.
+
+    They answer with the whole contact rather than the sub-resource, so a client
+    can replace its cached contact from the response of a write to one date.
+    """
+    updated_contact = await contact_service.get_contact_by_id(contact_id)
+    if not updated_contact:
+        raise ContactNotFoundError(contact_id)
+
+    return ContactResponse(data=ContactConverter.to_resource(updated_contact, base_url))
+
+
 # Contact Addresses Management Endpoints
 
 
@@ -995,6 +1012,112 @@ async def delete_contact_address(
     """
     await contact_service.delete_contact_address(
         contact_id, address_id, connection, changed_by="ui", source=Provenance.UI
+    )
+
+
+# Contact Important Dates Management Endpoints
+#
+# Important dates are edited as whole resources rather than field by field, the
+# way methods, addresses and notes are: precision constrains which of
+# year/month/day may be present, and date_type constrains custom_date_type_id,
+# so a per-field PATCH could not express "year-only 2020 becomes 9 March 2015"
+# without passing through a state the domain rejects. See
+# docs/architecture/api-design.md.
+
+
+@router.post(
+    "/{contact_id}/important-dates",
+    status_code=status.HTTP_201_CREATED,
+)
+@inject
+async def add_contact_important_date(
+    contact_id: int,
+    request: Request,
+    date_request: ImportantDateCreateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    _user: FromDishka[SessionUser],  # Require authentication
+) -> ContactResponse:
+    """
+    Add a new important date to an existing contact.
+
+    Creates the date and returns the updated contact.
+    """
+    base_url = get_request_base_url(request)
+
+    date = ContactRequestConverter.from_important_date_create_request(
+        date_request.data, contact_id
+    )
+
+    try:
+        await contact_service.add_contact_important_date(
+            contact_id, date, connection, changed_by="ui", source=Provenance.UI
+        )
+    except ContactValidationError as e:
+        if CONTACT_NOT_FOUND_ERROR in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+    return await _contact_response(contact_service, contact_id, base_url)
+
+
+@router.put("/{contact_id}/important-dates/{date_id}")
+@inject
+async def update_contact_important_date(
+    contact_id: int,
+    date_id: int,
+    request: Request,
+    date_request: ImportantDateUpdateRequest,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    _user: FromDishka[SessionUser],  # Require authentication
+) -> ContactResponse:
+    """
+    Replace an existing important date.
+
+    The date keeps its ID, and the updated contact is returned.
+    """
+    base_url = get_request_base_url(request)
+
+    date = ContactRequestConverter.from_important_date_update_request(
+        date_request.data, contact_id, date_id
+    )
+
+    try:
+        await contact_service.update_contact_important_date(
+            contact_id,
+            date_id,
+            date,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+    except ContactValidationError as e:
+        if CONTACT_NOT_FOUND_ERROR in str(e):
+            raise ContactNotFoundError(contact_id) from e
+        raise
+
+    return await _contact_response(contact_service, contact_id, base_url)
+
+
+@router.delete(
+    "/{contact_id}/important-dates/{date_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+@inject
+async def delete_contact_important_date(
+    contact_id: int,
+    date_id: int,
+    contact_service: FromDishka[ContactService],
+    connection: FromDishka[AsyncConnection],
+    _user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """
+    Delete an important date.
+
+    Removes the specified date from the contact.
+    """
+    await contact_service.delete_contact_important_date(
+        contact_id, date_id, connection, changed_by="ui", source=Provenance.UI
     )
 
 

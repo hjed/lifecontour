@@ -1045,6 +1045,57 @@ Conventions this surface pins down:
   (`__created__`, `__deleted__`, `journal:{id}`, `contact:{id}`), and that this
   is a record rather than a way to browse tasks.
 
+## Contact Important Date Endpoints
+
+```
+POST   /api/contacts/{contact_id}/important-dates
+PUT    /api/contacts/{contact_id}/important-dates/{date_id}
+DELETE /api/contacts/{contact_id}/important-dates/{date_id}
+```
+
+- **The date is edited as a whole resource, not field by field.** Every other
+  contact sub-resource — methods, addresses, notes — is edited through
+  `PATCH .../{id}/fields/{field_name}`, one field per call. An important date
+  cannot be, because its fields constrain each other: `precision` decides which
+  of `year`/`month`/`day` may be present *and* which must be, and `date_type`
+  decides whether `custom_date_type_id` may be set at all. Both rules are
+  enforced by `ImportantDateAttributes` in the request schema and again by
+  `ImportantDate.__post_init__` in the domain. Turning a year-only 2020 into a
+  full-precision 9 March 2015 means moving four fields at once; any
+  field-at-a-time sequence passes through a state both layers reject, so the
+  edit would be impossible to express rather than merely awkward. `PUT` rather
+  than `PATCH` because the body is always the date's complete attributes.
+- **The path id wins over the body id.** `ImportantDateUpdateData` accepts an
+  optional `id` so the request reads as a JSON:API resource, but the converter
+  takes the id from the URL. A body id that disagreed with the path would
+  otherwise quietly decide which row got written.
+- **All three answer with the whole contact** (`ContactResponse`), matching the
+  address and method endpoints, so a client can replace its cached contact from
+  the response to a write against one date. `DELETE` answers 204.
+- **A date id that is unknown, or belongs to another contact, is 422**
+  `CONTACT_VALIDATION_ERROR` — the same answer
+  `DELETE /{contact_id}/addresses/{address_id}` gives for an unknown address.
+  A missing *contact* is 404 `CONTACT_NOT_FOUND`. Retyping a second date as the
+  birthday is 409 `DUPLICATE_BIRTHDAY`, from the `uq_contact_birthday` partial
+  unique index; editing the contact's existing birthday is not a second
+  birthday and is allowed.
+- **Editing writes per-field history.** The service publishes
+  `ImportantDateUpdated` carrying `changed_fields`, projected through
+  `_rows_from_changed_fields`, so the feed shows `year: 1990 → 1991` rather
+  than a bare status marker. The add and delete markers either side of it are
+  unchanged. A submitted date identical to the stored one writes nothing at
+  all. MCP still edits dates through `update_contact`'s whole-list replacement
+  and so writes no such rows — issue #1524.
+
+### Why these exist
+
+Until LOCAL-176 the only way to change an important date was the whole-contact
+`PUT /api/contacts/{id}`, which replaces the date list wholesale: every date is
+deleted and re-inserted, so ids churn on each save and the per-item events are
+flagged `affects_history=False`. The contact detail page's Important Dates card
+was the last UI writing through that route.
+
+
 ## Authentication Guidelines
 
 ### Session-Based Authentication

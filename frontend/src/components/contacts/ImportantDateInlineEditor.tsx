@@ -133,6 +133,12 @@ export function ImportantDateInlineEditor({
     setIsSaving(true);
     try {
       await onSave(data);
+    } catch {
+      // Swallowed deliberately. onSave rejects when the write is refused - a
+      // duplicate birthday, say - and the mutation hook has already shown the
+      // reason as a toast. Letting it escape an onClick handler would only
+      // raise an unhandled rejection; what matters here is that the editor
+      // stays open with the user's input rather than closing over lost work.
     } finally {
       setIsSaving(false);
     }

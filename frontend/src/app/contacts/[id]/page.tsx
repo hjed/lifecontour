@@ -204,7 +204,7 @@ function ContactDetailPageContent() {
             {/* Important Dates */}
             <ImportantDatesList
               contactId={contact.id}
-              contactAttributes={contact.attributes}
+              dates={contact.attributes.important_dates || []}
             />
           </div>
 

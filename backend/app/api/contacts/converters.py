@@ -8,7 +8,7 @@ ensuring proper separation between domain and API layers.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.api.common.schemas import JsonApiLinks
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         ContactUpdateData,
         CustomDateTypeCreateData,
         ImportantDateCreateData,
+        ImportantDateUpdateData,
     )
 
 from core_shared.models.contacts.entities import (
@@ -192,6 +193,8 @@ class ContactConverter:
             last_name=contact.last_name,
             middle_name=contact.middle_name,
             nick_name=contact.nick_name,
+            company=contact.company,
+            job_title=contact.job_title,
             is_favourite=contact.is_favourite,
             photo_url=contact.photo_url,
             created_at=contact.created_at,
@@ -352,6 +355,29 @@ class ContactRequestConverter:
         )
 
     @staticmethod
+    def from_important_date_update_request(
+        request_data: ImportantDateUpdateData,
+        contact_id: int,
+        date_id: int,
+    ) -> ImportantDate:
+        """Convert API update request for important date to domain entity.
+
+        The id comes from the path, not the body: a body id that disagreed with
+        the URL would otherwise decide which date got written.
+        """
+        attrs = request_data.attributes
+        return ImportantDate(
+            id=date_id,
+            contact_id=contact_id,
+            date_type=ImportantDateType(attrs.date_type),
+            precision=DatePrecision(attrs.precision),
+            year=attrs.year,
+            month=attrs.month,
+            day=attrs.day,
+            custom_date_type_id=attrs.custom_date_type_id,
+        )
+
+    @staticmethod
     def from_create_request(
         request_data: ContactCreateData,
     ) -> Contact:
@@ -389,6 +415,8 @@ class ContactRequestConverter:
             last_name=attrs.last_name,
             middle_name=attrs.middle_name,
             nick_name=attrs.nick_name,
+            company=attrs.company,
+            job_title=attrs.job_title,
             is_favourite=attrs.is_favourite,
             methods=methods,
             addresses=addresses,
@@ -428,6 +456,17 @@ class ContactRequestConverter:
             for date in attrs.important_dates
         ]
 
+        # ``ContactRepository.save`` writes company, job_title, photo_url and
+        # is_favourite on every update, so a field this converter does not
+        # supply is not "left alone" - it is nulled. ``ContactAttributes`` is
+        # shared by requests and responses and cannot distinguish an omitted
+        # key from an explicit null by its default, so the distinction is read
+        # from the keys the caller actually sent.
+        def _stated_or_existing(field: str, existing: Any) -> Any:
+            if field in attrs.model_fields_set:
+                return getattr(attrs, field)
+            return existing
+
         # Update the existing contact with new data
         updated_contact = Contact(
             id=existing_contact.id,
@@ -435,7 +474,14 @@ class ContactRequestConverter:
             last_name=attrs.last_name,
             middle_name=attrs.middle_name,
             nick_name=attrs.nick_name,
-            is_favourite=attrs.is_favourite,
+            company=_stated_or_existing("company", existing_contact.company),
+            job_title=_stated_or_existing("job_title", existing_contact.job_title),
+            # Not _stated_or_existing: photo_url is derived by contact sync and
+            # is read-only on this surface, so the stored value always wins.
+            photo_url=existing_contact.photo_url,
+            is_favourite=_stated_or_existing(
+                "is_favourite", existing_contact.is_favourite
+            ),
             methods=methods,
             addresses=addresses,
             notes=notes,

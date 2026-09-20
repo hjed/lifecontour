@@ -6,8 +6,13 @@ from core_shared.models.contacts.entities import (
     ContactAddress,
     ContactMethod,
     ContactNote,
+    ImportantDate,
     MethodType,
     Tag,
+)
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
 )
 from core_shared.models.contacts.value_objects import TagName
 from sqlalchemy import text
@@ -15,8 +20,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlContactRepository, SqlTagRepository
+from app.core.contacts.adapters.sql.custom_date_type_repository import (
+    SqlCustomDateTypeRepository,
+)
 from app.core.contacts.models.exceptions import (
+    CustomDateTypeNotFoundError,
+    DuplicateBirthdayError,
     DuplicateEmailError,
+    ImportantDateNotFoundError,
 )
 
 
@@ -509,3 +520,243 @@ class TestContactRepositoryIntegration:
 
         # Assert
         assert count == 2
+
+
+@pytest.mark.integration
+class TestImportantDateRepositoryIntegration:
+    """Integration tests for the repository's important-date writes."""
+
+    @pytest.fixture
+    def contact_repo(self, clean_database: AsyncConnection) -> SqlContactRepository:
+        """Create ContactRepository instance with real database connection."""
+        return SqlContactRepository(clean_database)
+
+    @pytest.fixture
+    def custom_date_type_repo(
+        self, clean_database: AsyncConnection
+    ) -> SqlCustomDateTypeRepository:
+        """Create CustomDateTypeRepository instance with real database connection."""
+        return SqlCustomDateTypeRepository(clean_database)
+
+    @staticmethod
+    async def _contact_with_date(
+        contact_repo: SqlContactRepository, date: ImportantDate
+    ) -> tuple[Contact, ImportantDate]:
+        """Persist a contact carrying one important date, returning both."""
+        contact = await contact_repo.save(Contact(first_name="Date", last_name="Owner"))
+        assert contact.id is not None
+        date.contact_id = contact.id
+        saved_date = await contact_repo.add_important_date(contact.id, date)
+        return contact, saved_date
+
+    @pytest.mark.asyncio
+    async def test_update_important_date_rewrites_every_column(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """An update replaces type, precision and all three date components."""
+        # Arrange - a year-only work anniversary
+        contact, saved_date = await self._contact_with_date(
+            contact_repo,
+            ImportantDate(
+                contact_id=0,
+                date_type=ImportantDateType.WORK_ANNIVERSARY,
+                precision=DatePrecision.YEAR,
+                year=2020,
+            ),
+        )
+
+        assert contact.id is not None
+
+        # Act - become a full-precision first-met date
+        saved_date.date_type = ImportantDateType.FIRST_MET
+        saved_date.precision = DatePrecision.FULL
+        saved_date.year = 2015
+        saved_date.month = 3
+        saved_date.day = 9
+        returned = await contact_repo.update_important_date(saved_date)
+
+        # Assert - both the returned entity and the stored row
+        assert returned.id == saved_date.id
+        assert returned.updated_at is not None
+
+        stored = await contact_repo.get_important_dates(contact.id)
+        assert len(stored) == 1, "an update must not insert a second row"
+        assert stored[0].id == saved_date.id
+        assert stored[0].date_type == ImportantDateType.FIRST_MET
+        assert stored[0].precision == DatePrecision.FULL
+        assert stored[0].year == 2015
+        assert stored[0].month == 3
+        assert stored[0].day == 9
+
+    @pytest.mark.asyncio
+    async def test_update_important_date_clears_components_precision_drops(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """Narrowing precision nulls the components the new precision excludes."""
+        # Arrange - a full-precision first-met date
+        contact, saved_date = await self._contact_with_date(
+            contact_repo,
+            ImportantDate(
+                contact_id=0,
+                date_type=ImportantDateType.FIRST_MET,
+                precision=DatePrecision.FULL,
+                year=2015,
+                month=3,
+                day=9,
+            ),
+        )
+
+        assert contact.id is not None
+
+        # Act - drop to year-only
+        saved_date.precision = DatePrecision.YEAR
+        saved_date.month = None
+        saved_date.day = None
+        await contact_repo.update_important_date(saved_date)
+
+        # Assert
+        stored = await contact_repo.get_important_dates(contact.id)
+        assert stored[0].precision == DatePrecision.YEAR
+        assert stored[0].year == 2015
+        assert stored[0].month is None
+        assert stored[0].day is None
+
+    @pytest.mark.asyncio
+    async def test_update_birthday_in_place_does_not_violate_uniqueness(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """Editing the contact's only birthday is not a second birthday.
+
+        ``uq_contact_birthday`` is a partial unique index on ``contact_id``
+        where ``date_type = 'birthday'``. An in-place UPDATE of that same row
+        leaves one birthday, so it must be allowed - this is the ordinary case
+        of a user correcting a birth year.
+        """
+        # Arrange
+        contact, saved_date = await self._contact_with_date(
+            contact_repo,
+            ImportantDate(
+                contact_id=0,
+                date_type=ImportantDateType.BIRTHDAY,
+                precision=DatePrecision.FULL,
+                year=1990,
+                month=5,
+                day=15,
+            ),
+        )
+
+        assert contact.id is not None
+
+        # Act
+        saved_date.year = 1991
+        await contact_repo.update_important_date(saved_date)
+
+        # Assert
+        stored = await contact_repo.get_important_dates(contact.id)
+        assert len(stored) == 1
+        assert stored[0].year == 1991
+
+    @pytest.mark.asyncio
+    async def test_update_to_second_birthday_raises_duplicate_birthday(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """Retyping a second date as a birthday hits the partial unique index."""
+        # Arrange - a contact with a birthday and a work anniversary
+        contact, _birthday = await self._contact_with_date(
+            contact_repo,
+            ImportantDate(
+                contact_id=0,
+                date_type=ImportantDateType.BIRTHDAY,
+                precision=DatePrecision.DAY_MONTH,
+                month=5,
+                day=15,
+            ),
+        )
+        assert contact.id is not None
+        other = await contact_repo.add_important_date(
+            contact.id,
+            ImportantDate(
+                contact_id=contact.id,
+                date_type=ImportantDateType.WORK_ANNIVERSARY,
+                precision=DatePrecision.YEAR,
+                year=2020,
+            ),
+        )
+
+        # Act / Assert
+        other.date_type = ImportantDateType.BIRTHDAY
+        with pytest.raises(DuplicateBirthdayError):
+            await contact_repo.update_important_date(other)
+
+    @pytest.mark.asyncio
+    async def test_update_important_date_to_custom_type(
+        self,
+        contact_repo: SqlContactRepository,
+        custom_date_type_repo: SqlCustomDateTypeRepository,
+    ) -> None:
+        """A date can be retyped as custom, and reads back with the type name."""
+        # Arrange
+        contact, saved_date = await self._contact_with_date(
+            contact_repo,
+            ImportantDate(
+                contact_id=0,
+                date_type=ImportantDateType.FIRST_MET,
+                precision=DatePrecision.YEAR,
+                year=2015,
+            ),
+        )
+        assert contact.id is not None
+        custom_type = await custom_date_type_repo.create("Adoption Day")
+
+        # Act
+        saved_date.date_type = ImportantDateType.CUSTOM
+        saved_date.custom_date_type_id = custom_type.id
+        await contact_repo.update_important_date(saved_date)
+
+        # Assert - the name comes from the join, not the written row
+        stored = await contact_repo.get_important_dates(contact.id)
+        assert stored[0].date_type == ImportantDateType.CUSTOM
+        assert stored[0].custom_date_type_id == custom_type.id
+        assert stored[0].custom_date_type_name == "Adoption Day"
+
+    @pytest.mark.asyncio
+    async def test_update_important_date_unknown_custom_type_raises(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """A custom type id with no row behind it is refused by the FK."""
+        # Arrange
+        _contact, saved_date = await self._contact_with_date(
+            contact_repo,
+            ImportantDate(
+                contact_id=0,
+                date_type=ImportantDateType.FIRST_MET,
+                precision=DatePrecision.YEAR,
+                year=2015,
+            ),
+        )
+
+        # Act / Assert
+        saved_date.date_type = ImportantDateType.CUSTOM
+        saved_date.custom_date_type_id = 999999
+        with pytest.raises(CustomDateTypeNotFoundError):
+            await contact_repo.update_important_date(saved_date)
+
+    @pytest.mark.asyncio
+    async def test_update_important_date_unknown_id_raises_not_found(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """Updating a date that does not exist is reported, not silently ignored."""
+        # Arrange
+        contact = await contact_repo.save(Contact(first_name="No", last_name="Date"))
+        assert contact.id is not None
+        missing = ImportantDate(
+            id=999999,
+            contact_id=contact.id,
+            date_type=ImportantDateType.BIRTHDAY,
+            precision=DatePrecision.YEAR,
+            year=1990,
+        )
+
+        # Act / Assert
+        with pytest.raises(ImportantDateNotFoundError):
+            await contact_repo.update_important_date(missing)

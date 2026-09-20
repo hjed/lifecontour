@@ -32,6 +32,7 @@ from app.core.contacts.models.events import (
     ContactUpdated,
     ImportantDateAdded,
     ImportantDateDeleted,
+    ImportantDateUpdated,
     TagAssigned,
     TagRemoved,
 )
@@ -1979,6 +1980,107 @@ class ContactService:
         return cast(
             None, await self._execute_with_retry(_delete_address_operation, transaction)
         )
+
+    async def update_contact_important_date(
+        self,
+        contact_id: int,
+        date_id: int,
+        date: ImportantDate,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+    ) -> ImportantDate:
+        """
+        Edit one important date in place, with transaction management.
+
+        The date keeps its id, which is what separates this from the bulk
+        replacement ``update_contact`` performs: the history feed can report
+        *what changed* on a date that is still the same date.
+        """
+
+        async def _update_date_operation() -> ImportantDate:
+            # Parent lock before the child write, so this cannot deadlock
+            # against a conditional update that locks the contact first.
+            await self.contact_repo.lock(contact_id)
+
+            # Validate contact exists
+            await self.contact_validation.validate_contact_exists(
+                contact_id, transaction
+            )
+
+            # Get the existing date to validate it exists and belongs to the
+            # contact - a date id alone would let one contact edit another's.
+            dates = await self.contact_repo.get_important_dates(contact_id)
+            existing = next((d for d in dates if d.id == date_id), None)
+            if not existing:
+                raise ContactValidationError("date_id", "Date not found")
+
+            # Ensure type constraints are satisfied by running python validation.
+            # ImportantDate is a plain dataclass, so a caller can mutate one into
+            # a state its constructor would have refused.
+            date.id = date_id
+            date.contact_id = contact_id
+            date.__post_init__()
+
+            changed_fields = self._calculate_important_date_changed_fields(
+                existing, date
+            )
+
+            # Nothing moved. Writing anyway would bump the row's updated_at and
+            # the contact's ETag, and publishing anyway would put an empty edit
+            # in the feed and re-index for nothing.
+            if not changed_fields:
+                return existing
+
+            saved_date = await self.contact_repo.update_important_date(date)
+
+            # Publish event; the history projection turns changed_fields into rows.
+            event = ImportantDateUpdated(
+                contact_id,
+                date_id,
+                date.date_type.value,
+                changed_fields,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+            await self.event_publisher.publish(event)
+            await self.contact_repo.touch(contact_id, transaction)
+
+            return saved_date
+
+        return cast(
+            ImportantDate,
+            await self._execute_with_retry(_update_date_operation, transaction),
+        )
+
+    @staticmethod
+    def _calculate_important_date_changed_fields(
+        existing: ImportantDate, updated: ImportantDate
+    ) -> dict[str, Any]:
+        """Diff two important dates into ``{field: (old, new)}`` pairs.
+
+        Enums are compared and reported by value, because the result is carried
+        in an outbox event payload and has to survive JSON.
+        """
+        changed: dict[str, Any] = {}
+
+        def _add_if_changed(field: str, old: Any, new: Any) -> None:
+            if old != new:
+                changed[field] = (old, new)
+
+        _add_if_changed("date_type", existing.date_type.value, updated.date_type.value)
+        _add_if_changed("precision", existing.precision.value, updated.precision.value)
+        _add_if_changed("year", existing.year, updated.year)
+        _add_if_changed("month", existing.month, updated.month)
+        _add_if_changed("day", existing.day, updated.day)
+        _add_if_changed(
+            "custom_date_type_id",
+            existing.custom_date_type_id,
+            updated.custom_date_type_id,
+        )
+
+        return changed
 
     async def delete_contact_important_date(
         self,

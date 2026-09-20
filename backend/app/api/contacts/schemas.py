@@ -708,6 +708,30 @@ class ImportantDateCreateRequest(BaseModel):
     data: ImportantDateCreateData = Field(..., description="Date creation data")
 
 
+class ImportantDateUpdateData(BaseModel):
+    """Data for replacing an existing important date.
+
+    The whole date is submitted rather than one field at a time: precision and
+    the year/month/day components constrain each other, as do ``date_type`` and
+    ``custom_date_type_id``, so any field-at-a-time sequence would have to pass
+    through a state ``ImportantDateAttributes`` rejects. See the api-design doc.
+    """
+
+    type: str = Field(default="contact_important_dates", description="Resource type")
+    id: str | None = Field(
+        default=None, description="Date ID; the path parameter is authoritative"
+    )
+    attributes: ImportantDateAttributes = Field(
+        ..., description="The date's full replacement attributes"
+    )
+
+
+class ImportantDateUpdateRequest(BaseModel):
+    """Request model for updating an important date."""
+
+    data: ImportantDateUpdateData = Field(..., description="Date update data")
+
+
 # Custom Date Type Schemas
 class CustomDateTypeAttributes(BaseModel):
     """Attributes for custom date type."""

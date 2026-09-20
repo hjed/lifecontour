@@ -1268,6 +1268,53 @@ class SqlContactRepository(ContactRepository):
         date.updated_at = row.updated_at
         return date
 
+    async def update_important_date(self, date: ImportantDate) -> ImportantDate:
+        """Update an important date in place.
+
+        Editing rather than delete-and-reinsert, so the row keeps its id: the
+        history feed and any caller holding the id both stay pointed at the
+        same date. ``uq_contact_birthday`` is a partial unique index on
+        ``contact_id``, so re-typing a *second* date as the birthday collides
+        while editing the existing birthday does not.
+        """
+        query = text(
+            """
+            UPDATE contact_important_dates
+            SET date_type = :date_type, precision = :precision,
+                year = :year, month = :month, day = :day,
+                custom_date_type_id = :custom_date_type_id, updated_at = NOW()
+            WHERE id = :id
+            RETURNING updated_at
+        """
+        )
+        try:
+            result = await self.conn.execute(
+                query,
+                {
+                    "id": date.id,
+                    "date_type": date.date_type.value,
+                    "precision": date.precision.value,
+                    "year": date.year,
+                    "month": date.month,
+                    "day": date.day,
+                    "custom_date_type_id": date.custom_date_type_id,
+                },
+            )
+        except IntegrityError as e:
+            error_msg = str(e).lower()
+            if "uq_contact_birthday" in error_msg:
+                raise DuplicateBirthdayError(date.contact_id) from e
+            if "fk" in error_msg and "custom_date_types" in error_msg:
+                raise CustomDateTypeNotFoundError(date.custom_date_type_id) from e  # type: ignore
+            raise
+
+        row = result.fetchone()
+        if row is None:
+            raise ImportantDateNotFoundError(date.id)  # type: ignore[arg-type]
+
+        date.updated_at = row.updated_at
+        return date
+
     async def get_important_dates(self, contact_id: int) -> list[ImportantDate]:
         """Get all important dates for a contact."""
         query = text(

@@ -27,6 +27,7 @@ import {
   TagResponse,
   ContactFieldResponse,
   ContactSummaryUpdateData,
+  ImportantDateAttributes,
   CustomDateTypeResponse,
   CustomDateTypeListResponse,
   MergeContactOverrides,
@@ -1037,6 +1038,182 @@ export function useDeleteContactAddress() {
         { queryKey: contactKeys.lists() }
       );
       toast.success('Contact address deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+// Contact Important Dates Management API Functions
+//
+// These write against date-scoped endpoints rather than the whole-contact PUT.
+// That PUT replaces the entire date list, so it churns every date's id on each
+// save and records no per-field history for an edit. See LOCAL-176.
+
+const importantDatesUrl = (contactId: string) =>
+  `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/important-dates`;
+
+async function readErrorMessage(
+  response: Response,
+  fallback: string
+): Promise<string> {
+  const errorData: JsonApiErrorResponse = await response.json();
+  return errorData.errors?.[0]?.detail || fallback;
+}
+
+async function addContactImportantDate(
+  contactId: string,
+  date: ImportantDateAttributes
+): Promise<ContactResponse> {
+  const response = await fetch(importantDatesUrl(contactId), {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      data: { type: 'contact_important_dates', attributes: date },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, ERROR_MESSAGES.CREATE_FAILED)
+    );
+  }
+
+  return response.json();
+}
+
+async function updateContactImportantDate(
+  contactId: string,
+  dateId: string,
+  date: ImportantDateAttributes
+): Promise<ContactResponse> {
+  const response = await fetch(`${importantDatesUrl(contactId)}/${dateId}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      data: {
+        type: 'contact_important_dates',
+        id: dateId,
+        attributes: date,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, ERROR_MESSAGES.UPDATE_FAILED)
+    );
+  }
+
+  return response.json();
+}
+
+async function deleteContactImportantDate(
+  contactId: string,
+  dateId: string
+): Promise<void> {
+  const response = await fetch(`${importantDatesUrl(contactId)}/${dateId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, ERROR_MESSAGES.DELETE_FAILED)
+    );
+  }
+}
+
+export function useAddContactImportantDate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      contactId,
+      date,
+    }: {
+      contactId: string;
+      date: ImportantDateAttributes;
+    }) => addContactImportantDate(contactId, date),
+    onSuccess: (data, { contactId }) => {
+      // Seed rather than invalidate: these endpoints answer with the whole
+      // contact, so the cache can be made current synchronously. An
+      // invalidation alone resolves the mutation before the refetch lands, and
+      // the inline editor seeds its inputs from the cache when it reopens - so
+      // a second edit would submit the values the first one just replaced.
+      queryClient.setQueryData(contactKeys.detail(contactId), data);
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.lists() },
+        // The add writes a "created" marker to field_history; refresh the
+        // activity feed (historyKeys) so it surfaces without a manual reload,
+        // exactly as the merge does.
+        { queryKey: historyKeys.all }
+      );
+      toast.success('Important date added successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useUpdateContactImportantDate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      contactId,
+      dateId,
+      date,
+    }: {
+      contactId: string;
+      dateId: string;
+      date: ImportantDateAttributes;
+    }) => updateContactImportantDate(contactId, dateId, date),
+    onSuccess: (data, { contactId }) => {
+      // See useAddContactImportantDate: the editor reopens from this cache, so
+      // it has to be current by the time the mutation settles.
+      queryClient.setQueryData(contactKeys.detail(contactId), data);
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.lists() },
+        // An edit writes a row per changed field to field_history.
+        { queryKey: historyKeys.all }
+      );
+      toast.success('Important date updated successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+export function useDeleteContactImportantDate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      contactId,
+      dateId,
+    }: {
+      contactId: string;
+      dateId: string;
+    }) => deleteContactImportantDate(contactId, dateId),
+    onSuccess: (_, { contactId }) => {
+      // A delete answers 204, so there is no payload to seed the cache with and
+      // the detail query is invalidated instead. No editor reopens from it.
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.lists() },
+        // The delete writes a "deleted" marker to field_history.
+        { queryKey: historyKeys.all }
+      );
+      toast.success('Important date deleted successfully');
     },
     onError: (error: Error) => {
       toast.error(error.message);

@@ -5,6 +5,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 
 from app.main import create_app
 
@@ -864,3 +865,161 @@ class TestContactEndpoints:
             f"/api/contacts/{contact_id}/journals?relationship_type=INVALID"
         )
         assert response.status_code == 422  # Validation error
+
+
+@pytest.mark.integration
+class TestContactWriteFieldPreservation:
+    """The whole-contact write must not discard fields it does not carry.
+
+    ``ContactRepository.save`` writes ``company``, ``job_title``, ``photo_url``
+    and ``is_favourite`` on every update. The request converter has to supply
+    them, or a PUT that says nothing about them nulls all four. LOCAL-176 found
+    this through the Important Dates card, which was the only UI still writing
+    through this route.
+    """
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        """Setup method to ensure clean database for each test."""
+        pass
+
+    @staticmethod
+    async def _create(client, **attributes):
+        """Create a contact and return its id."""
+        response = await client.post(
+            "/api/contacts",
+            json={"data": {"type": "contacts", "attributes": attributes}},
+        )
+        assert response.status_code == 201, response.text
+        return int(response.json()["data"]["id"])
+
+    async def test_create_stores_company_and_job_title(self, integration_api_client):
+        """They are part of the create schema, so they must reach the row."""
+        contact_id = await self._create(
+            integration_api_client,
+            first_name="Ada",
+            company="Analytical Engines",
+            job_title="Mathematician",
+        )
+
+        attributes = (
+            await integration_api_client.get(f"/api/contacts/{contact_id}")
+        ).json()["data"]["attributes"]
+        assert attributes["company"] == "Analytical Engines"
+        assert attributes["job_title"] == "Mathematician"
+
+    async def test_update_preserves_fields_the_request_omits(
+        self, integration_api_client
+    ):
+        """A PUT that mentions only the name leaves the rest of the contact alone."""
+        contact_id = await self._create(
+            integration_api_client,
+            first_name="Ada",
+            company="Analytical Engines",
+            job_title="Mathematician",
+            is_favourite=True,
+        )
+
+        response = await integration_api_client.put(
+            f"/api/contacts/{contact_id}",
+            json={
+                "data": {
+                    "type": "contacts",
+                    "id": str(contact_id),
+                    "attributes": {"first_name": "Ada", "last_name": "Lovelace"},
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["last_name"] == "Lovelace", "the change still lands"
+        assert attributes["company"] == "Analytical Engines"
+        assert attributes["job_title"] == "Mathematician"
+        assert attributes["is_favourite"] is True
+
+    async def test_update_applies_fields_the_request_does_carry(
+        self, integration_api_client
+    ):
+        """Preserving an omitted field must not become ignoring a stated one."""
+        contact_id = await self._create(
+            integration_api_client,
+            first_name="Ada",
+            company="Analytical Engines",
+            is_favourite=True,
+        )
+
+        response = await integration_api_client.put(
+            f"/api/contacts/{contact_id}",
+            json={
+                "data": {
+                    "type": "contacts",
+                    "id": str(contact_id),
+                    "attributes": {
+                        "first_name": "Ada",
+                        "company": "Difference Engines",
+                        "is_favourite": False,
+                    },
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["company"] == "Difference Engines"
+        assert attributes["is_favourite"] is False
+
+    async def test_update_can_clear_a_field_explicitly(self, integration_api_client):
+        """An explicit null clears; only an absent key preserves."""
+        contact_id = await self._create(
+            integration_api_client, first_name="Ada", company="Analytical Engines"
+        )
+
+        response = await integration_api_client.put(
+            f"/api/contacts/{contact_id}",
+            json={
+                "data": {
+                    "type": "contacts",
+                    "id": str(contact_id),
+                    "attributes": {"first_name": "Ada", "company": None},
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["company"] is None
+
+    async def test_update_preserves_the_server_owned_photo_url(
+        self, integration_api_client, async_connection
+    ):
+        """``photo_url`` is set by contact sync, never by the caller.
+
+        It is written through the connection rather than the API because no
+        endpoint accepts it - which is exactly why the converter must carry it
+        from the stored contact rather than from the request.
+        """
+        contact_id = await self._create(integration_api_client, first_name="Ada")
+        await async_connection.execute(
+            text("UPDATE contacts SET photo_url = :url WHERE id = :id"),
+            {"url": "https://example.test/ada.jpg", "id": contact_id},
+        )
+
+        response = await integration_api_client.put(
+            f"/api/contacts/{contact_id}",
+            json={
+                "data": {
+                    "type": "contacts",
+                    "id": str(contact_id),
+                    "attributes": {
+                        "first_name": "Ada",
+                        "photo_url": "https://attacker.test/other.jpg",
+                    },
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        assert (
+            response.json()["data"]["attributes"]["photo_url"]
+            == "https://example.test/ada.jpg"
+        ), "the stored photo wins over anything the request claims"
