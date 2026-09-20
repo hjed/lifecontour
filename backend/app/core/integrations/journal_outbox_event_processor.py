@@ -1765,21 +1765,32 @@ class JournalOutboxEventProcessor:
         that subsequent FK-dependent inserts into
         ``journal_calendar_info`` and ``journal_external_event_links``
         succeed.
+
+        The source is recorded on the row because this is where it is known.
+        Deleting a journal reads it back to tell each worker which of the
+        identifiers it carries are that worker's own. An existing row is left
+        alone except to fill that in: a calendar created before the column
+        existed, or by a path that does not know the source, is classified the
+        first time an event for it arrives, while one already classified keeps
+        what it has.
         """
         name, color = self._INTEGRATION_CALENDAR_DEFAULTS.get(
             integration_source, (f"{integration_source.title()} Calendar", "#808080")
         )
         await self.connection.execute(
             text("""
-                INSERT INTO calendars (id, user_id, name, color)
-                VALUES (:id, :user_id, :name, :color)
-                ON CONFLICT (id) DO NOTHING
+                INSERT INTO calendars (id, user_id, name, color, integration_source)
+                VALUES (:id, :user_id, :name, :color, :integration_source)
+                ON CONFLICT (id) DO UPDATE
+                    SET integration_source = EXCLUDED.integration_source
+                    WHERE calendars.integration_source IS NULL
             """),
             {
                 "id": calendar_id,
                 "user_id": user_id,
                 "name": name,
                 "color": color,
+                "integration_source": integration_source,
             },
         )
 

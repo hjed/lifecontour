@@ -317,22 +317,38 @@ class JournalService:
         # read or written: the refusal is total, so nothing else is worth doing.
         await self._refuse_if_tasks_are_anchored(journal_id)
 
-        # Fetch external event IDs before deletion so workers know what to delete
+        # Fetch external event IDs before deletion so workers know what to
+        # delete. Filed under the integration that owns the calendar each link
+        # hangs off, because that is all a worker has to find its own by: the
+        # link itself is about to be cascade-deleted with the journal.
+        #
+        # A calendar the Google worker created and syncs carries no recorded
+        # source, so the id it syncs under stands in for one. A calendar with
+        # neither belongs to the user alone; its link is left out, since no
+        # worker could act on it and every key here is an instruction to.
         stmt = text("""
-            SELECT jeel.external_event_id, c.google_calendar_id
+            SELECT jeel.external_event_id,
+                   jeel.calendar_id,
+                   c.google_calendar_id,
+                   COALESCE(
+                       c.integration_source,
+                       CASE
+                           WHEN c.google_calendar_id IS NOT NULL THEN 'google'
+                       END
+                   ) AS integration_source
             FROM journal_external_event_links jeel
             JOIN calendars c ON jeel.calendar_id = c.id
             WHERE jeel.journal_id = :journal_id AND jeel.external_event_id IS NOT NULL
         """)
         result = await transaction.execute(stmt, {"journal_id": journal_id})
         external_identifiers: dict[str, list[dict[str, Any]]] = {}
-        # We currently only support Google calendar syncing, so we hardcode the key.
         for row in result.fetchall():
-            if "google" not in external_identifiers:
-                external_identifiers["google"] = []
-            external_identifiers["google"].append(
+            if row.integration_source is None:
+                continue
+            external_identifiers.setdefault(row.integration_source, []).append(
                 {
                     "external_event_id": row.external_event_id,
+                    "calendar_id": str(row.calendar_id),
                     "google_calendar_id": row.google_calendar_id,
                 }
             )

@@ -410,10 +410,14 @@ class TestJournalServiceCRUD:
         mock_result = MagicMock()
         mock_row1 = MagicMock()
         mock_row1.external_event_id = "ext1"
+        mock_row1.calendar_id = "cal-uuid-1"
         mock_row1.google_calendar_id = "cal1"
+        mock_row1.integration_source = "google"
         mock_row2 = MagicMock()
         mock_row2.external_event_id = "ext2"
+        mock_row2.calendar_id = "cal-uuid-2"
         mock_row2.google_calendar_id = "cal2"
+        mock_row2.integration_source = "google"
         mock_result.fetchall.return_value = [mock_row1, mock_row2]
         mock_transaction.execute.return_value = mock_result
 

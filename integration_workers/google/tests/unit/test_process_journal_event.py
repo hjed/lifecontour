@@ -311,6 +311,89 @@ class TestProcessJournalEvent:
             )
 
     @pytest.mark.asyncio
+    async def test_delete_reads_the_calendar_the_identifier_names(
+        self, mock_session_factory, mock_google_auth_service, mock_google_client
+    ):
+        """The per-source payload deletes from the calendar the link hung off.
+
+        ``JournalDeleted`` now files each identifier under the integration that
+        owns its calendar, so the Google key holds Google's own entries and
+        nothing else. This pins that the reader still finds them.
+        """
+        from worker import process_journal_event
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        ):
+            mock_session = mock_session_factory.return_value.__aenter__.return_value
+            mock_session.execute.side_effect = None
+            mock_result = MagicMock()
+            mock_row = MagicMock()
+            mock_row.google_account_email = "test@example.com"
+            mock_result.fetchone.return_value = mock_row
+            mock_session.execute.return_value = mock_result
+
+            ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
+            result = await process_journal_event(
+                ctx=ctx,
+                event_type="JournalDeleted",
+                event_data={
+                    "journal_id": 1,
+                    "user_id": "test_user",
+                    "external_identifiers": {
+                        "google": [
+                            {
+                                "external_event_id": "existing_event_id",
+                                "calendar_id": "11111111-1111-5111-8111-111111111111",
+                                "google_calendar_id": "work@group.calendar.google.com",
+                            }
+                        ]
+                    },
+                },
+            )
+
+            assert result["status"] == "success"
+            mock_google_client.delete_event.assert_called_once_with(
+                "existing_event_id", "work@group.calendar.google.com"
+            )
+
+    @pytest.mark.asyncio
+    async def test_delete_ignores_another_integrations_identifiers(
+        self, mock_session_factory
+    ):
+        """Only Google's key is Google's work.
+
+        Before the identifiers were filed by source, a Snipe-IT maintenance id
+        arrived here with no ``google_calendar_id``, was read as the user's
+        primary calendar, and became a delete issued against Google for a
+        record Google never had.
+        """
+        from worker import process_journal_event
+
+        ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
+        result = await process_journal_event(
+            ctx=ctx,
+            event_type="JournalDeleted",
+            event_data={
+                "journal_id": 1,
+                "user_id": "test_user",
+                "external_identifiers": {
+                    "snipeit_maintenance": [
+                        {
+                            "external_event_id": "snipeit_maint:17",
+                            "calendar_id": "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a",
+                            "google_calendar_id": None,
+                        }
+                    ]
+                },
+            },
+        )
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "no_external_id_for_provider"
+
+    @pytest.mark.asyncio
     async def test_process_journal_event_ignores_delete_if_no_identifier(
         self, mock_session_factory
     ):

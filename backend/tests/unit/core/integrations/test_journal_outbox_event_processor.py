@@ -384,7 +384,12 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
-        """_ensure_calendar_exists should INSERT ON CONFLICT DO NOTHING with integration defaults."""
+        """The calendar is created with the defaults and source of its integration.
+
+        It records the source because this is where it is known: deleting a
+        journal reads it back to tell each worker which identifiers are its
+        own. An existing row keeps everything but a source it does not have.
+        """
         from uuid import UUID
 
         strava_calendar_id = "00000000-0000-0000-0000-000000000001"
@@ -416,11 +421,13 @@ class TestJournalOutboxEventProcessor:
         sql_text = str(ensure_call[0][0].text)
         assert "INSERT INTO calendars" in sql_text
         assert "ON CONFLICT" in sql_text
-        assert "DO NOTHING" in sql_text
+        assert "integration_source = EXCLUDED.integration_source" in sql_text
+        assert "WHERE calendars.integration_source IS NULL" in sql_text
         params = ensure_call[0][1]
         assert params["id"] == UUID(strava_calendar_id)
         assert params["name"] == "Strava Activities"
         assert params["color"] == "#FC4C02"
+        assert params["integration_source"] == "strava"
 
     @pytest.mark.asyncio
     async def test_process_journal_event_created_no_invitees(
