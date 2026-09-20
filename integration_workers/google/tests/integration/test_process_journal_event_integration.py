@@ -85,6 +85,46 @@ async def _setup_journal_event_test_data(
     return journal_id
 
 
+async def _connect_calendar_to_google(
+    db_session: AsyncConnection,
+    calendar_id: str,
+    google_calendar_id: str,
+    access_role: str | None,
+) -> None:
+    """Point a seeded calendar at a Google calendar with a stored role."""
+    await db_session.execute(
+        text("""
+            UPDATE calendars
+            SET google_calendar_id = :google_calendar_id, access_role = :access_role
+            WHERE id = :id
+        """),
+        {
+            "id": calendar_id,
+            "google_calendar_id": google_calendar_id,
+            "access_role": access_role,
+        },
+    )
+    await db_session.commit()
+
+
+async def _read_calendar_user_id(db_session: AsyncConnection, calendar_id: str) -> str:
+    result = await db_session.execute(
+        text("SELECT user_id FROM calendars WHERE id = :id"),
+        {"id": calendar_id},
+    )
+    return str(result.scalar())
+
+
+async def _read_access_role(
+    db_session: AsyncConnection, calendar_id: str
+) -> str | None:
+    result = await db_session.execute(
+        text("SELECT access_role FROM calendars WHERE id = :id"),
+        {"id": calendar_id},
+    )
+    return result.scalar()
+
+
 @pytest.mark.asyncio
 class TestProcessJournalEventIntegration:
     """Integration test for process_journal_event flow handling."""
@@ -817,7 +857,7 @@ class TestProcessJournalEventTimezoneIntegration:
 
 @pytest.mark.asyncio
 class TestProcessJournalEventSkipsIntegration:
-    """The two ways an outbound push declines to write, proved against the DB.
+    """The ways an outbound push declines to write, proved against the DB.
 
     Both decisions are about what is *committed* on the link row afterwards,
     which is the part a mocked session cannot demonstrate.
@@ -927,3 +967,250 @@ class TestProcessJournalEventSkipsIntegration:
 
         after = await self._link(db_session, journal_id, calendar_id)
         assert after == before
+
+    async def test_a_read_only_calendar_is_never_written_to(self, db_session) -> None:
+        """The stored role stops the push before Google is called at all."""
+        journal_id, calendar_id = await self._seed(db_session)
+        await _connect_calendar_to_google(
+            db_session, calendar_id, "shared@example.com", "reader"
+        )
+        before = await self._link(db_session, journal_id, calendar_id)
+
+        mock_client = AsyncMock()
+
+        result = await self._run(
+            db_session,
+            journal_id,
+            mock_client,
+            {"changed_fields": {"title": ("Old", "New")}, "source": "ui"},
+        )
+
+        assert result["reason"] == "read_only_calendar"
+        mock_client.update_event.assert_not_called()
+        assert await self._link(db_session, journal_id, calendar_id) == before
+
+    async def test_a_read_only_calendar_is_never_deleted_from(self, db_session) -> None:
+        """Deletion is a write too: it reads the roles rather than trying it."""
+        journal_id, calendar_id = await self._seed(db_session)
+        await _connect_calendar_to_google(
+            db_session, calendar_id, "shared@example.com", "freeBusyReader"
+        )
+
+        mock_client = AsyncMock()
+
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            result = await process_journal_event(
+                ctx={
+                    "session_factory": lambda: self._factory(db_session),
+                    "job_id": "test_skip_delete",
+                },
+                event_type="JournalDeleted",
+                event_data={
+                    "journal_id": journal_id,
+                    "user_id": await _read_calendar_user_id(db_session, calendar_id),
+                    "external_identifiers": {
+                        "google": [
+                            {
+                                "external_event_id": "existing_event_id_123",
+                                "google_calendar_id": "shared@example.com",
+                            }
+                        ]
+                    },
+                },
+            )
+
+        assert result["read_only_event_ids"] == ["existing_event_id_123"]
+        mock_client.delete_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestRefreshCalendarAccessRolesIntegration:
+    """Storing Google's current access roles against real calendar rows."""
+
+    @staticmethod
+    async def _seed_calendar(
+        db_session: AsyncConnection,
+        user_id: str,
+        google_calendar_id: str,
+        access_role: str | None,
+    ) -> str:
+        calendar_id = str(uuid.uuid4())
+        await db_session.execute(
+            text("""
+                INSERT INTO calendars (
+                    id, user_id, name, color, is_synced_to_google,
+                    google_calendar_id, access_role
+                )
+                VALUES (
+                    :id, :user_id, 'Work', '#FF0000', true,
+                    :google_calendar_id, :access_role
+                )
+            """),
+            {
+                "id": calendar_id,
+                "user_id": user_id,
+                "google_calendar_id": google_calendar_id,
+                "access_role": access_role,
+            },
+        )
+        await db_session.commit()
+        return calendar_id
+
+    @staticmethod
+    def _client(*calendars: tuple[str, str]) -> AsyncMock:
+        client = AsyncMock()
+        client.list_calendars.return_value = {
+            "items": [
+                {"id": google_calendar_id, "accessRole": access_role}
+                for google_calendar_id, access_role in calendars
+            ]
+        }
+        return client
+
+    async def test_a_downgraded_role_is_stored(self, db_session) -> None:
+        from worker import _refresh_calendar_access_roles
+
+        user_id = str(uuid.uuid4())
+        calendar_id = await self._seed_calendar(
+            db_session, user_id, "shared@example.com", "writer"
+        )
+
+        changed = await _refresh_calendar_access_roles(
+            db_session, self._client(("shared@example.com", "reader")), user_id
+        )
+
+        assert changed == 1
+        assert await _read_access_role(db_session, calendar_id) == "reader"
+
+    async def test_a_role_that_was_never_captured_is_filled_in(
+        self, db_session
+    ) -> None:
+        """Every calendar connected before this existed has a NULL role."""
+        from worker import _refresh_calendar_access_roles
+
+        user_id = str(uuid.uuid4())
+        calendar_id = await self._seed_calendar(
+            db_session, user_id, "shared@example.com", None
+        )
+
+        await _refresh_calendar_access_roles(
+            db_session, self._client(("shared@example.com", "owner")), user_id
+        )
+
+        assert await _read_access_role(db_session, calendar_id) == "owner"
+
+    async def test_another_users_calendar_is_left_alone(self, db_session) -> None:
+        """Two accounts can hold the same shared Google calendar."""
+        from worker import _refresh_calendar_access_roles
+
+        user_id = str(uuid.uuid4())
+        other_user_id = str(uuid.uuid4())
+        await self._seed_calendar(db_session, user_id, "shared@example.com", "writer")
+        other_calendar_id = await self._seed_calendar(
+            db_session, other_user_id, "shared@example.com", "owner"
+        )
+
+        await _refresh_calendar_access_roles(
+            db_session, self._client(("shared@example.com", "reader")), user_id
+        )
+
+        assert await _read_access_role(db_session, other_calendar_id) == "owner"
+
+    async def test_an_unchanged_role_is_not_rewritten(self, db_session) -> None:
+        from worker import _refresh_calendar_access_roles
+
+        user_id = str(uuid.uuid4())
+        await self._seed_calendar(db_session, user_id, "shared@example.com", "owner")
+
+        changed = await _refresh_calendar_access_roles(
+            db_session, self._client(("shared@example.com", "owner")), user_id
+        )
+
+        assert changed == 0
+
+    @staticmethod
+    async def _connect_account(db_session: AsyncConnection, user_id: str) -> None:
+        """One connected Google account, which is what the sweep requires."""
+        await db_session.execute(
+            text("""
+                INSERT INTO user_google_auth (
+                    user_id, google_account_email, encrypted_access_token,
+                    encrypted_refresh_token, expires_at, created_at, updated_at
+                )
+                VALUES (
+                    :user_id, :email, :token, :refresh,
+                    now() + interval '1 hour', now(), now()
+                )
+            """),
+            {
+                "user_id": user_id,
+                "email": f"test_{uuid.uuid4().hex[:8]}@example.com",
+                "token": b"fake_token",
+                "refresh": b"fake_refresh",
+            },
+        )
+        await db_session.commit()
+
+    async def test_a_calendar_that_left_the_list_is_marked_unreachable(
+        self, db_session
+    ) -> None:
+        """Revoking a share removes the calendar instead of downgrading it."""
+        from worker import _refresh_calendar_access_roles
+
+        user_id = str(uuid.uuid4())
+        await self._connect_account(db_session, user_id)
+        revoked = await self._seed_calendar(
+            db_session, user_id, "gone@example.com", "writer"
+        )
+        kept = await self._seed_calendar(
+            db_session, user_id, "mine@example.com", "owner"
+        )
+
+        await _refresh_calendar_access_roles(
+            db_session, self._client(("mine@example.com", "owner")), user_id
+        )
+
+        assert await _read_access_role(db_session, revoked) == "none"
+        assert await _read_access_role(db_session, kept) == "owner"
+
+    async def test_a_vanished_calendar_is_then_never_written_to(
+        self, db_session
+    ) -> None:
+        """Which is the point: the refusals stop instead of repeating."""
+        from worker import is_read_only_calendar
+
+        user_id = str(uuid.uuid4())
+        await self._connect_account(db_session, user_id)
+        revoked = await self._seed_calendar(
+            db_session, user_id, "gone@example.com", "writer"
+        )
+
+        from worker import _refresh_calendar_access_roles
+
+        await _refresh_calendar_access_roles(
+            db_session, self._client(("mine@example.com", "owner")), user_id
+        )
+
+        assert is_read_only_calendar(await _read_access_role(db_session, revoked))
+
+    async def test_another_connected_account_holds_the_sweep_back(
+        self, db_session
+    ) -> None:
+        """A second account's list cannot speak for the first's calendars."""
+        from worker import _refresh_calendar_access_roles
+
+        user_id = str(uuid.uuid4())
+        await self._connect_account(db_session, user_id)
+        await self._connect_account(db_session, user_id)
+        absent = await self._seed_calendar(
+            db_session, user_id, "gone@example.com", "writer"
+        )
+
+        await _refresh_calendar_access_roles(
+            db_session, self._client(("mine@example.com", "owner")), user_id
+        )
+
+        assert await _read_access_role(db_session, absent) == "writer"

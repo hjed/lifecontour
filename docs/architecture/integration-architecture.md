@@ -577,6 +577,37 @@ Snipe-IT's General webhook has no signing secret or verification handshake, so t
 
 **Journal Integration Example**: Calendar events sync bi-directionally with journal EVENT type entries. See [Journal System Specification](../journal-system-specification.md) for sync behavior and attendee handling.
 
+#### Outbound Push and Calendar Access Roles
+
+A connected Google calendar is not necessarily one the account may **write**
+to. A work calendar shared with a personal account, or one shared as "see all
+event details", lists its events happily and refuses every write with `403`.
+The sync is therefore asymmetric by design: **inbound for any calendar,
+outbound only where Google grants write access.**
+
+`calendars.access_role` holds Google's own answer (`owner`, `writer`,
+`reader`, `freeBusyReader`, or `none`), and every write to Google — the push,
+journal deletion and orphan pruning — asks `is_read_only_calendar` before
+calling the API at all. A role that is missing or unrecognised counts as
+writable, so a calendar we have never asked about does not silently stop
+syncing.
+
+The role is **refreshed from `calendarList` on every calendar sync**
+(`_refresh_calendar_access_roles`), not captured once when the calendar is
+connected. Google can change it at any time and nothing announces it — a
+snapshot taken at connection time goes stale silently, and the guard is only
+as good as the value behind it. The refresh never fails its caller: a
+calendar list that cannot be fetched leaves the stored roles as they were.
+
+Revoking a share does not come back as a lesser role: Google drops the
+calendar from `calendarList` altogether. Calendars the list no longer
+mentions are therefore recorded as `none`, Google's own ACL value for no
+access, which the guard treats like any other non-writable role. That
+inference only holds while the user has **one** connected Google account —
+`calendars` records no account of its own, so one account's list cannot
+speak for another's calendars — and the sweep stands down when there is more
+than one.
+
 ## Deployment Architecture
 
 ### Development Environment

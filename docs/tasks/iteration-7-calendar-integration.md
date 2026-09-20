@@ -174,6 +174,7 @@ The sequence reflects both product priority and technical dependency:
 - [x] Per-link sync states are tracked explicitly, including pending, synced, and error states.
 - [x] Manual edits in the journal system remain the canonical source for outbound updates.
 - [x] No-op outbound writes are detected and do not create noisy state changes.
+- [x] Calendars the Google account may only read are inbound-only: the outbound push is skipped rather than refused, based on `calendars.access_role` refreshed from Google on every sync. See [Outbound Push and Calendar Access Roles](../architecture/integration-architecture.md#outbound-push-and-calendar-access-roles).
 
 **Required Test Coverage:**
 - **Unit:** fan-out planning, no-op detection, payload selection per linked calendar. ✅ Covered in this branch.

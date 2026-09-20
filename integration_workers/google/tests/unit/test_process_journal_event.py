@@ -287,10 +287,14 @@ class TestProcessJournalEvent:
             assert result["action"] == "delete"
             assert result["external_event_ids"] == ["existing_event_id"]
 
-            # Verify auth layout query was executed
-            assert mock_session.execute.call_count == 1
-            auth_call_args = mock_session.execute.call_args[0]
-            assert "SELECT google_account_email" in str(auth_call_args[0])
+            # The deletion reads twice before calling Google: whose account to
+            # act as, and which of their calendars refuse writes.
+            statements = [
+                str(call[0][0]) for call in mock_session.execute.call_args_list
+            ]
+            assert len(statements) == 2
+            assert "SELECT google_account_email" in statements[0]
+            assert "access_role" in statements[1]
 
             # Verify API was called with fallback calendar_id 'primary' for old string format
             mock_google_client.delete_event.assert_called_once_with(
@@ -395,21 +399,17 @@ class TestProcessJournalEvent:
                 "old_event_id", "test-google-cal-id-old"
             )
 
-            # Should have called the UPDATE statement setting status to errored
-            update_call = None
-            for call in mock_session.execute.call_args_list:
-                stmt_str = str(call[0][0])
-                if (
-                    "UPDATE journal_external_event_links" in stmt_str
-                    and "sync_status = 'errored'" in stmt_str
-                ):
-                    update_call = call
-                    break
+            # The old calendar's link records that its event is still there
+            errored = [
+                call
+                for call in mock_session.execute.call_args_list
+                if "journal_external_event_links" in str(call[0][0])
+                and len(call[0]) > 1
+                and call[0][1].get("status") == "errored"
+            ]
 
-            assert update_call is not None, (
-                "Did not execute UPDATE journal_external_event_links to set errored state"
-            )
-            assert update_call[0][1]["calendar_id"] == "test-cal-id-old"
+            assert errored, "Did not mark the orphaned link errored"
+            assert errored[0][0][1]["calendar_id"] == "test-cal-id-old"
 
 
 class TestProcessJournalEventTimezones:
@@ -668,3 +668,139 @@ class TestProcessJournalEventRestrictedType:
 
         with pytest.raises(HttpError):
             await self._push_failing_with(error)
+
+
+class TestOutboundPushPermissions:
+    """Outbound push against a calendar the account may not write to.
+
+    Pushing to a calendar shared read-only is refused by Google every time,
+    so the stored access role is what has to stop the push before it is made.
+    """
+
+    @staticmethod
+    def _client() -> AsyncMock:
+        mock_client = AsyncMock()
+        mock_client.create_event.return_value = {"id": "new_event_id", "etag": "e"}
+        mock_client.update_event.return_value = {"id": "existing_event_id", "etag": "e"}
+        mock_client.list_calendars.return_value = {"items": []}
+        return mock_client
+
+    @staticmethod
+    async def _push(
+        session_factory: MagicMock,
+        client: AsyncMock,
+        event_type: str = "JournalUpdated",
+    ) -> dict[str, Any]:
+        from worker import process_journal_event
+
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=client),
+        ):
+            return await process_journal_event(
+                ctx={"session_factory": session_factory, "job_id": "job123"},
+                event_type=event_type,
+                event_data={
+                    "journal_id": 1,
+                    "changed_fields": {"title": ("Old", "New")},
+                },
+            )
+
+    @pytest.mark.asyncio
+    async def test_read_only_calendar_is_not_pushed_to(self) -> None:
+        session_factory = _push_session_factory(
+            access_role="reader", external_event_id="existing_event_id"
+        )
+        client = self._client()
+
+        result = await self._push(session_factory, client)
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "read_only_calendar"
+        client.update_event.assert_not_called()
+        client.create_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_free_busy_calendar_is_not_pushed_to(self) -> None:
+        session_factory = _push_session_factory(
+            access_role="freeBusyReader", external_event_id="existing_event_id"
+        )
+        client = self._client()
+
+        result = await self._push(session_factory, client)
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "read_only_calendar"
+        client.update_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_read_only_calendar_is_not_deleted_from(self) -> None:
+        """Deleting is a write too, and this calendar refuses writes."""
+        from worker import process_journal_event
+
+        read_only = MagicMock()
+        read_only.google_calendar_id = "shared@example.com"
+        roles_result = MagicMock()
+        roles_result.__iter__.return_value = iter([read_only])
+
+        auth_row = MagicMock()
+        auth_row.google_account_email = "test@example.com"
+        auth_result = MagicMock()
+        auth_result.fetchone.return_value = auth_row
+
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [auth_result, roles_result]
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        client = AsyncMock()
+
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=client),
+        ):
+            result = await process_journal_event(
+                ctx={"session_factory": session_factory, "job_id": "job123"},
+                event_type="JournalDeleted",
+                event_data={
+                    "journal_id": 1,
+                    "user_id": "test_user",
+                    "external_identifiers": {
+                        "google": [
+                            {
+                                "external_event_id": "existing_event_id",
+                                "google_calendar_id": "shared@example.com",
+                            }
+                        ]
+                    },
+                },
+            )
+
+        assert result["status"] == "success"
+        assert result["read_only_event_ids"] == ["existing_event_id"]
+        assert result["external_event_ids"] == []
+        client.delete_event.assert_not_called()
+
+
+class TestReadOnlyCalendarPredicate:
+    """One answer to "may we write to this calendar?", used by every writer."""
+
+    @pytest.mark.parametrize("role", ["reader", "freeBusyReader", "none"])
+    def test_roles_without_write_access_refuse_writes(self, role: str) -> None:
+        """ "none" is Google's value for a calendar we can no longer reach."""
+        from worker import is_read_only_calendar
+
+        assert is_read_only_calendar(role) is True
+
+    @pytest.mark.parametrize("role", ["owner", "writer"])
+    def test_writable_roles_do_not(self, role: str) -> None:
+        from worker import is_read_only_calendar
+
+        assert is_read_only_calendar(role) is False
+
+    def test_an_unknown_role_is_treated_as_writable(self) -> None:
+        """A role we have never stored must not silently stop syncing."""
+        from worker import is_read_only_calendar
+
+        assert is_read_only_calendar(None) is False
