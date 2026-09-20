@@ -1980,3 +1980,135 @@ class TestMaintenanceDeletion:
 
         assert deleted is False
         assert _snipeit_writes(mock_transport) == []
+
+
+async def _push_row_internal_uuid(
+    async_connection: AsyncConnection, maintenance_id: int
+) -> str | None:
+    """The journal a record's sync row still names, if any."""
+    result = await async_connection.execute(
+        text("""
+            SELECT internal_uuid
+            FROM sync_metadata
+            WHERE integration_source = 'snipeit_maintenance'
+              AND external_id = :external_id
+        """),
+        {"external_id": f"snipeit_maint:{maintenance_id}"},
+    )
+    internal_uuid: str | None = result.scalar_one()
+    return internal_uuid
+
+
+class TestOrphanedPushRowsRecover:
+    """A push row naming a journal that no longer exists must not hide its record.
+
+    Deleting a maintenance journal now deletes its record, but rows orphaned
+    before that — by a deletion, or by a push that raced one — would otherwise
+    skip their record on every sync, leaving it in Snipe-IT and invisible here.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_record_whose_journal_was_deleted_is_imported(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=8
+        )
+        await _delete_journal(async_connection, journal_id)
+        mock_transport.add_response(
+            "/maintenances/8",
+            json_data={**_SNIPEIT_MAINTENANCE_17, "id": 8, "title": "Retire Harness"},
+        )
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[8],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert await _journal_events(async_connection) == ["journal_event.created"]
+        # The row now tracks the record as an import, not as that journal's push.
+        assert await _push_row_internal_uuid(async_connection, 8) is None
+
+    @pytest.mark.asyncio
+    async def test_a_live_journals_record_is_still_skipped(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The gate must widen only for a journal that is gone, not for every push."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=8
+        )
+        mock_transport.add_response(
+            "/maintenances/8",
+            json_data={**_SNIPEIT_MAINTENANCE_17, "id": 8, "title": "Retire Harness"},
+        )
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[8],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 0, "skipped": 1, "failed": 0}
+        assert await _push_row_internal_uuid(async_connection, 8) == str(journal_id)
+
+    @pytest.mark.asyncio
+    async def test_a_push_whose_journal_is_deleted_writes_no_row(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The journal goes while its POST is in flight.
+
+        Recording the record against a journal that no longer exists would
+        orphan the row the deletion handler already looked for, so the record
+        this push created is deleted instead.
+        """
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        serve = mock_transport.handle_async_request
+
+        async def delete_journal_then_serve(request: httpx.Request) -> httpx.Response:
+            response = await serve(request)
+            if request.method == "POST":
+                await _delete_journal(async_connection, journal_id)
+            return response
+
+        monkeypatch.setattr(
+            mock_transport, "handle_async_request", delete_journal_then_serve
+        )
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(8), method="POST"
+        )
+        mock_transport.add_response(
+            "/maintenances/8", json_data={"status": "success"}, method="DELETE"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == [
+            "POST /api/v1/maintenances",
+            "DELETE /api/v1/maintenances/8",
+        ]
+        assert await _push_rows(async_connection, journal_id) == []
+        assert await _claim_row(async_connection, journal_id) is None

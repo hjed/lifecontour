@@ -424,6 +424,19 @@ async def _fetch_maintenance_claim(session: Any, journal_id: int) -> Any:
     return result.fetchone()
 
 
+async def _journal_exists(session: Any, journal_id: int) -> bool:
+    """Whether the journal is still there.
+
+    A journal's rows outlive it: deleting one cascades its own tables, not the
+    ``sync_metadata`` rows that name it by id.
+    """
+    result = await session.execute(
+        text("SELECT 1 FROM journals WHERE id = :journal_id"),
+        {"journal_id": journal_id},
+    )
+    return result.fetchone() is not None
+
+
 async def _recorded_maintenance(session: Any, journal_id: int) -> str | None:
     """The ``snipeit_maint:{id}`` recorded as the journal's Snipe-IT maintenance."""
     result = await session.execute(
@@ -458,11 +471,20 @@ def _raise_if_claim_in_flight(journal_id: int, claim_row: Any) -> None:
 
 async def _insert_push_row(
     session: Any, journal_id: int, external_id: str, version_hash: str
-) -> bool:
+) -> Literal["inserted", "taken", "journal_gone"]:
     """Record ``external_id`` as the journal's Snipe-IT maintenance.
 
-    Returns ``False``, writing nothing, when a sync row already names that
-    record: a record's row is never re-pointed to another journal.
+    This is the only place a push row is written, so it is where a row can be
+    stopped from naming a journal that is not there. A journal deleted while a
+    push or an inbound claim-link was running would otherwise be recorded after
+    the deletion handler had already looked for its rows, leaving a record no
+    journal holds and the inbound sync skipped.
+
+    Returns:
+        ``"inserted"`` when the row was written, ``"taken"`` when a sync row
+        already names that record — a record's row is never re-pointed to
+        another journal — and ``"journal_gone"`` when the journal no longer
+        exists. Nothing is written in the latter two cases.
     """
     result = await session.execute(
         text("""
@@ -470,19 +492,23 @@ async def _insert_push_row(
                 (internal_uuid, integration_source, external_id,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
-            VALUES
-                (:internal_uuid, 'snipeit_maintenance', :external_id,
-                 now(), :version_hash, 'success', NULL, 0, now(), now())
+            SELECT
+                :internal_uuid, 'snipeit_maintenance', :external_id,
+                now(), :version_hash, 'success', NULL, 0, now(), now()
+            WHERE EXISTS (SELECT 1 FROM journals WHERE id = :journal_id)
             ON CONFLICT (integration_source, external_id) DO NOTHING
             RETURNING id
         """),
         {
             "internal_uuid": str(journal_id),
+            "journal_id": journal_id,
             "external_id": external_id,
             "version_hash": version_hash,
         },
     )
-    return result.fetchone() is not None
+    if result.fetchone() is not None:
+        return "inserted"
+    return "taken" if await _journal_exists(session, journal_id) else "journal_gone"
 
 
 @dataclass(frozen=True)
@@ -1083,16 +1109,36 @@ class SnipeItSyncService:
                     and existing_journal_id is None
                     and existing_meta.internal_uuid
                 ):
-                    # Only a push records the journal: this record was created
-                    # from that user's journal, so it is not a new import.
-                    logger.debug(
-                        "Skipping Snipe-IT maintenance pushed from a journal",
+                    # Only a push records the journal, so this record was
+                    # created from that user's journal rather than imported —
+                    # unless that journal is gone. Deleting a maintenance
+                    # journal now deletes its record, but a row orphaned before
+                    # that, or by a push that raced a deletion, would hide its
+                    # record here for good. It is imported instead, and the row
+                    # stops naming the journal that no longer exists.
+                    if await _journal_exists(session, int(existing_meta.internal_uuid)):
+                        logger.debug(
+                            "Skipping Snipe-IT maintenance pushed from a journal",
+                            maintenance_id=maintenance_id,
+                            journal_id=existing_meta.internal_uuid,
+                        )
+                        raise _MaintenanceSkipped
+
+                    logger.info(
+                        "Importing a Snipe-IT maintenance whose journal was deleted",
                         maintenance_id=maintenance_id,
                         journal_id=existing_meta.internal_uuid,
                     )
-                    raise _MaintenanceSkipped
-
-                if existing_meta and existing_journal_id is None:
+                    await session.execute(
+                        text("""
+                            UPDATE sync_metadata
+                            SET internal_uuid = NULL
+                            WHERE integration_source = 'snipeit_maintenance'
+                              AND external_id = :external_id
+                        """),
+                        {"external_id": external_id},
+                    )
+                elif existing_meta and existing_journal_id is None:
                     # An outbox event for creation was enqueued but hasn't been processed
                     # by the backend yet, so the external event link doesn't exist.
                     # We cannot emit an update without the journal ID, and emitting another
@@ -1356,13 +1402,18 @@ class SnipeItSyncService:
                 asset_id=snipeit_asset_id,
                 payload=payload,
             )
-            await self._record_pushed_maintenance(
+            journal_gone = await self._record_pushed_maintenance(
                 journal_id,
                 claim,
                 f"snipeit_maint:{created.id}",
                 version_hash,
                 session_factory,
             )
+            if journal_gone:
+                # The deletion handler looked for this journal's rows before
+                # there were any, so nothing else will remove the record.
+                await self._api_client.delete_maintenance(created.id)
+                return
         except SnipeItAPIError as exc:
             if exc.status_code in (403, 404):
                 logger.warning(
@@ -1547,11 +1598,14 @@ class SnipeItSyncService:
                 # Sync rows are keyed globally, so another user's sync may have
                 # recorded this maintenance id under another asset's lock; the
                 # journal then keeps its claim.
-                if not await _insert_push_row(
-                    session,
-                    journal_id,
-                    external_id,
-                    _payload_version_hash(_snipeit_record_payload(maintenance)),
+                if (
+                    await _insert_push_row(
+                        session,
+                        journal_id,
+                        external_id,
+                        _payload_version_hash(_snipeit_record_payload(maintenance)),
+                    )
+                    != "inserted"
                 ):
                     return False
                 await _delete_maintenance_claim(session, journal_id)
@@ -1633,11 +1687,15 @@ class SnipeItSyncService:
                 )
 
                 free = await self._free_maintenance(session, journal_id, candidates)
-                if free is not None and await _insert_push_row(
-                    session,
-                    journal_id,
-                    f"snipeit_maint:{free.id}",
-                    _payload_version_hash(_snipeit_record_payload(free)),
+                if (
+                    free is not None
+                    and await _insert_push_row(
+                        session,
+                        journal_id,
+                        f"snipeit_maint:{free.id}",
+                        _payload_version_hash(_snipeit_record_payload(free)),
+                    )
+                    == "inserted"
                 ):
                     await _delete_maintenance_claim(session, journal_id)
                     logger.info(
@@ -1681,7 +1739,7 @@ class SnipeItSyncService:
         external_id: str,
         version_hash: str,
         session_factory: Any,
-    ) -> None:
+    ) -> bool:
         """Replace the journal's claim with the sync row of the record it posted.
 
         The inbound sync may have recorded the journal's record while the POST
@@ -1691,6 +1749,12 @@ class SnipeItSyncService:
         A record's row is never re-pointed. Sync rows are not scoped to a user,
         so another user's Snipe-IT can hold the same maintenance id; that row is
         left alone and reported, and the journal keeps its claim.
+
+        Returns:
+            ``True`` when the journal was deleted while its POST was in flight,
+            so the record it created belongs to nothing and must be deleted.
+            Its claim is dropped here: a claim outlives its journal no better
+            than a push row does.
         """
         async with session_factory() as session:
             async with session.begin():
@@ -1706,17 +1770,27 @@ class SnipeItSyncService:
                             external_id=external_id,
                             linked_external_id=linked,
                         )
-                    return
-                if not await _insert_push_row(
+                    return False
+                outcome = await _insert_push_row(
                     session, journal_id, external_id, version_hash
-                ):
+                )
+                if outcome == "journal_gone":
+                    logger.info(
+                        "Journal deleted while its maintenance was being posted",
+                        journal_id=journal_id,
+                        external_id=external_id,
+                    )
+                    await _delete_maintenance_claim(session, journal_id)
+                    return True
+                if outcome == "taken":
                     logger.error(
                         "Posted Snipe-IT maintenance already has a sync row",
                         journal_id=journal_id,
                         external_id=external_id,
                     )
-                    return
+                    return False
                 await _delete_maintenance_claim(session, journal_id)
+        return False
 
     async def _release_maintenance_claim(
         self, journal_id: int, session_factory: Any
