@@ -424,14 +424,26 @@ async def _fetch_maintenance_claim(session: Any, journal_id: int) -> Any:
     return result.fetchone()
 
 
-async def _journal_exists(session: Any, journal_id: int) -> bool:
+async def _journal_exists(session: Any, journal_id: int, *, lock: bool = False) -> bool:
     """Whether the journal is still there.
 
     A journal's rows outlive it: deleting one cascades its own tables, not the
     ``sync_metadata`` rows that name it by id.
+
+    Args:
+        session: The session to read in.
+        journal_id: The journal to look for.
+        lock: Hold the row with ``FOR SHARE`` until this transaction commits, so
+            a deletion racing it cannot commit in between and leave a row naming
+            a journal that has gone. Callers about to *write* such a row pass
+            this; a read-only decision does not need it. The deletion then waits
+            for this transaction, and its handler sees the row and cleans it up.
     """
     result = await session.execute(
-        text("SELECT 1 FROM journals WHERE id = :journal_id"),
+        text(
+            "SELECT 1 FROM journals WHERE id = :journal_id"
+            + (" FOR SHARE" if lock else "")
+        ),
         {"journal_id": journal_id},
     )
     return result.fetchone() is not None
@@ -486,29 +498,28 @@ async def _insert_push_row(
         another journal — and ``"journal_gone"`` when the journal no longer
         exists. Nothing is written in the latter two cases.
     """
+    if not await _journal_exists(session, journal_id, lock=True):
+        return "journal_gone"
+
     result = await session.execute(
         text("""
             INSERT INTO sync_metadata
                 (internal_uuid, integration_source, external_id,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
-            SELECT
-                :internal_uuid, 'snipeit_maintenance', :external_id,
-                now(), :version_hash, 'success', NULL, 0, now(), now()
-            WHERE EXISTS (SELECT 1 FROM journals WHERE id = :journal_id)
+            VALUES
+                (:internal_uuid, 'snipeit_maintenance', :external_id,
+                 now(), :version_hash, 'success', NULL, 0, now(), now())
             ON CONFLICT (integration_source, external_id) DO NOTHING
             RETURNING id
         """),
         {
             "internal_uuid": str(journal_id),
-            "journal_id": journal_id,
             "external_id": external_id,
             "version_hash": version_hash,
         },
     )
-    if result.fetchone() is not None:
-        return "inserted"
-    return "taken" if await _journal_exists(session, journal_id) else "journal_gone"
+    return "inserted" if result.fetchone() is not None else "taken"
 
 
 @dataclass(frozen=True)
@@ -1391,6 +1402,12 @@ class SnipeItSyncService:
         outcome = await self._claim_maintenance(
             journal_id, claim, candidates, session_factory
         )
+        if outcome == "journal_gone":
+            logger.info(
+                "Journal deleted before its maintenance was posted",
+                journal_id=journal_id,
+            )
+            return
         if outcome != "claimed":
             await self._update_recorded_maintenance(
                 journal_id, version_hash, session_factory
@@ -1662,7 +1679,7 @@ class SnipeItSyncService:
         claim: MaintenanceClaim,
         candidates: Sequence[SnipeItMaintenance],
         session_factory: Any,
-    ) -> Literal["recorded", "linked", "claimed"]:
+    ) -> Literal["recorded", "linked", "claimed", "journal_gone"]:
         """Link a free candidate, or else claim the record about to be posted.
 
         Runs under the asset's lock, so journals processed at once see each
@@ -1670,9 +1687,10 @@ class SnipeItSyncService:
 
         Returns:
             ``"recorded"`` when the journal's record already has its sync row,
-            ``"linked"`` when a candidate was recorded as its record, and
+            ``"linked"`` when a candidate was recorded as its record,
             ``"claimed"`` when the claim is written and the record is to be
-            posted.
+            posted, and ``"journal_gone"`` when the journal was deleted while
+            this push was running, so nothing is to be posted or linked.
 
         Raises:
             SnipeItSyncInProgress: The journal's claim is still in flight.
@@ -1682,6 +1700,12 @@ class SnipeItSyncService:
                 await _lock_asset_maintenances(session, claim.asset_id)
                 if await _recorded_maintenance(session, journal_id) is not None:
                     return "recorded"
+                if not await _journal_exists(session, journal_id, lock=True):
+                    # Deleted since this push read it. Neither claiming nor
+                    # linking is right: a record posted now belongs to nothing,
+                    # and one whose response is lost leaves nothing to clean up.
+                    await _delete_maintenance_claim(session, journal_id)
+                    return "journal_gone"
                 _raise_if_claim_in_flight(
                     journal_id, await _fetch_maintenance_claim(session, journal_id)
                 )

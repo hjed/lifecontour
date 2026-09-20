@@ -2112,3 +2112,97 @@ class TestOrphanedPushRowsRecover:
         ]
         assert await _push_rows(async_connection, journal_id) == []
         assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_journal_deleted_before_the_claim_posts_nothing(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The journal goes while the push is searching Snipe-IT for its record.
+
+        Posting now would create a record for a journal that is already gone —
+        and one whose lost response leaves nothing to clean up — so the push
+        gives up instead of claiming and posting.
+        """
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        serve = mock_transport.handle_async_request
+
+        async def delete_journal_during_search(
+            request: httpx.Request,
+        ) -> httpx.Response:
+            response = await serve(request)
+            if request.method == "GET":
+                await _delete_journal(async_connection, journal_id)
+            return response
+
+        monkeypatch.setattr(
+            mock_transport, "handle_async_request", delete_journal_during_search
+        )
+        # Queued so a push that wrongly posts fails on the assertion below
+        # rather than on an unmocked request.
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(8), method="POST"
+        )
+        mock_transport.add_response(
+            "/maintenances/8", json_data={"status": "success"}, method="DELETE"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == []
+        assert await _push_rows(async_connection, journal_id) == []
+        assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_journal_deleted_before_a_matching_record_is_linked(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Same, with a candidate to link: the record must not be linked either."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        _queue_maintenance_page(mock_transport, _listed(9, title="Retire Harness"))
+        serve = mock_transport.handle_async_request
+
+        async def delete_journal_during_search(
+            request: httpx.Request,
+        ) -> httpx.Response:
+            response = await serve(request)
+            if request.method == "GET":
+                await _delete_journal(async_connection, journal_id)
+            return response
+
+        monkeypatch.setattr(
+            mock_transport, "handle_async_request", delete_journal_during_search
+        )
+        # Queued so a push that wrongly posts fails on the assertion below
+        # rather than on an unmocked request.
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(8), method="POST"
+        )
+        mock_transport.add_response(
+            "/maintenances/8", json_data={"status": "success"}, method="DELETE"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _snipeit_writes(mock_transport) == []
+        assert await _push_rows(async_connection, journal_id) == []
+        assert await _claim_row(async_connection, journal_id) is None
