@@ -1,6 +1,8 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from googleapiclient.errors import HttpError
 
 
 @pytest.fixture
@@ -131,3 +133,88 @@ async def test_delete_event_success(mock_auth_service, mock_google_calendar_serv
     ):
         await client.delete_event("event123", "primary")
         mock_delete.assert_called_once_with(calendarId="primary", eventId="event123")
+
+
+# ── eventTypeRestriction classification ─────────────────────────────────
+
+# A 400 that is *not* a type restriction: the stale-etag conflict that
+# update_contact already retries. The predicate must keep the two apart.
+_ETAG_CONFLICT_CONTENT = json.dumps(
+    {
+        "error": {
+            "code": 400,
+            "message": "Request etag is different from the current etag.",
+            "status": "FAILED_PRECONDITION",
+            "errors": [{"domain": "global", "reason": "failedPrecondition"}],
+        }
+    }
+).encode()
+
+
+def test_is_event_type_restriction_true_for_birthday_rejection(
+    event_type_restriction_error,
+) -> None:
+    from google_client import is_event_type_restriction
+
+    assert is_event_type_restriction(event_type_restriction_error) is True
+
+
+def test_is_event_type_restriction_false_for_etag_conflict(google_http_error) -> None:
+    """A 400 etag conflict is retryable; a type restriction never is."""
+    from google_client import is_event_type_restriction
+
+    assert is_event_type_restriction(
+        google_http_error(400, _ETAG_CONFLICT_CONTENT)
+    ) is (False)
+
+
+def test_is_event_type_restriction_false_for_server_error(google_http_error) -> None:
+    from google_client import is_event_type_restriction
+
+    error = google_http_error(500, b'{"error": {"code": 500, "message": "Backend"}}')
+
+    assert is_event_type_restriction(error) is False
+
+
+def test_is_event_type_restriction_false_for_other_status(
+    google_http_error, event_type_restriction_content
+) -> None:
+    """The status is part of the match: only a 400 carries this rejection."""
+    from google_client import is_event_type_restriction
+
+    error = google_http_error(403, event_type_restriction_content)
+
+    assert is_event_type_restriction(error) is False
+
+
+@pytest.mark.asyncio
+async def test_update_event_restriction_logs_warning_and_reraises(
+    mock_auth_service, mock_google_calendar_service, event_type_restriction_error
+) -> None:
+    """A restriction is the caller's decision, so it is re-raised — but it is a
+    permanent rejection rather than a fault, so it is not logged as an error."""
+    import google_client
+    from google_client import GoogleAPIClient
+
+    mock_patch = mock_google_calendar_service.events.return_value.patch
+    mock_patch.return_value.execute.side_effect = event_type_restriction_error
+
+    client = GoogleAPIClient(
+        auth_service=mock_auth_service,
+        google_account_email="test@example.com",
+        google_client_id="client_id",
+        google_client_secret="client_secret",
+        user_id=1,
+    )
+
+    with (
+        patch.object(
+            client, "_get_calendar_service", return_value=mock_google_calendar_service
+        ),
+        patch.object(google_client, "logger") as mock_logger,
+    ):
+        with pytest.raises(HttpError):
+            await client.update_event("event123", {"summary": "New"}, "primary")
+
+    mock_logger.warning.assert_called_once()
+    mock_logger.error.assert_not_called()

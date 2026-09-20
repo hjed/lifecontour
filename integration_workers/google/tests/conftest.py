@@ -43,9 +43,12 @@ os.environ.setdefault("ENCRYPTION_KEY", "test_encryption_key_32_characters!")
 os.environ.setdefault("WORKER_ID", "test-worker")
 os.environ.setdefault("LOG_LEVEL", "INFO")
 
+from collections.abc import Callable
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+from googleapiclient.errors import HttpError
 
 # Register the shared worker unit-test fixtures (mock_redis, worker_settings,
 # session_factory_mock, arq_ctx). pytest_plugins is only honoured in the
@@ -75,3 +78,70 @@ def valid_person_data() -> dict[str, Any]:
         "organizations": [{"name": "Example Corp", "title": "Software Engineer"}],
         "userDefined": [{"key": "custom_field", "value": "custom_value"}],
     }
+
+
+# ── Google API error fixtures ───────────────────────────────────────────
+
+# The body Google returns when a push targets an event whose type forbids the
+# change. A contact-linked birthday accepts only colorId, summary and
+# reminders, and rejects description, location and dates outright:
+# https://developers.google.com/workspace/calendar/api/guides/event-types
+_EVENT_TYPE_RESTRICTION_MESSAGE = (
+    "Attempt made to modify 'birthday' event in a way that is not valid for "
+    "this event type."
+)
+
+
+@pytest.fixture
+def google_http_error() -> Callable[[int, bytes], HttpError]:
+    """Build an ``HttpError`` the way googleapiclient raises one.
+
+    The real class rather than a stand-in, because the code under test
+    classifies these errors by their rendered form — a mock would assert
+    nothing about whether that rendering carries the reason code.
+    """
+
+    def _build(status: int, content: bytes) -> HttpError:
+        resp = MagicMock()
+        resp.status = status
+        resp.reason = "Bad Request" if status == 400 else "Error"
+        return HttpError(
+            resp=resp,
+            content=content,
+            uri="https://www.googleapis.com/calendar/v3/calendars/cal/events/evt",
+        )
+
+    return _build
+
+
+@pytest.fixture
+def event_type_restriction_content() -> bytes:
+    """The 400 body Google returns for a write an event's type forbids."""
+    return json.dumps(
+        {
+            "error": {
+                "code": 400,
+                "message": _EVENT_TYPE_RESTRICTION_MESSAGE,
+                "errors": [
+                    {
+                        "domain": "calendar",
+                        "reason": "eventTypeRestriction",
+                        "message": _EVENT_TYPE_RESTRICTION_MESSAGE,
+                        "extendedHelp": (
+                            "https://developers.google.com/workspace/calendar/"
+                            "api/guides/event-types#birthday"
+                        ),
+                    }
+                ],
+            }
+        }
+    ).encode()
+
+
+@pytest.fixture
+def event_type_restriction_error(
+    google_http_error: Callable[[int, bytes], HttpError],
+    event_type_restriction_content: bytes,
+) -> HttpError:
+    """The rejection a push to a Google birthday event comes back with."""
+    return google_http_error(400, event_type_restriction_content)

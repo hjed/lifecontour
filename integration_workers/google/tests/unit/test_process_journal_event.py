@@ -1,9 +1,62 @@
 """Tests for process_journal_event task."""
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+SYDNEY_MIDNIGHT_5_SEPT = datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
+
+
+def _push_session_factory(**row_overrides: Any) -> MagicMock:
+    """A session factory whose first two reads answer the outbound push.
+
+    The push opens one session and runs a fixed opening pair of queries — the
+    journal-with-calendar join, then the Google account lookup — so a factory
+    that answers those two and returns bare mocks thereafter is enough to
+    drive it. ``row_overrides`` set the journal row's columns.
+    """
+    mock_row = MagicMock()
+    mock_row.journal_id = 1
+    mock_row.title = "Birthday"
+    mock_row.content = "Content"
+    mock_row.event_date_range_start = SYDNEY_MIDNIGHT_5_SEPT
+    mock_row.event_date_range_end = SYDNEY_MIDNIGHT_5_SEPT
+    mock_row.user_id = 1
+    mock_row.is_all_day = True
+    mock_row.start_time = None
+    mock_row.end_time = None
+    mock_row.timezone = None
+    mock_row.user_timezone = None
+    mock_row.location = None
+    mock_row.calendar_id = "test-cal-id"
+    mock_row.google_calendar_id = "test-google-cal-id"
+    mock_row.is_synced_to_google = True
+    mock_row.access_role = "owner"
+    mock_row.external_event_id = None
+    mock_row.sync_status = None
+    mock_row.private_description = False
+    for name, value in row_overrides.items():
+        setattr(mock_row, name, value)
+
+    mock_result = MagicMock()
+    mock_result.fetchone.return_value = mock_row
+
+    mock_auth_row = MagicMock()
+    mock_auth_row.google_account_email = "test@example.com"
+    mock_auth_result = MagicMock()
+    mock_auth_result.fetchone.return_value = mock_auth_row
+
+    mock_session = AsyncMock()
+    mock_session.execute.side_effect = [mock_result, mock_auth_result] + [
+        MagicMock() for _ in range(10)
+    ]
+
+    mock_factory = MagicMock()
+    mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+    return mock_factory
 
 
 class TestProcessJournalEvent:
@@ -367,57 +420,10 @@ class TestProcessJournalEventTimezones:
     push that reads the UTC date sends the event a day early.
     """
 
-    SYDNEY_MIDNIGHT_5_SEPT = datetime(2026, 9, 4, 14, 0, tzinfo=UTC)
+    _session_factory = staticmethod(_push_session_factory)
 
     @staticmethod
-    def _session_factory(**row_overrides):
-        mock_row = MagicMock()
-        mock_row.journal_id = 1
-        mock_row.title = "Birthday"
-        mock_row.content = "Content"
-        mock_row.event_date_range_start = (
-            TestProcessJournalEventTimezones.SYDNEY_MIDNIGHT_5_SEPT
-        )
-        mock_row.event_date_range_end = (
-            TestProcessJournalEventTimezones.SYDNEY_MIDNIGHT_5_SEPT
-        )
-        mock_row.user_id = 1
-        mock_row.is_all_day = True
-        mock_row.start_time = None
-        mock_row.end_time = None
-        mock_row.timezone = None
-        mock_row.user_timezone = None
-        mock_row.location = None
-        mock_row.calendar_id = "test-cal-id"
-        mock_row.google_calendar_id = "test-google-cal-id"
-        mock_row.is_synced_to_google = True
-        mock_row.access_role = "owner"
-        mock_row.external_event_id = None
-        mock_row.sync_status = None
-        mock_row.private_description = False
-        for name, value in row_overrides.items():
-            setattr(mock_row, name, value)
-
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = mock_row
-
-        mock_auth_row = MagicMock()
-        mock_auth_row.google_account_email = "test@example.com"
-        mock_auth_result = MagicMock()
-        mock_auth_result.fetchone.return_value = mock_auth_row
-
-        mock_session = AsyncMock()
-        mock_session.execute.side_effect = [mock_result, mock_auth_result] + [
-            MagicMock() for _ in range(10)
-        ]
-
-        mock_factory = MagicMock()
-        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
-        return mock_factory
-
-    @staticmethod
-    async def _push(session_factory) -> dict:
+    async def _push(session_factory: MagicMock) -> dict[str, Any]:
         from worker import process_journal_event
 
         mock_client = AsyncMock()
@@ -515,3 +521,150 @@ class TestProcessJournalEventTimezones:
 
         assert payload["start"] == {"dateTime": "2026-09-04T16:00:00Z"}
         assert payload["end"] == {"dateTime": "2026-09-04T17:00:00Z"}
+
+
+class TestProcessJournalEventInboundEcho:
+    """A journal the Google inbound sync applied is not pushed back to Google.
+
+    The inbound sync creates the journal *and* its external event link in one
+    transaction, so by the time the resulting JournalCreated reaches this
+    worker the link already exists and the push would PATCH the very event the
+    journal was built from. Besides being a wasted round trip, Google rejects
+    it outright for event types it owns — a contact-linked birthday among them.
+    """
+
+    INBOUND = {"source": "google_calendar"}
+
+    @staticmethod
+    async def _run(
+        event_type: str, event_data: dict[str, Any]
+    ) -> tuple[dict[str, Any], AsyncMock]:
+        from worker import process_journal_event
+
+        session_factory = _push_session_factory(external_event_id="existing_event_id")
+        mock_client = AsyncMock()
+
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            result = await process_journal_event(
+                ctx={"session_factory": session_factory, "job_id": "job123"},
+                event_type=event_type,
+                event_data=event_data,
+            )
+        return result, mock_client
+
+    @pytest.mark.asyncio
+    async def test_created_by_inbound_sync_is_not_pushed_back(self) -> None:
+        result, mock_client = await self._run(
+            "JournalCreated", {"journal_id": 1, **self.INBOUND}
+        )
+
+        assert result == {"status": "ignored", "reason": "inbound_sync_echo"}
+        mock_client.create_event.assert_not_called()
+        mock_client.update_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_updated_by_inbound_sync_is_not_pushed_back(self) -> None:
+        result, mock_client = await self._run(
+            "JournalUpdated",
+            {
+                "journal_id": 1,
+                "changed_fields": {"title": ("Old", "New")},
+                **self.INBOUND,
+            },
+        )
+
+        assert result == {"status": "ignored", "reason": "inbound_sync_echo"}
+        mock_client.update_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_locally_sourced_event_is_still_pushed(self) -> None:
+        """The guard reads the source, not the journal: a user's own edit to a
+        journal that arrived from Google must still reach Google."""
+        result, mock_client = await self._run(
+            "JournalUpdated",
+            {
+                "journal_id": 1,
+                "changed_fields": {"title": ("Old", "New")},
+                "source": "ui",
+            },
+        )
+
+        assert result["status"] == "success"
+        mock_client.update_event.assert_called_once()
+
+
+class TestProcessJournalEventRestrictedType:
+    """Google declining to be written to is a skip, not a failure.
+
+    A birthday or from-Gmail event is derived by Google and accepts almost no
+    change. Raising would leave the stream message unacknowledged and retry it
+    to the dead-letter path, so the rejection is recorded on the link and the
+    event is acknowledged.
+    """
+
+    @staticmethod
+    async def _push_failing_with(
+        error: Exception,
+    ) -> tuple[dict[str, Any], AsyncMock]:
+        from worker import process_journal_event
+
+        session_factory = _push_session_factory(external_event_id="existing_event_id")
+        mock_session = session_factory.return_value.__aenter__.return_value
+        mock_client = AsyncMock()
+        mock_client.update_event.side_effect = error
+
+        with (
+            patch("worker.GoogleAuthService", return_value=AsyncMock()),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            result = await process_journal_event(
+                ctx={"session_factory": session_factory, "job_id": "job123"},
+                event_type="JournalUpdated",
+                event_data={
+                    "journal_id": 1,
+                    "changed_fields": {"title": ("Old", "New")},
+                    "source": "ui",
+                },
+            )
+        return result, mock_session
+
+    @staticmethod
+    def _errored_link_writes(mock_session: AsyncMock) -> list[Any]:
+        return [
+            call
+            for call in mock_session.execute.call_args_list
+            if "journal_external_event_links" in str(call[0][0])
+            and len(call[0]) > 1
+            and call[0][1].get("status") == "errored"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_restriction_is_a_permanent_skip(
+        self, event_type_restriction_error
+    ) -> None:
+        result, _ = await self._push_failing_with(event_type_restriction_error)
+
+        assert result["status"] == "ignored"
+        assert result["reason"] == "event_type_not_modifiable"
+
+    @pytest.mark.asyncio
+    async def test_restriction_records_the_divergence_on_the_link(
+        self, event_type_restriction_error
+    ) -> None:
+        """The journal and Google now differ, and the link is where that shows."""
+        _, mock_session = await self._push_failing_with(event_type_restriction_error)
+
+        assert self._errored_link_writes(mock_session)
+
+    @pytest.mark.asyncio
+    async def test_other_http_errors_still_raise(self, google_http_error) -> None:
+        """A transient fault must keep retrying, so only the restriction is caught."""
+        from googleapiclient.errors import HttpError
+
+        error = google_http_error(500, b'{"error": {"code": 500}}')
+
+        with pytest.raises(HttpError):
+            await self._push_failing_with(error)
