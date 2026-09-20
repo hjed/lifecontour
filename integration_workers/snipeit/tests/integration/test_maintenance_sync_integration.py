@@ -1999,29 +1999,77 @@ async def _push_row_internal_uuid(
     return internal_uuid
 
 
-def _delete_journal_after(
+async def _push_losing_its_journal(
+    snipeit_sync_service: Any,
     mock_transport: Any,
     monkeypatch: pytest.MonkeyPatch,
     async_connection: AsyncConnection,
     *,
-    journal_id: int,
-    method: str,
-) -> None:
-    """Delete the journal once a request of ``method`` has been served.
+    deleted_after: str,
+    candidate: int | None = None,
+) -> int:
+    """Run a create push whose journal is deleted part-way through it.
 
-    Puts a journal deletion inside a push, at the point the HTTP call reaches:
-    ``GET`` while it is still searching Snipe-IT for an existing record,
-    ``POST`` once it has created one.
+    The journal goes once a request of ``deleted_after`` has been served:
+    ``GET`` while the push is still searching Snipe-IT for an existing record,
+    ``POST`` once it has created one. With ``candidate`` the search finds a
+    record of that id to link.
+
+    Returns:
+        The id of the journal that was deleted.
     """
+    gear_item_id = await _seed_synced_asset(async_connection, 51)
+    journal_id = await _seed_maintenance_journal(
+        async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+    )
+    if candidate is not None:
+        _queue_maintenance_page(
+            mock_transport, _listed(candidate, title="Retire Harness")
+        )
+
     serve = mock_transport.handle_async_request
 
     async def serve_then_delete(request: httpx.Request) -> httpx.Response:
         response = await serve(request)
-        if request.method == method:
+        if request.method == deleted_after:
             await _delete_journal(async_connection, journal_id)
         return response
 
     monkeypatch.setattr(mock_transport, "handle_async_request", serve_then_delete)
+    # Queued so a push that wrongly posts fails on a test's assertions rather
+    # than on an unmocked request.
+    mock_transport.add_response(
+        "/maintenances", json_data=_write_response(8), method="POST"
+    )
+    mock_transport.add_response(
+        "/maintenances/8", json_data={"status": "success"}, method="DELETE"
+    )
+
+    await snipeit_sync_service.push_maintenance_create(
+        journal_id=journal_id,
+        session_factory=_joined_session_factory(async_connection),
+    )
+    return journal_id
+
+
+async def _sync_a_record_pushed_by(
+    snipeit_sync_service: Any,
+    mock_transport: Any,
+    async_connection: AsyncConnection,
+    *,
+    journal_id: int,
+) -> dict[str, int]:
+    """Run an inbound sync of record 8, which ``journal_id``'s push recorded."""
+    await _seed_push_record(async_connection, journal_id=journal_id, maintenance_id=8)
+    mock_transport.add_response(
+        "/maintenances/8",
+        json_data={**_SNIPEIT_MAINTENANCE_17, "id": 8, "title": "Retire Harness"},
+    )
+    result: dict[str, int] = await snipeit_sync_service.sync_maintenance_batch(
+        maintenance_ids=[8],
+        session_factory=_joined_session_factory(async_connection),
+    )
+    return result
 
 
 class TestOrphanedPushRowsRecover:
@@ -2033,128 +2081,123 @@ class TestOrphanedPushRowsRecover:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("journal_deleted", "expected_result", "expected_events", "still_named"),
-        [
-            pytest.param(
-                True,
-                {"synced": 1, "skipped": 0, "failed": 0},
-                ["journal_event.created"],
-                False,
-                id="journal-deleted-so-the-record-is-imported",
-            ),
-            pytest.param(
-                False,
-                {"synced": 0, "skipped": 1, "failed": 0},
-                [],
-                True,
-                id="journal-alive-so-the-record-is-still-skipped",
-            ),
-        ],
-    )
-    async def test_the_skip_asks_whether_the_pushing_journal_still_exists(
+    async def test_a_record_whose_journal_was_deleted_is_imported(
         self,
         snipeit_sync_service: Any,
         mock_transport: Any,
         async_connection: AsyncConnection,
-        journal_deleted: bool,
-        expected_result: dict[str, int],
-        expected_events: list[str],
-        still_named: bool,
     ) -> None:
-        """The gate must widen only for a journal that is gone.
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _delete_journal(async_connection, journal_id)
+
+        result = await _sync_a_record_pushed_by(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            journal_id=journal_id,
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert await _journal_events(async_connection) == ["journal_event.created"]
+        # The row now tracks the record as an import, not as that journal's push.
+        assert await _push_row_internal_uuid(async_connection, 8) is None
+
+    @pytest.mark.asyncio
+    async def test_a_live_journals_record_is_still_skipped(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The gate widens only for a journal that is gone.
 
         Widening it further would re-import every pushed record as a duplicate
-        journal, so the live case is pinned alongside the orphaned one.
+        journal, so the live case is pinned beside the orphaned one.
         """
         gear_item_id = await _seed_synced_asset(async_connection, 51)
         journal_id = await _seed_maintenance_journal(
             async_connection, gear_item_id=gear_item_id, title="Retire Harness"
         )
-        await _seed_push_record(
-            async_connection, journal_id=journal_id, maintenance_id=8
-        )
-        if journal_deleted:
-            await _delete_journal(async_connection, journal_id)
-        mock_transport.add_response(
-            "/maintenances/8",
-            json_data={**_SNIPEIT_MAINTENANCE_17, "id": 8, "title": "Retire Harness"},
+
+        result = await _sync_a_record_pushed_by(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            journal_id=journal_id,
         )
 
-        result = await snipeit_sync_service.sync_maintenance_batch(
-            maintenance_ids=[8],
-            session_factory=_joined_session_factory(async_connection),
-        )
-
-        assert result == expected_result
-        assert await _journal_events(async_connection) == expected_events
-        # An orphaned row stops naming the journal: it tracks an import now.
-        assert await _push_row_internal_uuid(async_connection, 8) == (
-            str(journal_id) if still_named else None
-        )
+        assert result == {"synced": 0, "skipped": 1, "failed": 0}
+        assert await _journal_events(async_connection) == []
+        assert await _push_row_internal_uuid(async_connection, 8) == str(journal_id)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("deleted_after", "candidate", "expected_writes"),
-        [
-            pytest.param(
-                "POST",
-                None,
-                ["POST /api/v1/maintenances", "DELETE /api/v1/maintenances/8"],
-                id="deleted-while-posting",
-            ),
-            pytest.param("GET", None, [], id="deleted-while-searching"),
-            pytest.param("GET", 9, [], id="deleted-while-searching-with-a-candidate"),
-        ],
-    )
-    async def test_a_push_that_loses_its_journal_leaves_no_record(
+    async def test_a_journal_deleted_while_searching_posts_nothing(
         self,
         snipeit_sync_service: Any,
         mock_transport: Any,
         async_connection: AsyncConnection,
         monkeypatch: pytest.MonkeyPatch,
-        deleted_after: str,
-        candidate: int | None,
-        expected_writes: list[str],
     ) -> None:
-        """The journal goes mid-push. No record may outlive it either way.
-
-        Deleted while the push is still searching Snipe-IT, it neither claims,
-        links nor posts — a record posted then belongs to nothing, and one whose
-        response is lost leaves nothing to clean up. Deleted once the POST is
-        already away, the record it created is deleted instead, because nothing
-        else will: the deletion handler looked for this journal's rows before
-        there were any.
-        """
-        gear_item_id = await _seed_synced_asset(async_connection, 51)
-        journal_id = await _seed_maintenance_journal(
-            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
-        )
-        if candidate is not None:
-            _queue_maintenance_page(
-                mock_transport, _listed(candidate, title="Retire Harness")
-            )
-        _delete_journal_after(
+        """A record posted now would belong to nothing, and one whose response
+        is lost would leave nothing to clean up, so the push gives up."""
+        journal_id = await _push_losing_its_journal(
+            snipeit_sync_service,
             mock_transport,
             monkeypatch,
             async_connection,
-            journal_id=journal_id,
-            method=deleted_after,
-        )
-        # Queued so a push that wrongly posts fails on the assertions below
-        # rather than on an unmocked request.
-        mock_transport.add_response(
-            "/maintenances", json_data=_write_response(8), method="POST"
-        )
-        mock_transport.add_response(
-            "/maintenances/8", json_data={"status": "success"}, method="DELETE"
+            deleted_after="GET",
         )
 
-        await snipeit_sync_service.push_maintenance_create(
-            journal_id=journal_id,
-            session_factory=_joined_session_factory(async_connection),
+        assert _snipeit_writes(mock_transport) == []
+        assert await _push_rows(async_connection, journal_id) == []
+        assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_journal_deleted_while_searching_links_no_candidate(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A matching record must not be linked to a journal that has gone."""
+        journal_id = await _push_losing_its_journal(
+            snipeit_sync_service,
+            mock_transport,
+            monkeypatch,
+            async_connection,
+            deleted_after="GET",
+            candidate=9,
         )
 
-        assert _snipeit_writes(mock_transport) == expected_writes
+        assert _snipeit_writes(mock_transport) == []
+        assert await _push_rows(async_connection, journal_id) == []
+        assert await _claim_row(async_connection, journal_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_journal_deleted_after_the_post_has_its_record_deleted(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Nothing else would delete it: the deletion handler looked for this
+        journal's rows before the push had written any."""
+        journal_id = await _push_losing_its_journal(
+            snipeit_sync_service,
+            mock_transport,
+            monkeypatch,
+            async_connection,
+            deleted_after="POST",
+        )
+
+        assert _snipeit_writes(mock_transport) == [
+            "POST /api/v1/maintenances",
+            "DELETE /api/v1/maintenances/8",
+        ]
         assert await _push_rows(async_connection, journal_id) == []
         assert await _claim_row(async_connection, journal_id) is None
