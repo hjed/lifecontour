@@ -308,6 +308,14 @@ Two properties are worth knowing when reading this code:
   was registered under, falling back to a deterministically chosen connected
   account only when there is no usable channel.
 
+`setup_calendar_webhook` signals retryability the way the rest of the workers
+do — by whether it raises. A refusal no retry can change (a calendar this
+account may not watch, one Google no longer knows, a disconnected account) is
+logged and returned, so the job succeeds and the next sweep tries again in six
+hours. Anything that might pass next time — a quota 403, a 5xx, a database
+blip — raises, so ARQ retries it in seconds rather than leaving a channel to
+lapse inside its renewal window.
+
 Everything here no-ops when `WEBHOOK_BASE_URL` is unset, leaving periodic sync
 as the only inbound path.
 

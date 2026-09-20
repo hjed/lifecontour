@@ -59,7 +59,7 @@ from api_models import ListConnectionsResponse
 
 # Import worker-specific services
 from event_transformer import google_event_times
-from google_auth_service import GoogleAuthService
+from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
 from google_client import (
     GoogleAPIClient,
     google_error_reasons,
@@ -4354,6 +4354,30 @@ async def _stop_previous_watch_channel(
         )
 
 
+# Statuses from ``events().watch()`` that no retry can change: a request Google
+# will keep rejecting, or a calendar this account cannot see.
+_PERMANENT_WATCH_STATUSES: frozenset[int] = frozenset({400, 404})
+
+
+def _is_permanent_watch_failure(error: Exception) -> bool:
+    """Return True when retrying the webhook setup cannot change the outcome.
+
+    Covers the three answers that are settled: the account is no longer
+    connected, Google refused access to the calendar (``is_permission_denied``
+    keeps rate and quota limits out of this), and a request Google rejects
+    outright. Everything else — 429, 5xx, a dropped connection, a database
+    blip — may succeed on a retry.
+    """
+    if isinstance(error, GoogleAuthTokensNotFoundError):
+        return True
+    if isinstance(error, HttpError):
+        return (
+            is_permission_denied(error)
+            or error.resp.status in _PERMANENT_WATCH_STATUSES
+        )
+    return False
+
+
 async def setup_calendar_webhook(
     ctx: dict[str, Any],
     google_account_email: str,
@@ -4498,7 +4522,17 @@ async def setup_calendar_webhook(
             else None,
         }
 
-    except Exception as e:  # noqa: BLE001
+    except (HttpError, GoogleAuthTokensNotFoundError) as e:
+        # Report a refusal and let the job succeed; raise anything that might
+        # work next time so ARQ spends its retry budget on it. Returning for
+        # everything, as this did, meant a transient Google or database error
+        # near a channel's expiry waited for the next six-hourly sweep instead
+        # of being retried in seconds. Raising for everything would be worse:
+        # a read-only calendar would burn the whole retry budget every sweep.
+        # See "Handler Convention: Returning vs Raising" in
+        # docs/architecture/integration-architecture.md.
+        if not _is_permanent_watch_failure(e):
+            raise
         logger.error(
             "Failed to setup calendar webhook",
             google_account_email=google_account_email,

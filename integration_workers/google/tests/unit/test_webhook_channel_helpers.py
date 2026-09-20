@@ -4,6 +4,7 @@ Tests GoogleAPIClient.watch_events/stop_channel methods and the
 setup_calendar_webhook ARQ task.
 """
 
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -16,12 +17,25 @@ from googleapiclient.errors import HttpError
 sys.path.insert(0, "/core_shared")
 
 
-def make_http_error(status: int, reason: str = "Error") -> HttpError:
-    """Build a googleapiclient HttpError carrying the given HTTP status."""
+def make_http_error(
+    status: int, reason: str = "Error", reasons: list[str] | None = None
+) -> HttpError:
+    """Build a googleapiclient HttpError carrying the given HTTP status.
+
+    ``reasons`` writes a Google-shaped JSON body so the reason codes are
+    readable by ``google_error_reasons``; without it the body is opaque, which
+    is itself a case the classifier has to handle.
+    """
     response = MagicMock()
     type(response).status = PropertyMock(return_value=status)
     response.reason = reason
-    return HttpError(resp=response, content=reason.encode())
+    if reasons is None:
+        content = reason.encode()
+    else:
+        content = json.dumps(
+            {"error": {"errors": [{"reason": r} for r in reasons]}}
+        ).encode()
+    return HttpError(resp=response, content=content)
 
 
 class TestWatchEvents:
@@ -350,14 +364,108 @@ class TestSetupCalendarWebhook:
         )
 
     @pytest.mark.asyncio
-    async def test_handles_watch_api_error(
+    async def test_raises_on_a_transient_watch_failure(
         self, mock_ctx: dict, mock_session: AsyncMock
     ) -> None:
-        """Should return error status when Google API watch fails."""
+        """A failure that might pass next time must reach ARQ as a failure.
+
+        Returning an error dict marks the job successful, so ARQ never spends
+        its retry budget and recovery waits for the next six-hourly sweep.
+        """
         from worker import setup_calendar_webhook
 
         mock_client = MagicMock()
-        mock_client.watch_events = AsyncMock(side_effect=Exception("API Error"))
+        mock_client.watch_events = AsyncMock(side_effect=make_http_error(500))
+
+        _, repo_patch = patch_watch_repo()
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
+            pytest.raises(HttpError),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_a_rate_limited_watch(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """A 403 naming a quota limit is backpressure, not a refusal."""
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            side_effect=make_http_error(403, reasons=["rateLimitExceeded"])
+        )
+
+        _, repo_patch = patch_watch_repo()
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
+            pytest.raises(HttpError),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error", "case"),
+        [
+            (make_http_error(403, reasons=["forbidden"]), "calendar is read-only"),
+            (make_http_error(404), "calendar is gone"),
+            (make_http_error(400), "google rejects the request"),
+        ],
+    )
+    async def test_returns_without_retrying_a_settled_refusal(
+        self, mock_ctx: dict, mock_session: AsyncMock, error: Any, case: str
+    ) -> None:
+        """A refusal no retry can change reports and lets the job succeed.
+
+        Raising these would burn the whole retry budget on every sweep for a
+        calendar that will never accept a watch.
+        """
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(side_effect=error)
+
+        _, repo_patch = patch_watch_repo()
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+            repo_patch,
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            result = await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+        assert result["status"] == "error", case
+
+    @pytest.mark.asyncio
+    async def test_returns_when_the_account_is_disconnected(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """No tokens means no retry will help until the user reconnects."""
+        from google_auth_service import GoogleAuthTokensNotFoundError
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            side_effect=GoogleAuthTokensNotFoundError("no tokens")
+        )
 
         _, repo_patch = patch_watch_repo()
 
@@ -373,7 +481,6 @@ class TestSetupCalendarWebhook:
             )
 
         assert result["status"] == "error"
-        assert "API Error" in result["error"]
 
     @pytest.mark.asyncio
     async def test_skips_stop_for_expired_channel(
