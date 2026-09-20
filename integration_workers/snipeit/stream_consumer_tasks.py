@@ -474,26 +474,32 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
                 {"journal_id": str(journal_id)},
             )
             sources = {row.integration_source for row in rows_result.fetchall()}
-            if not sources:
-                logger.debug(
-                    "Skipping JournalDeleted: nothing recorded in Snipe-IT",
-                    journal_id=journal_id,
-                )
-                return
 
-            # A claim with no record beside it is cleared here, before anything
-            # asks for credentials: clearing it is a database write, and a user
-            # who has disconnected Snipe-IT would otherwise leave it behind for
-            # good. A claim alongside a push row goes with that record instead.
-            if sources == {"snipeit_maintenance_claim"}:
+        if not sources:
+            logger.debug(
+                "Skipping JournalDeleted: nothing recorded in Snipe-IT",
+                journal_id=journal_id,
+            )
+            return
+
+        # A claim with no record beside it is cleared before anything asks for
+        # credentials: clearing it is a database write, and a user who has
+        # disconnected Snipe-IT would otherwise leave it behind for good. A
+        # claim alongside a push row goes with that record instead.
+        #
+        # In its own session: the query above has already opened a transaction
+        # on that one, and asking it to begin a second raises.
+        if sources == {"snipeit_maintenance_claim"}:
+            async with self._session_factory() as session:
                 async with session.begin():
                     await _delete_maintenance_claim(session, journal_id)
-                logger.info(
-                    "Cleared the maintenance claim of a deleted journal",
-                    journal_id=journal_id,
-                )
-                return
+            logger.info(
+                "Cleared the maintenance claim of a deleted journal",
+                journal_id=journal_id,
+            )
+            return
 
+        async with self._session_factory() as session:
             settings_result = await session.execute(
                 text("""
                     SELECT user_id, base_url, snipeit_user_id
