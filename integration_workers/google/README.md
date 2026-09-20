@@ -296,6 +296,15 @@ Two properties are worth knowing when reading this code:
   404 and 410 as success, because a channel Google has already forgotten is
   already in the state the call exists to produce. `setup_calendar_webhook`
   also skips the stop entirely when the stored expiry has passed.
+- **Setup is serialised per calendar.** Registering a channel is read-then-write
+  across two Google calls, so `setup_calendar_webhook` takes a transaction-scoped
+  advisory lock on (user, account, calendar) first. Renewal jobs additionally
+  carry a job id keyed to the calendar, so ARQ rejects a duplicate rather than
+  dispatching a second setup that would race the first.
+- **The account is chosen from the existing channel.** A calendar records no
+  Google account of its own, so renewal reuses the account its current channel
+  was registered under, falling back to a deterministically chosen connected
+  account only when there is no usable channel.
 
 Everything here no-ops when `WEBHOOK_BASE_URL` is unset, leaving periodic sync
 as the only inbound path.

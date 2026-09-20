@@ -8,7 +8,7 @@ It runs as a separate process from the main FastAPI application.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any, NamedTuple, cast
+from typing import Any, cast
 
 from arq import run_worker
 from arq.typing import StartupShutdown, WorkerSettingsBase
@@ -43,7 +43,11 @@ from core_shared.models.journal_external_event_link import (
 from core_shared.models.journals import CalendarInfo
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
-from core_shared.repositories import SyncJobRepository
+from core_shared.repositories import (
+    CalendarWatchRenewal,
+    CalendarWatchRepository,
+    SyncJobRepository,
+)
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from googleapiclient.errors import HttpError
 from sqlalchemy import text
@@ -4374,6 +4378,17 @@ async def setup_calendar_webhook(
         async with session_factory() as session:
             client = _create_google_client(session, user_id, google_account_email)
 
+            # Serialise concurrent setups for this calendar before reading the
+            # channel we are about to replace. Held until this block commits,
+            # so the Google stop/watch pair below cannot interleave with
+            # another run's.
+            conn = await session.connection()
+            await CalendarWatchRepository(conn).lock_calendar(
+                user_id=str(user_id),
+                google_account_email=google_account_email,
+                google_calendar_id=google_calendar_id,
+            )
+
             # Stop existing channel if one exists
             stmt = text("""
                 SELECT channel_id, channel_resource_id, channel_expiration
@@ -4498,58 +4513,20 @@ async def setup_calendar_webhook(
 WEBHOOK_RENEWAL_CRON_INTERVAL_HOURS = 6
 
 
-class CalendarWatchRenewal(NamedTuple):
-    """A calendar whose Google push notification channel needs re-registering."""
+def _renewal_job_id(calendar: CalendarWatchRenewal) -> str:
+    """Build the deduplicating ARQ job id for one calendar's renewal.
 
-    user_id: str
-    google_account_email: str
-    google_calendar_id: str
-
-
-async def _select_calendars_due_for_renewal(
-    session: AsyncSession, deadline: datetime
-) -> list[CalendarWatchRenewal]:
-    """Find synced calendars whose watch channel expires before ``deadline``.
-
-    A calendar is due when its channel is lapsing, was never registered, or has
-    no recorded expiry — all three leave push notifications unreliable.
-
-    ``user_google_auth`` is unique on (user_id, google_account_email) rather
-    than on user_id, so a user may hold more than one Google account while a
-    calendar records none. ``DISTINCT ON`` picks one account per user so a
-    single calendar cannot fan out into competing channels.
+    Keying the job by the calendar it renews makes a sweep idempotent: if a
+    previous sweep's job for this calendar is still queued or running, ARQ
+    refuses the duplicate rather than dispatching a second setup that would
+    race the first.
     """
-    stmt = text("""
-        WITH accounts AS (
-            SELECT DISTINCT ON (user_id) user_id, google_account_email
-            FROM user_google_auth
-            ORDER BY user_id, google_account_email
-        )
-        SELECT c.user_id, a.google_account_email, c.google_calendar_id
-        FROM calendars c
-        JOIN accounts a ON a.user_id = c.user_id
-        LEFT JOIN calendar_sync_tokens t
-               ON t.user_id = c.user_id
-              AND t.google_account_email = a.google_account_email
-              AND t.google_calendar_id = c.google_calendar_id
-        WHERE c.is_synced_to_google = true
-          AND c.google_calendar_id IS NOT NULL
-          AND (
-              t.channel_id IS NULL
-              OR t.channel_expiration IS NULL
-              OR t.channel_expiration < :deadline
-          )
-        ORDER BY c.user_id, c.google_calendar_id
-    """)
-    result = await session.execute(stmt, {"deadline": deadline})
-    return [
-        CalendarWatchRenewal(
-            user_id=row.user_id,
-            google_account_email=row.google_account_email,
-            google_calendar_id=row.google_calendar_id,
-        )
-        for row in result.fetchall()
-    ]
+    return (
+        "calendar-webhook-renewal:"
+        f"{calendar.user_id}:"
+        f"{calendar.google_account_email}:"
+        f"{calendar.google_calendar_id}"
+    )
 
 
 async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
@@ -4583,11 +4560,14 @@ async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
 
     session_factory = ctx["session_factory"]
     jobs_enqueued = 0
+    jobs_skipped = 0
     errors: list[str] = []
 
     try:
         async with session_factory() as session:
-            due = await _select_calendars_due_for_renewal(session, deadline)
+            conn = await session.connection()
+            repo = CalendarWatchRepository(conn)
+            due = await repo.select_due_for_renewal(deadline)
 
         logger.info("Found calendars due for webhook renewal", calendars_due=len(due))
 
@@ -4598,6 +4578,7 @@ async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
                     calendar.google_account_email,
                     calendar.user_id,
                     calendar.google_calendar_id,
+                    _job_id=_renewal_job_id(calendar),
                     _queue_name=ARQ_QUEUE_NAME,
                 )
                 if job:
@@ -4609,12 +4590,12 @@ async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
                         user_id=calendar.user_id,
                     )
                 else:
-                    errors.append(
-                        f"Failed to enqueue webhook renewal for "
-                        f"{calendar.google_calendar_id}"
-                    )
-                    logger.warning(
-                        "Failed to enqueue calendar webhook renewal job",
+                    # ARQ returns None only when a job with this id is already
+                    # queued or running, which is the deduplication working:
+                    # a previous sweep is still setting this calendar up.
+                    jobs_skipped += 1
+                    logger.debug(
+                        "Calendar webhook renewal already in flight",
                         google_calendar_id=calendar.google_calendar_id,
                         user_id=calendar.user_id,
                     )
@@ -4631,6 +4612,7 @@ async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
             "Calendar webhook renewal complete",
             calendars_due=len(due),
             jobs_enqueued=jobs_enqueued,
+            jobs_skipped=jobs_skipped,
             errors_count=len(errors),
         )
 
@@ -4638,6 +4620,7 @@ async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
             "status": "success",
             "calendars_due": len(due),
             "jobs_enqueued": jobs_enqueued,
+            "jobs_skipped": jobs_skipped,
             "errors": errors,
             "worker_id": settings.worker_id,
         }

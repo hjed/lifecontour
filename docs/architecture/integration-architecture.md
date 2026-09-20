@@ -615,6 +615,11 @@ Two design notes:
 - Stopping a channel is **idempotent**: 404 and 410 from `channels().stop()`
   mean the channel is already gone, which is the state the call exists to
   produce, so they are not treated as failures.
+- Setup is **serialised per calendar** by a transaction-scoped advisory lock
+  (`CalendarWatchRepository.lock_calendar`), and renewal jobs carry a job id
+  keyed to the calendar. Two overlapping setups would otherwise each register a
+  replacement channel, leaving one live at Google but unrecorded — and so
+  delivering notifications the webhook endpoint rejects until it expires.
 
 The whole mechanism no-ops when `WEBHOOK_BASE_URL` is unset, leaving periodic
 sync as the only inbound path.

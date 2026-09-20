@@ -6,8 +6,8 @@ before they lapse by enqueueing a ``setup_calendar_webhook`` job per calendar.
 
 The query that decides *which* calendars are due depends on real SQL across
 three tables and is covered by
-``tests/integration/test_webhook_renewal_integration.py``; it is patched out
-here so these tests cover the fan-out and its failure handling.
+``tests/integration/test_webhook_renewal_integration.py``; the repository is
+patched out here so these tests cover the fan-out and its failure handling.
 """
 
 import sys
@@ -33,6 +33,14 @@ def make_due_calendar(
         google_account_email=google_account_email,
         google_calendar_id=google_calendar_id,
     )
+
+
+def patch_due_calendars(due: list[Any]) -> Any:
+    """Patch the repository so the renewal task sees ``due`` as the work to do."""
+    repo = MagicMock()
+    repo.select_due_for_renewal = AsyncMock(return_value=due)
+    repo_cls = MagicMock(return_value=repo)
+    return patch("worker.CalendarWatchRepository", repo_cls)
 
 
 class TestRenewCalendarWebhooks:
@@ -79,10 +87,7 @@ class TestRenewCalendarWebhooks:
 
         with (
             patch("worker.settings") as mock_settings,
-            patch(
-                "worker._select_calendars_due_for_renewal",
-                new=AsyncMock(return_value=due),
-            ),
+            patch_due_calendars(due),
         ):
             mock_settings.webhook_base_url = "https://example.com"
             mock_settings.webhook_renewal_threshold_hours = 48
@@ -138,10 +143,7 @@ class TestRenewCalendarWebhooks:
 
         with (
             patch("worker.settings") as mock_settings,
-            patch(
-                "worker._select_calendars_due_for_renewal",
-                new=AsyncMock(return_value=due),
-            ),
+            patch_due_calendars(due),
         ):
             mock_settings.webhook_base_url = "https://example.com"
             mock_settings.webhook_renewal_threshold_hours = 48
@@ -163,10 +165,7 @@ class TestRenewCalendarWebhooks:
 
         with (
             patch("worker.settings") as mock_settings,
-            patch(
-                "worker._select_calendars_due_for_renewal",
-                new=AsyncMock(return_value=due),
-            ),
+            patch_due_calendars(due),
         ):
             mock_settings.webhook_base_url = "https://example.com"
             mock_settings.webhook_renewal_threshold_hours = 48
@@ -187,10 +186,7 @@ class TestRenewCalendarWebhooks:
 
         with (
             patch("worker.settings") as mock_settings,
-            patch(
-                "worker._select_calendars_due_for_renewal",
-                new=AsyncMock(return_value=[]),
-            ),
+            patch_due_calendars([]),
         ):
             mock_settings.webhook_base_url = "https://example.com"
             mock_settings.webhook_renewal_threshold_hours = 48
@@ -200,3 +196,78 @@ class TestRenewCalendarWebhooks:
         assert result["status"] == "success"
         assert result["calendars_due"] == 0
         mock_redis.enqueue_job.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_enqueues_with_a_job_id_keyed_to_the_calendar(
+        self, mock_ctx: dict, mock_redis: AsyncMock
+    ) -> None:
+        """A deterministic job id lets ARQ reject a duplicate sweep's job.
+
+        Without it, a delayed sweep overlapping the next one would dispatch two
+        setups for the same calendar, which race to register competing channels.
+        """
+        from worker import renew_calendar_webhooks
+
+        due = [make_due_calendar("user-1", "a@example.com", "cal-1")]
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch_due_calendars(due),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+            mock_settings.webhook_renewal_threshold_hours = 48
+
+            await renew_calendar_webhooks(mock_ctx)
+
+        job_id = mock_redis.enqueue_job.call_args.kwargs["_job_id"]
+        assert job_id == "calendar-webhook-renewal:user-1:a@example.com:cal-1"
+
+    @pytest.mark.asyncio
+    async def test_job_ids_differ_per_calendar(
+        self, mock_ctx: dict, mock_redis: AsyncMock
+    ) -> None:
+        """Deduplication must be per calendar, not per sweep."""
+        from worker import renew_calendar_webhooks
+
+        due = [
+            make_due_calendar("user-1", "a@example.com", "cal-1"),
+            make_due_calendar("user-1", "a@example.com", "cal-2"),
+        ]
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch_due_calendars(due),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+            mock_settings.webhook_renewal_threshold_hours = 48
+
+            await renew_calendar_webhooks(mock_ctx)
+
+        job_ids = {
+            call.kwargs["_job_id"] for call in mock_redis.enqueue_job.call_args_list
+        }
+        assert len(job_ids) == 2
+
+    @pytest.mark.asyncio
+    async def test_counts_a_deduplicated_job_as_skipped_not_failed(
+        self, mock_ctx: dict, mock_redis: AsyncMock
+    ) -> None:
+        """ARQ returning None means the job is already in flight — not an error."""
+        from worker import renew_calendar_webhooks
+
+        due = [make_due_calendar("user-1", "a@example.com", "cal-1")]
+        mock_redis.enqueue_job = AsyncMock(return_value=None)
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch_due_calendars(due),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+            mock_settings.webhook_renewal_threshold_hours = 48
+
+            result = await renew_calendar_webhooks(mock_ctx)
+
+        assert result["status"] == "success"
+        assert result["jobs_enqueued"] == 0
+        assert result["jobs_skipped"] == 1
+        assert result["errors"] == []

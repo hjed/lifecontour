@@ -1,18 +1,18 @@
 """Integration tests for the calendar watch-channel renewal query.
 
-``_select_calendars_due_for_renewal`` joins ``calendars``,
-``user_google_auth`` and ``calendar_sync_tokens`` to decide which push
-channels are close enough to expiry to re-register. That decision is pure SQL,
-so it is exercised here against a real database rather than mocked.
+``CalendarWatchRepository.select_due_for_renewal`` joins ``calendars``,
+``user_google_auth`` and ``calendar_sync_tokens`` to decide which push channels
+are close enough to expiry to re-register, and which Google account each should
+be renewed under. That decision is pure SQL, so it is exercised here against a
+real database rather than mocked.
 """
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from core_shared.repositories import CalendarWatchRenewal, CalendarWatchRepository
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from worker import CalendarWatchRenewal, _select_calendars_due_for_renewal
 
 # Renewal horizon used by every case below: a channel expiring inside this
 # window is due, one expiring after it is not.
@@ -95,6 +95,14 @@ async def seed_channel(
     )
 
 
+async def select_due(
+    session: AsyncSession, deadline: datetime
+) -> list[CalendarWatchRenewal]:
+    """Run the renewal query against the test session's connection."""
+    conn = await session.connection()
+    return await CalendarWatchRepository(conn).select_due_for_renewal(deadline)
+
+
 @pytest.mark.asyncio
 class TestSelectCalendarsDueForRenewal:
     """The renewal query returns exactly the calendars whose channel is lapsing."""
@@ -165,7 +173,7 @@ class TestSelectCalendarsDueForRenewal:
 
         await db_session.commit()
 
-        due = await _select_calendars_due_for_renewal(db_session, now + THRESHOLD)
+        due = await select_due(db_session, now + THRESHOLD)
 
         due_ids = {row.google_calendar_id for row in due if row.user_id == USER_ID}
         assert due_ids == {
@@ -187,7 +195,7 @@ class TestSelectCalendarsDueForRenewal:
         await seed_calendar(db_session, user_id, "cal-2")
         await db_session.commit()
 
-        due = await _select_calendars_due_for_renewal(db_session, now + THRESHOLD)
+        due = await select_due(db_session, now + THRESHOLD)
 
         rows = [row for row in due if row.user_id == user_id]
         assert rows == [
@@ -216,8 +224,94 @@ class TestSelectCalendarsDueForRenewal:
         await seed_calendar(db_session, user_id, "cal-3")
         await db_session.commit()
 
-        due = await _select_calendars_due_for_renewal(db_session, now + THRESHOLD)
+        due = await select_due(db_session, now + THRESHOLD)
 
         rows = [row for row in due if row.user_id == user_id]
         assert len(rows) == 1
         assert rows[0].google_calendar_id == "cal-3"
+
+    async def test_renews_under_the_account_the_channel_was_registered_with(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A calendar keeps the account its existing channel belongs to.
+
+        Picking any other connected account would register a second, competing
+        channel under different credentials while the real one expired
+        unrenewed.
+        """
+        now = datetime.now(UTC)
+        user_id = "renew-user-4"
+
+        # The alphabetically first account is deliberately NOT the one the
+        # channel was registered under.
+        await seed_google_account(db_session, user_id, "aaa@example.com")
+        await seed_google_account(db_session, user_id, "zzz@example.com")
+        await seed_calendar(db_session, user_id, "cal-4")
+        await seed_channel(
+            db_session,
+            user_id,
+            "zzz@example.com",
+            "cal-4",
+            expiration=now + timedelta(hours=6),
+        )
+        await db_session.commit()
+
+        due = await select_due(db_session, now + THRESHOLD)
+
+        rows = [row for row in due if row.user_id == user_id]
+        assert rows == [
+            CalendarWatchRenewal(
+                user_id=user_id,
+                google_account_email="zzz@example.com",
+                google_calendar_id="cal-4",
+            )
+        ]
+
+    async def test_falls_back_when_the_channels_account_was_disconnected(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A channel whose account is gone is re-registered under a live one.
+
+        Keeping the disconnected account would renew forever against
+        credentials that no longer exist.
+        """
+        now = datetime.now(UTC)
+        user_id = "renew-user-5"
+
+        await seed_google_account(db_session, user_id, "live@example.com")
+        await seed_calendar(db_session, user_id, "cal-5")
+        # A channel left behind by an account that is no longer connected:
+        # there is no matching user_google_auth row for it.
+        await seed_channel(
+            db_session,
+            user_id,
+            "disconnected@example.com",
+            "cal-5",
+            expiration=now + timedelta(days=6),
+        )
+        await db_session.commit()
+
+        due = await select_due(db_session, now + THRESHOLD)
+
+        rows = [row for row in due if row.user_id == user_id]
+        assert rows == [
+            CalendarWatchRenewal(
+                user_id=user_id,
+                google_account_email="live@example.com",
+                google_calendar_id="cal-5",
+            )
+        ]
+
+    async def test_user_with_no_connected_account_is_never_returned(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A synced calendar with no Google account behind it cannot be renewed."""
+        now = datetime.now(UTC)
+        user_id = "renew-user-6"
+
+        await seed_calendar(db_session, user_id, "cal-6")
+        await db_session.commit()
+
+        due = await select_due(db_session, now + THRESHOLD)
+
+        assert [row for row in due if row.user_id == user_id] == []

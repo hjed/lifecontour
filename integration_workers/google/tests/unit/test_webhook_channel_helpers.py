@@ -426,3 +426,45 @@ class TestSetupCalendarWebhook:
         mock_client.stop_channel.assert_called_once_with(
             channel_id="old-channel-id", resource_id="old-resource-id"
         )
+
+    @pytest.mark.asyncio
+    async def test_locks_the_calendar_before_reading_its_channel(
+        self, mock_ctx: dict, mock_session: AsyncMock
+    ) -> None:
+        """Setup serialises on the calendar so two runs cannot both register.
+
+        The lock is taken before the existing channel is read, so a run that
+        waits for it sees whatever the previous holder committed.
+        """
+        from worker import setup_calendar_webhook
+
+        mock_client = MagicMock()
+        mock_client.watch_events = AsyncMock(
+            return_value={"resourceId": "res-id", "expiration": "1711580400000"}
+        )
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        repo = MagicMock()
+        repo.lock_calendar = AsyncMock()
+        repo_cls = MagicMock(return_value=repo)
+
+        with (
+            patch("worker.settings") as mock_settings,
+            patch("worker._create_google_client", return_value=mock_client),
+            patch("worker.CalendarWatchRepository", repo_cls),
+        ):
+            mock_settings.webhook_base_url = "https://example.com"
+
+            result = await setup_calendar_webhook(
+                mock_ctx, "test@example.com", "user-1", "cal-1"
+            )
+
+        assert result["status"] == "success"
+        repo.lock_calendar.assert_awaited_once_with(
+            user_id="user-1",
+            google_account_email="test@example.com",
+            google_calendar_id="cal-1",
+        )
