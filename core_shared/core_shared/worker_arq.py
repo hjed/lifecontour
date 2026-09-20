@@ -111,6 +111,39 @@ class SharedARQWorkerSettings:
     retry_delay = staticmethod(default_retry_delay)
 
 
+def generate_interval_cron(
+    func: Any,
+    *,
+    every_hours: int,
+    minute: int = 0,
+    unique: bool = True,
+) -> list[Any]:
+    """Build the ARQ cron list scheduling ``func`` every ``every_hours`` hours.
+
+    The function runs at the top of every ``every_hours``-th hour (e.g.
+    ``every_hours=6`` → hours ``{0, 6, 12, 18}``) at the given ``minute``.
+    ``every_hours`` is floored at 1 to avoid a zero step. The schedule resets
+    daily, so the cadence is perfectly even only when ``every_hours`` divides
+    24; other values leave a shorter final gap before midnight.
+
+    ``arq`` is imported lazily so importing ``core_shared`` does not require it
+    (see the module docstring); workers that schedule cron jobs always depend on
+    ``arq``.
+    """
+    interval = max(1, every_hours)
+
+    from arq import cron
+
+    return [
+        cron(
+            func,
+            hour=set(range(0, 24, interval)),
+            minute=minute,
+            unique=unique,
+        )
+    ]
+
+
 def generate_cron_jobs(
     func: Any,
     *,
@@ -127,32 +160,26 @@ def generate_cron_jobs(
     the immich/google/strava workers produced by hand. ``sync_interval_hours`` is
     floored at 1 to avoid a zero step, mirroring ``immich._generate_cron_jobs``.
 
-    ``arq`` is imported lazily so importing ``core_shared`` does not require it
-    (see the module docstring); workers that schedule cron jobs always depend on
-    ``arq``.
+    The schedule itself is built by :func:`generate_interval_cron`; this helper
+    adds the periodic-sync gate and its logging.
     """
     if not enable_periodic_sync:
         return []
 
     interval = max(1, sync_interval_hours)
-    sync_hours = set(range(0, 24, interval))
-
-    from arq import cron
 
     logger.info(
         "Periodic sync enabled",
         sync_interval_hours=interval,
-        sync_hours=sorted(sync_hours),
+        sync_hours=sorted(range(0, 24, interval)),
     )
 
-    return [
-        cron(
-            func,
-            hour=sync_hours,
-            minute=minute,
-            unique=unique,
-        )
-    ]
+    return generate_interval_cron(
+        func,
+        every_hours=interval,
+        minute=minute,
+        unique=unique,
+    )
 
 
 def generate_reconciliation_cron(

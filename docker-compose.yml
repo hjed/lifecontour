@@ -383,6 +383,14 @@ services:
       # Determines how often to sync contacts from Google
       # Examples: 1 (hourly), 6 (every 6 hours), 12 (twice daily), 24 (daily)
       SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-6}
+      # Calendar push notification configuration
+      # Public HTTPS base URL Google delivers calendar webhooks to. Push
+      # notifications are disabled entirely while this is unset, leaving the
+      # periodic sync above as the only path for inbound calendar changes.
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-}
+      # How far ahead of a watch channel's expiry to re-register it, in hours.
+      # Channels live for 7 days; the default renews roughly every 5 days.
+      WEBHOOK_RENEWAL_THRESHOLD_HOURS: ${WEBHOOK_RENEWAL_THRESHOLD_HOURS:-48}
     volumes:
       - ./core_shared:/core_shared:ro
       - ./integration_workers/google:/app

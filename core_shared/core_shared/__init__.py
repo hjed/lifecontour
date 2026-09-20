@@ -79,6 +79,7 @@ from core_shared.worker_arq import (
     build_worker_lifecycle,
     default_retry_delay,
     generate_cron_jobs,
+    generate_interval_cron,
     generate_reconciliation_cron,
 )
 from core_shared.worker_settings import (
@@ -130,6 +131,7 @@ __all__ = [
     "SharedARQWorkerSettings",
     "default_retry_delay",
     "generate_cron_jobs",
+    "generate_interval_cron",
     "generate_reconciliation_cron",
     "build_worker_lifecycle",
     "DEFAULT_JOB_TIMEOUT",

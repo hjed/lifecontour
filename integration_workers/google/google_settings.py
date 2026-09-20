@@ -30,8 +30,14 @@ class GoogleSettings(BaseWorkerSettings):
     # Reserved Google groups to ignore (by default just ``myContacts``).
     google_reserved_groups: list[str] = ["myContacts"]
 
-    # Public HTTPS URL for webhook callbacks.
+    # Public HTTPS URL for webhook callbacks. Push notifications are disabled
+    # entirely while this is unset.
     webhook_base_url: str = ""
+
+    # How far ahead of a watch channel's expiry to re-register it. Channels
+    # live for 7 days, so the default renews roughly every 5 days while
+    # leaving enough slack to survive the worker being down for a day.
+    webhook_renewal_threshold_hours: int = 48
 
     # Per-worker identity overrides (see BaseWorkerSettings for the rest).
     worker_id: str = "google-worker"

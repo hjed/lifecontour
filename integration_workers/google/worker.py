@@ -8,7 +8,7 @@ It runs as a separate process from the main FastAPI application.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from arq import run_worker
 from arq.typing import StartupShutdown, WorkerSettingsBase
@@ -16,6 +16,7 @@ from core_shared import (
     SharedARQWorkerSettings,
     build_worker_lifecycle,
     generate_cron_jobs,
+    generate_interval_cron,
     redis_settings_from_url,
 )
 
@@ -4491,6 +4492,171 @@ async def setup_calendar_webhook(
         }
 
 
+# How often the renewal cron sweeps for lapsing channels. Paired with the
+# ``webhook_renewal_threshold_hours`` setting (48h by default), this leaves
+# several sweeps of margin before any channel can actually expire.
+WEBHOOK_RENEWAL_CRON_INTERVAL_HOURS = 6
+
+
+class CalendarWatchRenewal(NamedTuple):
+    """A calendar whose Google push notification channel needs re-registering."""
+
+    user_id: str
+    google_account_email: str
+    google_calendar_id: str
+
+
+async def _select_calendars_due_for_renewal(
+    session: AsyncSession, deadline: datetime
+) -> list[CalendarWatchRenewal]:
+    """Find synced calendars whose watch channel expires before ``deadline``.
+
+    A calendar is due when its channel is lapsing, was never registered, or has
+    no recorded expiry — all three leave push notifications unreliable.
+
+    ``user_google_auth`` is unique on (user_id, google_account_email) rather
+    than on user_id, so a user may hold more than one Google account while a
+    calendar records none. ``DISTINCT ON`` picks one account per user so a
+    single calendar cannot fan out into competing channels.
+    """
+    stmt = text("""
+        WITH accounts AS (
+            SELECT DISTINCT ON (user_id) user_id, google_account_email
+            FROM user_google_auth
+            ORDER BY user_id, google_account_email
+        )
+        SELECT c.user_id, a.google_account_email, c.google_calendar_id
+        FROM calendars c
+        JOIN accounts a ON a.user_id = c.user_id
+        LEFT JOIN calendar_sync_tokens t
+               ON t.user_id = c.user_id
+              AND t.google_account_email = a.google_account_email
+              AND t.google_calendar_id = c.google_calendar_id
+        WHERE c.is_synced_to_google = true
+          AND c.google_calendar_id IS NOT NULL
+          AND (
+              t.channel_id IS NULL
+              OR t.channel_expiration IS NULL
+              OR t.channel_expiration < :deadline
+          )
+        ORDER BY c.user_id, c.google_calendar_id
+    """)
+    result = await session.execute(stmt, {"deadline": deadline})
+    return [
+        CalendarWatchRenewal(
+            user_id=row.user_id,
+            google_account_email=row.google_account_email,
+            google_calendar_id=row.google_calendar_id,
+        )
+        for row in result.fetchall()
+    ]
+
+
+async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Re-register Google Calendar push channels before they expire.
+
+    Watch channels live for ``watch_events``' TTL (7 days) and Google then
+    forgets them, silently ending push-driven sync. This cron runs ahead of
+    that deadline and enqueues one ``setup_calendar_webhook`` job per lapsing
+    calendar, so a single failing calendar neither blocks the others nor loses
+    ARQ's retry budget.
+
+    Args:
+        ctx: ARQ context dictionary containing Redis pool and session_factory
+
+    Returns:
+        Dictionary with renewal summary (calendars_due, jobs_enqueued, errors)
+    """
+    if not settings.webhook_base_url:
+        logger.debug(
+            "webhook_base_url not configured, skipping calendar webhook renewal"
+        )
+        return {"status": "skipped", "reason": "webhook_base_url not configured"}
+
+    threshold_hours = settings.webhook_renewal_threshold_hours
+    deadline = datetime.now(UTC) + timedelta(hours=threshold_hours)
+
+    logger.info(
+        "Starting calendar webhook renewal",
+        renewal_threshold_hours=threshold_hours,
+    )
+
+    session_factory = ctx["session_factory"]
+    jobs_enqueued = 0
+    errors: list[str] = []
+
+    try:
+        async with session_factory() as session:
+            due = await _select_calendars_due_for_renewal(session, deadline)
+
+        logger.info("Found calendars due for webhook renewal", calendars_due=len(due))
+
+        for calendar in due:
+            try:
+                job = await ctx["redis"].enqueue_job(
+                    "setup_calendar_webhook",
+                    calendar.google_account_email,
+                    calendar.user_id,
+                    calendar.google_calendar_id,
+                    _queue_name=ARQ_QUEUE_NAME,
+                )
+                if job:
+                    jobs_enqueued += 1
+                    logger.info(
+                        "Enqueued calendar webhook renewal job",
+                        job_id=job.job_id,
+                        google_calendar_id=calendar.google_calendar_id,
+                        user_id=calendar.user_id,
+                    )
+                else:
+                    errors.append(
+                        f"Failed to enqueue webhook renewal for "
+                        f"{calendar.google_calendar_id}"
+                    )
+                    logger.warning(
+                        "Failed to enqueue calendar webhook renewal job",
+                        google_calendar_id=calendar.google_calendar_id,
+                        user_id=calendar.user_id,
+                    )
+            except Exception as e:  # noqa: BLE001
+                errors.append(str(e))
+                logger.warning(
+                    "Error enqueueing calendar webhook renewal job",
+                    google_calendar_id=calendar.google_calendar_id,
+                    user_id=calendar.user_id,
+                    error=str(e),
+                )
+
+        logger.info(
+            "Calendar webhook renewal complete",
+            calendars_due=len(due),
+            jobs_enqueued=jobs_enqueued,
+            errors_count=len(errors),
+        )
+
+        return {
+            "status": "success",
+            "calendars_due": len(due),
+            "jobs_enqueued": jobs_enqueued,
+            "errors": errors,
+            "worker_id": settings.worker_id,
+        }
+
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "Calendar webhook renewal failed",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "jobs_enqueued": jobs_enqueued,
+            "errors": errors,
+        }
+
+
 # ARQ Worker Settings
 class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     """ARQ worker configuration.
@@ -4512,6 +4678,7 @@ class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         push_local_contacts_to_google,
         sync_calendar_events,
         setup_calendar_webhook,
+        renew_calendar_webhooks,  # Wrapper for the webhook renewal cron
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
 
@@ -4534,11 +4701,20 @@ class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     job_timeout = 600
     max_jobs = settings.max_concurrent_jobs
 
-    # Periodic sync cron (shared helper; empty when periodic sync is disabled).
+    # Periodic sync cron (shared helper; empty when periodic sync is disabled),
+    # plus the calendar webhook renewal cron. Renewal is deliberately *not*
+    # gated on enable_periodic_sync: push notifications are what keeps calendars
+    # fresh when periodic sync is off, so that is exactly when a lapsed watch
+    # channel hurts most. It runs at minute 30 to stay clear of the periodic
+    # sync cron at minute 0.
     cron_jobs = generate_cron_jobs(
         periodic_sync_all_accounts,
         enable_periodic_sync=settings.enable_periodic_sync,
         sync_interval_hours=settings.sync_interval_hours,
+    ) + generate_interval_cron(
+        renew_calendar_webhooks,
+        every_hours=WEBHOOK_RENEWAL_CRON_INTERVAL_HOURS,
+        minute=30,
     )
 
 
