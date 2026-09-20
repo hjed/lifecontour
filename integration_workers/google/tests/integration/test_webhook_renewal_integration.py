@@ -423,3 +423,105 @@ class TestLockCalendar:
                 text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
             )
             assert held.scalar_one() >= 2
+
+
+@pytest.mark.asyncio
+class TestActiveChannels:
+    """Reading and clearing the channels a calendar has recorded."""
+
+    async def test_returns_every_account_holding_a_channel(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Rows under several accounts are all returned, newest expiry first.
+
+        A calendar should hold one channel, but rows predating the
+        account-agnostic lookup can leave one per account, and every one of
+        them has to be stopped rather than silently cleared.
+        """
+        now = datetime.now(UTC)
+        user_id = "active-user-1"
+
+        await seed_google_account(db_session, user_id, "older@example.com")
+        await seed_google_account(db_session, user_id, "newer@example.com")
+        await seed_calendar(db_session, user_id, "cal-active")
+        await seed_channel(
+            db_session,
+            user_id,
+            "older@example.com",
+            "cal-active",
+            expiration=now + timedelta(days=1),
+        )
+        await seed_channel(
+            db_session,
+            user_id,
+            "newer@example.com",
+            "cal-active",
+            expiration=now + timedelta(days=5),
+        )
+        # A sync-only row must not be mistaken for a channel.
+        await seed_calendar(db_session, user_id, "cal-synconly")
+        await seed_channel(
+            db_session,
+            user_id,
+            "older@example.com",
+            "cal-synconly",
+            expiration=None,
+            with_channel=False,
+        )
+        await db_session.commit()
+
+        conn = await db_session.connection()
+        repo = CalendarWatchRepository(conn)
+
+        channels = await repo.get_active_channels(user_id, "cal-active")
+        assert [c.google_account_email for c in channels] == [
+            "newer@example.com",
+            "older@example.com",
+        ]
+        assert await repo.get_active_channels(user_id, "cal-synconly") == []
+
+    async def test_clearing_leaves_the_kept_account_and_its_sync_token(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Only other accounts' channel columns are cleared; sync tokens stay."""
+        now = datetime.now(UTC)
+        user_id = "active-user-2"
+
+        await seed_google_account(db_session, user_id, "keep@example.com")
+        await seed_google_account(db_session, user_id, "drop@example.com")
+        await seed_calendar(db_session, user_id, "cal-clear")
+        await seed_channel(
+            db_session,
+            user_id,
+            "keep@example.com",
+            "cal-clear",
+            expiration=now + timedelta(days=5),
+        )
+        await seed_channel(
+            db_session,
+            user_id,
+            "drop@example.com",
+            "cal-clear",
+            expiration=now + timedelta(days=5),
+        )
+        await db_session.commit()
+
+        conn = await db_session.connection()
+        repo = CalendarWatchRepository(conn)
+        await repo.clear_channels_for_other_accounts(
+            user_id, "cal-clear", "keep@example.com"
+        )
+
+        channels = await repo.get_active_channels(user_id, "cal-clear")
+        assert [c.google_account_email for c in channels] == ["keep@example.com"]
+
+        # The dropped row keeps its own incremental sync token.
+        result = await db_session.execute(
+            text("""
+                SELECT sync_token FROM calendar_sync_tokens
+                WHERE user_id = :u AND google_account_email = 'drop@example.com'
+                  AND google_calendar_id = 'cal-clear'
+            """),
+            {"u": user_id},
+        )
+        assert result.scalar_one() == "synctoken-cal-clear"

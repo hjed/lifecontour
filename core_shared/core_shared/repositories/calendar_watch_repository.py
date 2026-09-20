@@ -73,26 +73,32 @@ class CalendarWatchRepository:
         stmt = text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
         await self.conn.execute(stmt, {"key": f"{user_id}:{google_calendar_id}"})
 
-    async def get_active_channel(
+    async def get_active_channels(
         self, user_id: str, google_calendar_id: str
-    ) -> ActiveCalendarChannel | None:
+    ) -> list[ActiveCalendarChannel]:
         """
-        Return the channel a calendar is currently registered with, if any.
+        Return every channel this calendar still has recorded, newest first.
 
-        Deliberately **not** scoped to a Google account. A calendar has one live
-        channel, but which account registered it varies: renewal reuses the
-        account already on the channel, while manual re-registration picks one
-        of the user's accounts unordered. Filtering by account would hide a
-        channel registered under the other one, so the caller would register a
-        second channel and leave the first live — Google would then deliver on
-        both, and the webhook endpoint rejects whichever is no longer recorded.
+        Deliberately **not** scoped to a Google account. Which account
+        registered a calendar's channel varies: renewal reuses the account
+        already on the channel, while manual re-registration picks one of the
+        user's accounts unordered. Filtering by account would hide a channel
+        registered under the other one, so the caller would register a second
+        channel and leave the first live — Google would then deliver on both,
+        and the webhook endpoint rejects whichever is no longer recorded.
+
+        A calendar should hold at most one, but it can hold several: the table
+        is keyed by (user, account, calendar), and registrations made before
+        this lookup went account-agnostic could leave one row per account. All
+        of them are returned so the caller can stop every one rather than
+        stranding the ones it does not replace.
 
         Args:
             user_id: Owner of the calendar
             google_calendar_id: The Google Calendar to look up
 
         Returns:
-            The recorded channel, or None when the calendar has none
+            Every recorded channel for the calendar, newest expiry first
         """
         stmt = text("""
             SELECT google_account_email, channel_id, channel_resource_id,
@@ -103,21 +109,20 @@ class CalendarWatchRepository:
               AND channel_id IS NOT NULL
               AND channel_resource_id IS NOT NULL
             ORDER BY channel_expiration DESC NULLS LAST, google_account_email
-            LIMIT 1
         """)
         result = await self.conn.execute(
             stmt,
             {"user_id": user_id, "google_calendar_id": google_calendar_id},
         )
-        row = result.fetchone()
-        if row is None:
-            return None
-        return ActiveCalendarChannel(
-            google_account_email=row.google_account_email,
-            channel_id=row.channel_id,
-            channel_resource_id=row.channel_resource_id,
-            channel_expiration=row.channel_expiration,
-        )
+        return [
+            ActiveCalendarChannel(
+                google_account_email=row.google_account_email,
+                channel_id=row.channel_id,
+                channel_resource_id=row.channel_resource_id,
+                channel_expiration=row.channel_expiration,
+            )
+            for row in result.fetchall()
+        ]
 
     async def clear_channels_for_other_accounts(
         self, user_id: str, google_calendar_id: str, keep_account: str

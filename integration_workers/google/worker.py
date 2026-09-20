@@ -44,6 +44,7 @@ from core_shared.models.journals import CalendarInfo
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import (
+    ActiveCalendarChannel,
     CalendarWatchRenewal,
     CalendarWatchRepository,
     SyncJobRepository,
@@ -4302,40 +4303,53 @@ async def sync_calendar_events(
 
 
 async def _stop_previous_watch_channel(
-    client: GoogleAPIClient,
-    channel_id: str,
-    resource_id: str,
-    channel_expiration: datetime | None,
+    session: Any,
+    user_id: str | int,
+    channel: ActiveCalendarChannel,
 ) -> None:
-    """Stop the channel a calendar is currently registered with, best effort.
+    """Stop one channel a calendar still has recorded, best effort.
 
     Replacing a channel does not depend on the old one being stopped — the new
     registration stands either way — so a failure here is logged and swallowed
-    rather than failing the setup.
+    rather than failing the setup. That matters most when the channel's account
+    has since been disconnected: the token lookup below raises, and swallowing
+    it is what lets the calendar be re-registered under an account that still
+    works instead of failing every sweep.
+
+    The client is built inside the try for the same reason, and for the
+    channel's **own** account, since another account's token cannot address it.
 
     Args:
-        client: Authenticated Google API client
-        channel_id: The channel to stop
-        resource_id: That channel's resource ID from the original watch response
-        channel_expiration: When the channel expires, if it was recorded
+        session: Database session used to load the account's credentials
+        user_id: Owner of the calendar
+        channel: The recorded channel to stop
     """
     # A channel past its expiry has already been discarded by Google, so
     # stopping it would only spend a round trip to be told it does not exist.
-    if channel_expiration is not None and channel_expiration <= datetime.now(UTC):
+    expiration = channel.channel_expiration
+    if expiration is not None and expiration <= datetime.now(UTC):
         logger.debug(
             "Previous calendar webhook channel already expired",
-            channel_id=channel_id,
-            channel_expiration=channel_expiration.isoformat(),
+            channel_id=channel.channel_id,
+            channel_expiration=expiration.isoformat(),
         )
         return
 
     try:
-        await client.stop_channel(channel_id=channel_id, resource_id=resource_id)
-        logger.info("Stopped previous calendar webhook channel", channel_id=channel_id)
+        client = _create_google_client(session, user_id, channel.google_account_email)
+        await client.stop_channel(
+            channel_id=channel.channel_id,
+            resource_id=channel.channel_resource_id,
+        )
+        logger.info(
+            "Stopped previous calendar webhook channel",
+            channel_id=channel.channel_id,
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "Failed to stop previous watch channel",
-            channel_id=channel_id,
+            channel_id=channel.channel_id,
+            google_account_email=channel.google_account_email,
             error=str(e),
         )
 
@@ -4389,21 +4403,16 @@ async def setup_calendar_webhook(
                 google_calendar_id=google_calendar_id,
             )
 
-            # Stop the calendar's existing channel, whichever account holds it.
-            # Scoping this to our own account would miss a channel registered
-            # under the user's other one and leave it live alongside the new.
-            existing = await repo.get_active_channel(str(user_id), google_calendar_id)
-            if existing:
-                # Stop it with credentials for the account that registered it;
-                # another account's token cannot address that channel.
-                await _stop_previous_watch_channel(
-                    _create_google_client(
-                        session, user_id, existing.google_account_email
-                    ),
-                    channel_id=existing.channel_id,
-                    resource_id=existing.channel_resource_id,
-                    channel_expiration=existing.channel_expiration,
-                )
+            # Stop every channel the calendar still has recorded, whichever
+            # account holds it. Scoping this to our own account would miss one
+            # registered under the user's other account and leave it live
+            # alongside the new one; stopping only the newest would strand the
+            # rest, since their metadata is cleared below and Google would keep
+            # delivering on them until they expire.
+            for existing in await repo.get_active_channels(
+                str(user_id), google_calendar_id
+            ):
+                await _stop_previous_watch_channel(session, user_id, existing)
 
             # Register watch channel with Google
             result = await client.watch_events(
