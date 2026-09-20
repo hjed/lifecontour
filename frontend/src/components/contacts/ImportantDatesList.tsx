@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Calendar, Cake, Plus, Trash2 } from 'lucide-react';
+import { Calendar, Cake, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -12,61 +12,58 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useUpdateContact } from '@/lib/api/contacts';
 import {
-  ContactAttributes,
-  ContactFormData,
+  useAddContactImportantDate,
+  useDeleteContactImportantDate,
+  useUpdateContactImportantDate,
+} from '@/lib/api/contacts';
+import {
   ImportantDateAttributes,
   ImportantDatePrecision,
   ImportantDateResource,
   ImportantDateTypeEnum,
 } from '@/types/contacts';
 import { ImportantDateInlineEditor } from './ImportantDateInlineEditor';
-// uuid not needed anymore
 
 export interface ImportantDatesListProps {
   readonly contactId: string;
-  readonly contactAttributes: ContactAttributes;
+  readonly dates: readonly ImportantDateResource[];
   readonly disabled?: boolean;
 }
 
 export function ImportantDatesList({
   contactId,
-  contactAttributes,
+  dates,
   disabled = false,
 }: ImportantDatesListProps) {
   const [isAddingDate, setIsAddingDate] = useState(false);
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [dateToDelete, setDateToDelete] = useState<string | null>(null);
 
-  const updateContactMutation = useUpdateContact();
-  const dates = contactAttributes.important_dates || [];
+  const addDateMutation = useAddContactImportantDate();
+  const updateDateMutation = useUpdateContactImportantDate();
+  const deleteDateMutation = useDeleteContactImportantDate();
 
-  const handleCreateOrUpdate = async (
-    updatedDates: ImportantDateResource[]
-  ) => {
-    const data: ContactFormData = {
-      first_name: contactAttributes.first_name,
-      last_name: contactAttributes.last_name,
-      middle_name: contactAttributes.middle_name,
-      nick_name: contactAttributes.nick_name,
-      contact_methods: contactAttributes.contact_methods || [],
-      addresses: contactAttributes.addresses || [],
-      notes: contactAttributes.notes || [],
-      important_dates: updatedDates,
-    };
+  const isWriting =
+    addDateMutation.isPending ||
+    updateDateMutation.isPending ||
+    deleteDateMutation.isPending;
 
-    return updateContactMutation.mutateAsync({ id: contactId, data });
+  const handleAddDate = async (date: ImportantDateAttributes) => {
+    await addDateMutation.mutateAsync({ contactId, date });
+    setIsAddingDate(false);
   };
 
-  const handleAddDate = async (attributes: ImportantDateAttributes) => {
-    const newResource: ImportantDateResource = {
-      type: 'important_dates',
-      attributes,
-    };
-
-    await handleCreateOrUpdate([...dates, newResource]);
-    setIsAddingDate(false);
+  const handleEditDate = async (
+    dateId: string,
+    date: ImportantDateAttributes
+  ) => {
+    // Deliberately not wrapped in try/catch: a rejected write must leave the
+    // editor open with the user's input intact, and the hook has already
+    // surfaced the error as a toast.
+    await updateDateMutation.mutateAsync({ contactId, dateId, date });
+    setEditingDateId(null);
   };
 
   const handleDeleteClick = (dateId: string) => {
@@ -76,10 +73,7 @@ export function ImportantDatesList({
 
   const handleConfirmDelete = async () => {
     if (!dateToDelete) return;
-    const remainingDates = dates.filter(
-      d => d.id?.toString() !== dateToDelete.toString()
-    );
-    await handleCreateOrUpdate(remainingDates);
+    await deleteDateMutation.mutateAsync({ contactId, dateId: dateToDelete });
     setDeleteDialogOpen(false);
     setDateToDelete(null);
   };
@@ -121,7 +115,7 @@ export function ImportantDatesList({
           size='sm'
           className='h-8 w-8 p-0'
           onClick={() => setIsAddingDate(true)}
-          disabled={disabled || updateContactMutation.isPending || isAddingDate}
+          disabled={disabled || isWriting || isAddingDate}
           aria-label='Add important date'
         >
           <Plus className='h-4 w-4' />
@@ -136,8 +130,24 @@ export function ImportantDatesList({
           )}
 
           {dates.map((date, index) => {
+            const dateId = date.id?.toString();
             const isBirthday =
               date.attributes.date_type === ImportantDateTypeEnum.BIRTHDAY;
+
+            // Only one row is editable at a time, so the editor replaces the
+            // row it belongs to rather than appearing beside it.
+            if (dateId && editingDateId === dateId) {
+              return (
+                <ImportantDateInlineEditor
+                  key={dateId}
+                  initialData={date.attributes}
+                  onSave={attributes => handleEditDate(dateId, attributes)}
+                  onCancel={() => setEditingDateId(null)}
+                  isLoading={updateDateMutation.isPending}
+                />
+              );
+            }
+
             return (
               <div
                 key={date.id || `temp-${index}`}
@@ -168,11 +178,19 @@ export function ImportantDatesList({
                   <Button
                     variant='ghost'
                     size='sm'
+                    className='h-8 w-8 p-0'
+                    onClick={() => dateId && setEditingDateId(dateId)}
+                    disabled={disabled || isWriting}
+                    aria-label={`Edit ${date.attributes.date_type}`}
+                  >
+                    <Pencil className='h-4 w-4' />
+                  </Button>
+                  <Button
+                    variant='ghost'
+                    size='sm'
                     className='text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-8 p-0'
-                    onClick={() =>
-                      date.id && handleDeleteClick(date.id.toString())
-                    }
-                    disabled={disabled || updateContactMutation.isPending}
+                    onClick={() => dateId && handleDeleteClick(dateId)}
+                    disabled={disabled || isWriting}
                     aria-label={`Delete ${date.attributes.date_type}`}
                   >
                     <Trash2 className='h-4 w-4' />
@@ -186,7 +204,7 @@ export function ImportantDatesList({
             <ImportantDateInlineEditor
               onSave={handleAddDate}
               onCancel={() => setIsAddingDate(false)}
-              isLoading={updateContactMutation.isPending}
+              isLoading={addDateMutation.isPending}
             />
           )}
         </div>
@@ -205,14 +223,14 @@ export function ImportantDatesList({
             <Button
               variant='outline'
               onClick={() => setDeleteDialogOpen(false)}
-              disabled={updateContactMutation.isPending}
+              disabled={deleteDateMutation.isPending}
             >
               Cancel
             </Button>
             <Button
               variant='destructive'
               onClick={handleConfirmDelete}
-              disabled={updateContactMutation.isPending}
+              disabled={deleteDateMutation.isPending}
             >
               Delete
             </Button>

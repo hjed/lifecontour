@@ -2,7 +2,7 @@ import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 
 test.describe('Important Dates', () => {
-  test('should display, add, and delete important dates', async ({
+  test('should display, edit, add, and delete important dates', async ({
     authenticatedPage,
     testCleanup,
   }) => {
@@ -47,6 +47,32 @@ test.describe('Important Dates', () => {
     await expect(authenticatedPage.getByText(/birthday/i)).toBeVisible();
     await expect(authenticatedPage.getByText('1985')).toBeVisible();
 
+    // --- Edit the existing birthday ---
+    // The pencil opens the inline editor in place, prefilled from the row.
+    await authenticatedPage.getByLabel('Edit birthday').click();
+    await expect(authenticatedPage.getByPlaceholder('YYYY')).toHaveValue(
+      '1985'
+    );
+
+    await authenticatedPage.getByPlaceholder('YYYY').fill('1986');
+
+    // The card writes to the date's own endpoint now, not the whole-contact PUT.
+    const editResponsePromise = authenticatedPage.waitForResponse(
+      response =>
+        /\/api\/contacts\/\d+\/important-dates\/\d+$/.test(response.url()) &&
+        response.request().method() === 'PUT' &&
+        response.status() === 200
+    );
+
+    await authenticatedPage.getByLabel('Save date').click();
+    await editResponsePromise;
+
+    // The edited value replaces the old one on the same row.
+    await expect(authenticatedPage.getByText('1986')).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(authenticatedPage.getByText('1985')).toBeHidden();
+
     // --- Add a new Important Date ---
     await authenticatedPage.getByLabel('Add important date').click();
 
@@ -85,12 +111,12 @@ test.describe('Important Dates', () => {
     // Enter Year
     await authenticatedPage.getByPlaceholder('YYYY').fill('2010');
 
-    // Wait for the PUT request for the new date
+    // Wait for the POST that creates the new date
     const saveResponsePromise = authenticatedPage.waitForResponse(
       response =>
-        response.url().includes('/api/contacts/') &&
-        response.request().method() === 'PUT' &&
-        response.status() === 200
+        /\/api\/contacts\/\d+\/important-dates$/.test(response.url()) &&
+        response.request().method() === 'POST' &&
+        response.status() === 201
     );
 
     // Save
@@ -112,12 +138,12 @@ test.describe('Important Dates', () => {
     const deleteDialog = authenticatedPage.getByRole('dialog');
     await expect(deleteDialog).toBeVisible();
 
-    // Wait for the PUT request for the deletion
+    // Wait for the DELETE of that one date
     const deleteResponsePromise = authenticatedPage.waitForResponse(
       response =>
-        response.url().includes('/api/contacts/') &&
-        response.request().method() === 'PUT' &&
-        response.status() === 200
+        /\/api\/contacts\/\d+\/important-dates\/\d+$/.test(response.url()) &&
+        response.request().method() === 'DELETE' &&
+        response.status() === 204
     );
 
     // Confirm delete
