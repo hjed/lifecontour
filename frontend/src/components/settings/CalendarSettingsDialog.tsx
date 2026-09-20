@@ -32,9 +32,18 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Info } from 'lucide-react';
 import { useCreateCalendar, useUpdateCalendar } from '@/lib/api/journals';
 import { useGoogleCalendars, useGoogleStatus } from '@/lib/api/integrations';
 import { JournalCalendar } from '@/types/journals';
+
+/**
+ * Access roles that can read a Google calendar but not write to it. Events
+ * still sync in; nothing we change here ever reaches Google, because every
+ * write is refused.
+ */
+const READ_ONLY_ACCESS_ROLES = new Set(['reader', 'freeBusyReader']);
 
 const calendarFormSchema = z
   .object({
@@ -102,6 +111,22 @@ export function CalendarSettingsDialog({
     control: form.control,
     name: 'is_synced_to_google',
   });
+
+  const selectedGoogleCalendarId = useWatch({
+    control: form.control,
+    name: 'google_calendar_id',
+  });
+
+  // Derived rather than stored: the list loads asynchronously, so a role
+  // captured at selection time would freeze whatever was known back then.
+  const selectedGoogleCalendar = googleCalendars?.data.find(
+    cal => cal.id === selectedGoogleCalendarId
+  );
+  const isSelectedCalendarReadOnly =
+    isSyncEnabled &&
+    READ_ONLY_ACCESS_ROLES.has(
+      selectedGoogleCalendar?.attributes.accessRole ?? ''
+    );
 
   useEffect(() => {
     if (open) {
@@ -292,6 +317,9 @@ export function CalendarSettingsDialog({
                           <SelectItem key={cal.id} value={cal.id}>
                             {cal.attributes.summary}
                             {cal.attributes.primary && ' (Primary)'}
+                            {READ_ONLY_ACCESS_ROLES.has(
+                              cal.attributes.accessRole ?? ''
+                            ) && ' (read-only)'}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -300,6 +328,17 @@ export function CalendarSettingsDialog({
                       Choose which Google Calendar to sync with
                     </FormDescription>
                     <FormMessage />
+                    {isSelectedCalendarReadOnly && (
+                      <Alert data-testid='read-only-calendar-warning'>
+                        <Info className='h-4 w-4' aria-hidden='true' />
+                        <AlertDescription>
+                          You have read-only access to this calendar, so changes
+                          you make here are not sent back to Google. Its events
+                          still sync in, with whatever detail Google shares with
+                          you.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </FormItem>
                 )}
               />

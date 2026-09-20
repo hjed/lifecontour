@@ -577,6 +577,69 @@ Snipe-IT's General webhook has no signing secret or verification handshake, so t
 
 **Journal Integration Example**: Calendar events sync bi-directionally with journal EVENT type entries. See [Journal System Specification](../journal-system-specification.md) for sync behavior and attendee handling.
 
+#### Outbound Push and Calendar Access Roles
+
+A connected Google calendar is not necessarily one the account may **write**
+to. A work calendar shared with a personal account, or one shared as "see all
+event details", lists its events happily and refuses every write with `403`.
+The sync is therefore asymmetric by design: **inbound for any calendar,
+outbound only where Google grants write access.**
+
+`calendars.access_role` holds Google's own answer (`owner`, `writer`,
+`reader`, `freeBusyReader`, or `none`), and every write to Google — the push,
+journal deletion and orphan pruning — asks `is_read_only_calendar` before
+calling the API at all. A role that is missing or unrecognised counts as
+writable, so a calendar we have never asked about does not silently stop
+syncing.
+
+The role is **refreshed from `calendarList` on every calendar sync**
+(`_refresh_calendar_access_roles`), not captured once when the calendar is
+connected. Google can change it at any time and nothing announces it — a
+snapshot taken at connection time goes stale silently, and the guard is only
+as good as the value behind it. The refresh never fails its caller: a
+calendar list that cannot be fetched leaves the stored roles as they were.
+
+Revoking a share does not come back as a lesser role: Google drops the
+calendar from `calendarList` altogether. Calendars the list no longer
+mentions are therefore recorded as `none`, Google's own ACL value for no
+access, which the guard treats like any other non-writable role. That
+inference only holds while the user has **one** connected Google account —
+`calendars` records no account of its own, so one account's list cannot
+speak for another's calendars — and the sweep stands down when there is more
+than one.
+
+#### Transient vs Permanent Google Errors
+
+Google answers `403` to two unrelated situations, and they need opposite
+handling. `google_client.py` classifies them, alongside the `400` it uses for
+event-type restrictions:
+
+| Status and reason | Meaning | Handling |
+|---|---|---|
+| `403` `rateLimitExceeded`, `userRateLimitExceeded`, `quotaExceeded` | Going too fast | **Transient** — raise, retry with backoff |
+| `403` `forbidden`, `forbiddenForNonOrganizer`, `requiredAccessLevel`, `insufficientPermissions` | Not allowed | **Permanent** — stop, do not retry |
+| `403` with an unreadable body | unknown | Treated as permanent: an unreadable `403` is far more likely a refusal, and mis-classifying a quota `403` costs one skipped request rather than an endless retry |
+| `400` `eventTypeRestriction` | Google derives this event (a birthday, a Gmail event) and accepts almost no change | **Permanent** — stop, do not retry |
+
+On either permanent rejection the push marks the link `errored` and returns
+without raising; a refusal also refreshes the stored access role, since a
+stale role is why the push was attempted at all. See
+<https://developers.google.com/workspace/calendar/api/guides/errors>.
+
+#### Handler Convention: Returning vs Raising
+
+Stream-consumed handlers signal retryability by **whether they raise**, not by
+their return value, which the consumer discards:
+
+- **Return** `{"status": "ignored", "reason": "..."}` — the work cannot succeed
+  and retrying will not change that. The message is acknowledged.
+- **Raise** — the failure may be transient. The message stays pending, is
+  retried up to `max_delivery_count`, and is then dead-lettered.
+
+Anything a retry cannot fix (a read-only calendar, a refused write, a journal
+that no longer exists) must return rather than raise, or it burns the full
+retry budget on every occurrence before dead-lettering.
+
 ## Deployment Architecture
 
 ### Development Environment

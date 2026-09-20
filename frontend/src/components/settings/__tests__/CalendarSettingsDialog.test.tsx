@@ -45,12 +45,38 @@ const mockGoogleCalendars = {
       {
         id: 'primary@gmail.com',
         type: 'google-calendar',
-        attributes: { summary: 'My Calendar', primary: true },
+        attributes: {
+          summary: 'My Calendar',
+          primary: true,
+          accessRole: 'owner',
+        },
       },
       {
         id: 'work@group.v.calendar.google.com',
         type: 'google-calendar',
-        attributes: { summary: 'Work Calendar', primary: false },
+        attributes: {
+          summary: 'Work Calendar',
+          primary: false,
+          accessRole: 'writer',
+        },
+      },
+      {
+        id: 'shared@example.com',
+        type: 'google-calendar',
+        attributes: {
+          summary: 'Shared Calendar',
+          primary: false,
+          accessRole: 'reader',
+        },
+      },
+      {
+        id: 'busy@example.com',
+        type: 'google-calendar',
+        attributes: {
+          summary: 'Busy Calendar',
+          primary: false,
+          accessRole: 'freeBusyReader',
+        },
       },
     ],
   },
@@ -187,5 +213,86 @@ describe('CalendarSettingsDialog', () => {
 
     const toggle = screen.getByTestId('google-sync-toggle');
     expect(toggle).toBeDisabled();
+  });
+  describe('read-only Google calendars', () => {
+    /**
+     * A calendar shared read-only syncs in but never out: Google refuses
+     * every write. Nothing else in the product says so, so the moment of
+     * choosing it is the only place the user can learn it.
+     */
+    const selectGoogleCalendar = async (name: RegExp) => {
+      fireEvent.click(screen.getByTestId('google-sync-toggle'));
+      fireEvent.click(await screen.findByTestId('google-calendar-select'));
+      fireEvent.click(await screen.findByRole('option', { name }));
+    };
+
+    it('warns that a read-only calendar will not receive changes', async () => {
+      render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+      await selectGoogleCalendar(/Shared Calendar/);
+
+      const warning = await screen.findByTestId('read-only-calendar-warning');
+      expect(warning).toHaveTextContent(/read-only access/i);
+      // The outbound half is the part that surprises people, so it is the
+      // part the warning must state outright.
+      expect(warning).toHaveTextContent(/not sent back to Google/i);
+    });
+
+    it('does not promise full event detail it cannot guarantee', async () => {
+      /**
+       * `freeBusyReader` shares availability only, so events arrive without
+       * their details. One message covers both read-only roles, which means
+       * it must not claim more than the weaker one delivers.
+       */
+      render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+      await selectGoogleCalendar(/Busy Calendar/);
+
+      const warning = await screen.findByTestId('read-only-calendar-warning');
+      expect(warning).toHaveTextContent(/whatever detail Google shares/i);
+    });
+
+    it('does not warn about a calendar the account can write to', async () => {
+      render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+      await selectGoogleCalendar(/Work Calendar/);
+
+      expect(
+        screen.queryByTestId('read-only-calendar-warning')
+      ).not.toBeInTheDocument();
+    });
+
+    it('marks read-only calendars in the list before one is chosen', async () => {
+      render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+      fireEvent.click(screen.getByTestId('google-sync-toggle'));
+      fireEvent.click(await screen.findByTestId('google-calendar-select'));
+
+      expect(
+        await screen.findByRole('option', {
+          name: /Shared Calendar \(read-only\)/,
+        })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('option', { name: /^Work Calendar$/ })
+      ).toBeInTheDocument();
+    });
+
+    it('drops the warning when Google sync is turned back off', async () => {
+      render(<CalendarSettingsDialog open={true} onOpenChange={jest.fn()} />);
+
+      await selectGoogleCalendar(/Shared Calendar/);
+      expect(
+        await screen.findByTestId('read-only-calendar-warning')
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('google-sync-toggle'));
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId('read-only-calendar-warning')
+        ).not.toBeInTheDocument();
+      });
+    });
   });
 });

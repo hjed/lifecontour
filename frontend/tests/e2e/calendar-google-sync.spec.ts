@@ -37,6 +37,7 @@ const googleCalendars = {
         description: 'Main calendar',
         backgroundColor: '#4285f4',
         primary: true,
+        accessRole: 'owner',
       },
     },
     {
@@ -46,6 +47,17 @@ const googleCalendars = {
         summary: 'Work Calendar',
         backgroundColor: '#7986cb',
         primary: false,
+        accessRole: 'writer',
+      },
+    },
+    {
+      id: 'shared@example.com',
+      type: 'google-calendar',
+      attributes: {
+        summary: 'Shared Calendar',
+        backgroundColor: '#33b679',
+        primary: false,
+        accessRole: 'reader',
       },
     },
   ],
@@ -123,6 +135,42 @@ test.describe('Calendar Google Sync Settings', () => {
     expect(createPayload!.data.attributes.is_synced_to_google).toBe(true);
     expect(createPayload!.data.attributes.google_calendar_id).toBe(
       'work@group.v.calendar.google.com'
+    );
+  });
+
+  test('selecting a read-only Google calendar warns that changes will not be sent back', async ({
+    authenticatedPage: page,
+  }) => {
+    await page.route('**/api/integrations/google/contacts/status', route =>
+      route.fulfill(json(googleStatusConnected))
+    );
+    await page.route('**/api/integrations/google/calendars', route =>
+      route.fulfill(json(googleCalendars))
+    );
+    await page.route('**/api/calendars', route =>
+      route.fulfill(json({ data: [] }))
+    );
+
+    await page.goto('/settings');
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Add Calendar' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await page.getByTestId('google-sync-toggle').click();
+    const selectTrigger = page.getByTestId('google-calendar-select');
+    await expect(selectTrigger).toBeVisible();
+
+    // A writable calendar carries no warning...
+    await selectTrigger.click();
+    await page.getByRole('option', { name: 'Work Calendar' }).click();
+    await expect(page.getByTestId('read-only-calendar-warning')).toBeHidden();
+
+    // ...while one shared read-only says so before the calendar is saved.
+    await selectTrigger.click();
+    await page.getByRole('option', { name: 'Shared Calendar' }).click();
+    await expect(page.getByTestId('read-only-calendar-warning')).toContainText(
+      /read-only access/i
     );
   });
 });

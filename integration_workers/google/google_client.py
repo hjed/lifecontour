@@ -5,6 +5,7 @@ Simplified version of the core client adapted for worker environment.
 Migrated from backend/app/core/integrations/google/client.py
 """
 
+import json
 from typing import Any, cast
 
 import structlog
@@ -40,6 +41,63 @@ def is_event_type_restriction(error: HttpError) -> bool:
     if error.resp.status != 400:
         return False
     return _EVENT_TYPE_RESTRICTION_REASON in str(error).lower()
+
+
+# The 403 reasons that mean "slow down" rather than "no". Everything else at
+# 403 is a refusal: this set is the exception list precisely because a refusal
+# we fail to recognise should stop the work rather than be retried forever.
+# See https://developers.google.com/workspace/calendar/api/guides/errors
+_TRANSIENT_403_REASONS = frozenset(
+    {
+        "rateLimitExceeded",
+        "userRateLimitExceeded",
+        "quotaExceeded",
+    }
+)
+
+
+def google_error_reasons(error: HttpError) -> set[str]:
+    """Return the ``reason`` codes carried in a Google API error body.
+
+    Returns an empty set when the body is missing, is not JSON, or carries no
+    ``error.errors`` list — every caller has to cope with an unreadable body
+    anyway, so this never raises.
+    """
+    content = error.content
+    if not content:
+        return set()
+
+    try:
+        decoded = content.decode() if isinstance(content, bytes) else str(content)
+        payload: Any = json.loads(decoded)
+        errors = payload["error"]["errors"]
+    except Exception:  # noqa: BLE001 - an unreadable body is simply no reasons
+        return set()
+
+    if not isinstance(errors, list):
+        return set()
+
+    return {
+        entry["reason"]
+        for entry in errors
+        if isinstance(entry, dict) and isinstance(entry.get("reason"), str)
+    }
+
+
+def is_permission_denied(error: HttpError) -> bool:
+    """Return True if ``error`` is a 403 that retrying cannot resolve.
+
+    A 403 naming a rate or quota limit is transient and stays retryable. Any
+    other 403 — including one whose body we cannot read — is a refusal: the
+    account may not write to this calendar, or to this event. An unreadable
+    403 is far more likely a permission answer than a quota one, and
+    mis-classifying a quota 403 this way costs one skipped request rather
+    than an endless retry loop.
+    """
+    if error.resp.status != 403:
+        return False
+
+    return not (google_error_reasons(error) & _TRANSIENT_403_REASONS)
 
 
 class GoogleAPIClient:

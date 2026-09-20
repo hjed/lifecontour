@@ -1456,3 +1456,306 @@ class TestSyncCalendarEventsTimezones:
         calendar_info = outbox_event.event_data["calendar_info_data"]
         assert journal_data["event_date_range_start"] == "2026-09-05T00:00:00+00:00"
         assert calendar_info["timezone"] is None
+
+
+def _calendar_list_page(
+    *calendars: tuple[str, str], next_page_token: str | None = None
+) -> dict[str, Any]:
+    """One page of a Google calendarList response."""
+    page: dict[str, Any] = {
+        "items": [
+            {"id": calendar_id, "accessRole": access_role}
+            for calendar_id, access_role in calendars
+        ]
+    }
+    if next_page_token is not None:
+        page["nextPageToken"] = next_page_token
+    return page
+
+
+class TestRefreshCalendarAccessRoles:
+    """Re-reading what the account may do with each calendar.
+
+    The outbound push is skipped for calendars the account can only read, so
+    that guard is only as good as the stored role — and Google can change the
+    role at any time without telling us.
+    """
+
+    @staticmethod
+    def _session(
+        rowcount: int = 1, account_count: int = 1, vanished: int = 0
+    ) -> AsyncMock:
+        """A session that answers each of the refresh's statements in kind.
+
+        The refresh runs three shapes of query — the per-calendar role update,
+        the connected-account count and the absent-calendar reconciliation —
+        and a single canned result would let one stand in for another.
+        """
+
+        def _execute(statement: Any, params: Any = None) -> MagicMock:
+            result = MagicMock()
+            sql = str(statement)
+            if "count(*)" in sql:
+                result.scalar.return_value = account_count
+                result.rowcount = 0
+            elif "<> ALL(:seen)" in sql:
+                result.rowcount = vanished
+            else:
+                result.rowcount = rowcount
+            return result
+
+        session = AsyncMock()
+        session.execute.side_effect = _execute
+        return session
+
+    @staticmethod
+    def _vanished_update(session: AsyncMock) -> list[Any]:
+        return [
+            call
+            for call in session.execute.call_args_list
+            if "google_calendar_id <> ALL(:seen)" in str(call[0][0])
+        ]
+
+    @staticmethod
+    def _client(*pages: dict[str, Any]) -> MagicMock:
+        client = MagicMock()
+        client.list_calendars = AsyncMock(side_effect=list(pages))
+        return client
+
+    @staticmethod
+    def _update_calls(session: AsyncMock) -> list[dict[str, Any]]:
+        """The per-calendar role updates, not the absent-calendar sweep."""
+        return [
+            call[0][1]
+            for call in session.execute.call_args_list
+            if "UPDATE calendars" in str(call[0][0])
+            and "google_calendar_id = :google_calendar_id" in str(call[0][0])
+        ]
+
+    @pytest.mark.asyncio
+    async def test_stores_the_role_for_each_calendar(self) -> None:
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session()
+        client = self._client(
+            _calendar_list_page(("primary", "owner"), ("shared@example.com", "reader"))
+        )
+
+        changed = await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert changed == 2
+        assert self._update_calls(session) == [
+            {
+                "user_id": "user-1",
+                "google_calendar_id": "primary",
+                "access_role": "owner",
+            },
+            {
+                "user_id": "user-1",
+                "google_calendar_id": "shared@example.com",
+                "access_role": "reader",
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_only_the_owning_users_calendars_are_updated(self) -> None:
+        """The UPDATE is scoped by user, not by Google calendar id alone."""
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session()
+        client = self._client(_calendar_list_page(("shared@example.com", "reader")))
+
+        await _refresh_calendar_access_roles(session, client, 7)
+
+        statement = str(session.execute.call_args[0][0])
+        assert "user_id = :user_id" in statement
+        assert session.execute.call_args[0][1]["user_id"] == "7"
+
+    @pytest.mark.asyncio
+    async def test_follows_every_page(self) -> None:
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session()
+        client = self._client(
+            _calendar_list_page(("primary", "owner"), next_page_token="page-2"),
+            _calendar_list_page(("shared@example.com", "reader")),
+        )
+
+        await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert client.list_calendars.await_count == 2
+        assert client.list_calendars.await_args_list[1][1]["page_token"] == "page-2"
+        assert len(self._update_calls(session)) == 2
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_role_is_not_counted(self) -> None:
+        """The UPDATE skips rows already holding the role, so nothing changed."""
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session(rowcount=0)
+        client = self._client(_calendar_list_page(("primary", "owner")))
+
+        changed = await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert changed == 0
+
+    @pytest.mark.asyncio
+    async def test_a_changed_role_is_committed(self) -> None:
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session()
+        client = self._client(_calendar_list_page(("primary", "reader")))
+
+        await _refresh_calendar_access_roles(session, client, "user-1")
+
+        session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_it_leaves_no_open_transaction_behind(self) -> None:
+        """Its caller is mid-push and must not inherit a transaction to close."""
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session(rowcount=0)
+        client = self._client(_calendar_list_page(("primary", "owner")))
+
+        await _refresh_calendar_access_roles(session, client, "user-1")
+
+        session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_calendar_without_a_role_is_left_alone(self) -> None:
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session()
+        client = MagicMock()
+        client.list_calendars = AsyncMock(return_value={"items": [{"id": "primary"}]})
+
+        changed = await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert changed == 0
+        assert self._update_calls(session) == []
+
+    @pytest.mark.asyncio
+    async def test_a_failed_calendar_list_leaves_the_stored_roles_alone(self) -> None:
+        """A refresh that cannot reach Google must not fail its caller."""
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session()
+        client = MagicMock()
+        client.list_calendars = AsyncMock(side_effect=RuntimeError("network down"))
+
+        changed = await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert changed == 0
+        assert self._update_calls(session) == []
+
+    @pytest.mark.asyncio
+    async def test_a_calendar_that_left_the_list_is_marked_unreachable(self) -> None:
+        """Revoking a share drops the calendar rather than downgrading it."""
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session(rowcount=0, vanished=1)
+        client = self._client(_calendar_list_page(("primary", "owner")))
+
+        changed = await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert changed == 1
+        update = self._vanished_update(session)
+        assert update, "calendars absent from the list were never reconciled"
+        assert update[0][0][1]["no_access"] == "none"
+        assert update[0][0][1]["seen"] == ["primary"]
+
+    @pytest.mark.asyncio
+    async def test_a_second_google_account_stops_the_absence_check(self) -> None:
+        """One account's list cannot speak for another account's calendars."""
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session(account_count=2)
+        client = self._client(_calendar_list_page(("primary", "owner")))
+
+        await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert self._vanished_update(session) == []
+
+    @pytest.mark.asyncio
+    async def test_an_empty_list_unsyncs_nothing(self) -> None:
+        """One odd response must not look like "every calendar is gone"."""
+        from worker import _refresh_calendar_access_roles
+
+        session = self._session()
+        client = self._client(_calendar_list_page())
+
+        await _refresh_calendar_access_roles(session, client, "user-1")
+
+        assert self._vanished_update(session) == []
+
+    @pytest.mark.asyncio
+    async def test_the_primary_alias_counts_as_seen(self) -> None:
+        """A calendar stored as Google's "primary" alias is not a stranger."""
+        from worker import _fetch_calendar_access_roles
+
+        client = MagicMock()
+        client.list_calendars = AsyncMock(
+            return_value={
+                "items": [
+                    {"id": "me@example.com", "accessRole": "owner", "primary": True}
+                ]
+            }
+        )
+
+        roles = await _fetch_calendar_access_roles(client)
+
+        assert roles == {"me@example.com": "owner", "primary": "owner"}
+
+
+class TestSyncRefreshesAccessRoles:
+    """The periodic calendar sync is what keeps the stored roles current."""
+
+    @pytest.mark.asyncio
+    async def test_sync_refreshes_the_access_roles_before_syncing(self) -> None:
+        from worker import sync_calendar_events
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = []
+        session.execute.return_value = cal_result
+
+        factory = MagicMock()
+        factory.return_value = session
+        ctx = make_arq_ctx(session_factory=factory, redis=make_mock_redis())
+
+        client = MagicMock()
+        client.list_calendars = AsyncMock(
+            return_value=_calendar_list_page(("primary", "owner"))
+        )
+
+        with patch("worker._create_google_client", return_value=client):
+            result = await sync_calendar_events(ctx, "test@example.com", "user-1")
+
+        assert result["status"] == "success"
+        client.list_calendars.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_refresh_does_not_stop_the_sync(self) -> None:
+        from worker import sync_calendar_events
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = []
+        session.execute.return_value = cal_result
+
+        factory = MagicMock()
+        factory.return_value = session
+        ctx = make_arq_ctx(session_factory=factory, redis=make_mock_redis())
+
+        client = MagicMock()
+        client.list_calendars = AsyncMock(side_effect=RuntimeError("network down"))
+
+        with patch("worker._create_google_client", return_value=client):
+            result = await sync_calendar_events(ctx, "test@example.com", "user-1")
+
+        assert result["status"] == "success"

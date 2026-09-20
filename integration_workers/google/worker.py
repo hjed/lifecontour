@@ -54,7 +54,12 @@ from api_models import ListConnectionsResponse
 # Import worker-specific services
 from event_transformer import google_event_times
 from google_auth_service import GoogleAuthService
-from google_client import GoogleAPIClient, is_event_type_restriction
+from google_client import (
+    GoogleAPIClient,
+    google_error_reasons,
+    is_event_type_restriction,
+    is_permission_denied,
+)
 from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
@@ -1975,6 +1980,45 @@ async def sync_google_contacts(
         }
 
 
+# Google's own ACL vocabulary for "no access at all", which is what we record
+# for a calendar that has left the account's list entirely.
+GOOGLE_NO_ACCESS_ROLE = "none"
+
+NON_WRITABLE_ACCESS_ROLES = frozenset(
+    {GOOGLE_NO_ACCESS_ROLE, "reader", "freeBusyReader"}
+)
+
+
+def is_read_only_calendar(access_role: str | None) -> bool:
+    """Return True if Google grants no write access to this calendar.
+
+    A calendar shared read-only still lists its events, so it syncs inbound
+    like any other — but every write to it is refused. Each of the three
+    places that writes to Google asks this before calling the API.
+
+    A role we have never stored (``None``) or do not recognise counts as
+    writable: a calendar we have not asked about must not silently stop
+    syncing, and a write that turns out to be refused is handled as its own
+    permanent skip.
+    """
+    return access_role in NON_WRITABLE_ACCESS_ROLES
+
+
+async def _read_only_google_calendar_ids(session: Any, user_id: str | int) -> set[str]:
+    """Return the user's Google calendar ids that refuse writes."""
+    result = await session.execute(
+        text("""
+            SELECT google_calendar_id
+            FROM calendars
+            WHERE user_id = :user_id
+              AND google_calendar_id IS NOT NULL
+              AND access_role = ANY(:read_only_roles)
+        """),
+        {"user_id": str(user_id), "read_only_roles": list(NON_WRITABLE_ACCESS_ROLES)},
+    )
+    return {row.google_calendar_id for row in result}
+
+
 async def _process_journal_deleted_event(
     session_factory: Any, event_data: dict[str, Any], journal_id: int
 ) -> dict[str, Any]:
@@ -2025,7 +2069,11 @@ async def _process_journal_deleted_event(
             user_id=user_id,
         )
 
+        read_only_calendars = await _read_only_google_calendar_ids(session, user_id)
+
         deleted_ids = []
+        read_only_ids = []
+        forbidden_ids = []
         errors = []
         from googleapiclient.errors import HttpError
 
@@ -2045,6 +2093,19 @@ async def _process_journal_deleted_event(
                 if not google_event_id:
                     continue
 
+                if calendar_id in read_only_calendars:
+                    # Deleting is a write like any other, and this calendar
+                    # refuses them. The copy stays on Google; asking would
+                    # only earn a 403.
+                    logger.info(
+                        "Skipping delete: calendar is read-only",
+                        google_event_id=google_event_id,
+                        google_calendar_id=calendar_id,
+                        journal_id=journal_id,
+                    )
+                    read_only_ids.append(google_event_id)
+                    continue
+
                 await client.delete_event(google_event_id, calendar_id)
                 logger.info(
                     "Deleted journal event from Google Calendar",
@@ -2060,6 +2121,18 @@ async def _process_journal_deleted_event(
                         journal_id=journal_id,
                     )
                     deleted_ids.append(google_event_id)
+                elif is_permission_denied(e):
+                    # The account may not delete from this calendar. The copy
+                    # stays on Google and no retry can change that, so the
+                    # deletion is recorded as refused rather than failing the
+                    # job and leaving the event to be attempted forever.
+                    logger.warning(
+                        "Not allowed to delete this event from Google Calendar",
+                        google_event_id=google_event_id,
+                        journal_id=journal_id,
+                        error=str(e),
+                    )
+                    forbidden_ids.append(google_event_id)
                 else:
                     logger.error(
                         "HTTP error deleting journal event from Google Calendar",
@@ -2082,6 +2155,8 @@ async def _process_journal_deleted_event(
             "status": "success",
             "action": "delete",
             "external_event_ids": deleted_ids,
+            "read_only_event_ids": read_only_ids,
+            "forbidden_event_ids": forbidden_ids,
         }
 
 
@@ -2189,7 +2264,7 @@ async def _process_journal_upsert_event(
 
         # Skip outbound push for read-only calendars (shared calendars
         # where the user doesn't have write access)
-        if row.access_role in ("reader", "freeBusyReader"):
+        if is_read_only_calendar(row.access_role):
             logger.info(
                 "Skipping outbound sync: calendar is read-only",
                 journal_id=journal_id,
@@ -2313,6 +2388,7 @@ async def _process_journal_upsert_event(
         links_stmt = text("""
             SELECT jeel.external_event_id,
                    c.google_calendar_id,
+                   c.access_role,
                    jeel.calendar_id,
                    jeel.external_identity,
                    jeel.sync_capability
@@ -2339,6 +2415,19 @@ async def _process_journal_upsert_event(
                         del_link_stmt,
                         {"journal_id": journal_id, "calendar_id": link_row.calendar_id},
                     )
+                    continue
+
+                if is_read_only_calendar(link_row.access_role):
+                    # The event cannot be removed from a calendar we may not
+                    # write to, so the link keeps recording that it is still
+                    # out there rather than being dropped silently.
+                    logger.info(
+                        "Skipping orphan delete: calendar is read-only",
+                        journal_id=journal_id,
+                        old_calendar_id=link_row.calendar_id,
+                        access_role=link_row.access_role,
+                    )
+                    await _mark_link_errored(session, journal_id, link_row.calendar_id)
                     continue
 
                 success = False
@@ -2377,15 +2466,7 @@ async def _process_journal_upsert_event(
                         {"journal_id": journal_id, "calendar_id": link_row.calendar_id},
                     )
                 else:
-                    err_link_stmt = text("""
-                        UPDATE journal_external_event_links
-                        SET sync_status = 'errored', updated_at = now()
-                        WHERE journal_id = :journal_id AND calendar_id = :calendar_id
-                    """)
-                    await session.execute(
-                        err_link_stmt,
-                        {"journal_id": journal_id, "calendar_id": link_row.calendar_id},
-                    )
+                    await _mark_link_errored(session, journal_id, link_row.calendar_id)
 
         await session.commit()
 
@@ -2485,28 +2566,53 @@ async def _process_journal_upsert_event(
 
         except HttpError as e:
             await _mark_link_errored(session, journal_id, row.calendar_id)
-            if not is_event_type_restriction(e):
-                raise
 
-            # Google owns this event and derives it — a birthday from a
-            # contact, an event from Gmail — so it accepts almost no change.
-            # No retry and no reshaping of the payload makes the same write
-            # land, so the message is acknowledged rather than left pending to
-            # be redelivered until it dead-letters. The journal keeps the
-            # local edit; the errored link is where the divergence shows.
-            logger.warning(
-                "Skipping outbound push: Google event type is not modifiable",
-                journal_id=journal_id,
-                external_event_id=external_event_id,
-                calendar_id=row.calendar_id,
-                error=str(e),
-            )
-            return {
-                "status": "ignored",
-                "reason": "event_type_not_modifiable",
-                "journal_id": journal_id,
-                "external_event_id": external_event_id,
-            }
+            if is_event_type_restriction(e):
+                # Google owns this event and derives it — a birthday from a
+                # contact, an event from Gmail — so it accepts almost no
+                # change. No retry and no reshaping of the payload makes the
+                # same write land, so the message is acknowledged rather than
+                # left pending to be redelivered until it dead-letters. The
+                # journal keeps the local edit; the errored link is where the
+                # divergence shows.
+                logger.warning(
+                    "Skipping outbound push: Google event type is not modifiable",
+                    journal_id=journal_id,
+                    external_event_id=external_event_id,
+                    calendar_id=row.calendar_id,
+                    error=str(e),
+                )
+                return {
+                    "status": "ignored",
+                    "reason": "event_type_not_modifiable",
+                    "journal_id": journal_id,
+                    "external_event_id": external_event_id,
+                }
+
+            if is_permission_denied(e):
+                # Refusing the write is an answer, not a fault: the account
+                # may not write to this calendar, or to this event. Raising
+                # would ride the same retries to the same dead-letter for the
+                # same reply, so the push stops here and the stored access
+                # role is refreshed — a stale role is why the read-only guard
+                # above let this push through at all.
+                logger.warning(
+                    "Google refused the outbound push, skipping this calendar",
+                    journal_id=journal_id,
+                    calendar_id=row.calendar_id,
+                    google_calendar_id=target_calendar_id,
+                    action=action,
+                    error=str(e),
+                )
+                await _refresh_calendar_access_roles(session, client, row.user_id)
+                return {
+                    "status": "ignored",
+                    "reason": "forbidden",
+                    "journal_id": journal_id,
+                    "action": action,
+                }
+
+            raise
 
         except Exception:
             await _mark_link_errored(session, journal_id, row.calendar_id)
@@ -3378,6 +3484,149 @@ async def _find_journal_by_event_identity(
     return int(row.journal_id) if row else None
 
 
+async def _fetch_calendar_access_roles(client: GoogleAPIClient) -> dict[str, str]:
+    """Return Google's current access role for every calendar in the list."""
+    roles: dict[str, str] = {}
+    page_token: str | None = None
+
+    while True:
+        response = await client.list_calendars(page_token=page_token)
+        for item in response.get("items", []):
+            google_calendar_id = item.get("id")
+            access_role = item.get("accessRole")
+            if google_calendar_id and access_role:
+                roles[google_calendar_id] = access_role
+                if item.get("primary"):
+                    roles.setdefault("primary", access_role)
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            return roles
+
+
+async def _mark_vanished_calendars_unreachable(
+    session: Any, user_id: str | int, seen: dict[str, str]
+) -> int:
+    """Record the calendars that are no longer in the account's list at all.
+
+    Revoking a share does not return the calendar with a lesser role — Google
+    drops it from ``calendarList`` entirely. Reconciling only the entries that
+    came back would leave the last role we saw (often ``writer``) standing
+    forever, and every later edit would go on earning a refusal, which is the
+    very thing the refresh exists to stop.
+
+    Only sound while the user has a single connected Google account:
+    ``calendars`` records no account of its own, so with two connected
+    accounts one account's list cannot speak for the other's calendars. With
+    more than one, the absent calendars are left alone and a refused write
+    remains their only signal.
+    """
+    if not seen:
+        # A successful fetch that returned nothing tells us nothing about
+        # which calendars are gone — treating it as "all of them" would
+        # unsync the account on one odd response.
+        return 0
+
+    account_count = await session.execute(
+        text("SELECT count(*) FROM user_google_auth WHERE user_id = :user_id"),
+        {"user_id": str(user_id)},
+    )
+    if account_count.scalar() != 1:
+        return 0
+
+    result = await session.execute(
+        text("""
+            UPDATE calendars
+            SET access_role = :no_access, updated_at = now()
+            WHERE user_id = :user_id
+              AND google_calendar_id IS NOT NULL
+              AND google_calendar_id <> ALL(:seen)
+              AND access_role IS DISTINCT FROM :no_access
+        """),
+        {
+            "user_id": str(user_id),
+            "seen": list(seen),
+            "no_access": GOOGLE_NO_ACCESS_ROLE,
+        },
+    )
+    vanished = result.rowcount or 0
+    if vanished:
+        logger.info(
+            "Calendars no longer reachable from this Google account",
+            user_id=user_id,
+            count=vanished,
+        )
+    return vanished
+
+
+async def _refresh_calendar_access_roles(
+    session: Any, client: GoogleAPIClient, user_id: str | int
+) -> int:
+    """Store Google's current access role on each of the user's calendars.
+
+    The outbound push is skipped for calendars the account can only read, and
+    that guard is only as good as the stored role. Google can change it at any
+    time — a shared work calendar downgraded to "see all event details", an
+    account that has left the organisation — and nothing tells us but the 403
+    on the next write. Re-reading it from ``calendarList`` on every sync is
+    what keeps the guard honest and lets a revoked permission settle by
+    itself instead of costing a refused request per edit, forever.
+
+    A calendar that has left the list entirely is handled too — see
+    :func:`_mark_vanished_calendars_unreachable`.
+
+    Returns the number of calendars whose stored role changed. Never raises:
+    a list that cannot be fetched leaves the stored roles as they were rather
+    than failing the sync or the push that asked for the refresh.
+
+    Commits whatever it ran, including when nothing changed, so the caller is
+    never left holding an open transaction to reason about.
+    """
+    try:
+        roles = await _fetch_calendar_access_roles(client)
+    except Exception as e:  # noqa: BLE001 - a stale role is better than a failed sync
+        logger.warning(
+            "Could not refresh calendar access roles",
+            user_id=user_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return 0
+
+    update_stmt = text("""
+        UPDATE calendars
+        SET access_role = :access_role, updated_at = now()
+        WHERE user_id = :user_id
+          AND google_calendar_id = :google_calendar_id
+          AND access_role IS DISTINCT FROM :access_role
+    """)
+
+    changed = 0
+    for google_calendar_id, access_role in roles.items():
+        result = await session.execute(
+            update_stmt,
+            {
+                "user_id": str(user_id),
+                "google_calendar_id": google_calendar_id,
+                "access_role": access_role,
+            },
+        )
+        if result.rowcount:
+            changed += 1
+            logger.info(
+                "Calendar access role changed",
+                user_id=user_id,
+                google_calendar_id=google_calendar_id,
+                access_role=access_role,
+            )
+
+    changed += await _mark_vanished_calendars_unreachable(session, user_id, roles)
+
+    await session.commit()
+
+    return changed
+
+
 async def _save_calendar_sync_token(
     session: Any,
     new_sync_token: str,
@@ -3526,6 +3775,12 @@ async def sync_calendar_events(
         async with session_factory() as session:
             client = _create_google_client(session, user_id, google_account_email)
 
+            # Re-read what the account is allowed to do with each calendar
+            # before syncing it. Outbound push relies on the stored role, and
+            # this is the only moment we hear about a permission that changed
+            # on Google's side.
+            await _refresh_calendar_access_roles(session, client, user_id)
+
             # Fetch synced calendars from DB
             # The user's configured zone rides along on each calendar row so an
             # imported all-day event can be stored on the day the user reads
@@ -3583,18 +3838,10 @@ async def sync_calendar_events(
                         client, list_kwargs
                     )
                 except HttpError as e:
-                    is_sync_token_error = e.resp.status == 410
-                    if e.resp.status == 400:
-                        try:
-                            import json
-
-                            error_details = json.loads(e.content.decode())
-                            for err in error_details.get("error", {}).get("errors", []):
-                                if err.get("reason") == "syncTokenInvalid":
-                                    is_sync_token_error = True
-                                    break
-                        except Exception:  # noqa: BLE001
-                            pass
+                    is_sync_token_error = e.resp.status == 410 or (
+                        e.resp.status == 400
+                        and "syncTokenInvalid" in google_error_reasons(e)
+                    )
                     if is_sync_token_error:
                         logger.warning(
                             "Sync token invalid, falling back to full sync",
