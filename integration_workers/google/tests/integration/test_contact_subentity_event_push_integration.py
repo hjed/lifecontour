@@ -279,3 +279,60 @@ class TestInboundEchoIsNotPushedBack:
         mock_client.update_contact.assert_not_called()
         # The stored etag is untouched, so the next pull still reconciles.
         assert await _stored_version_hash(db_session, contact_id) == "etag-before"
+
+
+@pytest.mark.asyncio
+class TestDeletingTheLastValueClearsGoogle:
+    """Augment review of #1548: a deletion must name the field it empties.
+
+    ``updatePersonFields`` is derived from the payload's keys, so a payload that
+    omits an emptied list leaves the stale value in Google — and the next pull,
+    seeing a changed etag, re-imports what the user deleted.
+    """
+
+    async def test_deleting_the_last_email_sends_an_empty_email_list(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """ContactMethodDeleted for the only email clears it remotely."""
+        contact_id = synced_contact["contact_id"]
+        await db_session.execute(
+            text("DELETE FROM contact_methods WHERE contact_id = :cid"),
+            {"cid": contact_id},
+        )
+        await db_session.flush()
+
+        mock_client = _mock_google_client()
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactMethodDeleted",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        pushed = mock_client.update_contact.call_args[1]["contact_data"]
+        assert pushed["emailAddresses"] == []
+        assert pushed["phoneNumbers"] == []
+
+    async def test_deleting_the_last_address_sends_an_empty_address_list(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """ContactAddressDeleted for a contact left with no address clears it."""
+        contact_id = synced_contact["contact_id"]
+        mock_client = _mock_google_client()
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactAddressDeleted",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        pushed = mock_client.update_contact.call_args[1]["contact_data"]
+        assert pushed["addresses"] == []

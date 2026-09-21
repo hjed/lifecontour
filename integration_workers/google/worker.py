@@ -584,18 +584,21 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if nicknames:
         person_data["nicknames"] = nicknames
 
-    # Transform contact methods (emails and phones)
-    methods = contact.get("methods", [])
-    email_addresses, phone_numbers = _transform_contact_methods(methods)
-    if email_addresses:
+    # Transform contact methods (emails and phones). Both fields are sent
+    # whenever methods were loaded, even when empty: update_contact derives
+    # updatePersonFields from the payload's keys, so omitting an empty list
+    # would leave a deleted contact's last email or phone standing in Google —
+    # and the next inbound pull would re-import it.
+    if "methods" in contact:
+        email_addresses, phone_numbers = _transform_contact_methods(
+            contact["methods"] or []
+        )
         person_data["emailAddresses"] = email_addresses
-    if phone_numbers:
         person_data["phoneNumbers"] = phone_numbers
 
-    # Transform addresses
-    google_addresses = _transform_addresses(contact.get("addresses", []))
-    if google_addresses:
-        person_data["addresses"] = google_addresses
+    # Transform addresses, sent even when empty for the same reason.
+    if "addresses" in contact:
+        person_data["addresses"] = _transform_addresses(contact["addresses"] or [])
 
     # Transform notes to biographies
     biographies = _transform_notes(contact.get("notes", []))
