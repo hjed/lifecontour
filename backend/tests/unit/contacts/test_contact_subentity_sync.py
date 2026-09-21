@@ -23,14 +23,20 @@ from app.core.contacts.services.contact_subentity_sync import (
     ADDRESS_FIELDS,
     ADDRESS_PREFIX,
     IMPORTANT_DATE_FIELDS,
+    IMPORTANT_DATES,
     METHOD_FIELDS,
     METHOD_PREFIX,
+    METHODS,
     NOTE_FIELDS,
     NOTE_PREFIX,
+    NOTES,
+    aggregate_change,
     diff_fields,
     important_date_key,
     prefixed,
     reconcile,
+    render_important_date,
+    render_note,
 )
 from app.core.history.services.history_service import (
     _SUBENTITY_FIELD_RE,
@@ -399,3 +405,72 @@ class TestPrefixedKeys:
         the projection's prefix map has no entry for them."""
         assert _SUBENTITY_FIELD_RE.match("important_date_5_year") is None
         assert "important_date" not in _SUBENTITY_PREFIX_ENTITY_TYPE
+
+
+class TestAggregateRendering:
+    """The aggregate row describes a list's membership, not how long it is."""
+
+    def test_a_full_date_renders_its_type_and_day(self) -> None:
+        assert render_important_date(_date()) == "birthday:1990-03-09"
+
+    def test_a_day_month_date_renders_without_a_year(self) -> None:
+        date = _date(year=None, precision=DatePrecision.DAY_MONTH)
+
+        assert render_important_date(date) == "birthday:--03-09"
+
+    def test_a_year_only_date_renders_its_year(self) -> None:
+        date = _date(
+            date_type=ImportantDateType.WORK_ANNIVERSARY,
+            precision=DatePrecision.YEAR,
+            month=None,
+            day=None,
+            year=2015,
+        )
+
+        assert render_important_date(date) == "work_anniversary:2015"
+
+    def test_a_custom_date_renders_its_own_type_name(self) -> None:
+        date = ImportantDate(
+            contact_id=CONTACT_ID,
+            date_type=ImportantDateType.CUSTOM,
+            precision=DatePrecision.YEAR,
+            year=2020,
+            custom_date_type_id=3,
+            custom_date_type_name="Graduation",
+        )
+
+        assert render_important_date(date) == "custom(Graduation):2020"
+
+    def test_a_long_note_is_truncated(self) -> None:
+        """The note-added event carries 100 characters; the row does too."""
+        rendered = render_note(_note("x" * 150))
+
+        assert rendered == "x" * 100 + "…"
+
+    def test_a_membership_change_reports_both_lists_sorted(self) -> None:
+        before = [_method("b@example.com"), _method("a@example.com")]
+        after = [_method("a@example.com")]
+
+        assert aggregate_change(METHODS, before, after) == {
+            "contact_methods": (
+                "email:a@example.com, email:b@example.com",
+                "email:a@example.com",
+            )
+        }
+
+    def test_an_emptied_list_reports_none(self) -> None:
+        assert aggregate_change(NOTES, [_note("Only note")], []) == {
+            "notes": ("Only note", "None")
+        }
+
+    def test_lists_that_read_the_same_report_nothing(self) -> None:
+        """A note deleted and re-created with the same words has changed ids,
+        and nothing a reader of the feed could see."""
+        assert (
+            aggregate_change(NOTES, [_note("Same", id=1)], [_note("Same", id=2)]) == {}
+        )
+
+    def test_important_dates_report_under_their_own_key(self) -> None:
+        change = aggregate_change(IMPORTANT_DATES, [], [_date()])
+
+        assert change == {"important_dates": ("None", "birthday:1990-03-09")}

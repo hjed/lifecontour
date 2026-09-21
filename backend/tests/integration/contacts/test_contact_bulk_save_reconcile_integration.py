@@ -200,14 +200,15 @@ class TestMatchedImportantDate:
         assert [d.id for d in updated.important_dates] == [birthday_id]
 
     @pytest.mark.asyncio
-    async def test_retyping_a_date_is_reported_field_by_field(
+    async def test_retyping_a_date_is_reported_on_the_aggregate(
         self,
         contact_service: ContactService,
         async_connection: AsyncConnection,
         recorded_events: RecordingEventPublisher,
     ) -> None:
-        """A date whose type moves has no match, so it is a delete and an add —
-        the aggregate row is the feed for that, as for any other bulk add."""
+        """A date whose type moves has no match, so it is a delete and an add,
+        and the aggregate row is its record. The count does not move, which is
+        why that row has to describe the dates rather than count them."""
         saved = await _contact_with(
             contact_service,
             async_connection,
@@ -223,6 +224,10 @@ class TestMatchedImportantDate:
         assert updated.important_dates[0].date_type == ImportantDateType.BIRTHDAY
         assert recorded_events.of_type("ImportantDateUpdated") == []
         assert len(recorded_events.of_type("ImportantDateAdded")) == 1
+        assert _changed_fields(recorded_events)["important_dates"] == (
+            "work_anniversary:2015",
+            "birthday:1990-03-09",
+        )
 
 
 class TestMatchedMethodAddressAndNote:
@@ -257,10 +262,14 @@ class TestMatchedMethodAddressAndNote:
 
         assert updated.methods is not None
         assert updated.methods[0].id == method_id
-        assert _changed_fields(recorded_events)[f"method_{method_id}_value"] == (
+        changed = _changed_fields(recorded_events)
+        assert changed[f"method_{method_id}_value"] == (
             "before@example.com",
             "after@example.com",
         )
+        # The per-field row is the record, as it is for a field-level PATCH; an
+        # aggregate row beside it would report the same edit twice.
+        assert "contact_methods" not in changed
         assert recorded_events.of_type("ContactMethodAdded") == []
 
     @pytest.mark.asyncio
@@ -292,9 +301,12 @@ class TestMatchedMethodAddressAndNote:
 
         assert updated.addresses is not None
         assert updated.addresses[0].id == address_id
-        assert _changed_fields(recorded_events)[
-            f"address_{address_id}_street_line_1"
-        ] == ("1 Old Street", "2 New Street")
+        changed = _changed_fields(recorded_events)
+        assert changed[f"address_{address_id}_street_line_1"] == (
+            "1 Old Street",
+            "2 New Street",
+        )
+        assert "addresses" not in changed
 
     @pytest.mark.asyncio
     async def test_an_edited_note_reports_its_field(
@@ -353,6 +365,51 @@ class TestMatchedMethodAddressAndNote:
         assert len(updated.notes) == 2
         assert stored_id in [n.id for n in updated.notes]
         assert len(recorded_events.of_type("ContactNoteAdded")) == 1
+
+    @pytest.mark.asyncio
+    async def test_replacing_a_note_is_reported_on_the_aggregate(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        """One note out, another in: the count holds, so a count-based row
+        would have said nothing about it."""
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            notes=[ContactNote(content="Met at the conference", contact_id=0)],
+        )
+        saved.notes = [ContactNote(content="Follows the cricket", contact_id=0)]
+
+        await contact_service.update_contact(saved, async_connection)
+
+        assert _changed_fields(recorded_events)["notes"] == (
+            "Met at the conference",
+            "Follows the cricket",
+        )
+
+    @pytest.mark.asyncio
+    async def test_resubmitting_a_note_without_its_id_is_not_a_change(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        """A client that drops the id re-creates the note, but nothing a reader
+        of the feed could see has moved."""
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            notes=[ContactNote(content="Met at the conference", contact_id=0)],
+        )
+        saved.notes = [ContactNote(content="Met at the conference", contact_id=0)]
+
+        await contact_service.update_contact(saved, async_connection)
+
+        assert recorded_events.of_type("ContactUpdated") == []
 
 
 class TestPrimaryAndUniquenessGuards:

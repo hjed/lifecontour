@@ -52,17 +52,19 @@ from app.core.contacts.services.address_validation_service import (
 )
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 from app.core.contacts.services.contact_subentity_sync import (
-    ADDRESS_FIELDS,
     ADDRESS_PREFIX,
+    ADDRESSES,
     IMPORTANT_DATE_FIELDS,
-    METHOD_FIELDS,
+    IMPORTANT_DATES,
     METHOD_PREFIX,
-    NOTE_FIELDS,
+    METHODS,
     NOTE_PREFIX,
+    NOTES,
     ChangedFields,
     SubEntity,
+    SubEntityKind,
+    aggregate_change,
     diff_fields,
-    important_date_key,
     prefixed,
     reconcile,
 )
@@ -894,71 +896,10 @@ class ContactService:
             "nick_name", current_contact.nick_name, updated_contact.nick_name
         )
 
-        # Check method changes
-        if updated_contact.methods is not None:
-            current_method_strs = sorted(
-                [
-                    f"{m.method_type.value}:{m.value}"
-                    for m in (current_contact.methods or [])
-                    if m.method_type and m.value
-                ]
-            )
-            updated_method_strs = sorted(
-                [
-                    f"{m.method_type.value}:{m.value}"
-                    for m in updated_contact.methods
-                    if m.method_type and m.value
-                ]
-            )
-
-            if current_method_strs != updated_method_strs:
-                changed_fields["contact_methods"] = (
-                    ", ".join(current_method_strs) if current_method_strs else "None",
-                    ", ".join(updated_method_strs) if updated_method_strs else "None",
-                )
-
-        # Check address changes
-        if updated_contact.addresses is not None:
-
-            def _format_address(a: ContactAddress) -> str:
-                parts = [
-                    a.street_line_1,
-                    a.street_line_2,
-                    a.locality,
-                    a.region,
-                    a.postal_code,
-                    a.country_code,
-                ]
-                return ", ".join(str(p) for p in parts if p) or "Unknown Address"
-
-            current_addr_strs = sorted(
-                [_format_address(a) for a in (current_contact.addresses or [])]
-            )
-            updated_addr_strs = sorted(
-                [_format_address(a) for a in updated_contact.addresses]
-            )
-
-            if current_addr_strs != updated_addr_strs:
-                changed_fields["addresses"] = (
-                    " | ".join(current_addr_strs) if current_addr_strs else "None",
-                    " | ".join(updated_addr_strs) if updated_addr_strs else "None",
-                )
-
-        if updated_contact.notes is not None and len(
-            current_contact.notes or []
-        ) != len(updated_contact.notes):
-            changed_fields["notes"] = (
-                f"count:{len(current_contact.notes or [])}",
-                f"count:{len(updated_contact.notes)}",
-            )
-
-        if updated_contact.important_dates is not None and len(
-            current_contact.important_dates or []
-        ) != len(updated_contact.important_dates):
-            changed_fields["important_dates"] = (
-                f"count:{len(current_contact.important_dates or [])}",
-                f"count:{len(updated_contact.important_dates)}",
-            )
+        # Methods, addresses, notes and important dates are reported by the
+        # reconcile that applies them (_handle_update_relations): only it knows
+        # which items were matched and edited - those have per-field rows of
+        # their own - and which came and went.
 
         # Check tag changes
         if updated_contact.tags is not None:
@@ -1131,8 +1072,7 @@ class ContactService:
                 contact_id,
                 contact.methods,
                 current_contact.methods,
-                fields=METHOD_FIELDS,
-                prefix=METHOD_PREFIX,
+                kind=METHODS,
                 delete_one=self.contact_repo.delete_method,
                 update_one=self.contact_repo.update_method,
                 insert_all=lambda new: self._save_contact_methods(
@@ -1151,8 +1091,7 @@ class ContactService:
                 contact_id,
                 contact.addresses,
                 current_contact.addresses,
-                fields=ADDRESS_FIELDS,
-                prefix=ADDRESS_PREFIX,
+                kind=ADDRESSES,
                 delete_one=self.contact_repo.delete_address,
                 update_one=self.contact_repo.update_address,
                 insert_all=lambda new: self._save_contact_addresses(
@@ -1171,8 +1110,7 @@ class ContactService:
                 contact_id,
                 contact.notes,
                 current_contact.notes,
-                fields=NOTE_FIELDS,
-                prefix=NOTE_PREFIX,
+                kind=NOTES,
                 delete_one=self.contact_repo.delete_note,
                 update_one=self.contact_repo.update_note,
                 insert_all=lambda new: self._save_contact_notes(
@@ -1197,7 +1135,7 @@ class ContactService:
             )
 
         if contact.important_dates is not None:
-            saved_entities["important_dates"] = await self._sync_important_dates(
+            saved_entities["important_dates"], moved = await self._sync_important_dates(
                 contact_id,
                 contact.important_dates,
                 current_contact.important_dates,
@@ -1205,6 +1143,7 @@ class ContactService:
                 changed_by,
                 source,
             )
+            subentity_changes.update(moved)
 
         return saved_entities, subentity_changes
 
@@ -1214,20 +1153,21 @@ class ContactService:
         submitted: Sequence[T],
         stored: Sequence[T] | None,
         *,
-        fields: Sequence[str],
-        prefix: str,
+        kind: SubEntityKind[T],
         delete_one: Callable[[int], Awaitable[None]],
         update_one: Callable[[T], Awaitable[T]],
         insert_all: Callable[[list[T]], Awaitable[list[T]]],
     ) -> tuple[list[T], ChangedFields]:
         """Reconcile one sub-entity list, reporting what moved.
 
-        The field changes come back keyed for the aggregate ContactUpdated -
+        A matched edit comes back keyed for the aggregate ContactUpdated -
         "method_5_value" - which is exactly what the field-level endpoints
         publish, so the feed reads the same whichever surface made the change.
-        The rows come back in the order they were submitted.
+        Items that came or went are reported on the list's aggregate key
+        instead, since they have no row of their own in the feed. The rows come
+        back in the order they were submitted.
         """
-        plan = reconcile(stored, submitted)
+        plan = reconcile(stored, submitted, natural_key=kind.natural_key)
 
         for row in plan.deletions:
             if row.id is not None:
@@ -1238,20 +1178,24 @@ class ContactService:
         for row, incoming in plan.updates:
             incoming.id = row.id
             incoming.contact_id = contact_id
-            moved = diff_fields(row, incoming, fields)
+            moved = diff_fields(row, incoming, kind.fields)
             if not moved or row.id is None:
                 # Nothing moved: writing anyway would bump the row's updated_at
                 # and the contact's ETag for an edit nobody made.
                 applied[id(incoming)] = row
                 continue
             applied[id(incoming)] = await update_one(incoming)
-            changed.update(prefixed(prefix, row.id, moved))
+            if kind.prefix is not None:
+                changed.update(prefixed(kind.prefix, row.id, moved))
 
         inserted = iter(await insert_all(plan.inserts))
         saved: list[T] = []
         for item in submitted:
             row_for_item = applied.get(id(item))
             saved.append(row_for_item if row_for_item is not None else next(inserted))
+
+        if plan.inserts or plan.deletions:
+            changed.update(aggregate_change(kind, stored or [], saved))
         return saved, changed
 
     async def _sync_important_dates(
@@ -1262,16 +1206,17 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str,
         source: Provenance,
-    ) -> list[ImportantDate]:
+    ) -> tuple[list[ImportantDate], ChangedFields]:
         """Reconcile the important dates, publishing a real edit for a match.
 
         MCP submits dates carrying no ids, so a match is made on the date's
         type: a submitted birthday is an edit of the stored one. That edit is
         published as ImportantDateUpdated - the same event the per-date
         endpoint publishes, which the projection has a handler of its own for
-        - rather than as a key on the aggregate.
+        - rather than as a key on the aggregate. Dates that came or went are
+        reported on the aggregate ``important_dates`` key, as for any list.
         """
-        plan = reconcile(stored, submitted, natural_key=important_date_key)
+        plan = reconcile(stored, submitted, natural_key=IMPORTANT_DATES.natural_key)
 
         for row in plan.deletions:
             if row.id is not None:
@@ -1298,7 +1243,10 @@ class ContactService:
         for item in submitted:
             row_for_item = applied.get(id(item))
             saved.append(row_for_item if row_for_item is not None else next(inserted))
-        return saved
+
+        if plan.inserts or plan.deletions:
+            return saved, aggregate_change(IMPORTANT_DATES, stored or [], saved)
+        return saved, {}
 
     async def _edit_important_date(
         self,

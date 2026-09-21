@@ -12,12 +12,21 @@ with a :class:`Reconciliation`; these functions only decide what matches what,
 and what moved.
 """
 
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
-from core_shared.models.contacts.entities import ImportantDate
+from core_shared.models.contacts.entities import (
+    ContactAddress,
+    ContactMethod,
+    ContactNote,
+    ImportantDate,
+)
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
 
 # ``{field: (old, new)}`` — the shape the history projection reads, where the
 # two-element tuple is what its ``len(change) == 2`` guard is asking for.
@@ -185,3 +194,123 @@ IMPORTANT_DATE_FIELDS: Sequence[str] = (
     "day",
     "custom_date_type_id",
 )
+
+
+# How much of a note the aggregate row keeps - the same cut ContactNoteAdded
+# makes in its own payload.
+NOTE_RENDER_LIMIT = 100
+
+
+def render_method(method: ContactMethod) -> str:
+    """``email:ann@example.com``."""
+    return f"{method.method_type.value}:{method.value}"
+
+
+def render_address(address: ContactAddress) -> str:
+    """The address's populated lines, comma separated."""
+    parts = [
+        address.street_line_1,
+        address.street_line_2,
+        address.locality,
+        address.region,
+        address.postal_code,
+        address.country_code,
+    ]
+    return ", ".join(str(p) for p in parts if p) or "Unknown Address"
+
+
+def render_note(note: ContactNote) -> str:
+    """The note's words, cut at :data:`NOTE_RENDER_LIMIT`."""
+    if len(note.content) <= NOTE_RENDER_LIMIT:
+        return note.content
+    return note.content[:NOTE_RENDER_LIMIT] + "…"
+
+
+def render_important_date(date: ImportantDate) -> str:
+    """``birthday:1990-03-09`` - ISO 8601, truncated to the date's precision.
+
+    A day and month with no year is ``--03-09``, the standard's own form for
+    it; a custom type is named by its own label, since ``custom`` alone would
+    make two different custom dates read the same.
+    """
+    kind = date.date_type.value
+    if date.date_type == ImportantDateType.CUSTOM:
+        kind = f"custom({date.custom_date_type_name or date.custom_date_type_id})"
+
+    if date.precision == DatePrecision.FULL:
+        when = f"{date.year:04d}-{date.month:02d}-{date.day:02d}"
+    elif date.precision == DatePrecision.DAY_MONTH:
+        when = f"--{date.month:02d}-{date.day:02d}"
+    else:
+        when = f"{date.year:04d}"
+    return f"{kind}:{when}"
+
+
+@dataclass(frozen=True)
+class SubEntityKind[T: SubEntity]:
+    """Everything the whole-contact save needs to know about one sub-resource.
+
+    ``aggregate_key`` names the row that records a change to the list's
+    membership; ``prefix`` is the per-sub-entity key a matched edit rides the
+    aggregate ContactUpdated under, or ``None`` for a type whose edit has an
+    event of its own.
+    """
+
+    aggregate_key: str
+    fields: Sequence[str]
+    render: Callable[[T], str]
+    separator: str
+    prefix: str | None = None
+    natural_key: NaturalKey[T] | None = None
+
+
+METHODS: SubEntityKind[ContactMethod] = SubEntityKind(
+    aggregate_key="contact_methods",
+    fields=METHOD_FIELDS,
+    render=render_method,
+    separator=", ",
+    prefix=METHOD_PREFIX,
+)
+ADDRESSES: SubEntityKind[ContactAddress] = SubEntityKind(
+    aggregate_key="addresses",
+    fields=ADDRESS_FIELDS,
+    render=render_address,
+    separator=" | ",
+    prefix=ADDRESS_PREFIX,
+)
+NOTES: SubEntityKind[ContactNote] = SubEntityKind(
+    aggregate_key="notes",
+    fields=NOTE_FIELDS,
+    render=render_note,
+    separator=" | ",
+    prefix=NOTE_PREFIX,
+)
+IMPORTANT_DATES: SubEntityKind[ImportantDate] = SubEntityKind(
+    aggregate_key="important_dates",
+    fields=IMPORTANT_DATE_FIELDS,
+    render=render_important_date,
+    separator=", ",
+    natural_key=important_date_key,
+)
+
+
+def aggregate_change[T: SubEntity](
+    kind: SubEntityKind[T], before: Iterable[T], after: Iterable[T]
+) -> ChangedFields:
+    """The aggregate row for a list whose membership changed, if it reads
+    differently.
+
+    Both sides are rendered and sorted, so the row says which items came and
+    went rather than how many there are - a retyped date or a replaced note
+    keeps the count. Lists that render the same report nothing: a note deleted
+    and re-created with the same words has new ids and nothing a reader of the
+    feed could see.
+    """
+    old = _render_list(kind, before)
+    new = _render_list(kind, after)
+    return {} if old == new else {kind.aggregate_key: (old, new)}
+
+
+def _render_list[T: SubEntity](kind: SubEntityKind[T], items: Iterable[T]) -> str:
+    rendered = sorted(kind.render(item) for item in items)
+    return kind.separator.join(rendered) if rendered else "None"
