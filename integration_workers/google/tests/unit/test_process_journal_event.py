@@ -1,5 +1,6 @@
 """Tests for process_journal_event task."""
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -66,6 +67,27 @@ def _forbidden_body(*reasons: str) -> bytes:
         for reason in reasons
     )
     return f'{{"error": {{"code": 403, "errors": [{errors}]}}}}'.encode()
+
+
+@contextmanager
+def _google_account(mock_session_factory, mock_google_auth_service, mock_google_client):
+    """Patch in a user with a Google account, ready for the worker to act as.
+
+    Every deletion test needs the same arrangement — the auth row the handler
+    reads before it builds a client — and only what the event carries differs.
+    """
+    with (
+        patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+        patch("worker.GoogleAPIClient", return_value=mock_google_client),
+    ):
+        mock_session = mock_session_factory.return_value.__aenter__.return_value
+        mock_session.execute.side_effect = None
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.google_account_email = "test@example.com"
+        mock_result.fetchone.return_value = mock_row
+        mock_session.execute.return_value = mock_result
+        yield mock_session
 
 
 class TestProcessJournalEvent:
@@ -269,18 +291,9 @@ class TestProcessJournalEvent:
     ):
         from worker import process_journal_event
 
-        with (
-            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
-            patch("worker.GoogleAPIClient", return_value=mock_google_client),
-        ):
-            mock_session = mock_session_factory.return_value.__aenter__.return_value
-            mock_session.execute.side_effect = None
-            mock_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.google_account_email = "test@example.com"
-            mock_result.fetchone.return_value = mock_row
-            mock_session.execute.return_value = mock_result
-
+        with _google_account(
+            mock_session_factory, mock_google_auth_service, mock_google_client
+        ) as mock_session:
             ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
             result = await process_journal_event(
                 ctx=ctx,
@@ -322,21 +335,11 @@ class TestProcessJournalEvent:
         """
         from worker import process_journal_event
 
-        with (
-            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
-            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        with _google_account(
+            mock_session_factory, mock_google_auth_service, mock_google_client
         ):
-            mock_session = mock_session_factory.return_value.__aenter__.return_value
-            mock_session.execute.side_effect = None
-            mock_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.google_account_email = "test@example.com"
-            mock_result.fetchone.return_value = mock_row
-            mock_session.execute.return_value = mock_result
-
-            ctx = {"session_factory": mock_session_factory, "job_id": "job123"}
             result = await process_journal_event(
-                ctx=ctx,
+                ctx={"session_factory": mock_session_factory, "job_id": "job123"},
                 event_type="JournalDeleted",
                 event_data={
                     "journal_id": 1,
