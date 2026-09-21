@@ -4,12 +4,17 @@ ITER14-004 Phase 2: the consumer declares an ``EventRoute`` table instead of
 overriding ``_handle_event``. These tests assert the route table maps the
 expected event types to the right handlers, the consumed-event set is unchanged,
 and unmatched events are acknowledged without dispatch.
+
+LOCAL-177: the contact half of that table is now derived from the shared
+``CONTACT_PUSH_EVENT_TYPES`` registry rather than hand-maintained, so a contact
+event added backend-side cannot silently miss outbound Google sync.
 """
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.models.contacts.event_types import CONTACT_PUSH_EVENT_TYPES
 from core_shared.stream_client import StreamClient, StreamEvent
 
 
@@ -44,7 +49,8 @@ class TestGoogleWorkerRouteTable:
         """Route patterns equal the documented consumed-event set (regression).
 
         Guards the spec requirement that the migrated consumer's consumed-event
-        set is unchanged: the 3 journal + 2 tag + 4 contact exact-match events.
+        set is unchanged: the 3 journal + 2 tag events, plus every contact event
+        the shared registry marks as pushed to integrations.
         """
         patterns = {route.pattern for route in consumer._routes}
         assert patterns == {
@@ -53,11 +59,35 @@ class TestGoogleWorkerRouteTable:
             "JournalDeleted",
             "TagUpdated",
             "TagDeleted",
-            "ContactCreated",
-            "ContactUpdated",
-            "ContactDeleted",
-            "ContactMerged",
+        } | set(CONTACT_PUSH_EVENT_TYPES)
+
+    def test_contact_routes_are_driven_by_the_shared_registry(
+        self, consumer: Any
+    ) -> None:
+        """LOCAL-177: the contact route set is the registry, not a hand list.
+
+        Ten contact events (``TagAssigned``, ``ContactMethodAdded``,
+        ``ImportantDate*`` …) were dropped because this table was maintained by
+        hand. Deriving it from ``CONTACT_PUSH_EVENT_TYPES`` means a newly added
+        contact event is routed as soon as it is classified.
+        """
+        contact_patterns = {
+            route.pattern
+            for route in consumer._routes
+            if route.handler == consumer._handle_contact
         }
+        assert contact_patterns == set(CONTACT_PUSH_EVENT_TYPES)
+        # The events this ticket was raised for, spelled out so a regression
+        # names the symptom rather than a set difference.
+        assert {
+            "TagAssigned",
+            "TagRemoved",
+            "ContactMethodAdded",
+            "ContactMethodDeleted",
+            "ImportantDateAdded",
+            "ImportantDateUpdated",
+            "ImportantDateDeleted",
+        } <= contact_patterns
 
     @pytest.mark.parametrize(
         ("event_type", "expected_handler"),
@@ -67,10 +97,10 @@ class TestGoogleWorkerRouteTable:
             ("JournalDeleted", "process_journal_event"),
             ("TagUpdated", "process_tag_event"),
             ("TagDeleted", "process_tag_event"),
-            ("ContactCreated", "process_contact_event"),
-            ("ContactUpdated", "process_contact_event"),
-            ("ContactDeleted", "process_contact_event"),
-            ("ContactMerged", "process_contact_event"),
+            *(
+                (event_type, "process_contact_event")
+                for event_type in CONTACT_PUSH_EVENT_TYPES
+            ),
         ],
     )
     @pytest.mark.asyncio

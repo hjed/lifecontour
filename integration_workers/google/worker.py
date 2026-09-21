@@ -88,6 +88,12 @@ logger = get_logger(__name__)
 # rename of the provenance value cannot silently disable the echo guard.
 INBOUND_SYNC_SOURCE = Provenance.GOOGLE_CALENDAR.value
 
+# The contacts equivalent: the inbound contacts sync applies Google's data
+# through the backend's ContactService, which re-publishes the same contact
+# events this worker consumes. Pushing those back out would write Google's own
+# data to Google once per sub-entity it touched (LOCAL-177).
+INBOUND_CONTACT_SYNC_SOURCE = Provenance.GOOGLE_CONTACTS.value
+
 # Initialize metrics collector for this worker
 metrics_collector = MetricsCollector(worker_type="google")
 
@@ -3068,6 +3074,18 @@ async def process_contact_event(
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
+
+    # Echo guard: skip anything the inbound contacts sync caused, before any
+    # database work. It runs ahead of the ContactMerged branch so every consumed
+    # contact event is covered by one check.
+    if event_data.get("source") == INBOUND_CONTACT_SYNC_SOURCE:
+        logger.debug(
+            "Skipping contact event applied by the inbound Google sync",
+            job_id=job_id,
+            event_type=event_type,
+            contact_id=event_data.get("contact_id"),
+        )
+        return {"status": "skipped", "reason": "inbound_echo"}
 
     # ContactMerged carries no contact_id (only survivor/source ids and the
     # external collisions to reconcile), so it is handled before the

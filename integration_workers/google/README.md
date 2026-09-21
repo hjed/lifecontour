@@ -62,7 +62,27 @@ the single source of truth for the worker's consumed-event set:
 |---|---|
 | `JournalCreated`, `JournalUpdated`, `JournalDeleted` | `process_journal_event` |
 | `TagUpdated`, `TagDeleted` | `process_tag_event` |
-| `ContactCreated`, `ContactUpdated`, `ContactDeleted`, `ContactMerged` | `process_contact_event` |
+| every event in `CONTACT_PUSH_EVENT_TYPES` (see below) | `process_contact_event` |
+
+The contact half of that table is **derived from**
+`core_shared.models.contacts.event_types.CONTACT_PUSH_EVENT_TYPES` rather than
+listed here, because a hand-maintained list fell behind the contacts domain
+(LOCAL-177): only the four aggregate-level events were routed, so adding a tag,
+adding or removing an email address, and every important-date edit were read off
+the stream, acknowledged and dropped. That registry currently covers:
+
+- `ContactCreated`, `ContactUpdated`, `ContactDeleted`, `ContactMerged`
+- `TagAssigned`, `TagRemoved` — contact-group membership
+- `ContactMethodAdded`, `ContactMethodDeleted` — emails and phone numbers
+- `ContactAddressAdded`, `ContactAddressDeleted` — postal addresses
+- `ContactNoteAdded` — biographies
+- `ImportantDateAdded`, `ImportantDateUpdated`, `ImportantDateDeleted` —
+  birthdays and events
+
+Every one of them pushes the contact's **whole current state**, so the event only
+has to identify which contact changed. Events carrying the inbound sync's
+provenance (`source == "google_contacts"`) are skipped, so applying Google's data
+locally does not write it straight back to Google.
 
 Each handler builds a minimal ARQ-compatible context (`session_factory` +
 `job_id`) and calls the existing worker function directly, bypassing ARQ enqueue.

@@ -668,3 +668,179 @@ class TestDeleteContactFromGoogleForEvent:
         mock_client.delete_contact.assert_called_once_with(resource_name="people/c123")
         # Verify sync metadata cleanup was called
         mock_session.execute.assert_called_once()
+
+
+class TestInboundEchoGuard:
+    """LOCAL-177: events the inbound Google sync caused are not pushed back.
+
+    The inbound sync applies Google's data through ``ContactService``, which
+    re-publishes the very contact events the worker now consumes. Without a
+    guard, every pull would trigger a write back to Google for each sub-entity
+    it touched. The journal handler already guards this way (``worker.py``'s
+    ``INBOUND_SYNC_SOURCE`` check); contacts did not.
+    """
+
+    @pytest.mark.parametrize(
+        "event_type",
+        ["ContactCreated", "ContactUpdated", "TagAssigned", "ContactMethodAdded"],
+    )
+    @pytest.mark.asyncio
+    async def test_inbound_sourced_event_is_not_pushed_back(
+        self, event_type: str
+    ) -> None:
+        """An event carrying the inbound sync provenance is skipped outright."""
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_session_factory(
+            sync_row=None,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with patch(
+            "worker._push_contact_to_google_for_event", new_callable=AsyncMock
+        ) as mock_push:
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type=event_type,
+                event_data={"contact_id": 42, "source": "google_contacts"},
+            )
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "inbound_echo"
+        mock_push.assert_not_called()
+        # The guard runs before any database work, so no session is opened.
+        mock_session.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_merge_from_inbound_sync_is_not_pushed_back(self) -> None:
+        """The guard covers ContactMerged, which is handled before contact_id."""
+        from worker import process_contact_event
+
+        with patch(
+            "worker._process_contact_merged_event", new_callable=AsyncMock
+        ) as mock_merge:
+            result = await process_contact_event(
+                ctx=_make_ctx(),
+                event_type="ContactMerged",
+                event_data={"source": "google_contacts", "external_collisions": []},
+            )
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "inbound_echo"
+        mock_merge.assert_not_called()
+
+    @pytest.mark.parametrize("source", ["ui", "mcp", "system", "immich"])
+    @pytest.mark.asyncio
+    async def test_locally_sourced_event_is_pushed(self, source: str) -> None:
+        """Any provenance other than the Google inbound sync still pushes."""
+        from worker import process_contact_event
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=None,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "created"},
+            ) as mock_push,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactUpdated",
+                event_data={"contact_id": 42, "source": source},
+            )
+
+        assert result["status"] == "success"
+        mock_push.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_event_without_source_is_pushed(self) -> None:
+        """A missing ``source`` must not be mistaken for an inbound echo."""
+        from worker import process_contact_event
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=None,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "created"},
+            ) as mock_push,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactUpdated",
+                event_data={"contact_id": 42},
+            )
+
+        assert result["status"] == "success"
+        mock_push.assert_called_once()
+
+
+class TestNewlyRoutedContactEvents:
+    """LOCAL-177: the sub-entity events that were previously dropped.
+
+    Each pushes the whole contact, exactly as ``ContactUpdated`` does — the
+    event only has to say which contact changed.
+    """
+
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "TagAssigned",
+            "TagRemoved",
+            "ContactMethodAdded",
+            "ContactMethodDeleted",
+            "ContactAddressAdded",
+            "ContactAddressDeleted",
+            "ContactNoteAdded",
+            "ImportantDateAdded",
+            "ImportantDateUpdated",
+            "ImportantDateDeleted",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_sub_entity_event_pushes_the_contact(self, event_type: str) -> None:
+        """A sub-entity change pushes the linked contact's current state."""
+        from worker import process_contact_event
+
+        mock_sync_row = MagicMock()
+        mock_sync_row.external_id = "people/c123"
+        mock_sync_row.version_hash = "etag-old"
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=mock_sync_row,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "updated"},
+            ) as mock_push,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type=event_type,
+                event_data={"contact_id": 42, "source": "ui"},
+            )
+
+        assert result["status"] == "success"
+        mock_push.assert_called_once()
+        call_kwargs = mock_push.call_args[1]
+        assert call_kwargs["contact_id"] == 42
+        assert call_kwargs["sync_action"] == "update"
+        assert call_kwargs["external_id"] == "people/c123"

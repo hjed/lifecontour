@@ -66,12 +66,13 @@ class TestContactEventMatching:
             "contact.created",
             "contact.updated",
             "contact.deleted",
-            # Search/summary events — not handled by Google worker
+            # Search/summary events — not handled by Google worker.
+            # TagAssigned/TagRemoved/ImportantDate* used to be listed here;
+            # LOCAL-177 found they are contact changes Google must receive, so
+            # they are now routed (see CONTACT_PUSH_EVENT_TYPES).
             "ContactSummaryRefreshRequested",
-            "TagAssigned",
-            "TagRemoved",
-            "ImportantDateAdded",
-            "ImportantDateDeleted",
+            "ContactSummaryUpdated",
+            "ContactRelationshipCreated",
         ],
     )
     def test_still_skips_non_matching_events(
