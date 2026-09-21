@@ -236,6 +236,42 @@ class TestReconcileByNaturalKey:
         assert result.deletions == [stored]
         assert result.updates == []
 
+    def test_an_unknown_id_is_not_matched_on_its_natural_key(self) -> None:
+        """A submission naming an id has said which row it is. A stale id is
+        not the stored birthday under another name - it is an insert."""
+        stored = _date(id=7, year=1990)
+        stale = _date(id=999, year=1991)
+
+        result = reconcile([stored], [stale], natural_key=important_date_key)
+
+        assert result.inserts == [stale]
+        assert result.deletions == [stored]
+        assert result.updates == []
+
+    def test_a_repeated_id_is_not_matched_to_another_row_on_its_natural_key(
+        self,
+    ) -> None:
+        """The second submission naming row 1 cannot become an edit of row 2
+        just because the two share a type."""
+        first = _date(id=1, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2011)
+        second = _date(id=2, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2015)
+        claims_first = _date(
+            id=1, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2012
+        )
+        repeats_first = _date(
+            id=1, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2016
+        )
+
+        result = reconcile(
+            [first, second],
+            [claims_first, repeats_first],
+            natural_key=important_date_key,
+        )
+
+        assert result.updates == [(first, claims_first)]
+        assert result.inserts == [repeats_first]
+        assert result.deletions == [second]
+
     def test_a_custom_date_type_keys_on_its_own_type(self) -> None:
         birthday = _date(id=1)
         anniversary = ImportantDate(

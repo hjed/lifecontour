@@ -61,8 +61,10 @@ def reconcile[T: SubEntity](
     submissions carry no ids — MCP sends important dates that way. Without a
     ``natural_key`` an id-less submission is always an insert.
 
-    A submitted id matching no stored row is an insert too: it cannot be an
-    edit of a row that is not there.
+    A submitted id matching no stored row is an insert too, and is never
+    matched on its natural key: it cannot be an edit of a row that is not
+    there, nor of one it did not name. The same holds for a second submission
+    naming an id another has already claimed.
     """
     stored = list(existing or [])
     submitted = list(incoming or [])
@@ -88,7 +90,10 @@ def reconcile[T: SubEntity](
 
         still_unmatched: list[T] = []
         for item in unmatched:
-            group = by_key.get(natural_key(item))
+            # Only a submission with no id is matched on its natural key. One
+            # naming an id has said which row it is: an id that is stale, or
+            # already claimed, is not some other row under a different name.
+            group = by_key.get(natural_key(item)) if item.id is None else None
             if not group:
                 still_unmatched.append(item)
                 continue
