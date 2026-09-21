@@ -863,21 +863,32 @@ class TestMaintenanceEchoPrevention:
 
 
 async def _seed_import_record(
-    async_connection: AsyncConnection, *, maintenance_id: int, version_hash: str
+    async_connection: AsyncConnection,
+    *,
+    maintenance_id: int,
+    version_hash: str,
+    age_seconds: int = 0,
 ) -> None:
-    """The sync row an import writes: the record's hash and no journal id."""
+    """The sync row an import writes: the record's hash and no journal id.
+
+    ``last_synced_at`` is when the import's outbox event was enqueued, so
+    ``age_seconds`` ages that event: how long the row has gone without the
+    journal link the backend answers it with.
+    """
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
                 (integration_source, external_id, last_synced_at,
                  version_hash, sync_status, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit_maintenance', :external_id, now(),
+                ('snipeit_maintenance', :external_id,
+                 now() - CAST(:age_seconds AS integer) * interval '1 second',
                  :version_hash, 'success', 0, now(), now())
         """),
         {
             "external_id": f"snipeit_maint:{maintenance_id}",
             "version_hash": version_hash,
+            "age_seconds": age_seconds,
         },
     )
 
@@ -2201,3 +2212,340 @@ class TestOrphanedPushRowsRecover:
         ]
         assert await _push_rows(async_connection, journal_id) == []
         assert await _claim_row(async_connection, journal_id) is None
+
+
+async def _an_import_whose_journal_is_gone(
+    async_connection: AsyncConnection,
+    *,
+    maintenance_id: int,
+    age_seconds: int,
+) -> None:
+    """Leave the state deleting a journal imported from Snipe-IT leaves behind.
+
+    The journal's external event link is cascade-deleted with it, so the
+    record's sync row is all that is left: the record's hash, and no journal
+    id, which is also what a row whose create event has not been answered yet
+    looks like. ``age_seconds`` is how long ago that create was enqueued.
+    """
+    gear_item_id = await _seed_synced_asset(async_connection, 51)
+    journal_id = await _seed_maintenance_journal(
+        async_connection,
+        gear_item_id=gear_item_id,
+        title="Split Canyoneroo 50 -> 34 + 15",
+        imported_from=maintenance_id,
+    )
+    await _seed_import_record(
+        async_connection,
+        maintenance_id=maintenance_id,
+        version_hash="the-hash-it-was-imported-with",
+        age_seconds=age_seconds,
+    )
+    await _delete_journal(async_connection, journal_id)
+
+
+async def _sync_the_edited_record(
+    snipeit_sync_service: Any,
+    mock_transport: Any,
+    async_connection: AsyncConnection,
+    *,
+    maintenance_id: int,
+) -> dict[str, int]:
+    """Sync the record after someone edited it in Snipe-IT.
+
+    The edit is what makes this urgent: while the record is unchanged its hash
+    still matches and the sync skips it, but an edited record falls through to
+    the branch that has no journal to update.
+    """
+    mock_transport.add_response(
+        f"/maintenances/{maintenance_id}",
+        json_data={**_SNIPEIT_MAINTENANCE_17, "title": "Re-taped the sheath"},
+    )
+    result: dict[str, int] = await snipeit_sync_service.sync_maintenance_batch(
+        maintenance_ids=[maintenance_id],
+        session_factory=_joined_session_factory(async_connection),
+    )
+    return result
+
+
+class TestAnUnansweredImportRecovers:
+    """A sync row with no journal link must not fail every run for ever.
+
+    The row looks the same whether the backend has not yet turned the import's
+    create event into a link or the journal that link belonged to has been
+    deleted. Raising for both made a deleted import's record fail on every
+    sync once it was edited in Snipe-IT, permanently.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_create_never_answered_is_imported_again(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Past the grace the create will never be answered: import the record."""
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=17, age_seconds=3600
+        )
+
+        result = await _sync_the_edited_record(
+            snipeit_sync_service, mock_transport, async_connection, maintenance_id=17
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert await _journal_events(async_connection) == ["journal_event.created"]
+
+    @pytest.mark.asyncio
+    async def test_a_create_still_within_the_grace_waits(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The backend answers a create in seconds, so a fresh row is still pending.
+
+        Sending another create now would only race the one on its way, so the
+        record is failed and left for the next sync to look at again.
+        """
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=17, age_seconds=0
+        )
+
+        result = await _sync_the_edited_record(
+            snipeit_sync_service, mock_transport, async_connection, maintenance_id=17
+        )
+
+        assert result == {"synced": 0, "skipped": 0, "failed": 1}
+        assert await _journal_events(async_connection) == []
+
+
+async def _import_rows(async_connection: AsyncConnection, maintenance_id: int) -> int:
+    """How many sync rows the record still has, whoever wrote them."""
+    result = await async_connection.execute(
+        text("""
+            SELECT count(*) FROM sync_metadata
+            WHERE integration_source = 'snipeit_maintenance'
+              AND external_id = :external_id
+        """),
+        {"external_id": f"snipeit_maint:{maintenance_id}"},
+    )
+    return int(result.scalar_one())
+
+
+class TestImportedMaintenanceDeletion:
+    """Deleting a journal imported from Snipe-IT deletes the record it came from.
+
+    Deletion means one thing for every maintenance journal. Leaving an imported
+    record behind would import it again as a new journal, so the deletion would
+    undo itself -- the same reason a pushed journal's record is deleted.
+    """
+
+    @pytest.mark.asyncio
+    async def test_deleting_an_imported_journal_deletes_the_snipeit_record(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=17, age_seconds=0
+        )
+        mock_transport.add_response(
+            "/maintenances/17", json_data={"status": "success"}, method="DELETE"
+        )
+
+        deleted = await snipeit_sync_service.delete_maintenance_record(
+            external_id="snipeit_maint:17",
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert deleted is True
+        assert _snipeit_writes(mock_transport) == ["DELETE /api/v1/maintenances/17"]
+        assert await _import_rows(async_connection, 17) == 0
+
+    @pytest.mark.asyncio
+    async def test_an_imported_record_already_gone_still_clears_the_row(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A 404 is the state asked for, so the row must not be left behind."""
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=17, age_seconds=0
+        )
+        mock_transport.add_response(
+            "/maintenances/17", status_code=404, method="DELETE"
+        )
+
+        deleted = await snipeit_sync_service.delete_maintenance_record(
+            external_id="snipeit_maint:17",
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert deleted is True
+        assert await _import_rows(async_connection, 17) == 0
+
+    @pytest.mark.asyncio
+    async def test_a_forbidden_delete_keeps_the_imported_row(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The record is still in Snipe-IT, so its row stays with it.
+
+        The record is not lost: no journal holds it any more, so the next full
+        sync imports it as a new journal rather than skipping it as unchanged.
+        """
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=17, age_seconds=0
+        )
+        mock_transport.add_response(
+            "/maintenances/17", status_code=403, method="DELETE"
+        )
+
+        deleted = await snipeit_sync_service.delete_maintenance_record(
+            external_id="snipeit_maint:17",
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert deleted is False
+        assert await _import_rows(async_connection, 17) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_record_a_live_journal_holds_is_not_deleted(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Someone else holds it now, so the deletion is not this record's.
+
+        A redelivered deletion event, or one that crosses a sync that imported
+        the record again, would otherwise take a live journal's record with it.
+        """
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Split Canyoneroo 50 -> 34 + 15",
+            imported_from=17,
+        )
+        await _seed_import_record(
+            async_connection, maintenance_id=17, version_hash="a-hash"
+        )
+
+        deleted = await snipeit_sync_service.delete_maintenance_record(
+            external_id="snipeit_maint:17",
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert deleted is False
+        assert _snipeit_writes(mock_transport) == []
+        assert await _import_rows(async_connection, 17) == 1
+
+
+async def _age_the_import_row(
+    async_connection: AsyncConnection, *, maintenance_id: int, age_seconds: int
+) -> None:
+    """Put the record's last sync ``age_seconds`` in the past."""
+    await async_connection.execute(
+        text("""
+            UPDATE sync_metadata
+            SET last_synced_at =
+                    now() - CAST(:age_seconds AS integer) * interval '1 second'
+            WHERE integration_source = 'snipeit_maintenance'
+              AND external_id = :external_id
+        """),
+        {
+            "external_id": f"snipeit_maint:{maintenance_id}",
+            "age_seconds": age_seconds,
+        },
+    )
+
+
+async def _import_then_sync_again(
+    snipeit_sync_service: Any,
+    mock_transport: Any,
+    async_connection: AsyncConnection,
+    *,
+    delete_the_journal: bool,
+) -> dict[str, int]:
+    """Import record 17, give it its journal, then sync the unchanged record.
+
+    The first sync writes the row with the record's own hash, which is what
+    makes the second sync's comparison a real one rather than a seeded guess.
+    With ``delete_the_journal`` the journal is deleted first, leaving the row
+    that a deletion cascade leaves.
+    """
+    session_factory = _joined_session_factory(async_connection)
+    gear_item_id = await _seed_synced_asset(async_connection, 51)
+    mock_transport.add_response("/maintenances/17", json_data=_SNIPEIT_MAINTENANCE_17)
+    await snipeit_sync_service.sync_maintenance_batch(
+        maintenance_ids=[17], session_factory=session_factory
+    )
+    journal_id = await _seed_maintenance_journal(
+        async_connection,
+        gear_item_id=gear_item_id,
+        title="Split Canyoneroo 50 -> 34 + 15",
+        imported_from=17,
+    )
+    if delete_the_journal:
+        await _delete_journal(async_connection, journal_id)
+    await _age_the_import_row(async_connection, maintenance_id=17, age_seconds=3600)
+
+    mock_transport.add_response("/maintenances/17", json_data=_SNIPEIT_MAINTENANCE_17)
+    result: dict[str, int] = await snipeit_sync_service.sync_maintenance_batch(
+        maintenance_ids=[17], session_factory=session_factory
+    )
+    return result
+
+
+class TestARecordNoJournalHoldsIsImported:
+    """An unchanged record whose journal is gone must not stay hidden.
+
+    The hash comparison runs before everything else, so a record nobody deleted
+    from Snipe-IT and nobody edited was skipped as unchanged on every sync --
+    present in Snipe-IT and invisible here, with nothing to say so. That is
+    what a deletion the system could not carry out leaves behind, along with
+    every row orphaned before it deleted records at all.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_record_no_journal_holds_is_imported(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        result = await _import_then_sync_again(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            delete_the_journal=True,
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        assert await _journal_events(async_connection) == [
+            "journal_event.created",
+            "journal_event.created",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_record_its_journal_holds_is_still_skipped(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The hot path is untouched: age alone must not re-import anything."""
+        result = await _import_then_sync_again(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            delete_the_journal=False,
+        )
+
+        assert result == {"synced": 0, "skipped": 1, "failed": 0}
+        assert await _journal_events(async_connection) == ["journal_event.created"]

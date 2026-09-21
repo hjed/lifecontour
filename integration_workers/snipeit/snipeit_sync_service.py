@@ -279,6 +279,27 @@ _SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
 # consumer tells a Snipe-IT-applied update from a user's edit.
 INBOUND_SYNC_CHANGED_BY = "snipeit_maintenance"
 
+# How long an import's sync row has to be answered with a journal link before
+# the record is imported again instead.
+#
+# A row with no link means one of two things, and nothing in the schema tells
+# them apart: the backend has not turned the event this row last wrote into a
+# link yet, or the journal that link belonged to has been deleted. The row's
+# ``last_synced_at`` is when that event was enqueued — an import writes it and
+# nothing else does, since a push of an imported journal deliberately leaves
+# the row alone — so its age is how long that event has gone unanswered.
+#
+# This only decides whether to wait or to import; nothing depends on it for
+# correctness. No length of grace could: a create delivered and not
+# acknowledged before the backend's consumer died can arrive after any amount
+# of time, once that consumer is back. What keeps it from overwriting the
+# journal the import creates is the backend, which applies a maintenance event
+# only while this row still records that event's hash (see
+# ``JournalOutboxEventProcessor._is_superseded_snipeit_maintenance``). The
+# grace just keeps a sync from re-sending a create the backend is about to
+# answer anyway.
+IMPORT_LINK_GRACE_SECONDS = 900
+
 
 def _snipeit_maintenance_id(external_id: str) -> int | None:
     """Return the Snipe-IT maintenance id in a ``snipeit_maint:{id}`` external id."""
@@ -449,6 +470,32 @@ async def _journal_exists(session: Any, journal_id: int, *, lock: bool = False) 
     return result.fetchone() is not None
 
 
+async def _journal_holding_maintenance(session: Any, external_id: str) -> int | None:
+    """The live journal linked to this Snipe-IT maintenance, if there is one.
+
+    A link is written only for an imported record, and only by the backend once
+    it has created the journal — so this answers "does the app still show this
+    record?" without trusting the sync row, which outlives the journal it was
+    written for.
+    """
+    result = await session.execute(
+        text("""
+            SELECT l.journal_id
+            FROM journal_external_event_links l
+            JOIN journals j ON j.id = l.journal_id
+            WHERE l.external_event_id = :external_event_id
+              AND l.calendar_id = :calendar_id
+            LIMIT 1
+        """),
+        {
+            "external_event_id": external_id,
+            "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+        },
+    )
+    journal_id: int | None = result.scalar_one_or_none()
+    return journal_id
+
+
 async def _recorded_maintenance(session: Any, journal_id: int) -> str | None:
     """The ``snipeit_maint:{id}`` recorded as the journal's Snipe-IT maintenance."""
     result = await session.execute(
@@ -463,6 +510,20 @@ async def _recorded_maintenance(session: Any, journal_id: int) -> str | None:
     )
     external_id: str | None = result.scalar_one_or_none()
     return external_id
+
+
+def _unanswered_create_has_expired(meta_row: Any) -> bool:
+    """Has this row waited too long for the journal link its create promised?
+
+    ``True`` means the create has gone unanswered long enough to count as never
+    coming — the journal it made was deleted, or the event was lost — so the
+    record belongs to nothing and is imported again. A row whose age cannot be
+    read is treated as still waiting, which costs no more than a later sync.
+    """
+    age_seconds = getattr(meta_row, "age_seconds", None)
+    if age_seconds is None:
+        return False
+    return float(age_seconds) >= IMPORT_LINK_GRACE_SECONDS
 
 
 def _raise_if_claim_in_flight(journal_id: int, claim_row: Any) -> None:
@@ -1075,7 +1136,9 @@ class SnipeItSyncService:
                 # Check existing metadata for dedup
                 meta_result = await session.execute(
                     text("""
-                        SELECT version_hash, internal_uuid
+                        SELECT version_hash, internal_uuid,
+                               EXTRACT(EPOCH FROM now() - last_synced_at)
+                                   AS age_seconds
                         FROM sync_metadata
                         WHERE integration_source = 'snipeit_maintenance'
                           AND external_id = :external_id
@@ -1085,18 +1148,12 @@ class SnipeItSyncService:
                 )
                 existing_meta = meta_result.fetchone()
 
-                if (
-                    existing_meta
-                    and existing_meta.version_hash == transformed.version_hash
-                ):
-                    logger.debug(
-                        "Skipping unchanged Snipe-IT maintenance",
-                        maintenance_id=maintenance_id,
-                    )
-                    raise _MaintenanceSkipped
-
                 # Look up existing journal via external event links
-                # (populated by JournalOutboxEventProcessor on creation)
+                # (populated by JournalOutboxEventProcessor on creation).
+                # Read before the hash is compared, because an unchanged record
+                # is only uninteresting while a journal still holds it: one
+                # whose journal has gone was skipped here on every sync, leaving
+                # it in Snipe-IT and invisible in the app with nothing to say so.
                 existing_journal_id: int | None = None
                 if existing_meta:
                     link_result = await session.execute(
@@ -1114,6 +1171,17 @@ class SnipeItSyncService:
                     )
                     link_row = link_result.fetchone()
                     existing_journal_id = link_row.journal_id if link_row else None
+
+                if (
+                    existing_meta
+                    and existing_journal_id is not None
+                    and existing_meta.version_hash == transformed.version_hash
+                ):
+                    logger.debug(
+                        "Skipping unchanged Snipe-IT maintenance",
+                        maintenance_id=maintenance_id,
+                    )
+                    raise _MaintenanceSkipped
 
                 if (
                     existing_meta
@@ -1150,12 +1218,36 @@ class SnipeItSyncService:
                         {"external_id": external_id},
                     )
                 elif existing_meta and existing_journal_id is None:
-                    # An outbox event for creation was enqueued but hasn't been processed
-                    # by the backend yet, so the external event link doesn't exist.
-                    # We cannot emit an update without the journal ID, and emitting another
-                    # create could duplicate the journal. Fail this record so it retries.
-                    raise RuntimeError(
-                        "Outbox creation event pending, cannot update yet"
+                    # No link, and no journal named: either the create event
+                    # this row's import enqueued has not been turned into a
+                    # link yet, or the journal it was turned into has since
+                    # been deleted, taking the link with it. The row looks the
+                    # same, so they are told apart by how long it has waited.
+                    if not _unanswered_create_has_expired(existing_meta):
+                        # Still plausibly in flight, so there is no journal to
+                        # update yet. An unchanged record can simply wait; for a
+                        # changed one, sending another create now would only
+                        # race the one the backend is about to answer, so fail
+                        # the record and let the next sync look again.
+                        if existing_meta.version_hash == transformed.version_hash:
+                            logger.debug(
+                                "Skipping unchanged Snipe-IT maintenance "
+                                "whose create is still pending",
+                                maintenance_id=maintenance_id,
+                            )
+                            raise _MaintenanceSkipped
+                        raise RuntimeError(
+                            "Outbox creation event pending, cannot update yet"
+                        )
+
+                    # Long past that. Whatever became of the create, nothing in
+                    # the app holds this record any more, so it is imported as
+                    # a new journal rather than failing on every sync for ever.
+                    logger.warning(
+                        "Importing a Snipe-IT maintenance whose create was never "
+                        "answered with a journal",
+                        maintenance_id=maintenance_id,
+                        age_seconds=existing_meta.age_seconds,
                     )
 
                 # Determine sync action
@@ -1994,12 +2086,56 @@ class SnipeItSyncService:
             )
             return False
 
+        deleted = await self.delete_maintenance_record(
+            external_id=external_id, session_factory=session_factory
+        )
+        if deleted:
+            await self._release_maintenance_claim(journal_id, session_factory)
+        return deleted
+
+    async def delete_maintenance_record(
+        self, external_id: str, session_factory: Any
+    ) -> bool:
+        """Delete the Snipe-IT maintenance ``external_id`` names, and its sync row.
+
+        The one way a record is removed, whichever kind of journal asked for it.
+        A journal reaches its record by two different routes — a pushed one
+        through the sync row that names the journal, an imported one through the
+        external id its deletion event carries, since an import's row names no
+        journal — but what has to happen to the record is the same, so they meet
+        here rather than each doing it their own way.
+
+        Args:
+            external_id: The record's ``snipeit_maint:{id}`` sync key.
+            session_factory: Factory for database sessions.
+
+        Returns:
+            ``True`` when the record is gone from Snipe-IT, whether this call
+            deleted it or found it already deleted.
+
+        Raises:
+            SnipeItAPIError: If Snipe-IT could not be reached or refused the
+                delete for a reason worth retrying the event for.
+        """
         snipeit_maintenance_id = _snipeit_maintenance_id(external_id)
         if snipeit_maintenance_id is None:
             logger.warning(
                 "Invalid maintenance sync metadata external_id",
                 external_id=external_id,
-                journal_id=journal_id,
+            )
+            return False
+
+        async with session_factory() as session:
+            holder = await _journal_holding_maintenance(session, external_id)
+        if holder is not None:
+            # Someone holds this record now, so the deletion being processed is
+            # not about it: a redelivered event, or one that crossed a sync that
+            # imported the record again. Deleting it would take a live journal's
+            # record away.
+            logger.info(
+                "Not deleting a Snipe-IT maintenance a live journal holds",
+                external_id=external_id,
+                journal_id=holder,
             )
             return False
 
@@ -2007,12 +2143,12 @@ class SnipeItSyncService:
             await self._api_client.delete_maintenance(snipeit_maintenance_id)
         except SnipeItAPIError as exc:
             if exc.status_code == 403:
-                # The record is still there, so its row stays: dropping the row
-                # would import the record as a new journal, which is the outcome
-                # deleting it prevents. A later sync surfaces it instead.
+                # The record is still there, so its row stays with it. It is not
+                # lost: no journal holds it any more, so the next full sync
+                # imports it as a new journal rather than skipping it.
                 logger.warning(
                     "Snipe-IT maintenance delete forbidden; keeping its sync row",
-                    journal_id=journal_id,
+                    external_id=external_id,
                     snipeit_maintenance_id=snipeit_maintenance_id,
                     status_code=exc.status_code,
                 )
@@ -2025,15 +2161,14 @@ class SnipeItSyncService:
                     text("""
                         DELETE FROM sync_metadata
                         WHERE integration_source = 'snipeit_maintenance'
-                          AND internal_uuid = :journal_id
+                          AND external_id = :external_id
                     """),
-                    {"journal_id": str(journal_id)},
+                    {"external_id": external_id},
                 )
-                await _delete_maintenance_claim(session, journal_id)
 
         logger.info(
             "Deleted the Snipe-IT maintenance of a deleted journal",
-            journal_id=journal_id,
+            external_id=external_id,
             snipeit_maintenance_id=snipeit_maintenance_id,
         )
         return True

@@ -1,6 +1,8 @@
 """Integration tests for JournalService with real database."""
 
+import json
 from datetime import datetime
+from typing import Any, NamedTuple
 
 import pytest
 from core_shared.models.journals import (
@@ -583,3 +585,212 @@ class TestJournalServiceFiltering:
             search="Python",
         )
         assert python_count == 2
+
+
+_GOOGLE_CALENDAR_ID = "11111111-1111-5111-8111-111111111111"
+_SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
+
+
+class _Link(NamedTuple):
+    """A calendar a journal reached, and the event id it was given there.
+
+    One value per test scenario, because what separates the scenarios is the
+    calendar: who owns it, and whether the source is recorded on it at all.
+    """
+
+    calendar_id: str
+    name: str
+    integration_source: str | None
+    external_event_id: str
+    google_calendar_id: str | None = None
+
+
+_GOOGLE = _Link(
+    calendar_id=_GOOGLE_CALENDAR_ID,
+    name="Work",
+    integration_source="google",
+    external_event_id="google-event-1",
+    google_calendar_id="work@group.calendar.google.com",
+)
+# The Google worker creates and updates its own calendar rows, so one it wrote
+# after the backfill carries no source: the id it syncs under stands in for one.
+_GOOGLE_UNRECORDED = _GOOGLE._replace(integration_source=None)
+_SNIPEIT = _Link(
+    calendar_id=_SNIPEIT_MAINTENANCE_CALENDAR_ID,
+    name="Snipe-IT Maintenance",
+    integration_source="snipeit_maintenance",
+    external_event_id="snipeit_maint:17",
+)
+# A calendar of the user's own: no integration syncs it, and no worker owns it.
+_JUST_MINE = _Link(
+    calendar_id=_GOOGLE_CALENDAR_ID,
+    name="Just mine",
+    integration_source=None,
+    external_event_id="local-only",
+)
+
+
+def _entry(link: _Link) -> dict[str, Any]:
+    """The identifier a deletion carries for ``link``."""
+    return {
+        "external_event_id": link.external_event_id,
+        "calendar_id": link.calendar_id,
+        "google_calendar_id": link.google_calendar_id,
+    }
+
+
+async def _a_journal_reaching(
+    journal_service: JournalService,
+    connection: AsyncConnection,
+    *links: _Link,
+) -> int:
+    """A journal linked to each calendar, as the outbox processor leaves it."""
+    journal = await journal_service.create_journal(create_test_journal(), connection)
+    assert journal.id is not None
+    for link in links:
+        await connection.execute(
+            text("""
+                INSERT INTO calendars
+                    (id, user_id, name, color, google_calendar_id,
+                     integration_source)
+                VALUES (:id, 'user123', :name, '#808080', :google_calendar_id,
+                        :source)
+            """),
+            {
+                "id": link.calendar_id,
+                "name": link.name,
+                "google_calendar_id": link.google_calendar_id,
+                "source": link.integration_source,
+            },
+        )
+        await connection.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                    (journal_id, calendar_id, external_event_id,
+                     sync_capability, sync_status)
+                VALUES (:journal_id, :calendar_id, :external_event_id,
+                        'bidirectional', 'synced')
+            """),
+            {
+                "journal_id": journal.id,
+                "calendar_id": link.calendar_id,
+                "external_event_id": link.external_event_id,
+            },
+        )
+    return journal.id
+
+
+async def _identifiers_of_deleting(
+    journal_service: JournalService,
+    connection: AsyncConnection,
+    journal_id: int,
+) -> dict[str, Any]:
+    """Delete the journal and read the identifiers its event carried."""
+    await journal_service.delete_journal(journal_id, connection)
+    row = (
+        await connection.execute(
+            text("""
+                SELECT event_data FROM outbox_events
+                WHERE event_type = 'JournalDeleted'
+                  AND aggregate_id = :journal_id
+            """),
+            {"journal_id": journal_id},
+        )
+    ).one()
+    event_data = row.event_data
+    if isinstance(event_data, str):
+        event_data = json.loads(event_data)
+    identifiers: dict[str, Any] = event_data["external_identifiers"]
+    return identifiers
+
+
+@pytest.mark.integration
+class TestDeletionIdentifiersAreFiledBySource:
+    """``JournalDeleted`` carries each system's identifiers under its own key.
+
+    A worker cleaning up after a deleted journal can only find what it put in
+    its own system if the event says whose each identifier is. Filing them all
+    under ``"google"`` also handed the Google worker Snipe-IT identifiers, which
+    it tried to delete from a Google calendar.
+    """
+
+    @pytest.fixture
+    def journal_repo(self, clean_database: AsyncConnection) -> SqlJournalRepository:
+        return SqlJournalRepository(clean_database)
+
+    @pytest.fixture
+    def journal_service(
+        self, journal_repo: SqlJournalRepository, clean_database: AsyncConnection
+    ) -> JournalService:
+        return JournalService(
+            journal_repo=journal_repo,
+            event_publisher=OutboxEventPublisher(clean_database),
+            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
+        )
+
+    @pytest.mark.asyncio
+    async def test_each_source_gets_its_own_key(
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
+        """One journal in two systems: each worker finds only its own identifier."""
+        journal_id = await _a_journal_reaching(
+            journal_service, clean_database, _GOOGLE, _SNIPEIT
+        )
+
+        identifiers = await _identifiers_of_deleting(
+            journal_service, clean_database, journal_id
+        )
+
+        assert identifiers == {
+            "google": [_entry(_GOOGLE)],
+            "snipeit_maintenance": [_entry(_SNIPEIT)],
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_snipeit_identifier_is_not_filed_under_google(
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
+        """The Google worker deletes what this key holds, so nothing else may be in it.
+
+        It took an entry with no ``google_calendar_id`` to mean the user's
+        primary calendar, so a Snipe-IT identifier became a delete issued
+        against Google for a record Google never had.
+        """
+        journal_id = await _a_journal_reaching(
+            journal_service, clean_database, _SNIPEIT
+        )
+
+        identifiers = await _identifiers_of_deleting(
+            journal_service, clean_database, journal_id
+        )
+
+        assert "google" not in identifiers
+
+    @pytest.mark.asyncio
+    async def test_a_calendar_with_no_source_recorded_is_google(
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
+        """Google's own calendars are the ones it names, whatever the column says."""
+        journal_id = await _a_journal_reaching(
+            journal_service, clean_database, _GOOGLE_UNRECORDED
+        )
+
+        identifiers = await _identifiers_of_deleting(
+            journal_service, clean_database, journal_id
+        )
+
+        assert list(identifiers) == ["google"]
+
+    @pytest.mark.asyncio
+    async def test_a_link_no_system_claims_is_left_out(
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
+        """A calendar of the user's own belongs to no worker, so nothing may act on it."""
+        journal_id = await _a_journal_reaching(
+            journal_service, clean_database, _JUST_MINE
+        )
+
+        assert (
+            await _identifiers_of_deleting(journal_service, clean_database, journal_id)
+            == {}
+        )
