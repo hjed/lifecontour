@@ -62,6 +62,7 @@ from event_transformer import google_event_times
 from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
 from google_client import (
     GoogleAPIClient,
+    GoogleContactNotFoundError,
     google_error_reasons,
     is_event_type_restriction,
     is_permission_denied,
@@ -989,14 +990,77 @@ async def _create_contact_in_google(
     return result
 
 
+# Person fields that identify or version one specific Google person. They are
+# meaningless — and the etag is rejected — when creating a replacement person.
+_PERSON_IDENTITY_FIELDS = frozenset({"etag", "resourceName", "metadata"})
+
+
+async def _delete_sync_link(session: AsyncSession, external_id: str) -> None:
+    """Remove the Google sync link for one remote person."""
+    await session.execute(
+        text("""
+            DELETE FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+        """),
+        {"integration_source": "google", "external_id": external_id},
+    )
+
+
+async def _update_or_recreate_contact_in_google(
+    session: AsyncSession,
+    client: GoogleAPIClient,
+    contact_id: int,
+    external_id: str,
+    person_data: dict[str, Any],
+    etag: str | None,
+) -> tuple[dict[str, Any], bool]:
+    """Update the linked Google person, recreating it if Google deleted it.
+
+    A push only happens when the contact has local edits, so a linked person
+    that no longer exists in Google (a 404) is recreated from the local data
+    rather than failing the push forever. The dead link is removed first:
+    ``sync_metadata`` is unique on the remote id, so upserting the new
+    resource name would otherwise leave the dead row beside it — two links for
+    one contact. The caller upserts the link for the returned person.
+
+    Returns:
+        The Google person, and whether it was recreated rather than updated.
+    """
+    try:
+        result = await client.update_contact(
+            resource_name=external_id,
+            contact_data=person_data,
+            etag=etag,
+        )
+        return result, False
+    except GoogleContactNotFoundError:
+        logger.warning(
+            "Linked Google contact no longer exists, recreating it",
+            contact_id=contact_id,
+            external_id=external_id,
+        )
+
+    await _delete_sync_link(session, external_id)
+    create_data = {
+        key: value
+        for key, value in person_data.items()
+        if key not in _PERSON_IDENTITY_FIELDS
+    }
+    return await client.create_contact(create_data), True
+
+
 async def _update_contact_in_google(
     session: AsyncSession,
     client: GoogleAPIClient,
     contact: dict[str, Any],
     person_data: dict[str, Any],
     google_account_email: str,
-) -> dict[str, Any]:
-    """Update an existing contact in Google and update sync metadata."""
+) -> bool:
+    """Update an existing contact in Google and update sync metadata.
+
+    Returns whether the Google person had to be recreated.
+    """
     logger.info(
         "Updating contact in Google",
         contact_id=contact["id"],
@@ -1004,13 +1068,13 @@ async def _update_contact_in_google(
         google_account_email=google_account_email,
     )
 
-    # Get current ETag from sync metadata
-    etag = contact.get("version_hash")
-
-    result = await client.update_contact(
-        resource_name=contact["external_id"],
-        contact_data=person_data,
-        etag=etag,
+    result, recreated = await _update_or_recreate_contact_in_google(
+        session,
+        client,
+        contact_id=contact["id"],
+        external_id=contact["external_id"],
+        person_data=person_data,
+        etag=contact.get("version_hash"),
     )
 
     # Update sync metadata with new ETag
@@ -1023,12 +1087,13 @@ async def _update_contact_in_google(
     )
 
     logger.info(
-        "Successfully updated contact in Google",
+        "Successfully pushed contact update to Google",
         contact_id=contact["id"],
         resource_name=result["resourceName"],
+        recreated=recreated,
     )
 
-    return result
+    return recreated
 
 
 def _handle_http_error(
@@ -1159,10 +1224,10 @@ async def _push_single_contact(
             metrics["created_count"] += 1
             metrics["pushed_count"] += 1
         elif contact["sync_action"] == "update":
-            await _update_contact_in_google(
+            recreated = await _update_contact_in_google(
                 session, client, contact, person_data, google_account_email
             )
-            metrics["updated_count"] += 1
+            metrics["created_count" if recreated else "updated_count"] += 1
             metrics["pushed_count"] += 1
 
         await session.commit()
@@ -3168,9 +3233,12 @@ async def _push_contact_to_google_for_event(
         return {"status": "created", "resource_name": result["resourceName"]}
 
     elif sync_action == "update":
-        result = await client.update_contact(
-            resource_name=external_id,  # type: ignore[arg-type]
-            contact_data=person_data,
+        result, recreated = await _update_or_recreate_contact_in_google(
+            session,
+            client,
+            contact_id=contact_id,
+            external_id=external_id,  # type: ignore[arg-type]
+            person_data=person_data,
             etag=version_hash,
         )
         await _upsert_sync_metadata(
@@ -3181,11 +3249,15 @@ async def _push_contact_to_google_for_event(
             integration_source="google",
         )
         logger.info(
-            "Updated contact in Google via event",
+            "Pushed contact update to Google via event",
             contact_id=contact_id,
             resource_name=result["resourceName"],
+            recreated=recreated,
         )
-        return {"status": "updated", "resource_name": result["resourceName"]}
+        return {
+            "status": "recreated" if recreated else "updated",
+            "resource_name": result["resourceName"],
+        }
 
     return {"status": "skipped", "reason": f"unknown_sync_action_{sync_action}"}
 
@@ -3212,16 +3284,7 @@ async def _delete_contact_from_google_for_event(
     """
     await client.delete_contact(resource_name=external_id)
 
-    # Clean up sync metadata
-    cleanup_stmt = text("""
-        DELETE FROM sync_metadata
-        WHERE integration_source = :integration_source
-          AND external_id = :external_id
-    """)
-    await session.execute(
-        cleanup_stmt,
-        {"integration_source": "google", "external_id": external_id},
-    )
+    await _delete_sync_link(session, external_id)
 
     logger.info(
         "Deleted contact from Google via event",

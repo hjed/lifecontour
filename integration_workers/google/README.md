@@ -51,6 +51,13 @@ contact and the local edit survives to be pushed next cycle. The exception is a
 genuine two-sided conflict — the contact was also edited in Google and the
 push's conflict retry failed too — where the pull applies Google's copy.
 
+A linked contact that no longer exists in Google (the update returns 404,
+surfaced as `GoogleContactNotFoundError`) is **recreated**: a push only happens
+when there are local edits, so both paths create a new Google person from the
+local contact and replace the dead `sync_metadata` link with the new resource
+name (`_update_or_recreate_contact_in_google`). The cron path counts it as
+created.
+
 Both push paths take a per-contact advisory lock (`_lock_contact_for_push`)
 before reading the contact's sync link, and the cron path commits per contact.
 Without it the stream handler and the cron could both see a new contact as

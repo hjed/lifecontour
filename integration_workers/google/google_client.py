@@ -106,6 +106,19 @@ def is_permission_denied(error: HttpError) -> bool:
 _CHANNEL_GONE_STATUSES: frozenset[int] = frozenset({404, 410})
 
 
+class GoogleContactNotFoundError(Exception):
+    """The Google contact a push targets no longer exists (People API 404).
+
+    Raised by :meth:`GoogleAPIClient.update_contact` so callers can tell a
+    contact deleted on Google's side apart from any other API failure without
+    inspecting HTTP status codes. The original ``HttpError`` is the cause.
+    """
+
+    def __init__(self, resource_name: str) -> None:
+        super().__init__(f"Google contact not found: {resource_name}")
+        self.resource_name = resource_name
+
+
 class GoogleAPIClient:
     """Client for Google People API operations."""
 
@@ -436,9 +449,27 @@ class GoogleAPIClient:
             Updated contact data from Google People API including new etag
 
         Raises:
+            GoogleContactNotFoundError: If the contact no longer exists in
+                Google (a 404 from the update, the etag refetch or the retry)
             HttpError: If API request fails (including 400 for conflicts)
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
+        try:
+            return await self._update_contact_with_etag_retry(
+                resource_name, contact_data, etag
+            )
+        except HttpError as e:
+            if e.resp.status == 404:
+                raise GoogleContactNotFoundError(resource_name) from e
+            raise
+
+    async def _update_contact_with_etag_retry(
+        self,
+        resource_name: str,
+        contact_data: dict[str, Any],
+        etag: str | None,
+    ) -> dict[str, Any]:
+        """Update a contact, refetching the etag and retrying once on conflict."""
         logger.info(
             "Updating Google contact",
             google_account_email=self.google_account_email,
