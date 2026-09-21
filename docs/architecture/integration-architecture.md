@@ -577,6 +577,56 @@ Snipe-IT's General webhook has no signing secret or verification handshake, so t
 
 **Journal Integration Example**: Calendar events sync bi-directionally with journal EVENT type entries. See [Journal System Specification](../journal-system-specification.md) for sync behavior and attendee handling.
 
+#### Google Calendar Push Channels
+
+Polling is the floor, not the ceiling: inbound calendar changes also arrive as
+Google Calendar push notifications, which depend on a per-calendar *watch
+channel*. Channels carry a 7-day TTL, after which Google discards the channel
+and silently stops delivering — so the lifecycle has three stages, not two.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Registered: setup_calendar_webhook -> events().watch()
+    Registered --> Registered: renew_calendar_webhooks re-registers before expiry
+    Registered --> Expired: 7-day TTL elapses with no renewal
+    Registered --> Stopped: channels().stop()
+    Expired --> [*]: push sync silently dead until re-registered
+    Stopped --> [*]
+```
+
+1. **Register** — `setup_calendar_webhook` (google-worker) calls
+   `events().watch()` and stores `channel_id`, `channel_resource_id` and
+   `channel_expiration` in `calendar_sync_tokens`. Users can force this for
+   every synced calendar via `POST /api/integrations/google/webhooks/reregister`.
+2. **Notify** — Google POSTs to `/api/integrations/google/calendar/webhook`.
+   The endpoint is unauthenticated (Google sends no token), so it validates the
+   `X-Goog-Channel-ID` / `X-Goog-Resource-ID` header pair against
+   `calendar_sync_tokens` before enqueueing a smart calendar sync.
+3. **Renew** — `renew_calendar_webhooks` runs on a cron every 6 hours and
+   re-registers any synced calendar whose channel expires within
+   `WEBHOOK_RENEWAL_THRESHOLD_HOURS` (48 by default), was never registered, or
+   has no recorded expiry.
+
+Two design notes:
+
+- Renewal is **not** gated on `ENABLE_PERIODIC_SYNC`. Push notifications are
+  what keeps calendars fresh when periodic sync is off, so that is precisely
+  when a lapsed channel does the most damage.
+- Stopping a channel is **idempotent**: 404 and 410 from `channels().stop()`
+  mean the channel is already gone, which is the state the call exists to
+  produce, so they are not treated as failures.
+- Setup is **serialised per calendar** by a transaction-scoped advisory lock
+  (`CalendarWatchRepository.lock_calendar`), keyed by (user, calendar) and
+  deliberately not by account — renewal and manual re-registration can resolve
+  different accounts for the same calendar, and keying on it would hand them
+  separate locks. Renewal jobs also carry a job id keyed to the calendar. Two
+  overlapping setups would otherwise each register a replacement channel,
+  leaving one live at Google but unrecorded — and so delivering notifications
+  the webhook endpoint rejects until it expires.
+
+The whole mechanism no-ops when `WEBHOOK_BASE_URL` is unset, leaving periodic
+sync as the only inbound path.
+
 #### Outbound Push and Calendar Access Roles
 
 A connected Google calendar is not necessarily one the account may **write**

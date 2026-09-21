@@ -100,6 +100,12 @@ def is_permission_denied(error: HttpError) -> bool:
     return not (google_error_reasons(error) & _TRANSIENT_403_REASONS)
 
 
+# Statuses Google returns when a push notification channel no longer exists.
+# Stopping such a channel has already achieved its purpose, so they are not
+# failures: 404 is the expired-or-never-registered case, 410 the explicit "gone".
+_CHANNEL_GONE_STATUSES: frozenset[int] = frozenset({404, 410})
+
+
 class GoogleAPIClient:
     """Client for Google People API operations."""
 
@@ -935,6 +941,13 @@ class GoogleAPIClient:
     async def stop_channel(self, channel_id: str, resource_id: str) -> None:
         """Stop a push notification channel.
 
+        Idempotent: channels expire on their own after their TTL, so a channel
+        Google no longer knows about is already in the state this method exists
+        to produce. Those responses (see ``_CHANNEL_GONE_STATUSES``) return
+        normally rather than raising, which keeps the routine re-registration
+        path from reporting an expired channel as a failure. Every other
+        ``HttpError`` still propagates to the caller.
+
         Args:
             channel_id: The channel UUID to stop
             resource_id: The resource ID from the watch response
@@ -952,6 +965,14 @@ class GoogleAPIClient:
                 resource_id=resource_id,
             )
         except HttpError as e:
+            if e.resp.status in _CHANNEL_GONE_STATUSES:
+                logger.debug(
+                    "Calendar watch channel was already stopped or expired",
+                    channel_id=channel_id,
+                    resource_id=resource_id,
+                    status=e.resp.status,
+                )
+                return
             logger.error(
                 "Error stopping calendar watch channel",
                 channel_id=channel_id,

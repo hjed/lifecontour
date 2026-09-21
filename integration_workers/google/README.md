@@ -106,7 +106,8 @@ Secrets (`DATABASE_URL`, `GOOGLE_CLIENT_SECRET`, `ENCRYPTION_KEY`) are
 | `WORKER_ID` | `google-worker` | Unique worker identifier (overrides base default) |
 | `MAX_CONCURRENT_JOBS` | `5` | Maximum concurrent ARQ jobs |
 | `GOOGLE_RESERVED_GROUPS` | `["myContacts"]` | Google groups to ignore during sync |
-| `WEBHOOK_BASE_URL` | `""` | Public HTTPS URL for webhook callbacks |
+| `WEBHOOK_BASE_URL` | `""` | Public HTTPS URL for webhook callbacks; push notifications are disabled while unset |
+| `WEBHOOK_RENEWAL_THRESHOLD_HOURS` | `48` | How far ahead of a watch channel's expiry to re-register it |
 
 ### ARQ Worker Settings
 
@@ -123,6 +124,7 @@ class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         push_local_contacts_to_google,
         sync_calendar_events,
         setup_calendar_webhook,
+        renew_calendar_webhooks,
         periodic_sync_all_accounts,
     ]
     on_startup = _on_startup  # build_worker_lifecycle(close_session_factory=True)
@@ -212,7 +214,7 @@ docker compose --profile prod up -d google-worker
 
 ## Tasks
 
-The worker provides three ARQ tasks:
+The worker provides these ARQ tasks:
 
 ### 1. `sync_google_contacts`
 
@@ -236,11 +238,86 @@ Pushes locally created/updated contacts to Google.
 - `google_account_email` (str): Google account email
 - `user_id` (int): User ID in local database
 
-### 3. `periodic_sync_all_accounts`
+### 3. `setup_calendar_webhook`
+
+Registers a Google Calendar push notification channel for one calendar and
+persists its metadata in `calendar_sync_tokens`. Any previous channel for that
+calendar is stopped first.
+
+**Parameters**:
+- `google_account_email` (str): Google account email
+- `user_id` (str | int): User ID in local database
+- `google_calendar_id` (str): The Google Calendar to watch
+
+### 4. `renew_calendar_webhooks`
+
+Internal task called by ARQ cron. Finds synced calendars whose watch channel is
+lapsing and enqueues a `setup_calendar_webhook` job for each. See
+[Calendar push channels](#calendar-push-channels).
+
+**Note**: Triggered by cron every 6 hours. Do not call manually.
+
+### 5. `periodic_sync_all_accounts`
 
 Internal task called by ARQ cron jobs. Queries all active Google integrations and enqueues sync tasks.
 
 **Note**: This task is automatically triggered by cron when `ENABLE_PERIODIC_SYNC=true`. Do not call manually.
+
+## Calendar push channels
+
+Inbound calendar changes reach the app two ways: the periodic sync above, and
+Google Calendar push notifications. Push is the low-latency path, and it depends
+on a *watch channel* registered per calendar.
+
+Channels are not permanent. `watch_events` requests a 7-day TTL, and once that
+elapses Google discards the channel and stops delivering notifications — without
+telling us. Left alone, push-driven sync therefore dies about weekly.
+
+The lifecycle:
+
+1. **Register** — `setup_calendar_webhook` calls `events().watch()` and stores
+   `channel_id`, `channel_resource_id` and `channel_expiration` in
+   `calendar_sync_tokens`.
+2. **Notify** — Google POSTs to `/api/integrations/google/calendar/webhook`,
+   which matches the channel against that table and enqueues a smart calendar
+   sync.
+3. **Renew** — `renew_calendar_webhooks` runs on a cron every 6 hours and
+   re-registers any synced calendar whose channel expires within
+   `WEBHOOK_RENEWAL_THRESHOLD_HOURS` (48 by default), is missing, or has no
+   recorded expiry. With a 7-day TTL each channel is renewed roughly every 5
+   days, leaving several sweeps of margin.
+
+Two properties are worth knowing when reading this code:
+
+- **Renewal is independent of `ENABLE_PERIODIC_SYNC`.** Push notifications
+  matter most when periodic sync is off, so gating renewal on that flag would
+  disable it exactly where it is load-bearing.
+- **Stopping a channel is idempotent.** `GoogleAPIClient.stop_channel` treats
+  404 and 410 as success, because a channel Google has already forgotten is
+  already in the state the call exists to produce. `setup_calendar_webhook`
+  also skips the stop entirely when the stored expiry has passed.
+- **Setup is serialised per calendar.** Registering a channel is read-then-write
+  across two Google calls, so `setup_calendar_webhook` takes a transaction-scoped
+  advisory lock on (user, calendar) first. The account is deliberately not part
+  of the key: renewal and manual re-registration can resolve different accounts
+  for the same calendar, and keying on it would hand them separate locks.
+  Renewal jobs additionally carry a job id keyed to the calendar, so ARQ rejects
+  a duplicate rather than dispatching a second setup that would race the first.
+- **The account is chosen from the existing channel.** A calendar records no
+  Google account of its own, so renewal reuses the account its current channel
+  was registered under, falling back to a deterministically chosen connected
+  account only when there is no usable channel.
+
+`setup_calendar_webhook` signals retryability the way the rest of the workers
+do — by whether it raises. A refusal no retry can change (a calendar this
+account may not watch, one Google no longer knows, a disconnected account) is
+logged and returned, so the job succeeds and the next sweep tries again in six
+hours. Anything that might pass next time — a quota 403, a 5xx, a database
+blip — raises, so ARQ retries it in seconds rather than leaving a channel to
+lapse inside its renewal window.
+
+Everything here no-ops when `WEBHOOK_BASE_URL` is unset, leaving periodic sync
+as the only inbound path.
 
 ## Monitoring
 

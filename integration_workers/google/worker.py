@@ -16,6 +16,7 @@ from core_shared import (
     SharedARQWorkerSettings,
     build_worker_lifecycle,
     generate_cron_jobs,
+    generate_interval_cron,
     redis_settings_from_url,
 )
 
@@ -42,7 +43,12 @@ from core_shared.models.journal_external_event_link import (
 from core_shared.models.journals import CalendarInfo
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncStatus
-from core_shared.repositories import SyncJobRepository
+from core_shared.repositories import (
+    ActiveCalendarChannel,
+    CalendarWatchRenewal,
+    CalendarWatchRepository,
+    SyncJobRepository,
+)
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from googleapiclient.errors import HttpError
 from sqlalchemy import text
@@ -53,7 +59,7 @@ from api_models import ListConnectionsResponse
 
 # Import worker-specific services
 from event_transformer import google_event_times
-from google_auth_service import GoogleAuthService
+from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
 from google_client import (
     GoogleAPIClient,
     google_error_reasons,
@@ -4296,6 +4302,82 @@ async def sync_calendar_events(
         }
 
 
+async def _stop_previous_watch_channel(
+    session: Any,
+    user_id: str | int,
+    channel: ActiveCalendarChannel,
+) -> None:
+    """Stop one channel a calendar still has recorded, best effort.
+
+    Replacing a channel does not depend on the old one being stopped — the new
+    registration stands either way — so a failure here is logged and swallowed
+    rather than failing the setup. That matters most when the channel's account
+    has since been disconnected: the token lookup below raises, and swallowing
+    it is what lets the calendar be re-registered under an account that still
+    works instead of failing every sweep.
+
+    The client is built inside the try for the same reason, and for the
+    channel's **own** account, since another account's token cannot address it.
+
+    Args:
+        session: Database session used to load the account's credentials
+        user_id: Owner of the calendar
+        channel: The recorded channel to stop
+    """
+    # A channel past its expiry has already been discarded by Google, so
+    # stopping it would only spend a round trip to be told it does not exist.
+    expiration = channel.channel_expiration
+    if expiration is not None and expiration <= datetime.now(UTC):
+        logger.debug(
+            "Previous calendar webhook channel already expired",
+            channel_id=channel.channel_id,
+            channel_expiration=expiration.isoformat(),
+        )
+        return
+
+    try:
+        client = _create_google_client(session, user_id, channel.google_account_email)
+        await client.stop_channel(
+            channel_id=channel.channel_id,
+            resource_id=channel.channel_resource_id,
+        )
+        logger.info(
+            "Stopped previous calendar webhook channel",
+            channel_id=channel.channel_id,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "Failed to stop previous watch channel",
+            channel_id=channel.channel_id,
+            google_account_email=channel.google_account_email,
+            error=str(e),
+        )
+
+
+# Statuses from ``events().watch()`` that no retry can change: a request Google
+# will keep rejecting, or a calendar this account cannot see.
+_PERMANENT_WATCH_STATUSES: frozenset[int] = frozenset({400, 404})
+
+
+def _is_permanent_watch_failure(error: Exception) -> bool:
+    """Return True when retrying the webhook setup cannot change the outcome.
+
+    Covers the three answers that are settled: the account is no longer
+    connected, Google refused access to the calendar (``is_permission_denied``
+    keeps rate and quota limits out of this), and a request Google rejects
+    outright. Everything else — 429, 5xx, a dropped connection, a database
+    blip — may succeed on a retry.
+    """
+    if isinstance(error, GoogleAuthTokensNotFoundError):
+        return True
+    if isinstance(error, HttpError):
+        return (
+            is_permission_denied(error)
+            or error.resp.status in _PERMANENT_WATCH_STATUSES
+        )
+    return False
+
+
 async def setup_calendar_webhook(
     ctx: dict[str, Any],
     google_account_email: str,
@@ -4334,41 +4416,27 @@ async def setup_calendar_webhook(
         async with session_factory() as session:
             client = _create_google_client(session, user_id, google_account_email)
 
-            # Stop existing channel if one exists
-            stmt = text("""
-                SELECT channel_id, channel_resource_id
-                FROM calendar_sync_tokens
-                WHERE user_id = :user_id
-                AND google_account_email = :email
-                AND google_calendar_id = :google_calendar_id
-                AND channel_id IS NOT NULL
-                AND channel_resource_id IS NOT NULL
-            """)
-            existing_result = await session.execute(
-                stmt,
-                {
-                    "user_id": str(user_id),
-                    "email": google_account_email,
-                    "google_calendar_id": google_calendar_id,
-                },
+            # Serialise concurrent setups for this calendar before reading the
+            # channel we are about to replace. Held until this block commits,
+            # so the Google stop/watch pair below cannot interleave with
+            # another run's.
+            conn = await session.connection()
+            repo = CalendarWatchRepository(conn)
+            await repo.lock_calendar(
+                user_id=str(user_id),
+                google_calendar_id=google_calendar_id,
             )
-            existing_row = existing_result.fetchone()
-            if existing_row:
-                try:
-                    await client.stop_channel(
-                        channel_id=existing_row.channel_id,
-                        resource_id=existing_row.channel_resource_id,
-                    )
-                    logger.info(
-                        "Stopped previous calendar webhook channel",
-                        channel_id=existing_row.channel_id,
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(
-                        "Failed to stop previous watch channel",
-                        channel_id=existing_row.channel_id,
-                        error=str(e),
-                    )
+
+            # Stop every channel the calendar still has recorded, whichever
+            # account holds it. Scoping this to our own account would miss one
+            # registered under the user's other account and leave it live
+            # alongside the new one; stopping only the newest would strand the
+            # rest, since their metadata is cleared below and Google would keep
+            # delivering on them until they expire.
+            for existing in await repo.get_active_channels(
+                str(user_id), google_calendar_id
+            ):
+                await _stop_previous_watch_channel(session, user_id, existing)
 
             # Register watch channel with Google
             result = await client.watch_events(
@@ -4425,6 +4493,14 @@ async def setup_calendar_webhook(
                     "now": now,
                 },
             )
+
+            # The table is keyed by (user, account, calendar), so registering
+            # under a different account than before inserts a second row rather
+            # than replacing the first. Clear the channel it still claims, or
+            # the renewal sweep keeps finding a channel that is no longer live.
+            await repo.clear_channels_for_other_accounts(
+                str(user_id), google_calendar_id, google_account_email
+            )
             await session.commit()
 
         logger.info(
@@ -4446,7 +4522,17 @@ async def setup_calendar_webhook(
             else None,
         }
 
-    except Exception as e:  # noqa: BLE001
+    except (HttpError, GoogleAuthTokensNotFoundError) as e:
+        # Report a refusal and let the job succeed; raise anything that might
+        # work next time so ARQ spends its retry budget on it. Returning for
+        # everything, as this did, meant a transient Google or database error
+        # near a channel's expiry waited for the next six-hourly sweep instead
+        # of being retried in seconds. Raising for everything would be worse:
+        # a read-only calendar would burn the whole retry budget every sweep.
+        # See "Handler Convention: Returning vs Raising" in
+        # docs/architecture/integration-architecture.md.
+        if not _is_permanent_watch_failure(e):
+            raise
         logger.error(
             "Failed to setup calendar webhook",
             google_account_email=google_account_email,
@@ -4458,6 +4544,139 @@ async def setup_calendar_webhook(
             "status": "error",
             "error": str(e),
             "error_type": type(e).__name__,
+        }
+
+
+# How often the renewal cron sweeps for lapsing channels. Paired with the
+# ``webhook_renewal_threshold_hours`` setting (48h by default), this leaves
+# several sweeps of margin before any channel can actually expire.
+WEBHOOK_RENEWAL_CRON_INTERVAL_HOURS = 6
+
+
+def _renewal_job_id(calendar: CalendarWatchRenewal) -> str:
+    """Build the deduplicating ARQ job id for one calendar's renewal.
+
+    Keying the job by the calendar it renews makes a sweep idempotent: if a
+    previous sweep's job for this calendar is still queued or running, ARQ
+    refuses the duplicate rather than dispatching a second setup that would
+    race the first.
+    """
+    return (
+        "calendar-webhook-renewal:"
+        f"{calendar.user_id}:"
+        f"{calendar.google_account_email}:"
+        f"{calendar.google_calendar_id}"
+    )
+
+
+async def renew_calendar_webhooks(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Re-register Google Calendar push channels before they expire.
+
+    Watch channels live for ``watch_events``' TTL (7 days) and Google then
+    forgets them, silently ending push-driven sync. This cron runs ahead of
+    that deadline and enqueues one ``setup_calendar_webhook`` job per lapsing
+    calendar, so a single failing calendar neither blocks the others nor loses
+    ARQ's retry budget.
+
+    Args:
+        ctx: ARQ context dictionary containing Redis pool and session_factory
+
+    Returns:
+        Dictionary with renewal summary (calendars_due, jobs_enqueued, errors)
+    """
+    if not settings.webhook_base_url:
+        logger.debug(
+            "webhook_base_url not configured, skipping calendar webhook renewal"
+        )
+        return {"status": "skipped", "reason": "webhook_base_url not configured"}
+
+    threshold_hours = settings.webhook_renewal_threshold_hours
+    deadline = datetime.now(UTC) + timedelta(hours=threshold_hours)
+
+    logger.info(
+        "Starting calendar webhook renewal",
+        renewal_threshold_hours=threshold_hours,
+    )
+
+    session_factory = ctx["session_factory"]
+    jobs_enqueued = 0
+    jobs_skipped = 0
+    errors: list[str] = []
+
+    try:
+        async with session_factory() as session:
+            conn = await session.connection()
+            repo = CalendarWatchRepository(conn)
+            due = await repo.select_due_for_renewal(deadline)
+
+        logger.info("Found calendars due for webhook renewal", calendars_due=len(due))
+
+        for calendar in due:
+            try:
+                job = await ctx["redis"].enqueue_job(
+                    "setup_calendar_webhook",
+                    calendar.google_account_email,
+                    calendar.user_id,
+                    calendar.google_calendar_id,
+                    _job_id=_renewal_job_id(calendar),
+                    _queue_name=ARQ_QUEUE_NAME,
+                )
+                if job:
+                    jobs_enqueued += 1
+                    logger.info(
+                        "Enqueued calendar webhook renewal job",
+                        job_id=job.job_id,
+                        google_calendar_id=calendar.google_calendar_id,
+                        user_id=calendar.user_id,
+                    )
+                else:
+                    # ARQ returns None only when a job with this id is already
+                    # queued or running, which is the deduplication working:
+                    # a previous sweep is still setting this calendar up.
+                    jobs_skipped += 1
+                    logger.debug(
+                        "Calendar webhook renewal already in flight",
+                        google_calendar_id=calendar.google_calendar_id,
+                        user_id=calendar.user_id,
+                    )
+            except Exception as e:  # noqa: BLE001
+                errors.append(str(e))
+                logger.warning(
+                    "Error enqueueing calendar webhook renewal job",
+                    google_calendar_id=calendar.google_calendar_id,
+                    user_id=calendar.user_id,
+                    error=str(e),
+                )
+
+        logger.info(
+            "Calendar webhook renewal complete",
+            calendars_due=len(due),
+            jobs_enqueued=jobs_enqueued,
+            jobs_skipped=jobs_skipped,
+            errors_count=len(errors),
+        )
+
+        return {
+            "status": "success",
+            "calendars_due": len(due),
+            "jobs_enqueued": jobs_enqueued,
+            "jobs_skipped": jobs_skipped,
+            "errors": errors,
+            "worker_id": settings.worker_id,
+        }
+
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "Calendar webhook renewal failed",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "jobs_enqueued": jobs_enqueued,
+            "errors": errors,
         }
 
 
@@ -4482,6 +4701,7 @@ class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         push_local_contacts_to_google,
         sync_calendar_events,
         setup_calendar_webhook,
+        renew_calendar_webhooks,  # Wrapper for the webhook renewal cron
         periodic_sync_all_accounts,  # Wrapper for periodic cron syncs
     ]
 
@@ -4504,11 +4724,20 @@ class GoogleWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     job_timeout = 600
     max_jobs = settings.max_concurrent_jobs
 
-    # Periodic sync cron (shared helper; empty when periodic sync is disabled).
+    # Periodic sync cron (shared helper; empty when periodic sync is disabled),
+    # plus the calendar webhook renewal cron. Renewal is deliberately *not*
+    # gated on enable_periodic_sync: push notifications are what keeps calendars
+    # fresh when periodic sync is off, so that is exactly when a lapsed watch
+    # channel hurts most. It runs at minute 30 to stay clear of the periodic
+    # sync cron at minute 0.
     cron_jobs = generate_cron_jobs(
         periodic_sync_all_accounts,
         enable_periodic_sync=settings.enable_periodic_sync,
         sync_interval_hours=settings.sync_interval_hours,
+    ) + generate_interval_cron(
+        renew_calendar_webhooks,
+        every_hours=WEBHOOK_RENEWAL_CRON_INTERVAL_HOURS,
+        minute=30,
     )
 
 

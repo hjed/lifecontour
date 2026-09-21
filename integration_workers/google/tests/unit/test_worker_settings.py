@@ -57,7 +57,37 @@ class TestGoogleWorkerSettings:
             "push_local_contacts_to_google",
             "sync_calendar_events",
             "setup_calendar_webhook",
+            "renew_calendar_webhooks",
             "periodic_sync_all_accounts",
+        }
+
+    def test_webhook_renewal_cron_is_independent_of_periodic_sync(self) -> None:
+        """Push channels lapse whether or not periodic sync is enabled.
+
+        Gating renewal on ``enable_periodic_sync`` would disable it precisely
+        where push notifications are the only thing keeping calendars fresh, so
+        the renewal cron is registered either way.
+        """
+        from arq.worker import get_kwargs
+
+        worker = _reload_worker(ENABLE_PERIODIC_SYNC="false")
+        kwargs: dict[str, Any] = get_kwargs(worker.GoogleWorkerSettings)
+
+        cron_names = {job.coroutine.__name__ for job in kwargs["cron_jobs"]}
+        assert "periodic_sync_all_accounts" not in cron_names
+        assert "renew_calendar_webhooks" in cron_names
+
+    def test_webhook_renewal_cron_present_with_periodic_sync(self) -> None:
+        """Both crons are registered when periodic sync is enabled."""
+        from arq.worker import get_kwargs
+
+        worker = _reload_worker(ENABLE_PERIODIC_SYNC="true", SYNC_INTERVAL_HOURS="6")
+        kwargs: dict[str, Any] = get_kwargs(worker.GoogleWorkerSettings)
+
+        cron_names = {job.coroutine.__name__ for job in kwargs["cron_jobs"]}
+        assert cron_names == {
+            "periodic_sync_all_accounts",
+            "renew_calendar_webhooks",
         }
 
     def test_documented_overrides(self) -> None:
