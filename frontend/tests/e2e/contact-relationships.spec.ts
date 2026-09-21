@@ -4,6 +4,7 @@
 
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
+import { selectRadixOption } from './utils/radix-select';
 import type { Page } from '@playwright/test';
 
 function attachClientErrorLogging(page: Page): void {
@@ -76,14 +77,9 @@ test.describe('Contact Relationships', () => {
       listbox.getByRole('option', { name: 'Partner', exact: true })
     ).toBeVisible();
 
-    // Select the first option
-    const parentOption = listbox.getByRole('option', {
-      name: 'Parent',
-      exact: true,
-    });
-    await expect(parentOption).toBeVisible();
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await parentOption.click({ force: true });
+    // Select the first option by typeahead; see selectRadixOption for why the
+    // portaled option is never clicked.
+    await selectRadixOption(page, typeTrigger, 'Parent');
   });
 
   test('should toggle "Relationship with me" and create a user-targeted relationship', async ({
@@ -137,24 +133,7 @@ test.describe('Contact Relationships', () => {
       .locator('.space-y-2')
       .filter({ hasText: 'Relationship Type' })
       .getByRole('combobox');
-    // Select the relationship type via keyboard typeahead rather than clicking
-    // the option. On mobile, clicking the portaled Radix Select item is
-    // unreliable — Playwright mis-computes the option's bounding box, so even
-    // force-clicks miss it and the value never commits (leaving the submit
-    // button disabled). Typing matches by text and avoids coordinates entirely.
-    // Wrap in toPass() to absorb a dropped keystroke while the dropdown is still
-    // opening, retrying until the trigger reflects the chosen value.
-    await expect(async () => {
-      // Close any stale/half-open dropdown from a prior attempt, then open fresh.
-      await page.keyboard.press('Escape');
-      await typeTrigger.click();
-      await expect(page.getByRole('listbox')).toBeVisible();
-      await page.keyboard.type('Friend', { delay: 50 });
-      await page.keyboard.press('Enter');
-      // Confirm the value committed. Short timeout so a dropped keystroke
-      // retries instead of consuming the global 15s expect budget on one pass.
-      await expect(typeTrigger).toContainText('Friend', { timeout: 3000 });
-    }).toPass({ timeout: 15000 });
+    await selectRadixOption(page, typeTrigger, 'Friend');
 
     // Submit
     const addButton = formContainer.getByRole('button', {

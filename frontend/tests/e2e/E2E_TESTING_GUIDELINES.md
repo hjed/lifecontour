@@ -249,17 +249,37 @@ await expect(page.getByRole('alert')).toBeVisible();
 await expect(page.getByRole('alert')).toContainText('Error');
 ```
 
+### Choosing a Select Option
+
+Radix (shadcn) `Select` options render in a portal and animate in. Under
+Mobile Chrome, Playwright mis-measures them, so an option click, even a
+forced one, can miss. A missed click leaves the listbox open, and while it
+is open Radix marks the rest of the page `aria-hidden`, including the
+trigger. A retry that looks the trigger up by role then finds nothing.
+Choose by keyboard typeahead with the shared helper:
+
+```typescript
+import { selectRadixOption } from './utils/radix-select';
+
+await selectRadixOption(
+  page,
+  page.getByRole('combobox', { name: 'Important Date Precision' }),
+  'Year Only'
+);
+```
+
 ## Anti-Patterns to Avoid
 
-| Anti-Pattern                      | Issue               | Solution                      |
-| --------------------------------- | ------------------- | ----------------------------- |
-| `waitForTimeout()`                | Flaky, slow         | Use web-first assertions      |
-| `waitForLoadState('networkidle')` | Unreliable for SPAs | Wait for specific elements    |
-| Manual `isVisible()` checks       | No auto-retry       | Use `toBeVisible()` assertion |
-| Complex CSS selectors             | Fragile             | Use role/testid locators      |
-| Conditional test logic            | Hides failures      | Use explicit assertions       |
-| No test data cleanup              | Test pollution      | Use fixtures with cleanup     |
-| Catching errors silently          | Hides real issues   | Let errors propagate          |
+| Anti-Pattern                      | Issue               | Solution                                    |
+| --------------------------------- | ------------------- | ------------------------------------------- |
+| `waitForTimeout()`                | Flaky, slow         | Use web-first assertions                    |
+| `waitForLoadState('networkidle')` | Unreliable for SPAs | Wait for specific elements                  |
+| Manual `isVisible()` checks       | No auto-retry       | Use `toBeVisible()` assertion               |
+| Complex CSS selectors             | Fragile             | Use role/testid locators                    |
+| Conditional test logic            | Hides failures      | Use explicit assertions                     |
+| No test data cleanup              | Test pollution      | Use fixtures with cleanup                   |
+| Catching errors silently          | Hides real issues   | Let errors propagate                        |
+| `click({ force: true })`          | Skips actionability | Fix the cause; typeahead for Select options |
 
 ## Debugging Flaky Tests
 

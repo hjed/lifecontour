@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
+import { selectRadixOption } from './utils/radix-select';
 
 test.describe('Important Dates', () => {
   test('should display, edit, add, and delete important dates', async ({
@@ -76,37 +77,20 @@ test.describe('Important Dates', () => {
     // --- Add a new Important Date ---
     await authenticatedPage.getByLabel('Add important date').click();
 
-    // Select ANNIVERSARY_MARK (or any other built-in type)
-    await expect(async () => {
-      await authenticatedPage
-        .getByRole('combobox', { name: 'Important Date Type' })
-        .click();
-      const typeOption = authenticatedPage.getByRole('option', {
-        name: 'Marriage Ann.',
-      });
-      await expect(typeOption).toBeVisible({ timeout: 1000 });
-      await typeOption.click({ force: true });
-      await expect(
-        authenticatedPage.getByRole('combobox', { name: 'Important Date Type' })
-      ).toHaveText('Marriage Ann.', { timeout: 1000 });
-    }).toPass({ timeout: 10000 });
-
-    // Select Precision: YEAR
-    await expect(async () => {
-      await authenticatedPage
-        .getByRole('combobox', { name: 'Important Date Precision' })
-        .click();
-      const precisionOption = authenticatedPage.getByRole('option', {
-        name: 'Year Only',
-      });
-      await expect(precisionOption).toBeVisible({ timeout: 1000 });
-      await precisionOption.click({ force: true });
-      await expect(
-        authenticatedPage.getByRole('combobox', {
-          name: 'Important Date Precision',
-        })
-      ).toHaveText('Year Only', { timeout: 1000 });
-    }).toPass({ timeout: 10000 });
+    // Choose the type and precision by typeahead; see selectRadixOption for
+    // why the portaled options are never clicked.
+    await selectRadixOption(
+      authenticatedPage,
+      authenticatedPage.getByRole('combobox', { name: 'Important Date Type' }),
+      'Marriage Ann.'
+    );
+    await selectRadixOption(
+      authenticatedPage,
+      authenticatedPage.getByRole('combobox', {
+        name: 'Important Date Precision',
+      }),
+      'Year Only'
+    );
 
     // Enter Year
     await authenticatedPage.getByPlaceholder('YYYY').fill('2010');

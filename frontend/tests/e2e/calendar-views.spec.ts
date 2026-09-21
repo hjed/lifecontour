@@ -7,6 +7,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { selectRadixOption } from './utils/radix-select';
 
 /**
  * Generate an ISO datetime string offset from today by the given number of days.
@@ -689,13 +690,11 @@ test.describe('Calendar Views', () => {
     await dialog.getByLabel('Title').fill('Quick Created UI Event');
 
     // Select calendar
-    await dialog.getByTestId('calendar-id-input').click();
-    const calendarOption = page
-      .getByRole('option', { name: calendars[0].name, exact: true })
-      .first();
-    await expect(calendarOption).toBeVisible({ timeout: 10000 });
-    // Use force: true to bypass Playwright mobile bounding box bug on Radix Select portals
-    await calendarOption.click({ force: true });
+    await selectRadixOption(
+      page,
+      dialog.getByTestId('calendar-id-input'),
+      calendars[0].name
+    );
 
     // Submit form
     // The form contains a button "Create Journal"
