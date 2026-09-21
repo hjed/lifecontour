@@ -226,8 +226,10 @@ class TestSnipeItMaintenanceImportLink:
         gear_item_id = await _create_gear_item(async_connection)
         processor = build_processor(async_connection)
 
-        await processor.process_event(
-            _maintenance_event(gear_item_id, maintenance_id=17)
+        await _send(
+            processor,
+            async_connection,
+            _maintenance_event(gear_item_id, maintenance_id=17),
         )
 
         source = await async_connection.execute(
