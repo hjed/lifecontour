@@ -5,6 +5,7 @@ Provides AI access to contact management functionality through MCP tools.
 Each tool is designed to return AI-friendly, contextual information.
 """
 
+from dataclasses import replace
 from typing import Annotated, Any
 
 import structlog
@@ -146,6 +147,39 @@ class TagListResponse(BaseModel):
     total_count: int
     summary: str
     suggestions: list[str]
+
+
+def _with_primary_method(
+    methods: list[ContactMethod],
+    method_type: MethodType,
+    value: str,
+    contact_id: int,
+) -> list[ContactMethod]:
+    """The contact's methods, with its primary ``method_type`` set to ``value``.
+
+    Edits the stored primary method of that type in place - keeping its id, so
+    the save can report what the value was - or, when the contact has none,
+    promotes the first method of the type, or adds one. Every other method is
+    left as it is: ``update_contact`` is asked to change the primary email,
+    not to discard the phone number beside it.
+    """
+    of_type = [m for m in methods if m.method_type == method_type]
+    target = next((m for m in of_type if m.is_primary), None) or next(
+        iter(of_type), None
+    )
+    if target is None:
+        return [
+            *methods,
+            ContactMethod(
+                method_type=method_type,
+                value=value,
+                contact_id=contact_id,
+                is_primary=True,
+            ),
+        ]
+    return [
+        replace(m, value=value, is_primary=True) if m is target else m for m in methods
+    ]
 
 
 def _convert_field_value(field_name: str, field_value: str) -> str | bool:
@@ -679,9 +713,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         2. Field-level update: Provide field_name and field_value for single field updates
 
         Updates an existing contact with validation and returns AI-friendly confirmation.
-        Supports updating contact methods, tags, and adding notes. Uses replacement
-        strategy for methods/addresses/notes - all existing ones are replaced with
-        the provided ones.
+        Only what is supplied changes: ``email`` and ``phone`` edit the
+        contact's primary method of that type and leave its other methods
+        alone, ``notes`` adds a note beside the existing ones, ``tags``
+        replaces the tag set, and ``important_dates`` is the contact's whole
+        date list - a date of the same type as a stored one edits it in place,
+        so its history shows what changed, and a stored date left out of the
+        list is removed. Omit a field to leave it untouched.
 
         To edit safely, pass the ``version`` from get_contact as
         ``expected_version``: the update is then refused, with nothing written,
@@ -763,38 +801,28 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 important_dates=None,
             )
 
-            # Add contact methods if provided (replacement strategy)
-            if request.email:
-                if updated_contact.methods is None:
-                    updated_contact.methods = []
-                email_method = ContactMethod(
-                    method_type=MethodType.EMAIL,
-                    value=request.email,
-                    contact_id=request.contact_id,
-                    is_primary=True,
-                )
-                updated_contact.methods.append(email_method)
+            # The service treats a sub-resource list as the whole desired state,
+            # so each list is built from the contact already read, with only
+            # the requested change applied. A list holding just the new email
+            # would delete the phone beside it (#1524).
+            if request.email or request.phone:
+                methods = list(existing_contact.methods or [])
+                if request.email:
+                    methods = _with_primary_method(
+                        methods, MethodType.EMAIL, request.email, request.contact_id
+                    )
+                if request.phone:
+                    methods = _with_primary_method(
+                        methods, MethodType.PHONE, request.phone, request.contact_id
+                    )
+                updated_contact.methods = methods
 
-            if request.phone:
-                if updated_contact.methods is None:
-                    updated_contact.methods = []
-                phone_method = ContactMethod(
-                    method_type=MethodType.PHONE,
-                    value=request.phone,
-                    contact_id=request.contact_id,
-                    is_primary=True,
-                )
-                updated_contact.methods.append(phone_method)
-
-            # Add additional note if provided
+            # A note is added beside the stored ones, never in place of them.
             if request.notes:
-                if updated_contact.notes is None:
-                    updated_contact.notes = []
-                note = ContactNote(
-                    content=request.notes,
-                    contact_id=request.contact_id,
-                )
-                updated_contact.notes.append(note)
+                updated_contact.notes = [
+                    *(existing_contact.notes or []),
+                    ContactNote(content=request.notes, contact_id=request.contact_id),
+                ]
 
             # Handle important dates if provided (replacement strategy)
             if request.important_dates is not None:

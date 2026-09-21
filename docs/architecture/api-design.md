@@ -1146,6 +1146,16 @@ The reconcile helpers live in
 where the `{prefix}_{id}_{field}` key format the history projection decodes is
 written.
 
+**MCP builds that whole state from the contact it has read.** The tool's
+arguments are narrower than the service's lists — one `email`, one `phone`, one
+note — so `update_contact` starts from the stored contact and applies only what
+was asked: `email`/`phone` edit the primary method of that type in place (or
+add one) and leave every other method alone, and `notes` appends. Before #1524
+it passed a list holding only the new value, which the service rightly read as
+the whole desired state — so setting an email deleted the phone, and adding a
+note deleted every note already there. `important_dates` remains the caller's
+whole list and `tags` the whole set, as their descriptions say.
+
 
 ## Authentication Guidelines
 
