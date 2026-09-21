@@ -25,6 +25,7 @@ from core_shared.models.history import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services.contact_service import ContactService
+from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 from tests.integration.contacts.contact_service_harness import (
     RecordingEventPublisher,
     build_contact_service,
@@ -694,3 +695,94 @@ class TestUniqueIndexesDuringASave:
             "swap.one@example.com",
         )
         assert "contact_methods" not in changed
+
+
+class TestSubResourceMerge:
+    """A change named rather than listed, applied to the contact as it stands.
+
+    MCP sets one primary email or adds one note. The merge is applied by the
+    service after it has locked the contact and read its rows, so a row the
+    caller never saw - one added while it was deciding - is kept.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_primary_email_merge_keeps_the_stored_phone(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            methods=[
+                ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value="merge.before@example.com",
+                    contact_id=0,
+                    is_primary=True,
+                ),
+                ContactMethod(
+                    method_type=MethodType.PHONE,
+                    value="+61412345678",
+                    contact_id=0,
+                    is_primary=True,
+                ),
+            ],
+        )
+        assert saved.methods is not None
+        ids = {m.method_type: m.id for m in saved.methods}
+
+        # The contact handed in carries no methods at all: what is kept can
+        # only have come from the service's own read.
+        updated = await contact_service.update_contact(
+            Contact(
+                id=saved.id, first_name=saved.first_name, last_name=saved.last_name
+            ),
+            async_connection,
+            subresource_merge=SubResourceMerge(
+                primary_methods={MethodType.EMAIL: "merge.after@example.com"}
+            ),
+        )
+
+        assert updated.methods is not None
+        by_type = {m.method_type: m for m in updated.methods}
+        assert by_type[MethodType.EMAIL].id == ids[MethodType.EMAIL]
+        assert by_type[MethodType.EMAIL].value == "merge.after@example.com"
+        assert by_type[MethodType.PHONE].id == ids[MethodType.PHONE]
+        changed = _changed_fields(recorded_events)
+        assert changed[f"method_{ids[MethodType.EMAIL]}_value"] == (
+            "merge.before@example.com",
+            "merge.after@example.com",
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_note_merge_appends_to_the_stored_notes(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            notes=[ContactNote(content="Met at the conference", contact_id=0)],
+        )
+        assert saved.notes is not None
+        stored_id = saved.notes[0].id
+
+        updated = await contact_service.update_contact(
+            Contact(
+                id=saved.id, first_name=saved.first_name, last_name=saved.last_name
+            ),
+            async_connection,
+            subresource_merge=SubResourceMerge(new_notes=["Follows the cricket"]),
+        )
+
+        assert updated.notes is not None
+        assert [(n.id == stored_id, n.content) for n in updated.notes] == [
+            (True, "Met at the conference"),
+            (False, "Follows the cricket"),
+        ]

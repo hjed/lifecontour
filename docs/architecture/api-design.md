@@ -1146,15 +1146,24 @@ The reconcile helpers live in
 where the `{prefix}_{id}_{field}` key format the history projection decodes is
 written.
 
-**MCP builds that whole state from the contact it has read.** The tool's
-arguments are narrower than the service's lists — one `email`, one `phone`, one
-note — so `update_contact` starts from the stored contact and applies only what
-was asked: `email`/`phone` edit the primary method of that type in place (or
-add one) and leave every other method alone, and `notes` appends. Before #1524
-it passed a list holding only the new value, which the service rightly read as
-the whole desired state — so setting an email deleted the phone, and adding a
-note deleted every note already there. `important_dates` remains the caller's
-whole list and `tags` the whole set, as their descriptions say.
+**MCP names its changes; the service applies them under the row lock.** The
+tool's arguments are narrower than the service's lists — one `email`, one
+`phone`, one note — so it passes a `SubResourceMerge` rather than a list:
+`email`/`phone` edit the primary method of that type in place (or add one) and
+leave every other method alone, and `notes` appends. The service applies the
+merge to the contact as it reads it **after** taking the contact's row lock,
+which `update_contact` now always takes, as every per-item writer does. A list
+the tool built from its own earlier read would delete anything another writer
+added in between; the merge has no such window (the `tag_names` argument works
+the same way). Before #1524 the tool passed a list holding only the new value,
+which the service rightly read as the whole desired state — so setting an email
+deleted the phone, and adding a note deleted every note already there.
+`important_dates` remains the caller's whole list and `tags` the whole set, as
+their descriptions say.
+
+The tool still fills unspecified *scalar* fields (`first_name`, `company`, …)
+from its earlier read, so a concurrent edit of one of those can be overwritten;
+that predates #1524 and is tracked separately.
 
 
 ## Authentication Guidelines

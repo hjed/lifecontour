@@ -15,6 +15,7 @@ from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import TagName
 
 from app.core.contacts.services.contact_service import ContactService
+from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 
 
 class TestContactService:
@@ -674,6 +675,57 @@ class TestContactService:
         assert result == saved_contact
         mock_contact_repo.find_by_id.assert_called_once_with(1)
         mock_contact_repo.save.assert_called_once_with(updated_contact)
+
+    @pytest.mark.asyncio
+    async def test_update_contact_locks_the_contact_before_reading_it(
+        self,
+        contact_service: ContactService,
+        mock_contact_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Even with no ETag to check: the save builds its lists from what it
+        reads, so a row a concurrent writer adds must not land between the
+        read and the write. Every per-item writer takes this lock first too."""
+        mock_contact_repo.find_by_id.return_value = Contact(first_name="Ada", id=1)
+        mock_contact_repo.save.return_value = Contact(first_name="Ada", id=1)
+
+        await contact_service.update_contact(
+            Contact(first_name="Ada", id=1), mock_transaction
+        )
+
+        calls = [name for name, *_ in mock_contact_repo.method_calls]
+        assert "lock" in calls
+        assert calls.index("lock") < calls.index("find_by_id")
+
+    @pytest.mark.asyncio
+    async def test_update_contact_refuses_a_list_and_a_merge_for_one_resource(
+        self,
+        contact_service: ContactService,
+        mock_contact_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Two answers to "what should the methods be" - refused before
+        anything is locked or written."""
+        contact = Contact(
+            first_name="Ada",
+            id=1,
+            methods=[
+                ContactMethod(
+                    method_type=MethodType.EMAIL, value="a@example.com", contact_id=1
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match="methods"):
+            await contact_service.update_contact(
+                contact,
+                mock_transaction,
+                subresource_merge=SubResourceMerge(
+                    primary_methods={MethodType.EMAIL: "b@example.com"}
+                ),
+            )
+
+        assert mock_contact_repo.method_calls == []
 
     @pytest.mark.asyncio
     async def test_update_contact_empty_tag_names_clears_without_tag_service(

@@ -39,6 +39,7 @@ from app.core.contacts.services.contact_subentity_sync import (
     reconcile,
     render_important_date,
     render_note,
+    with_primary_method,
 )
 from app.core.history.services.history_service import (
     _SUBENTITY_FIELD_RE,
@@ -572,3 +573,59 @@ class TestReconcileAroundUniqueKeys:
         )
 
         assert result.updates == [(second, edit_second), (first, edit_first)]
+
+
+class TestWithPrimaryMethod:
+    """Setting a contact's primary email or phone without touching the rest."""
+
+    def test_edits_the_stored_primary_in_place(self) -> None:
+        primary = _method("old@example.com", id=1, is_primary=True)
+        other = _method("work@example.com", id=2)
+        phone = _method("+61412345678", id=3, method_type=MethodType.PHONE)
+
+        result = with_primary_method(
+            [primary, other, phone], MethodType.EMAIL, "new@example.com", CONTACT_ID
+        )
+
+        assert [(m.id, m.value, m.is_primary) for m in result] == [
+            (1, "new@example.com", True),
+            (2, "work@example.com", False),
+            (3, "+61412345678", False),
+        ]
+
+    def test_promotes_the_first_of_the_type_when_none_is_primary(self) -> None:
+        first = _method("first@example.com", id=1)
+        second = _method("second@example.com", id=2)
+
+        result = with_primary_method(
+            [first, second], MethodType.EMAIL, "new@example.com", CONTACT_ID
+        )
+
+        assert [(m.id, m.value, m.is_primary) for m in result] == [
+            (1, "new@example.com", True),
+            (2, "second@example.com", False),
+        ]
+
+    def test_adds_a_primary_when_the_contact_has_none_of_the_type(self) -> None:
+        email = _method("a@example.com", id=1, is_primary=True)
+
+        result = with_primary_method(
+            [email], MethodType.PHONE, "+61412345678", CONTACT_ID
+        )
+
+        assert result[0] is email
+        added = result[1]
+        assert (added.id, added.method_type, added.value, added.is_primary) == (
+            None,
+            MethodType.PHONE,
+            "+61412345678",
+            True,
+        )
+
+    def test_leaves_the_stored_objects_unchanged(self) -> None:
+        """The stored list is the before-image the reconcile diffs against."""
+        primary = _method("old@example.com", id=1, is_primary=True)
+
+        with_primary_method([primary], MethodType.EMAIL, "new@example.com", CONTACT_ID)
+
+        assert primary.value == "old@example.com"

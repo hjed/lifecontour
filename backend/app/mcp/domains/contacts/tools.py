@@ -5,7 +5,6 @@ Provides AI access to contact management functionality through MCP tools.
 Each tool is designed to return AI-friendly, contextual information.
 """
 
-from dataclasses import replace
 from typing import Annotated, Any
 
 import structlog
@@ -46,6 +45,7 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
@@ -147,39 +147,6 @@ class TagListResponse(BaseModel):
     total_count: int
     summary: str
     suggestions: list[str]
-
-
-def _with_primary_method(
-    methods: list[ContactMethod],
-    method_type: MethodType,
-    value: str,
-    contact_id: int,
-) -> list[ContactMethod]:
-    """The contact's methods, with its primary ``method_type`` set to ``value``.
-
-    Edits the stored primary method of that type in place - keeping its id, so
-    the save can report what the value was - or, when the contact has none,
-    promotes the first method of the type, or adds one. Every other method is
-    left as it is: ``update_contact`` is asked to change the primary email,
-    not to discard the phone number beside it.
-    """
-    of_type = [m for m in methods if m.method_type == method_type]
-    target = next((m for m in of_type if m.is_primary), None) or next(
-        iter(of_type), None
-    )
-    if target is None:
-        return [
-            *methods,
-            ContactMethod(
-                method_type=method_type,
-                value=value,
-                contact_id=contact_id,
-                is_primary=True,
-            ),
-        ]
-    return [
-        replace(m, value=value, is_primary=True) if m is target else m for m in methods
-    ]
 
 
 def _convert_field_value(field_name: str, field_value: str) -> str | bool:
@@ -802,27 +769,20 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             )
 
             # The service treats a sub-resource list as the whole desired state,
-            # so each list is built from the contact already read, with only
-            # the requested change applied. A list holding just the new email
-            # would delete the phone beside it (#1524).
-            if request.email or request.phone:
-                methods = list(existing_contact.methods or [])
-                if request.email:
-                    methods = _with_primary_method(
-                        methods, MethodType.EMAIL, request.email, request.contact_id
-                    )
-                if request.phone:
-                    methods = _with_primary_method(
-                        methods, MethodType.PHONE, request.phone, request.contact_id
-                    )
-                updated_contact.methods = methods
-
-            # A note is added beside the stored ones, never in place of them.
-            if request.notes:
-                updated_contact.notes = [
-                    *(existing_contact.notes or []),
-                    ContactNote(content=request.notes, contact_id=request.contact_id),
-                ]
+            # so the email, phone and note are named as changes instead, and
+            # the service applies them to the contact as it reads it under the
+            # row lock. A list holding just the new email would delete the
+            # phone beside it (#1524); one built from existing_contact would
+            # delete anything added since that read.
+            primary_methods: dict[MethodType, str] = {}
+            if request.email:
+                primary_methods[MethodType.EMAIL] = request.email
+            if request.phone:
+                primary_methods[MethodType.PHONE] = request.phone
+            subresource_merge = SubResourceMerge(
+                primary_methods=primary_methods,
+                new_notes=[request.notes] if request.notes else [],
+            )
 
             # Handle important dates if provided (replacement strategy)
             if request.important_dates is not None:
@@ -860,6 +820,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 source=Provenance.MCP,
                 tag_names=request.tags,
                 expected_etags=expected_etags,
+                subresource_merge=subresource_merge,
             )
 
         # Create AI-friendly response using shared converter

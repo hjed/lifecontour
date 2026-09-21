@@ -63,6 +63,7 @@ from app.core.contacts.services.contact_subentity_sync import (
     ChangedFields,
     SubEntity,
     SubEntityKind,
+    SubResourceMerge,
     aggregate_change,
     diff_fields,
     prefixed,
@@ -374,6 +375,7 @@ class ContactService:
         source: Provenance = Provenance.SYSTEM,
         tag_names: list[str] | None = None,
         expected_etags: Sequence[str] | None = None,
+        subresource_merge: SubResourceMerge | None = None,
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -398,6 +400,11 @@ class ContactService:
                 to be at, from ``If-Match`` (REST) or ``expected_version``
                 (MCP). ``None`` writes unconditionally, as every caller did
                 before conditional writes existed.
+            subresource_merge: Optional changes to apply over the stored
+                methods and notes - set a primary email, add a note - instead
+                of a whole list. Applied to the contact as it is read under the
+                row lock, so a row added concurrently is not lost. Refused if
+                ``contact`` also carries a list for the same sub-resource.
 
         Returns:
             The updated Contact with all attached entities and assigned IDs
@@ -412,12 +419,25 @@ class ContactService:
         """
         if contact.id is None:
             raise ContactValidationError("id", "Contact ID is required for updates")
+        if subresource_merge is not None and (
+            clashes := subresource_merge.conflicts(contact)
+        ):
+            raise ValueError(
+                "A whole list and a merge were both given for: " + ", ".join(clashes)
+            )
 
         async def _update_operation() -> Contact:
             if contact.id is None:
                 raise ContactValidationError(
                     "id", "Contact ID is required for update operation"
                 )
+
+            # Parent lock before anything the save builds on is read, as every
+            # per-item writer takes it first: a method or note added
+            # concurrently cannot land between the read below and the write,
+            # where the reconcile would delete it for being missing from the
+            # list.
+            await self.contact_repo.lock(contact.id)
 
             # Refuse a stale write first: tag resolution below find-or-creates
             # rows, so checking any later would leave a refused update having
@@ -441,6 +461,8 @@ class ContactService:
 
             # Get current contact and calculate changes
             current_contact = await self._get_existing_contact(contact.id)
+            if subresource_merge is not None:
+                subresource_merge.apply_to(contact, current_contact)
             changed_fields = self._calculate_changed_fields(current_contact, contact)
 
             # Validate and save basic contact fields
