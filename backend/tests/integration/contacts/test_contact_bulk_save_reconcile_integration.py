@@ -229,6 +229,37 @@ class TestMatchedImportantDate:
             "birthday:1990-03-09",
         )
 
+    @pytest.mark.asyncio
+    async def test_a_stale_date_id_is_an_insert_not_an_edit_of_the_birthday(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        """A REST client holding an id for a date since deleted has named a row
+        that is not there. That is not the stored birthday under another name,
+        whatever its type: the natural key matches id-less submissions only."""
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            important_dates=[_birthday()],
+        )
+        assert saved.important_dates is not None
+        stored_id = saved.important_dates[0].id
+        stale = _birthday(saved.id or 0, year=1991)
+        stale.id = 999_999
+        saved.important_dates = [stale]
+
+        updated = await contact_service.update_contact(saved, async_connection)
+
+        assert updated.important_dates is not None
+        (date,) = updated.important_dates
+        assert date.id not in (stored_id, 999_999)
+        assert date.year == 1991
+        assert recorded_events.of_type("ImportantDateUpdated") == []
+        assert len(recorded_events.of_type("ImportantDateAdded")) == 1
+
 
 class TestMatchedMethodAddressAndNote:
     @pytest.mark.asyncio
