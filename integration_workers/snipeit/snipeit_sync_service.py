@@ -279,17 +279,25 @@ _SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
 # consumer tells a Snipe-IT-applied update from a user's edit.
 INBOUND_SYNC_CHANGED_BY = "snipeit_maintenance"
 
-# How long an import's create event has to be answered with a journal link
-# before the record is imported again instead.
+# How long an import's sync row has to be answered with a journal link before
+# the record is imported again instead.
 #
 # A row with no link means one of two things, and nothing in the schema tells
-# them apart: the backend has not turned the create event into a link yet, or
-# the journal that link belonged to has been deleted. The row's
-# ``last_synced_at`` is when that create was enqueued — an import writes it and
+# them apart: the backend has not turned the event this row last wrote into a
+# link yet, or the journal that link belonged to has been deleted. The row's
+# ``last_synced_at`` is when that event was enqueued — an import writes it and
 # nothing else does, since a push of an imported journal deliberately leaves
-# the row alone — so its age is how long the create has gone unanswered. The
-# backend answers one in seconds; a row older than this is not waiting for
-# anything.
+# the row alone — so its age is how long that event has gone unanswered.
+#
+# **It must outlast the inbound consumer's redelivery budget**, which is what
+# ``test_the_import_grace_outlasts_the_streams_redelivery_budget`` pins. An
+# event the backend has not finished with is either retried or dead-lettered
+# within ``retry_min_idle_ms × max_delivery_count`` (five minutes on the shared
+# defaults), and a dead letter is never replayed. Importing inside that window
+# would race a create still due to be delivered, and the redelivery — converted
+# to an update by the link the import just wrote — would put the record's older
+# state back with nothing to correct it afterwards, since the row's hash by
+# then says the journal is up to date.
 IMPORT_LINK_GRACE_SECONDS = 900
 
 
