@@ -184,6 +184,27 @@ class TestReconcileByNaturalKey:
         assert result.inserts == []
         assert result.deletions == []
 
+    def test_updates_keep_submission_order_across_both_passes(self) -> None:
+        """Ids are matched in an earlier pass than natural keys, but the pairs
+        come back in the order they were submitted."""
+        stored_birthday = _date(id=1)
+        stored_anniversary = _date(
+            id=2, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2015
+        )
+        by_key = _date(year=1991)
+        by_id = _date(id=2, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2016)
+
+        result = reconcile(
+            [stored_birthday, stored_anniversary],
+            [by_key, by_id],
+            natural_key=important_date_key,
+        )
+
+        assert result.updates == [
+            (stored_birthday, by_key),
+            (stored_anniversary, by_id),
+        ]
+
     def test_pairs_in_order_within_one_key_group(self) -> None:
         first = _date(id=1, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2011)
         second = _date(id=2, date_type=ImportantDateType.WORK_ANNIVERSARY, year=2015)

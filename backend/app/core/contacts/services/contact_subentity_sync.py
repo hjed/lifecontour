@@ -102,6 +102,11 @@ def reconcile[T: SubEntity](
             updates.append((match, item))
         unmatched = still_unmatched
 
+    # The id pass runs over the whole list before the natural-key pass, so put
+    # the pairs back in the order their submissions arrived.
+    position = {id(item): index for index, item in enumerate(submitted)}
+    updates.sort(key=lambda pair: position[id(pair[1])])
+
     deletions = [item for item in stored if id(item) not in claimed]
 
     return Reconciliation(inserts=unmatched, updates=updates, deletions=deletions)
