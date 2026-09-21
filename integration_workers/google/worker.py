@@ -1885,6 +1885,47 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+async def _push_before_pull(
+    session: AsyncSession,
+    client: GoogleAPIClient,
+    google_account_email: str,
+) -> dict[str, Any]:
+    """Run the outbound push ahead of an inbound sync, never failing it.
+
+    A Google write outage must not block inbound sync, and the pull is safe to
+    run anyway: if the push failed, Google's etag is unchanged, so the backend's
+    idempotency check skips that contact and the local edit survives to be
+    pushed on the next cycle.
+
+    Returns:
+        ``pushed_count`` and ``push_*`` counters to merge into the sync metrics,
+        with ``push_failed`` recording whether the push raised.
+    """
+    try:
+        push_result = await _push_pending_local_contacts(
+            session=session,
+            client=client,
+            google_account_email=google_account_email,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "Pushing local contact changes failed, continuing with inbound sync",
+            google_account_email=google_account_email,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return {"pushed_count": 0, "push_failed": True}
+
+    return {
+        "pushed_count": push_result.get("pushed_count", 0),
+        "push_created_count": push_result.get("created_count", 0),
+        "push_updated_count": push_result.get("updated_count", 0),
+        "push_error_count": push_result.get("error_count", 0),
+        "push_conflict_count": push_result.get("conflict_count", 0),
+        "push_failed": False,
+    }
+
+
 @trace_arq_job
 async def sync_google_contacts(
     ctx: dict[str, Any],
@@ -1965,6 +2006,18 @@ async def sync_google_contacts(
                 google_client_id=settings.google_client_id,
                 google_client_secret=settings.google_client_secret.get_secret_value(),
                 user_id=user_id,
+            )
+
+            # Push pending local changes BEFORE pulling. Keeping both halves
+            # in one job is what makes the ordering structural: as two ARQ jobs
+            # the pull could land first and overwrite an edit that had not
+            # reached Google yet (LOCAL-177).
+            metrics.update(
+                await _push_before_pull(
+                    session=session,
+                    client=client,
+                    google_account_email=google_account_email,
+                )
             )
 
             # Determine sync strategy
@@ -3386,6 +3439,66 @@ async def process_contact_event(
         return {"status": "success", "results": results}
 
 
+async def _push_pending_local_contacts(
+    session: AsyncSession,
+    client: GoogleAPIClient,
+    google_account_email: str,
+) -> dict[str, Any]:
+    """Push contacts with unsynced local changes to Google.
+
+    Finds contacts that are new locally or were modified since their last sync,
+    resolves the contact groups their tags need, and pushes them. Shared by the
+    standalone ``push_local_contacts_to_google`` task and by
+    ``sync_google_contacts``, which runs it before pulling so a pull cannot
+    overwrite a local edit that has not reached Google yet.
+
+    The caller owns the session lifecycle and commits.
+
+    Returns:
+        Push metrics: pushed/created/updated/error/conflict counts.
+    """
+    empty_metrics: dict[str, Any] = {
+        "pushed_count": 0,
+        "created_count": 0,
+        "updated_count": 0,
+        "error_count": 0,
+        "conflict_count": 0,
+    }
+
+    contacts_to_push = await find_contacts_to_push(
+        session=session, integration_source="google"
+    )
+
+    if not contacts_to_push:
+        logger.info(
+            "No local changes to push",
+            google_account_email=google_account_email,
+        )
+        return empty_metrics
+
+    # Build group mapping for tag→membership push, creating any group a local
+    # tag still needs. Tags are loaded again per contact in _load_full_contact,
+    # but every unique name is needed upfront so the groups exist before the
+    # first push.
+    contact_ids = [c["id"] for c in contacts_to_push]
+    tags_by_contact = await _load_tag_names_for_contacts_batch(session, contact_ids)
+    all_tag_names: set[str] = set()
+    for tag_list in tags_by_contact.values():
+        all_tag_names.update(tag_list)
+
+    reverse_group_mapping = await _resolve_group_mapping_for_tags(
+        client=client, tag_names=sorted(all_tag_names)
+    )
+
+    return await push_contacts_to_google(
+        session=session,
+        client=client,
+        contacts=contacts_to_push,
+        google_account_email=google_account_email,
+        group_name_to_resource=reverse_group_mapping,
+    )
+
+
 @trace_arq_job
 async def push_local_contacts_to_google(
     ctx: dict[str, Any], google_account_email: str, user_id: str | int = 1
@@ -3452,46 +3565,10 @@ async def push_local_contacts_to_google(
                 user_id=user_id,
             )
 
-            # Find contacts that need to be pushed
-            contacts_to_push = await find_contacts_to_push(
-                session=session, integration_source="google"
-            )
-
-            if not contacts_to_push:
-                logger.info(
-                    "No local changes to push",
-                    google_account_email=google_account_email,
-                )
-                metrics["completed_at"] = datetime.now(UTC).isoformat()
-                return {
-                    "status": "success",
-                    "google_account_email": google_account_email,
-                    **metrics,
-                }
-
-            # Build group mapping for tag→membership push, creating any group a
-            # local tag still needs. Tags are loaded again per contact in
-            # _load_full_contact, but every unique name is needed upfront so the
-            # groups exist before the first push.
-            contact_ids = [c["id"] for c in contacts_to_push]
-            tags_by_contact = await _load_tag_names_for_contacts_batch(
-                session, contact_ids
-            )
-            all_tag_names: set[str] = set()
-            for tag_list in tags_by_contact.values():
-                all_tag_names.update(tag_list)
-
-            reverse_group_mapping = await _resolve_group_mapping_for_tags(
-                client=client, tag_names=sorted(all_tag_names)
-            )
-
-            # Push contacts to Google
-            push_result = await push_contacts_to_google(
+            push_result = await _push_pending_local_contacts(
                 session=session,
                 client=client,
-                contacts=contacts_to_push,
                 google_account_email=google_account_email,
-                group_name_to_resource=reverse_group_mapping,
             )
 
             metrics.update(push_result)

@@ -27,10 +27,30 @@ The worker uses ARQ (Async Redis Queue) for task processing and supports:
 4. `OutboxEventProcessor` transforms Google Person data to Contact entities
 5. Domain services create/update local contacts
 
-**Outbound (Local → Google)**:
-1. Worker detects locally created/updated contacts
-2. Pushes changes to Google People API
-3. Updates sync metadata with Google resource names and ETags
+**Outbound (Local → Google)** — two paths, both pushing the contact's whole
+current state:
+
+1. **Event-driven (the normal path).** A contact domain event arrives on the
+   stream and `process_contact_event` pushes that contact immediately. See
+   [Stream Consumer](#stream-consumer) for the events this covers.
+2. **Reconciliation (the safety net).** `sync_google_contacts` calls
+   `_push_pending_local_contacts` **before** it pulls, pushing every contact
+   that is new locally or whose `updated_at` is newer than its
+   `sync_metadata.last_synced_at`. This repairs anything the event path missed —
+   a worker restart, a trimmed stream — and, because it runs in the same job as
+   the pull, guarantees the pull cannot overwrite an edit that has not reached
+   Google yet. Splitting the two into separate ARQ jobs would lose that ordering.
+
+Both paths update `sync_metadata` with the Google resource name and the ETag
+Google returns, which is what makes the following pull a no-op for that contact
+rather than a re-apply of Google's older copy.
+
+A failing push is logged and the pull still runs: if the push failed, Google's
+ETag is unchanged, so the inbound idempotency check skips that contact and the
+local edit survives to be pushed next cycle.
+
+`push_local_contacts_to_google` remains as a standalone ARQ task over the same
+helper, for pushing an account on demand without a pull.
 
 ### What the outbound journal push declines to do
 
