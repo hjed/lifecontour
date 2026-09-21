@@ -1007,6 +1007,30 @@ async def _delete_sync_link(session: AsyncSession, external_id: str) -> None:
     )
 
 
+async def _repoint_sync_link(
+    session: AsyncSession, old_external_id: str, new_external_id: str
+) -> None:
+    """Move a Google sync link from one remote person to its replacement.
+
+    Updated in place rather than deleted and re-inserted so the link keeps its
+    ``reference_data`` — the backend's ``synced_tags`` record, which is how an
+    inbound tag removal is told apart from a local-only tag.
+    """
+    await session.execute(
+        text("""
+            UPDATE sync_metadata
+            SET external_id = :new_external_id
+            WHERE integration_source = :integration_source
+              AND external_id = :old_external_id
+        """),
+        {
+            "integration_source": "google",
+            "old_external_id": old_external_id,
+            "new_external_id": new_external_id,
+        },
+    )
+
+
 async def _update_or_recreate_contact_in_google(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -1019,10 +1043,10 @@ async def _update_or_recreate_contact_in_google(
 
     A push only happens when the contact has local edits, so a linked person
     that no longer exists in Google (a 404) is recreated from the local data
-    rather than failing the push forever. The dead link is removed first:
-    ``sync_metadata`` is unique on the remote id, so upserting the new
-    resource name would otherwise leave the dead row beside it — two links for
-    one contact. The caller upserts the link for the returned person.
+    rather than failing the push forever. The dead link is re-pointed at the
+    new person: ``sync_metadata`` is unique on the remote id, so upserting the
+    new resource name alone would leave the dead row beside it — two links for
+    one contact. The caller then upserts the returned person's etag onto it.
 
     Returns:
         The Google person, and whether it was recreated rather than updated.
@@ -1041,13 +1065,14 @@ async def _update_or_recreate_contact_in_google(
             external_id=external_id,
         )
 
-    await _delete_sync_link(session, external_id)
     create_data = {
         key: value
         for key, value in person_data.items()
         if key not in _PERSON_IDENTITY_FIELDS
     }
-    return await client.create_contact(create_data), True
+    result = await client.create_contact(create_data)
+    await _repoint_sync_link(session, external_id, result["resourceName"])
+    return result, True
 
 
 async def _update_contact_in_google(

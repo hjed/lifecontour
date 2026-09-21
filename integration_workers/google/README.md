@@ -54,8 +54,9 @@ push's conflict retry failed too — where the pull applies Google's copy.
 A linked contact that no longer exists in Google (the update returns 404,
 surfaced as `GoogleContactNotFoundError`) is **recreated**: a push only happens
 when there are local edits, so both paths create a new Google person from the
-local contact and replace the dead `sync_metadata` link with the new resource
-name (`_update_or_recreate_contact_in_google`). The cron path counts it as
+local contact and re-point the existing `sync_metadata` link at the new
+resource name in place, so its `reference_data` (the backend's `synced_tags`)
+survives (`_update_or_recreate_contact_in_google`). The cron path counts it as
 created.
 
 Both push paths take a per-contact advisory lock (`_lock_contact_for_push`)

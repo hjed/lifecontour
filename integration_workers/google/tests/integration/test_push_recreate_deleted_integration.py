@@ -24,6 +24,9 @@ from worker import process_contact_event, push_contacts_to_google
 
 _DELETED_REMOTE = "people/cDELETED"
 _RECREATED_REMOTE = "people/cRECREATED"
+# The backend's record of which tags were last synced; losing it makes an
+# inbound Google tag removal look like a local-only tag to keep.
+_REFERENCE_DATA = '{"synced_tags": ["friends"]}'
 
 
 def _ctx(db_session: AsyncSession) -> dict[str, Any]:
@@ -78,29 +81,36 @@ async def linked_contact_id(db_session: AsyncSession) -> int:
             """
             INSERT INTO sync_metadata
                 (internal_id, integration_source, external_id,
-                 version_hash, sync_status, last_synced_at,
+                 version_hash, sync_status, last_synced_at, reference_data,
                  created_at, updated_at)
             VALUES
-                (:cid, 'google', :ext, 'etag_stale', 'success', NOW(), NOW(), NOW())
+                (:cid, 'google', :ext, 'etag_stale', 'success', NOW(), :ref,
+                 NOW(), NOW())
             """
         ),
-        {"cid": contact_id, "ext": _DELETED_REMOTE},
+        {"cid": contact_id, "ext": _DELETED_REMOTE, "ref": _REFERENCE_DATA},
     )
     await db_session.flush()
     return contact_id
 
 
-async def _google_links(db_session: AsyncSession, contact_id: int) -> list[str]:
+async def _google_links(
+    db_session: AsyncSession, contact_id: int
+) -> list[tuple[str, str | None, str]]:
+    """The contact's Google links as (external_id, reference_data, etag)."""
     result = await db_session.execute(
         text(
             """
-            SELECT external_id FROM sync_metadata
+            SELECT external_id, reference_data, version_hash FROM sync_metadata
             WHERE integration_source = 'google' AND internal_id = :cid
             """
         ),
         {"cid": contact_id},
     )
-    return [row.external_id for row in result.fetchall()]
+    return [
+        (row.external_id, row.reference_data, row.version_hash)
+        for row in result.fetchall()
+    ]
 
 
 def _created_payload(client: AsyncMock) -> dict[str, Any]:
@@ -155,7 +165,10 @@ class TestRecreateContactDeletedOnGoogle:
         assert "etag" not in payload
         assert "resourceName" not in payload
         assert payload["names"][0]["givenName"] == "Recreate"
-        assert await _google_links(db_session, linked_contact_id) == [_RECREATED_REMOTE]
+        # One link, re-pointed at the new person, keeping its reference data.
+        assert await _google_links(db_session, linked_contact_id) == [
+            (_RECREATED_REMOTE, _REFERENCE_DATA, "etag_recreated")
+        ]
 
     async def test_cron_push_recreates_and_relinks(
         self, db_session: AsyncSession, linked_contact_id: int
@@ -185,4 +198,7 @@ class TestRecreateContactDeletedOnGoogle:
         payload = _created_payload(client)
         assert "etag" not in payload
         assert "resourceName" not in payload
-        assert await _google_links(db_session, linked_contact_id) == [_RECREATED_REMOTE]
+        # One link, re-pointed at the new person, keeping its reference data.
+        assert await _google_links(db_session, linked_contact_id) == [
+            (_RECREATED_REMOTE, _REFERENCE_DATA, "etag_recreated")
+        ]
