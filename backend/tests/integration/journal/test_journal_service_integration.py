@@ -715,11 +715,13 @@ class TestDeletionIdentifiersAreFiledBySource:
     """
 
     @pytest.fixture
-    def journal_repo(self, clean_database: AsyncConnection):
+    def journal_repo(self, clean_database: AsyncConnection) -> SqlJournalRepository:
         return SqlJournalRepository(clean_database)
 
     @pytest.fixture
-    def journal_service(self, journal_repo, clean_database: AsyncConnection):
+    def journal_service(
+        self, journal_repo: SqlJournalRepository, clean_database: AsyncConnection
+    ) -> JournalService:
         return JournalService(
             journal_repo=journal_repo,
             event_publisher=OutboxEventPublisher(clean_database),
@@ -728,8 +730,8 @@ class TestDeletionIdentifiersAreFiledBySource:
 
     @pytest.mark.asyncio
     async def test_each_source_gets_its_own_key(
-        self, journal_service, clean_database: AsyncConnection
-    ):
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
         """One journal in two systems: each worker finds only its own identifier."""
         journal_id = await _a_journal_reaching(
             journal_service, clean_database, _GOOGLE, _SNIPEIT
@@ -746,8 +748,8 @@ class TestDeletionIdentifiersAreFiledBySource:
 
     @pytest.mark.asyncio
     async def test_a_snipeit_identifier_is_not_filed_under_google(
-        self, journal_service, clean_database: AsyncConnection
-    ):
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
         """The Google worker deletes what this key holds, so nothing else may be in it.
 
         It took an entry with no ``google_calendar_id`` to mean the user's
@@ -766,8 +768,8 @@ class TestDeletionIdentifiersAreFiledBySource:
 
     @pytest.mark.asyncio
     async def test_a_calendar_with_no_source_recorded_is_google(
-        self, journal_service, clean_database: AsyncConnection
-    ):
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
         """Google's own calendars are the ones it names, whatever the column says."""
         journal_id = await _a_journal_reaching(
             journal_service, clean_database, _GOOGLE_UNRECORDED
@@ -781,8 +783,8 @@ class TestDeletionIdentifiersAreFiledBySource:
 
     @pytest.mark.asyncio
     async def test_a_link_no_system_claims_is_left_out(
-        self, journal_service, clean_database: AsyncConnection
-    ):
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
         """A calendar of the user's own belongs to no worker, so nothing may act on it."""
         journal_id = await _a_journal_reaching(
             journal_service, clean_database, _JUST_MINE

@@ -1,5 +1,6 @@
 """Tests for process_journal_event task."""
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -70,7 +71,11 @@ def _forbidden_body(*reasons: str) -> bytes:
 
 
 @contextmanager
-def _google_account(mock_session_factory, mock_google_auth_service, mock_google_client):
+def _google_account(
+    mock_session_factory: MagicMock,
+    mock_google_auth_service: MagicMock,
+    mock_google_client: MagicMock,
+) -> Iterator[MagicMock]:
     """Patch in a user with a Google account, ready for the worker to act as.
 
     Every deletion test needs the same arrangement — the auth row the handler
@@ -325,8 +330,11 @@ class TestProcessJournalEvent:
 
     @pytest.mark.asyncio
     async def test_delete_reads_the_calendar_the_identifier_names(
-        self, mock_session_factory, mock_google_auth_service, mock_google_client
-    ):
+        self,
+        mock_session_factory: MagicMock,
+        mock_google_auth_service: MagicMock,
+        mock_google_client: MagicMock,
+    ) -> None:
         """The per-source payload deletes from the calendar the link hung off.
 
         ``JournalDeleted`` now files each identifier under the integration that
@@ -363,8 +371,8 @@ class TestProcessJournalEvent:
 
     @pytest.mark.asyncio
     async def test_delete_ignores_another_integrations_identifiers(
-        self, mock_session_factory
-    ):
+        self, mock_session_factory: MagicMock
+    ) -> None:
         """Only Google's key is Google's work.
 
         Before the identifiers were filed by source, a Snipe-IT maintenance id
