@@ -22,6 +22,7 @@ from core_shared.models.contacts.entities import (
     ContactMethod,
     ContactNote,
     ImportantDate,
+    MethodType,
 )
 from core_shared.models.contacts.important_date_types import (
     DatePrecision,
@@ -42,6 +43,11 @@ class SubEntity(Protocol):
 
 type NaturalKey[T] = Callable[[T], Hashable]
 
+# The unique-index keys a row occupies while it reads as it does - for a
+# method, ``("email", "ann@example.com")`` and, if it is primary,
+# ``("primary", "email")``.
+type UniqueClaims[T] = Callable[[T], frozenset[Hashable]]
+
 
 @dataclass(frozen=True)
 class Reconciliation[T: SubEntity]:
@@ -61,6 +67,7 @@ def reconcile[T: SubEntity](
     incoming: Sequence[T] | None,
     *,
     natural_key: NaturalKey[T] | None = None,
+    unique_claims: UniqueClaims[T] | None = None,
 ) -> Reconciliation[T]:
     """Pair ``incoming`` against ``existing``.
 
@@ -75,6 +82,9 @@ def reconcile[T: SubEntity](
     matched on its natural key: it cannot be an edit of a row that is not
     there, nor of one it did not name. The same holds for a second submission
     naming an id another has already claimed.
+
+    With ``unique_claims``, ``updates`` come back in an order the database can
+    apply one row at a time; see :func:`_order_around_unique_keys`.
     """
     stored = list(existing or [])
     submitted = list(incoming or [])
@@ -119,7 +129,60 @@ def reconcile[T: SubEntity](
 
     deletions = [item for item in stored if id(item) not in claimed]
 
+    if unique_claims is not None and updates:
+        updates, recreated = _order_around_unique_keys(updates, unique_claims)
+        for row, item in recreated:
+            deletions.append(row)
+            unmatched.append(item)
+
     return Reconciliation(inserts=unmatched, updates=updates, deletions=deletions)
+
+
+def _order_around_unique_keys[T](
+    updates: list[tuple[T, T]], claims: UniqueClaims[T]
+) -> tuple[list[tuple[T, T]], list[tuple[T, T]]]:
+    """Order in-place updates so none takes a unique value another still holds.
+
+    Postgres checks a non-deferrable unique index row by row, and these indexes
+    cannot be deferred - they are partial. So an update that takes a value
+    (makes a method primary, makes a date the birthday, gives a row an email)
+    must run after the update that lets it go, or a valid final state is
+    refused for the order the list happened to be in. The delete-all save
+    never met this: every row was gone before any was written.
+
+    Updates are taken in submitted order whenever nothing still pending holds
+    what they take. Only values can form a cycle - two rows swapping emails -
+    since "at most one primary" or "one birthday" is only ever let go by one
+    row and taken by another. A cycle is broken by returning its first member
+    to be re-created instead: its value is released in the deletion phase and
+    taken back in the insert phase, around the updates. Nothing references a
+    method row by id, so re-creating one loses no link.
+
+    Returns the ordered updates and the ones to re-create.
+    """
+    gains = [claims(new) - claims(old) for old, new in updates]
+    losses = [claims(old) - claims(new) for old, new in updates]
+
+    remaining = list(range(len(updates)))
+    ordered: list[int] = []
+    recreated: list[int] = []
+    while remaining:
+        ready = next(
+            (
+                i
+                for i in remaining
+                if not any(gains[i] & losses[j] for j in remaining if j != i)
+            ),
+            None,
+        )
+        if ready is None:
+            ready = remaining[0]
+            recreated.append(ready)
+        else:
+            ordered.append(ready)
+        remaining.remove(ready)
+
+    return [updates[i] for i in ordered], [updates[i] for i in recreated]
 
 
 def diff_fields(
@@ -149,6 +212,28 @@ def prefixed(prefix: str, entity_id: int, changed: ChangedFields) -> ChangedFiel
     to. This is the only place it is written.
     """
     return {f"{prefix}_{entity_id}_{name}": pair for name, pair in changed.items()}
+
+
+def method_unique_claims(method: ContactMethod) -> frozenset[Hashable]:
+    """The unique indexes a method occupies.
+
+    ``ix_contact_methods_primary_unique`` - one primary per type - and
+    ``ix_contact_methods_email_unique``, on ``LOWER(BTRIM(value))`` for emails,
+    so the value is normalised the way the index normalises it.
+    """
+    keys: set[Hashable] = set()
+    if method.is_primary:
+        keys.add(("primary", method.method_type.value))
+    if method.method_type == MethodType.EMAIL:
+        keys.add(("email", method.value.strip().lower()))
+    return frozenset(keys)
+
+
+def important_date_unique_claims(date: ImportantDate) -> frozenset[Hashable]:
+    """``uq_contact_birthday``: a contact has at most one birthday."""
+    if date.date_type == ImportantDateType.BIRTHDAY:
+        return frozenset({("birthday",)})
+    return frozenset()
 
 
 def important_date_key(date: ImportantDate) -> Hashable:
@@ -262,6 +347,7 @@ class SubEntityKind[T: SubEntity]:
     separator: str
     prefix: str | None = None
     natural_key: NaturalKey[T] | None = None
+    unique_claims: UniqueClaims[T] | None = None
 
 
 METHODS: SubEntityKind[ContactMethod] = SubEntityKind(
@@ -270,6 +356,7 @@ METHODS: SubEntityKind[ContactMethod] = SubEntityKind(
     render=render_method,
     separator=", ",
     prefix=METHOD_PREFIX,
+    unique_claims=method_unique_claims,
 )
 ADDRESSES: SubEntityKind[ContactAddress] = SubEntityKind(
     aggregate_key="addresses",
@@ -291,6 +378,7 @@ IMPORTANT_DATES: SubEntityKind[ImportantDate] = SubEntityKind(
     render=render_important_date,
     separator=", ",
     natural_key=important_date_key,
+    unique_claims=important_date_unique_claims,
 )
 
 

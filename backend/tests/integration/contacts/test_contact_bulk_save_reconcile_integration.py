@@ -483,3 +483,135 @@ class TestPrimaryAndUniquenessGuards:
 
         with pytest.raises(Exception, match="(?i)email"):
             await contact_service.update_contact(saved, async_connection)
+
+
+class TestUniqueIndexesDuringASave:
+    """A valid final state must not fail because of the order the list was in.
+
+    The delete-all save never met these indexes mid-save; updating rows in
+    place does, one row at a time, so the updates have to be ordered.
+    """
+
+    @pytest.mark.asyncio
+    async def test_moving_the_primary_between_two_stored_methods(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            methods=[
+                ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value="old.primary@example.com",
+                    contact_id=0,
+                    is_primary=True,
+                ),
+                ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value="new.primary@example.com",
+                    contact_id=0,
+                ),
+            ],
+        )
+        assert saved.methods is not None
+        old, new = saved.methods
+        # The promotion comes first in the list - the order that fails when
+        # rows are updated as they come.
+        saved.methods = [
+            ContactMethod(
+                id=new.id,
+                method_type=MethodType.EMAIL,
+                value=new.value,
+                contact_id=0,
+                is_primary=True,
+            ),
+            ContactMethod(
+                id=old.id,
+                method_type=MethodType.EMAIL,
+                value=old.value,
+                contact_id=0,
+                is_primary=False,
+            ),
+        ]
+
+        updated = await contact_service.update_contact(saved, async_connection)
+
+        assert updated.methods is not None
+        primaries = {m.id: m.is_primary for m in updated.methods}
+        assert primaries == {new.id: True, old.id: False}
+
+    @pytest.mark.asyncio
+    async def test_swapping_which_stored_date_is_the_birthday(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            important_dates=[_birthday(), _anniversary()],
+        )
+        assert saved.important_dates is not None
+        by_type = {d.date_type: d for d in saved.important_dates}
+        birthday_id = by_type[ImportantDateType.BIRTHDAY].id
+        anniversary_id = by_type[ImportantDateType.WORK_ANNIVERSARY].id
+        # REST sends ids, so each row is matched by id and retyped - with the
+        # row becoming the birthday first.
+        becomes_birthday = _birthday(saved.id or 0, year=2015)
+        becomes_birthday.id = anniversary_id
+        becomes_anniversary = _anniversary(saved.id or 0, year=1990)
+        becomes_anniversary.id = birthday_id
+        saved.important_dates = [becomes_birthday, becomes_anniversary]
+
+        updated = await contact_service.update_contact(saved, async_connection)
+
+        assert updated.important_dates is not None
+        assert {d.id: d.date_type for d in updated.important_dates} == {
+            anniversary_id: ImportantDateType.BIRTHDAY,
+            birthday_id: ImportantDateType.WORK_ANNIVERSARY,
+        }
+        assert len(recorded_events.of_type("ImportantDateUpdated")) == 2
+
+    @pytest.mark.asyncio
+    async def test_swapping_two_stored_emails(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            methods=[
+                ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value="swap.one@example.com",
+                    contact_id=0,
+                    label="home",
+                ),
+                ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value="swap.two@example.com",
+                    contact_id=0,
+                    label="work",
+                ),
+            ],
+        )
+        assert saved.methods is not None
+        home, work = saved.methods
+        home.value, work.value = work.value, home.value
+
+        updated = await contact_service.update_contact(saved, async_connection)
+
+        assert updated.methods is not None
+        assert {m.label: m.value for m in updated.methods} == {
+            "home": "swap.two@example.com",
+            "work": "swap.one@example.com",
+        }

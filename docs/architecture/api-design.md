@@ -1114,6 +1114,14 @@ by a **reconcile** rather than by replacement:
   keys on the aggregate `ContactUpdated` for methods, addresses and notes, and
   `ImportantDateUpdated` for a date. A submitted item identical to the stored
   one is not written at all.
+- **In-place updates are ordered around the unique indexes.** Postgres checks
+  `ix_contact_methods_primary_unique`, `ix_contact_methods_email_unique` and
+  `uq_contact_birthday` row by row, and being partial they cannot be deferred,
+  so moving the primary flag or the birthday between two rows would fail in the
+  wrong order. A row that lets a value go is updated before the row that takes
+  it. Two rows *swapping* emails have no such order, so the first of them is
+  re-created — deleted before the updates and re-inserted after — which is safe
+  because nothing references a method row by id.
 - **An added or removed item is recorded on the list's aggregate key** —
   `contact_methods`, `addresses`, `notes` or `important_dates` on the
   `ContactUpdated` — and the per-item add events keep `affects_history=False`,

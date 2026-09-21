@@ -1167,7 +1167,12 @@ class ContactService:
         instead, since they have no row of their own in the feed. The rows come
         back in the order they were submitted.
         """
-        plan = reconcile(stored, submitted, natural_key=kind.natural_key)
+        plan = reconcile(
+            stored,
+            submitted,
+            natural_key=kind.natural_key,
+            unique_claims=kind.unique_claims,
+        )
 
         for row in plan.deletions:
             if row.id is not None:
@@ -1188,15 +1193,30 @@ class ContactService:
             if kind.prefix is not None:
                 changed.update(prefixed(kind.prefix, row.id, moved))
 
-        inserted = iter(await insert_all(plan.inserts))
-        saved: list[T] = []
-        for item in submitted:
-            row_for_item = applied.get(id(item))
-            saved.append(row_for_item if row_for_item is not None else next(inserted))
+        inserted = await insert_all(plan.inserts)
+        saved = self._in_submitted_order(submitted, plan.inserts, inserted, applied)
 
         if plan.inserts or plan.deletions:
             changed.update(aggregate_change(kind, stored or [], saved))
         return saved, changed
+
+    @staticmethod
+    def _in_submitted_order[T](
+        submitted: Sequence[T],
+        inserts: Sequence[T],
+        inserted: Sequence[T],
+        applied: dict[int, T],
+    ) -> list[T]:
+        """The resulting rows, one per submitted item, in submitted order.
+
+        Keyed by the submitted item's identity rather than by position: a row
+        re-created to break a unique-value swap joins the inserts out of the
+        order it was submitted in.
+        """
+        resulting = {
+            id(item): row for item, row in zip(inserts, inserted, strict=True)
+        } | applied
+        return [resulting[id(item)] for item in submitted]
 
     async def _sync_important_dates(
         self,
@@ -1216,7 +1236,12 @@ class ContactService:
         - rather than as a key on the aggregate. Dates that came or went are
         reported on the aggregate ``important_dates`` key, as for any list.
         """
-        plan = reconcile(stored, submitted, natural_key=IMPORTANT_DATES.natural_key)
+        plan = reconcile(
+            stored,
+            submitted,
+            natural_key=IMPORTANT_DATES.natural_key,
+            unique_claims=IMPORTANT_DATES.unique_claims,
+        )
 
         for row in plan.deletions:
             if row.id is not None:
@@ -1229,20 +1254,15 @@ class ContactService:
             )
             applied[id(incoming)] = edited
 
-        inserted = iter(
-            await self._save_contact_important_dates(
-                contact_id,
-                plan.inserts,
-                transaction,
-                changed_by,
-                source,
-                affects_history=False,
-            )
+        inserted = await self._save_contact_important_dates(
+            contact_id,
+            plan.inserts,
+            transaction,
+            changed_by,
+            source,
+            affects_history=False,
         )
-        saved: list[ImportantDate] = []
-        for item in submitted:
-            row_for_item = applied.get(id(item))
-            saved.append(row_for_item if row_for_item is not None else next(inserted))
+        saved = self._in_submitted_order(submitted, plan.inserts, inserted, applied)
 
         if plan.inserts or plan.deletions:
             return saved, aggregate_change(IMPORTANT_DATES, stored or [], saved)

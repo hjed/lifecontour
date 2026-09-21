@@ -33,6 +33,8 @@ from app.core.contacts.services.contact_subentity_sync import (
     aggregate_change,
     diff_fields,
     important_date_key,
+    important_date_unique_claims,
+    method_unique_claims,
     prefixed,
     reconcile,
     render_important_date,
@@ -474,3 +476,98 @@ class TestAggregateRendering:
         change = aggregate_change(IMPORTANT_DATES, [], [_date()])
 
         assert change == {"important_dates": ("None", "birthday:1990-03-09")}
+
+
+class TestReconcileAroundUniqueKeys:
+    """Postgres checks a non-deferrable unique index row by row, so matched
+    updates are ordered: a row lets go of a unique value before another row
+    takes it."""
+
+    def test_the_old_primary_is_demoted_before_the_new_one_is_promoted(self) -> None:
+        old_primary = _method("a@example.com", id=1, is_primary=True)
+        other = _method("b@example.com", id=2)
+        promote = _method("b@example.com", id=2, is_primary=True)
+        demote = _method("a@example.com", id=1)
+
+        result = reconcile(
+            [old_primary, other], [promote, demote], unique_claims=method_unique_claims
+        )
+
+        assert result.updates == [(old_primary, demote), (other, promote)]
+
+    def test_the_old_birthday_is_retyped_before_the_new_one(self) -> None:
+        birthday = _date(id=1)
+        anniversary = _date(id=2, date_type=ImportantDateType.WORK_ANNIVERSARY)
+        becomes_birthday = _date(id=2)
+        becomes_anniversary = _date(id=1, date_type=ImportantDateType.WORK_ANNIVERSARY)
+
+        result = reconcile(
+            [birthday, anniversary],
+            [becomes_birthday, becomes_anniversary],
+            unique_claims=important_date_unique_claims,
+        )
+
+        assert result.updates == [
+            (birthday, becomes_anniversary),
+            (anniversary, becomes_birthday),
+        ]
+
+    def test_an_email_moves_to_another_row_after_it_is_released(self) -> None:
+        """A chain rather than a cycle: one order always works."""
+        first = _method("a@example.com", id=1)
+        second = _method("b@example.com", id=2)
+        takes_a = _method("a@example.com", id=2)
+        moves_on = _method("c@example.com", id=1)
+
+        result = reconcile(
+            [first, second], [takes_a, moves_on], unique_claims=method_unique_claims
+        )
+
+        assert result.updates == [(first, moves_on), (second, takes_a)]
+
+    def test_an_email_is_compared_as_the_index_normalises_it(self) -> None:
+        """The index is on LOWER(BTRIM(value)), so a change of case is the
+        same value."""
+        first = _method("A@Example.COM", id=1)
+        second = _method("b@example.com", id=2)
+        takes_a = _method("a@example.com", id=2)
+        moves_on = _method("c@example.com", id=1)
+
+        result = reconcile(
+            [first, second], [takes_a, moves_on], unique_claims=method_unique_claims
+        )
+
+        assert result.updates == [(first, moves_on), (second, takes_a)]
+
+    def test_a_swap_is_broken_by_re_creating_one_side(self) -> None:
+        """No order of two in-place updates swaps two unique values. The first
+        row is deleted and re-inserted instead, so its value is released in the
+        deletion phase and taken back in the insert phase."""
+        first = _method("a@example.com", id=1)
+        second = _method("b@example.com", id=2)
+        first_takes_b = _method("b@example.com", id=1)
+        second_takes_a = _method("a@example.com", id=2)
+
+        result = reconcile(
+            [first, second],
+            [first_takes_b, second_takes_a],
+            unique_claims=method_unique_claims,
+        )
+
+        assert result.updates == [(second, second_takes_a)]
+        assert result.deletions == [first]
+        assert result.inserts == [first_takes_b]
+
+    def test_updates_that_share_no_unique_value_keep_their_order(self) -> None:
+        first = _method("a@example.com", id=1)
+        second = _method("b@example.com", id=2)
+        edit_second = _method("b@example.com", id=2, label="work")
+        edit_first = _method("a@example.com", id=1, label="home")
+
+        result = reconcile(
+            [first, second],
+            [edit_second, edit_first],
+            unique_claims=method_unique_claims,
+        )
+
+        assert result.updates == [(second, edit_second), (first, edit_first)]
