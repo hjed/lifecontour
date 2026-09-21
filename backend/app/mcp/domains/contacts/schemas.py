@@ -315,19 +315,44 @@ class ContactUpdateRequest(BaseModel):
         default=None, description=f"Updated {_JOB_TITLE_DESC.lower()}"
     )
 
-    email: str | None = Field(default=None, description="Updated primary email")
+    email: str | None = Field(
+        default=None,
+        description=(
+            "The contact's primary email. Edits the stored primary email in "
+            "place (or adds one); the contact's phone and other emails are "
+            "left as they are."
+        ),
+    )
 
-    phone: str | None = Field(default=None, description="Updated primary phone")
+    phone: str | None = Field(
+        default=None,
+        description=(
+            "The contact's primary phone. Edits the stored primary phone in "
+            "place (or adds one); the contact's email and other phones are "
+            "left as they are."
+        ),
+    )
 
     tags: list[str] | None = Field(
         default=None, description="Updated tags (replaces existing tags)"
     )
 
-    notes: str | None = Field(default=None, description="Additional notes to add")
+    notes: str | None = Field(
+        default=None,
+        description=(
+            "A note to add beside the contact's existing notes. Existing notes "
+            "are never removed or changed."
+        ),
+    )
 
     important_dates: list[ImportantDateInfo] | None = Field(
         default=None,
-        description="Updated list of important dates (replaces existing dates)",
+        description=(
+            "The contact's complete list of important dates. A date of the same "
+            "type as a stored one edits that date in place, so its history "
+            "shows what changed; a stored date left out of the list is removed. "
+            "Omit to leave the dates untouched."
+        ),
     )
 
     expected_version: str | None = Field(

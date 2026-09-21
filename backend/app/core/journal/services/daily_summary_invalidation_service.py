@@ -26,11 +26,16 @@ possible.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 from typing import TYPE_CHECKING, Any
 
 import structlog
 from core_shared.models.contacts.important_date_occurrence import resolve_occurrence
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
 from core_shared.models.date_window import DEFAULT_UPCOMING_DAYS_AHEAD, upcoming_window
 
 from app.core.journal.models.events import parse_event_date_range
@@ -110,15 +115,29 @@ TASK_SPAN_EVENTS = frozenset(
 #: cannot be resolved at all; see :meth:`_targets_for_deleted_task`.
 TASK_DELETED_EVENT = "TaskDeleted"
 
-#: Important-date events. The app publishes ``ImportantDateAdded`` for every
-#: surviving date whenever a contact is saved — ``update_contact`` deletes them
-#: all and re-adds them — so these fire on an add, an edit *and* a delete.
+#: Important-date events. ``ImportantDateAdded`` is a new date;
+#: ``ImportantDateUpdated`` is a date edited in place — by the per-date endpoint,
+#: or by a whole-contact save that matched it (#1524) — and carries the fields
+#: it moved as ``{field: [old, new]}``, which is what lets the date as it *used
+#: to* read be tested too.
 IMPORTANT_DATE_ADDED_EVENT = "ImportantDateAdded"
+IMPORTANT_DATE_UPDATED_EVENT = "ImportantDateUpdated"
 IMPORTANT_DATE_DELETED_EVENT = "ImportantDateDeleted"
 
-#: A contact save that changed how many dates it has. This is the **only**
-#: announcement that a date was removed: the re-add above publishes nothing for
-#: the one that went, and ``ImportantDateDeleted`` has no production caller.
+#: The fields an ``ImportantDateUpdated`` can report as moved.
+_EDITABLE_DATE_FIELDS = (
+    "date_type",
+    "precision",
+    "year",
+    "month",
+    "day",
+    "custom_date_type_id",
+)
+
+#: A contact save that added or removed dates. This is the **only**
+#: announcement that a whole-contact save removed one: the save publishes
+#: nothing for the date that went, and ``ImportantDateDeleted`` is published
+#: only by the per-date endpoint.
 CONTACT_UPDATED_EVENT = "ContactUpdated"
 
 #: Deleting a contact takes its important dates with it, by cascade, and
@@ -129,8 +148,9 @@ CONTACT_DELETED_EVENT = "ContactDeleted"
 #: The ``changed_fields`` keys that mean a contact's dates are not what the
 #: summary was generated from.
 #:
-#: ``important_dates`` is a ``"count:N"`` **string** pair, written only when the
-#: count moved. ``merged_from`` is a contact merge, which re-points the absorbed
+#: ``important_dates`` is written only when a save added or removed a date, and
+#: names the dates either side; only its presence is read. ``merged_from`` is a
+#: contact merge, which re-points the absorbed
 #: contact's date rows onto the survivor and deletes the absorbed row: the dates
 #: survive but the **name** rendered beside them does not, and a date line
 #: renders ``entry.contact.display_name``. Raised by review.
@@ -147,6 +167,7 @@ HANDLED_EVENT_TYPES = frozenset(
         JOURNAL_CONTACT_EVENT,
         TASK_DELETED_EVENT,
         IMPORTANT_DATE_ADDED_EVENT,
+        IMPORTANT_DATE_UPDATED_EVENT,
         IMPORTANT_DATE_DELETED_EVENT,
         CONTACT_UPDATED_EVENT,
         CONTACT_DELETED_EVENT,
@@ -229,6 +250,7 @@ class DailySummaryInvalidationService:
             targets = await self._targets_for_deleted_task(event_data)
         elif event_type in (
             IMPORTANT_DATE_ADDED_EVENT,
+            IMPORTANT_DATE_UPDATED_EVENT,
             IMPORTANT_DATE_DELETED_EVENT,
             CONTACT_UPDATED_EVENT,
             CONTACT_DELETED_EVENT,
@@ -436,21 +458,28 @@ class DailySummaryInvalidationService:
         come from.
 
         **Which of them?** Only those whose week the date falls in, when there
-        is a row left to ask. There usually is: ``update_contact`` re-adds every
-        date on every contact save, so without the window test editing a phone
-        number would cost an AI call for a birthday six months away. When the
-        row is gone — a deletion, or the count pair that is a deletion's only
-        announcement — there is no before-image to test and today is marked
-        unconditionally.
+        is a row left to ask - so adding a birthday six months away costs no AI
+        call. An edit is tested as it now reads *and* as it used to read: a
+        date moved out of the week leaves a stale line just as one moved in
+        leaves a missing one. When the row is gone, or the old reading cannot be
+        rebuilt - a deletion, or the aggregate row that is a whole-contact
+        save's only announcement of one - there is nothing to test and today is
+        marked unconditionally.
         """
         if event_type == CONTACT_UPDATED_EVENT and not self._touched_important_dates(
             event_data
         ):
             return frozenset()
 
-        stored = None
-        if event_type == IMPORTANT_DATE_ADDED_EVENT:
+        # ``None`` means there is nothing to test against the window.
+        readings: list[Any] | None = None
+        if event_type in (IMPORTANT_DATE_ADDED_EVENT, IMPORTANT_DATE_UPDATED_EVENT):
             stored = await self._stored_date(event_data)
+            if stored is not None:
+                readings = [stored]
+                if event_type == IMPORTANT_DATE_UPDATED_EVENT:
+                    before = self._before_edit(stored, event_data)
+                    readings = None if before is None else [stored, before]
 
         now = _utc_now()
         targets: set[InvalidationTarget] = set()
@@ -458,11 +487,12 @@ class DailySummaryInvalidationService:
             tz: ZoneInfo = await self.date_resolver.timezone_for(user_id)
             today = today_in(tz, now)
             window = upcoming_window(today, DEFAULT_UPCOMING_DAYS_AHEAD)
-            if stored is not None and (
+            if readings is not None and all(
                 resolve_occurrence(
-                    stored, first_day=window.first_day, last_day=window.last_day
+                    reading, first_day=window.first_day, last_day=window.last_day
                 )
                 is None
+                for reading in readings
             ):
                 continue
             targets.add(InvalidationTarget.for_day(user_id, today))
@@ -488,6 +518,32 @@ class DailySummaryInvalidationService:
         if not isinstance(changed_fields, dict):
             return False
         return bool(IMPORTANT_DATE_FIELDS & set(changed_fields))
+
+    @staticmethod
+    def _before_edit(stored: Any, event_data: Mapping[str, Any]) -> Any:
+        """The date as it read before this edit, or ``None`` if unknowable.
+
+        The stored row with the edit's old values put back. Rebuilt through the
+        dataclass, so its own validation decides whether those values ever made
+        a date; a payload that does not is treated as having no before-image.
+        """
+        changed_fields = event_data.get("changed_fields")
+        if not isinstance(changed_fields, dict):
+            return None
+
+        old: dict[str, Any] = {}
+        for name in _EDITABLE_DATE_FIELDS:
+            change = changed_fields.get(name)
+            if isinstance(change, (list, tuple)) and len(change) == 2:
+                old[name] = change[0]
+        try:
+            if "date_type" in old:
+                old["date_type"] = ImportantDateType(old["date_type"])
+            if "precision" in old:
+                old["precision"] = DatePrecision(old["precision"])
+            return dataclasses.replace(stored, **old)
+        except TypeError, ValueError:
+            return None
 
     async def _stored_date(self, event_data: Mapping[str, Any]) -> Any:
         """The row this event is about, or ``None`` when it cannot be read.

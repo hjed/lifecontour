@@ -45,6 +45,7 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
@@ -679,9 +680,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         2. Field-level update: Provide field_name and field_value for single field updates
 
         Updates an existing contact with validation and returns AI-friendly confirmation.
-        Supports updating contact methods, tags, and adding notes. Uses replacement
-        strategy for methods/addresses/notes - all existing ones are replaced with
-        the provided ones.
+        Only what is supplied changes: ``email`` and ``phone`` edit the
+        contact's primary method of that type and leave its other methods
+        alone, ``notes`` adds a note beside the existing ones, ``tags``
+        replaces the tag set, and ``important_dates`` is the contact's whole
+        date list - a date of the same type as a stored one edits it in place,
+        so its history shows what changed, and a stored date left out of the
+        list is removed. Omit a field to leave it untouched.
 
         To edit safely, pass the ``version`` from get_contact as
         ``expected_version``: the update is then refused, with nothing written,
@@ -763,38 +768,21 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 important_dates=None,
             )
 
-            # Add contact methods if provided (replacement strategy)
+            # The service treats a sub-resource list as the whole desired state,
+            # so the email, phone and note are named as changes instead, and
+            # the service applies them to the contact as it reads it under the
+            # row lock. A list holding just the new email would delete the
+            # phone beside it (#1524); one built from existing_contact would
+            # delete anything added since that read.
+            primary_methods: dict[MethodType, str] = {}
             if request.email:
-                if updated_contact.methods is None:
-                    updated_contact.methods = []
-                email_method = ContactMethod(
-                    method_type=MethodType.EMAIL,
-                    value=request.email,
-                    contact_id=request.contact_id,
-                    is_primary=True,
-                )
-                updated_contact.methods.append(email_method)
-
+                primary_methods[MethodType.EMAIL] = request.email
             if request.phone:
-                if updated_contact.methods is None:
-                    updated_contact.methods = []
-                phone_method = ContactMethod(
-                    method_type=MethodType.PHONE,
-                    value=request.phone,
-                    contact_id=request.contact_id,
-                    is_primary=True,
-                )
-                updated_contact.methods.append(phone_method)
-
-            # Add additional note if provided
-            if request.notes:
-                if updated_contact.notes is None:
-                    updated_contact.notes = []
-                note = ContactNote(
-                    content=request.notes,
-                    contact_id=request.contact_id,
-                )
-                updated_contact.notes.append(note)
+                primary_methods[MethodType.PHONE] = request.phone
+            subresource_merge = SubResourceMerge(
+                primary_methods=primary_methods,
+                new_notes=[request.notes] if request.notes else [],
+            )
 
             # Handle important dates if provided (replacement strategy)
             if request.important_dates is not None:
@@ -832,6 +820,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 source=Provenance.MCP,
                 tag_names=request.tags,
                 expected_etags=expected_etags,
+                subresource_merge=subresource_merge,
             )
 
         # Create AI-friendly response using shared converter

@@ -682,10 +682,11 @@ class TestContactProjectionEndToEnd:
         stream_client: StreamClient,
     ) -> None:
         """The headline correctness gate. A bulk full-contact update that adds a
-        method and a tag via delete-all-then-re-save must produce ONLY the
-        aggregate ContactUpdated rows (``contact_methods`` / ``tags`` on the
-        contact) — NOT spurious per-sub-entity "created"/per-tag markers (the
-        re-save events carry affects_history=False)."""
+        method and a tag must produce ONLY the aggregate ContactUpdated rows
+        (``contact_methods`` / ``tags`` on the contact) — NOT spurious
+        per-sub-entity "created"/per-tag markers. Neither the method nor the
+        tag matches anything stored, so the save inserts them, and an inserted
+        row's per-item event still carries affects_history=False."""
         service = self._service(async_connection)
         created = await service.create_contact(
             Contact(first_name="Bea"),
@@ -730,6 +731,121 @@ class TestContactProjectionEndToEnd:
         assert tags_rows == [("tags", "None", "work", "ui", "ui")]
         # No per-sub-entity "created" markers from the re-saved method.
         assert await _count_rows(async_connection, entity_type="contact_method") == 0
+
+    @pytest.mark.asyncio
+    async def test_bulk_update_projects_a_matched_date_edit(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """The other half of the gate above. A whole-contact save that *edits*
+        a date it matched writes the same per-field rows the per-date endpoint
+        writes — which is what MCP could not do before (#1524)."""
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(
+                first_name="Cleo",
+                important_dates=[
+                    ImportantDate(
+                        contact_id=0,
+                        date_type=ImportantDateType.BIRTHDAY,
+                        precision=DatePrecision.FULL,
+                        year=1990,
+                        month=5,
+                        day=15,
+                    )
+                ],
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        assert created.important_dates is not None
+        date_id = created.important_dates[0].id
+        assert date_id is not None
+        # Drain the create so only the edit's rows are under test.
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        # As MCP submits it: the whole date list, carrying no ids.
+        await service.update_contact(
+            Contact(
+                id=created.id,
+                first_name="Cleo",
+                important_dates=[
+                    ImportantDate(
+                        contact_id=created.id,
+                        date_type=ImportantDateType.BIRTHDAY,
+                        precision=DatePrecision.FULL,
+                        year=1991,
+                        month=5,
+                        day=15,
+                    )
+                ],
+            ),
+            async_connection,
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        rows = await _rows_for(
+            async_connection, entity_type="contact_important_date", entity_id=date_id
+        )
+        # The create's own marker, then one row for the single field the save
+        # moved — asserted as a set, so a save reporting month and day as
+        # having "changed" from themselves would fail here.
+        assert set(rows) == {
+            ("status", None, "created", "ui", "ui"),
+            ("year", "1990", "1991", "mcp", "mcp"),
+        }
+
+    @pytest.mark.asyncio
+    async def test_bulk_update_projects_a_matched_method_edit(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """A matched method edit rides the aggregate event under a
+        per-sub-entity key, so it lands on the method's own row exactly as a
+        field-level PATCH would."""
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(
+                first_name="Dara",
+                methods=[
+                    ContactMethod(
+                        method_type=MethodType.EMAIL,
+                        value="dara.before@example.com",
+                        contact_id=0,
+                    )
+                ],
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None
+        assert created.methods is not None
+        method_id = created.methods[0].id
+        assert method_id is not None
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        created.methods[0].value = "dara.after@example.com"
+        await service.update_contact(
+            created, async_connection, changed_by="ui", source=Provenance.UI
+        )
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        rows = await _rows_for(
+            async_connection, entity_type="contact_method", entity_id=method_id
+        )
+        assert set(rows) == {
+            ("status", None, "created", "ui", "ui"),
+            ("value", "dara.before@example.com", "dara.after@example.com", "ui", "ui"),
+        }
 
     @pytest.mark.asyncio
     async def test_relationship_create_projected(

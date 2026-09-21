@@ -1084,16 +1084,86 @@ DELETE /api/contacts/{contact_id}/important-dates/{date_id}
   `_rows_from_changed_fields`, so the feed shows `year: 1990 → 1991` rather
   than a bare status marker. The add and delete markers either side of it are
   unchanged. A submitted date identical to the stored one writes nothing at
-  all. MCP still edits dates through `update_contact`'s whole-list replacement
-  and so writes no such rows — issue #1524.
+  all. The whole-contact save runs the same body for a date it matches, so an
+  MCP edit writes the same rows (#1524).
 
 ### Why these exist
 
 Until LOCAL-176 the only way to change an important date was the whole-contact
-`PUT /api/contacts/{id}`, which replaces the date list wholesale: every date is
-deleted and re-inserted, so ids churn on each save and the per-item events are
-flagged `affects_history=False`. The contact detail page's Important Dates card
-was the last UI writing through that route.
+`PUT /api/contacts/{id}`, which replaced the date list wholesale: every date was
+deleted and re-inserted, so ids churned on each save and the per-item events
+were flagged `affects_history=False` — leaving an edit with no trace in the
+feed. The contact detail page's Important Dates card was the last UI writing
+through that route.
+
+## The whole-contact save reconciles its sub-resources
+
+`PUT /api/contacts/{id}` and the MCP `update_contact` tool both hand
+`ContactService.update_contact` the whole desired state of a contact's methods,
+addresses, notes, tags and important dates. Since #1524 that state is reached
+by a **reconcile** rather than by replacement:
+
+- **A submitted item is matched to a stored row** by `id` — which the REST
+  converter preserves on every nested resource — or, for an important date, by
+  its `date_type` and custom type, since the MCP schema carries no id and a
+  contact has at most one birthday. Notes are matched by id alone: content is a
+  note's payload, not a key, so a new note is never mistaken for an edit of the
+  one already there.
+- **A matched row is updated in place and keeps its id.** What moved is
+  published exactly as the per-item endpoints publish it: `method_{id}_{field}`
+  keys on the aggregate `ContactUpdated` for methods, addresses and notes, and
+  `ImportantDateUpdated` for a date. A submitted item identical to the stored
+  one is not written at all.
+- **In-place updates are ordered around the unique indexes.** Postgres checks
+  `ix_contact_methods_primary_unique`, `ix_contact_methods_email_unique` and
+  `uq_contact_birthday` row by row, and being partial they cannot be deferred,
+  so moving the primary flag or the birthday between two rows would fail in the
+  wrong order. A row that lets a value go is updated before the row that takes
+  it. Two rows *swapping* emails have no such order, so the first of them is
+  re-created — deleted before the updates and re-inserted after — which is safe
+  because nothing references a method row by id. Its edit is still reported,
+  as `method_{new_id}_value`, so both halves of a swap reach the feed.
+- **An added or removed item is recorded on the list's aggregate key** —
+  `contact_methods`, `addresses`, `notes` or `important_dates` on the
+  `ContactUpdated` — and the per-item add events keep `affects_history=False`,
+  so a bulk save still writes no spurious "created" markers (ITER12-003
+  Phase 2, locked by `test_bulk_update_produces_no_spurious_subentity_markers`).
+  The aggregate key is written **only** when the save added or removed
+  something, and it names the items either side (`birthday:1990-03-09`)
+  rather than counting them, so a same-count swap — a retyped date, a replaced
+  note — is recorded too. A matched edit is described by its per-field rows
+  alone, with no aggregate row beside it, which is what a field-level `PATCH`
+  writes. Consumers read only the key's presence: the daily-summary
+  invalidation treats it as "a date may have gone", and handles
+  `ImportantDateUpdated` itself by testing the date as it read before and
+  after the edit.
+- **Tags are the exception**: a tag has no fields of its own to edit, so a
+  submitted set still replaces the stored one and shows one aggregate `tags`
+  row.
+
+The reconcile helpers live in
+`backend/app/core/contacts/services/contact_subentity_sync.py`, which is also
+where the `{prefix}_{id}_{field}` key format the history projection decodes is
+written.
+
+**MCP names its changes; the service applies them under the row lock.** The
+tool's arguments are narrower than the service's lists — one `email`, one
+`phone`, one note — so it passes a `SubResourceMerge` rather than a list:
+`email`/`phone` edit the primary method of that type in place (or add one) and
+leave every other method alone, and `notes` appends. The service applies the
+merge to the contact as it reads it **after** taking the contact's row lock,
+which `update_contact` now always takes, as every per-item writer does. A list
+the tool built from its own earlier read would delete anything another writer
+added in between; the merge has no such window (the `tag_names` argument works
+the same way). Before #1524 the tool passed a list holding only the new value,
+which the service rightly read as the whole desired state — so setting an email
+deleted the phone, and adding a note deleted every note already there.
+`important_dates` remains the caller's whole list and `tags` the whole set, as
+their descriptions say.
+
+The tool still fills unspecified *scalar* fields (`first_name`, `company`, …)
+from its earlier read, so a concurrent edit of one of those can be overwritten;
+that predates #1524 and is tracked separately.
 
 
 ## Authentication Guidelines

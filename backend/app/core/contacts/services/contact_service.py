@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -51,6 +51,24 @@ from app.core.contacts.services.address_validation_service import (
     AddressValidationService,
 )
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.contacts.services.contact_subentity_sync import (
+    ADDRESS_PREFIX,
+    ADDRESSES,
+    IMPORTANT_DATE_FIELDS,
+    IMPORTANT_DATES,
+    METHOD_PREFIX,
+    METHODS,
+    NOTE_PREFIX,
+    NOTES,
+    ChangedFields,
+    SubEntity,
+    SubEntityKind,
+    SubResourceMerge,
+    aggregate_change,
+    diff_fields,
+    prefixed,
+    reconcile,
+)
 from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )
@@ -357,6 +375,7 @@ class ContactService:
         source: Provenance = Provenance.SYSTEM,
         tag_names: list[str] | None = None,
         expected_etags: Sequence[str] | None = None,
+        subresource_merge: SubResourceMerge | None = None,
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -365,8 +384,14 @@ class ContactService:
         in a single database transaction. Attach methods, addresses, and notes to the
         Contact entity before calling this method for optimal transaction handling.
 
-        Note: This implementation uses a replacement strategy for methods/addresses/notes.
-        All existing methods/addresses/notes are replaced with the provided ones.
+        An attached list is the whole desired state for that sub-resource, and
+        ``None`` leaves it alone. Reaching that state is a reconcile, not a
+        replacement: a submitted item matching a stored row - by id, or for an
+        important date by its type - edits that row in place, keeping its id
+        and publishing what moved, so the activity feed can report an edit as
+        an edit. What is missing from the list is deleted and what is new is
+        inserted. Tags are the exception: a tag has no fields of its own, so a
+        submitted set still replaces the stored one.
 
         Args:
             contact: Contact entity with ID and optional attached methods, addresses, and notes
@@ -375,6 +400,11 @@ class ContactService:
                 to be at, from ``If-Match`` (REST) or ``expected_version``
                 (MCP). ``None`` writes unconditionally, as every caller did
                 before conditional writes existed.
+            subresource_merge: Optional changes to apply over the stored
+                methods and notes - set a primary email, add a note - instead
+                of a whole list. Applied to the contact as it is read under the
+                row lock, so a row added concurrently is not lost. Refused if
+                ``contact`` also carries a list for the same sub-resource.
 
         Returns:
             The updated Contact with all attached entities and assigned IDs
@@ -389,12 +419,25 @@ class ContactService:
         """
         if contact.id is None:
             raise ContactValidationError("id", "Contact ID is required for updates")
+        if subresource_merge is not None and (
+            clashes := subresource_merge.conflicts(contact)
+        ):
+            raise ValueError(
+                "A whole list and a merge were both given for: " + ", ".join(clashes)
+            )
 
         async def _update_operation() -> Contact:
             if contact.id is None:
                 raise ContactValidationError(
                     "id", "Contact ID is required for update operation"
                 )
+
+            # Parent lock before anything the save builds on is read, as every
+            # per-item writer takes it first: a method or note added
+            # concurrently cannot land between the read below and the write,
+            # where the reconcile would delete it for being missing from the
+            # list.
+            await self.contact_repo.lock(contact.id)
 
             # Refuse a stale write first: tag resolution below find-or-creates
             # rows, so checking any later would leave a refused update having
@@ -418,6 +461,8 @@ class ContactService:
 
             # Get current contact and calculate changes
             current_contact = await self._get_existing_contact(contact.id)
+            if subresource_merge is not None:
+                subresource_merge.apply_to(contact, current_contact)
             changed_fields = self._calculate_changed_fields(current_contact, contact)
 
             # Validate and save basic contact fields
@@ -431,10 +476,13 @@ class ContactService:
                     "id", "Contact ID is required after save operation"
                 )
 
-            # Handle related entities update
-            saved_entities = await self._handle_update_relations(
+            # Handle related entities update. A matched sub-entity edit is
+            # reported on the aggregate event alongside the contact's own
+            # fields, exactly as a field-level endpoint would report it.
+            saved_entities, subentity_changes = await self._handle_update_relations(
                 contact_id, contact, current_contact, transaction, changed_by, source
             )
+            changed_fields.update(subentity_changes)
 
             # Build complete contact with related entities
             complete_contact = self._build_complete_contact_for_update(
@@ -642,7 +690,9 @@ class ContactService:
             # the "method_{id}_{field}" key back to the contact_method row.
             event = ContactUpdated(
                 contact_id,
-                {f"method_{method_id}_{field_name}": (old_value, new_value)},
+                prefixed(
+                    METHOD_PREFIX, method_id, {field_name: (old_value, new_value)}
+                ),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -732,7 +782,9 @@ class ContactService:
             # decodes "address_{id}_{field}" to the contact_address row.
             event = ContactUpdated(
                 contact_id,
-                {f"address_{address_id}_{field_name}": (old_value, new_value)},
+                prefixed(
+                    ADDRESS_PREFIX, address_id, {field_name: (old_value, new_value)}
+                ),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -822,7 +874,7 @@ class ContactService:
             # decodes "note_{id}_{field}" to the contact_note row.
             event = ContactUpdated(
                 contact_id,
-                {f"note_{note_id}_{field_name}": (old_value, new_value)},
+                prefixed(NOTE_PREFIX, note_id, {field_name: (old_value, new_value)}),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -866,71 +918,10 @@ class ContactService:
             "nick_name", current_contact.nick_name, updated_contact.nick_name
         )
 
-        # Check method changes
-        if updated_contact.methods is not None:
-            current_method_strs = sorted(
-                [
-                    f"{m.method_type.value}:{m.value}"
-                    for m in (current_contact.methods or [])
-                    if m.method_type and m.value
-                ]
-            )
-            updated_method_strs = sorted(
-                [
-                    f"{m.method_type.value}:{m.value}"
-                    for m in updated_contact.methods
-                    if m.method_type and m.value
-                ]
-            )
-
-            if current_method_strs != updated_method_strs:
-                changed_fields["contact_methods"] = (
-                    ", ".join(current_method_strs) if current_method_strs else "None",
-                    ", ".join(updated_method_strs) if updated_method_strs else "None",
-                )
-
-        # Check address changes
-        if updated_contact.addresses is not None:
-
-            def _format_address(a: ContactAddress) -> str:
-                parts = [
-                    a.street_line_1,
-                    a.street_line_2,
-                    a.locality,
-                    a.region,
-                    a.postal_code,
-                    a.country_code,
-                ]
-                return ", ".join(str(p) for p in parts if p) or "Unknown Address"
-
-            current_addr_strs = sorted(
-                [_format_address(a) for a in (current_contact.addresses or [])]
-            )
-            updated_addr_strs = sorted(
-                [_format_address(a) for a in updated_contact.addresses]
-            )
-
-            if current_addr_strs != updated_addr_strs:
-                changed_fields["addresses"] = (
-                    " | ".join(current_addr_strs) if current_addr_strs else "None",
-                    " | ".join(updated_addr_strs) if updated_addr_strs else "None",
-                )
-
-        if updated_contact.notes is not None and len(
-            current_contact.notes or []
-        ) != len(updated_contact.notes):
-            changed_fields["notes"] = (
-                f"count:{len(current_contact.notes or [])}",
-                f"count:{len(updated_contact.notes)}",
-            )
-
-        if updated_contact.important_dates is not None and len(
-            current_contact.important_dates or []
-        ) != len(updated_contact.important_dates):
-            changed_fields["important_dates"] = (
-                f"count:{len(current_contact.important_dates or [])}",
-                f"count:{len(updated_contact.important_dates)}",
-            )
+        # Methods, addresses, notes and important dates are reported by the
+        # reconcile that applies them (_handle_update_relations): only it knows
+        # which items were matched and edited - those have per-field rows of
+        # their own - and which came and went.
 
         # Check tag changes
         if updated_contact.tags is not None:
@@ -1072,53 +1063,88 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
-    ) -> dict[str, list[Any]]:
-        """Handle updating related entities for contact update."""
-        # Remove existing relations if new data is provided
-        await self._remove_existing_relations(contact_id, contact, current_contact)
+    ) -> tuple[dict[str, list[Any]], ChangedFields]:
+        """Bring the contact's sub-entities to the submitted state.
 
-        # Save new related entities (only if new data is provided)
+        A submitted list is the whole desired state, but applying it by
+        deleting every row and re-inserting it leaves an *edit*
+        indistinguishable from a re-save. Each list is reconciled instead:
+        what is gone is deleted, what moved is updated in place and published
+        as the edit it is, and what is new is inserted with its per-item
+        marker suppressed - the aggregate ContactUpdated row remains the feed
+        for a bulk add, as it has been since ITER12-003 Phase 2.
+
+        Returns the resulting rows and the sub-entity field changes to carry
+        on that aggregate event.
+        """
+        # Tags are a set membership rather than an editable row: there is
+        # nothing to diff, so they are still removed and re-assigned.
+        await self._remove_existing_tags(contact_id, contact, current_contact)
+
         saved_entities: dict[str, list[Any]] = {
             "methods": [],
             "addresses": [],
             "notes": [],
             "tags": [],
         }
+        subentity_changes: ChangedFields = {}
 
-        # ITER12-003 Phase 2: this is a bulk delete-all-then-re-save. The aggregate
-        # ContactUpdated row (computed by _calculate_changed_fields) is the feed, so
-        # the per-item add/assign events are flagged affects_history=False and the
-        # history projection skips them — preventing spurious per-item "created"/tag
-        # markers the dual-write never wrote. Search still consumes the events.
         if contact.methods is not None:
-            saved_entities["methods"] = await self._save_contact_methods(
+            saved_entities["methods"], moved = await self._sync_subentities(
                 contact_id,
                 contact.methods,
-                transaction,
-                changed_by,
-                source,
-                affects_history=False,
+                current_contact.methods,
+                kind=METHODS,
+                delete_one=self.contact_repo.delete_method,
+                update_one=self.contact_repo.update_method,
+                insert_all=lambda new: self._save_contact_methods(
+                    contact_id,
+                    new,
+                    transaction,
+                    changed_by,
+                    source,
+                    affects_history=False,
+                ),
             )
+            subentity_changes.update(moved)
 
         if contact.addresses is not None:
-            saved_entities["addresses"] = await self._save_contact_addresses(
+            saved_entities["addresses"], moved = await self._sync_subentities(
                 contact_id,
                 contact.addresses,
-                transaction,
-                changed_by,
-                source,
-                affects_history=False,
+                current_contact.addresses,
+                kind=ADDRESSES,
+                delete_one=self.contact_repo.delete_address,
+                update_one=self.contact_repo.update_address,
+                insert_all=lambda new: self._save_contact_addresses(
+                    contact_id,
+                    new,
+                    transaction,
+                    changed_by,
+                    source,
+                    affects_history=False,
+                ),
             )
+            subentity_changes.update(moved)
 
         if contact.notes is not None:
-            saved_entities["notes"] = await self._save_contact_notes(
+            saved_entities["notes"], moved = await self._sync_subentities(
                 contact_id,
                 contact.notes,
-                transaction,
-                changed_by,
-                source,
-                affects_history=False,
+                current_contact.notes,
+                kind=NOTES,
+                delete_one=self.contact_repo.delete_note,
+                update_one=self.contact_repo.update_note,
+                insert_all=lambda new: self._save_contact_notes(
+                    contact_id,
+                    new,
+                    transaction,
+                    changed_by,
+                    source,
+                    affects_history=False,
+                ),
             )
+            subentity_changes.update(moved)
 
         if contact.tags is not None:
             saved_entities["tags"] = await self._save_contact_tags(
@@ -1131,18 +1157,204 @@ class ContactService:
             )
 
         if contact.important_dates is not None:
-            saved_entities[
-                "important_dates"
-            ] = await self._save_contact_important_dates(
+            saved_entities["important_dates"], moved = await self._sync_important_dates(
                 contact_id,
                 contact.important_dates,
+                current_contact.important_dates,
                 transaction,
                 changed_by,
                 source,
-                affects_history=False,
             )
+            subentity_changes.update(moved)
 
-        return saved_entities
+        return saved_entities, subentity_changes
+
+    async def _sync_subentities[T: SubEntity](
+        self,
+        contact_id: int,
+        submitted: Sequence[T],
+        stored: Sequence[T] | None,
+        *,
+        kind: SubEntityKind[T],
+        delete_one: Callable[[int], Awaitable[None]],
+        update_one: Callable[[T], Awaitable[T]],
+        insert_all: Callable[[list[T]], Awaitable[list[T]]],
+    ) -> tuple[list[T], ChangedFields]:
+        """Reconcile one sub-entity list, reporting what moved.
+
+        A matched edit comes back keyed for the aggregate ContactUpdated -
+        "method_5_value" - which is exactly what the field-level endpoints
+        publish, so the feed reads the same whichever surface made the change.
+        Items that came or went are reported on the list's aggregate key
+        instead, since they have no row of their own in the feed. The rows come
+        back in the order they were submitted.
+        """
+        plan = reconcile(
+            stored,
+            submitted,
+            natural_key=kind.natural_key,
+            unique_claims=kind.unique_claims,
+        )
+
+        # A re-created row gives up its unique values here, before any update
+        # takes them, and takes its new ones back with the inserts.
+        for row in [*plan.deletions, *(stored_row for stored_row, _ in plan.recreated)]:
+            if row.id is not None:
+                await delete_one(row.id)
+
+        changed: ChangedFields = {}
+        applied: dict[int, T] = {}
+        for row, incoming in plan.updates:
+            incoming.id = row.id
+            incoming.contact_id = contact_id
+            moved = diff_fields(row, incoming, kind.fields)
+            if not moved or row.id is None:
+                # Nothing moved: writing anyway would bump the row's updated_at
+                # and the contact's ETag for an edit nobody made.
+                applied[id(incoming)] = row
+                continue
+            applied[id(incoming)] = await update_one(incoming)
+            if kind.prefix is not None:
+                changed.update(prefixed(kind.prefix, row.id, moved))
+
+        inserts = [*plan.inserts, *(incoming for _, incoming in plan.recreated)]
+        inserted = await insert_all(inserts)
+        saved = self._in_submitted_order(submitted, inserts, inserted, applied)
+
+        # A re-created row is still an edit: report what moved on it, under the
+        # id it has now, as an in-place update would have been reported.
+        by_submission = {
+            id(item): row for item, row in zip(inserts, inserted, strict=True)
+        }
+        for stored_row, incoming in plan.recreated:
+            new_row = by_submission[id(incoming)]
+            moved = diff_fields(stored_row, incoming, kind.fields)
+            if moved and kind.prefix is not None and new_row.id is not None:
+                changed.update(prefixed(kind.prefix, new_row.id, moved))
+
+        if plan.inserts or plan.deletions:
+            changed.update(aggregate_change(kind, stored or [], saved))
+        return saved, changed
+
+    @staticmethod
+    def _in_submitted_order[T](
+        submitted: Sequence[T],
+        inserts: Sequence[T],
+        inserted: Sequence[T],
+        applied: dict[int, T],
+    ) -> list[T]:
+        """The resulting rows, one per submitted item, in submitted order.
+
+        Keyed by the submitted item's identity rather than by position: a row
+        re-created to break a unique-value swap joins the inserts out of the
+        order it was submitted in.
+        """
+        resulting = {
+            id(item): row for item, row in zip(inserts, inserted, strict=True)
+        } | applied
+        return [resulting[id(item)] for item in submitted]
+
+    async def _sync_important_dates(
+        self,
+        contact_id: int,
+        submitted: Sequence[ImportantDate],
+        stored: Sequence[ImportantDate] | None,
+        transaction: AsyncConnection,
+        changed_by: str,
+        source: Provenance,
+    ) -> tuple[list[ImportantDate], ChangedFields]:
+        """Reconcile the important dates, publishing a real edit for a match.
+
+        MCP submits dates carrying no ids, so a match is made on the date's
+        type: a submitted birthday is an edit of the stored one. That edit is
+        published as ImportantDateUpdated - the same event the per-date
+        endpoint publishes, which the projection has a handler of its own for
+        - rather than as a key on the aggregate. Dates that came or went are
+        reported on the aggregate ``important_dates`` key, as for any list.
+        """
+        plan = reconcile(
+            stored,
+            submitted,
+            natural_key=IMPORTANT_DATES.natural_key,
+            unique_claims=IMPORTANT_DATES.unique_claims,
+        )
+
+        # The birthday slot is let go by one row and taken by another, never
+        # swapped, so no date is ever re-created; were one to be, it is applied
+        # as a deletion and an insert, and the aggregate row records it.
+        recreated_rows = [stored_row for stored_row, _ in plan.recreated]
+        for row in [*plan.deletions, *recreated_rows]:
+            if row.id is not None:
+                await self.contact_repo.delete_important_date(row.id)
+
+        applied: dict[int, ImportantDate] = {}
+        for row, incoming in plan.updates:
+            edited, _ = await self._edit_important_date(
+                contact_id, row, incoming, transaction, changed_by, source
+            )
+            applied[id(incoming)] = edited
+
+        inserts = [*plan.inserts, *(incoming for _, incoming in plan.recreated)]
+        inserted = await self._save_contact_important_dates(
+            contact_id,
+            inserts,
+            transaction,
+            changed_by,
+            source,
+            affects_history=False,
+        )
+        saved = self._in_submitted_order(submitted, inserts, inserted, applied)
+
+        if plan.inserts or plan.deletions or plan.recreated:
+            return saved, aggregate_change(IMPORTANT_DATES, stored or [], saved)
+        return saved, {}
+
+    async def _edit_important_date(
+        self,
+        contact_id: int,
+        existing: ImportantDate,
+        incoming: ImportantDate,
+        transaction: AsyncConnection,
+        changed_by: str,
+        source: Provenance,
+    ) -> tuple[ImportantDate, ChangedFields]:
+        """Edit one stored date in place, if anything moved.
+
+        Shared by the per-date endpoint and the whole-contact save, so an edit
+        reads the same in the feed whichever of them made it. Returns the row
+        and what moved, which is empty when the submitted date is identical to
+        the stored one.
+        """
+        incoming.id = existing.id
+        incoming.contact_id = contact_id
+        # Ensure type constraints are satisfied by running python validation.
+        # ImportantDate is a plain dataclass, so a caller can mutate one into
+        # a state its constructor would have refused.
+        incoming.__post_init__()
+
+        changed = diff_fields(existing, incoming, IMPORTANT_DATE_FIELDS)
+
+        # Nothing moved. Writing anyway would bump the row's updated_at and
+        # the contact's ETag, and publishing anyway would put an empty edit in
+        # the feed and re-index for nothing.
+        if not changed or existing.id is None:
+            return existing, {}
+
+        saved_date = await self.contact_repo.update_important_date(incoming)
+
+        # The history projection turns changed_fields into per-field rows.
+        await self.event_publisher.publish(
+            ImportantDateUpdated(
+                contact_id,
+                existing.id,
+                incoming.date_type.value,
+                changed,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return saved_date, changed
 
     def _build_complete_contact_for_update(
         self,
@@ -1431,32 +1643,19 @@ class ContactService:
 
         return saved_dates
 
-    async def _remove_existing_relations(
+    async def _remove_existing_tags(
         self, contact_id: int, contact: Contact, current_contact: Contact
     ) -> None:
-        """Remove existing relations when updating contact."""
-        # Only replace methods if new methods are provided
-        if contact.methods is not None:
-            await self.contact_repo.delete_all_methods(contact_id)
+        """Clear the contact's tags, when the update supplies a new set.
 
-        # Only replace addresses if new addresses are provided
-        if contact.addresses is not None:
-            await self.contact_repo.delete_all_addresses(contact_id)
-
-        # Only replace notes if new notes are provided
-        if contact.notes is not None:
-            await self.contact_repo.delete_all_notes(contact_id)
-
-        # Only replace tags if new tags are provided
+        The other sub-entities are reconciled rather than replaced; a tag has
+        no fields of its own to edit, so a submitted set still replaces the
+        stored one wholesale.
+        """
         if contact.tags is not None:
-            # Remove all existing tags first
             for current_tag in current_contact.tags or []:
                 if current_tag.id is not None:
                     await self.contact_repo.remove_tag(contact_id, current_tag.id)
-
-        # Only replace dates if new dates are provided
-        if contact.important_dates is not None:
-            await self.contact_repo.delete_all_important_dates(contact_id)
 
     async def delete_contact(
         self,
@@ -2015,36 +2214,15 @@ class ContactService:
             if not existing:
                 raise ContactValidationError("date_id", "Date not found")
 
-            # Ensure type constraints are satisfied by running python validation.
-            # ImportantDate is a plain dataclass, so a caller can mutate one into
-            # a state its constructor would have refused.
-            date.id = date_id
-            date.contact_id = contact_id
-            date.__post_init__()
-
-            changed_fields = self._calculate_important_date_changed_fields(
-                existing, date
+            # The edit itself - revalidate, diff, write and publish - is the
+            # body the whole-contact save runs for a matched date, so the feed
+            # reads the same whichever surface made the change.
+            saved_date, date_changes = await self._edit_important_date(
+                contact_id, existing, date, transaction, changed_by, source
             )
-
-            # Nothing moved. Writing anyway would bump the row's updated_at and
-            # the contact's ETag, and publishing anyway would put an empty edit
-            # in the feed and re-index for nothing.
-            if not changed_fields:
+            if not date_changes:
                 return existing
 
-            saved_date = await self.contact_repo.update_important_date(date)
-
-            # Publish event; the history projection turns changed_fields into rows.
-            event = ImportantDateUpdated(
-                contact_id,
-                date_id,
-                date.date_type.value,
-                changed_fields,
-                source=source,
-                changed_by=changed_by,
-                transaction=transaction,
-            )
-            await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
 
             return saved_date
@@ -2053,34 +2231,6 @@ class ContactService:
             ImportantDate,
             await self._execute_with_retry(_update_date_operation, transaction),
         )
-
-    @staticmethod
-    def _calculate_important_date_changed_fields(
-        existing: ImportantDate, updated: ImportantDate
-    ) -> dict[str, Any]:
-        """Diff two important dates into ``{field: (old, new)}`` pairs.
-
-        Enums are compared and reported by value, because the result is carried
-        in an outbox event payload and has to survive JSON.
-        """
-        changed: dict[str, Any] = {}
-
-        def _add_if_changed(field: str, old: Any, new: Any) -> None:
-            if old != new:
-                changed[field] = (old, new)
-
-        _add_if_changed("date_type", existing.date_type.value, updated.date_type.value)
-        _add_if_changed("precision", existing.precision.value, updated.precision.value)
-        _add_if_changed("year", existing.year, updated.year)
-        _add_if_changed("month", existing.month, updated.month)
-        _add_if_changed("day", existing.day, updated.day)
-        _add_if_changed(
-            "custom_date_type_id",
-            existing.custom_date_type_id,
-            updated.custom_date_type_id,
-        )
-
-        return changed
 
     async def delete_contact_important_date(
         self,
