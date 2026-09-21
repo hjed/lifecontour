@@ -541,8 +541,8 @@ class TestReconcileAroundUniqueKeys:
 
     def test_a_swap_is_broken_by_re_creating_one_side(self) -> None:
         """No order of two in-place updates swaps two unique values. The first
-        row is deleted and re-inserted instead, so its value is released in the
-        deletion phase and taken back in the insert phase."""
+        row is re-created instead - deleted before the updates, inserted after -
+        and keeps its pairing, because it is still an edit the feed reports."""
         first = _method("a@example.com", id=1)
         second = _method("b@example.com", id=2)
         first_takes_b = _method("b@example.com", id=1)
@@ -555,8 +555,9 @@ class TestReconcileAroundUniqueKeys:
         )
 
         assert result.updates == [(second, second_takes_a)]
-        assert result.deletions == [first]
-        assert result.inserts == [first_takes_b]
+        assert result.recreated == [(first, first_takes_b)]
+        assert result.deletions == []
+        assert result.inserts == []
 
     def test_updates_that_share_no_unique_value_keep_their_order(self) -> None:
         first = _method("a@example.com", id=1)

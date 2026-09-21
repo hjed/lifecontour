@@ -1174,7 +1174,9 @@ class ContactService:
             unique_claims=kind.unique_claims,
         )
 
-        for row in plan.deletions:
+        # A re-created row gives up its unique values here, before any update
+        # takes them, and takes its new ones back with the inserts.
+        for row in [*plan.deletions, *(stored_row for stored_row, _ in plan.recreated)]:
             if row.id is not None:
                 await delete_one(row.id)
 
@@ -1193,8 +1195,20 @@ class ContactService:
             if kind.prefix is not None:
                 changed.update(prefixed(kind.prefix, row.id, moved))
 
-        inserted = await insert_all(plan.inserts)
-        saved = self._in_submitted_order(submitted, plan.inserts, inserted, applied)
+        inserts = [*plan.inserts, *(incoming for _, incoming in plan.recreated)]
+        inserted = await insert_all(inserts)
+        saved = self._in_submitted_order(submitted, inserts, inserted, applied)
+
+        # A re-created row is still an edit: report what moved on it, under the
+        # id it has now, as an in-place update would have been reported.
+        by_submission = {
+            id(item): row for item, row in zip(inserts, inserted, strict=True)
+        }
+        for stored_row, incoming in plan.recreated:
+            new_row = by_submission[id(incoming)]
+            moved = diff_fields(stored_row, incoming, kind.fields)
+            if moved and kind.prefix is not None and new_row.id is not None:
+                changed.update(prefixed(kind.prefix, new_row.id, moved))
 
         if plan.inserts or plan.deletions:
             changed.update(aggregate_change(kind, stored or [], saved))
@@ -1243,7 +1257,11 @@ class ContactService:
             unique_claims=IMPORTANT_DATES.unique_claims,
         )
 
-        for row in plan.deletions:
+        # The birthday slot is let go by one row and taken by another, never
+        # swapped, so no date is ever re-created; were one to be, it is applied
+        # as a deletion and an insert, and the aggregate row records it.
+        recreated_rows = [stored_row for stored_row, _ in plan.recreated]
+        for row in [*plan.deletions, *recreated_rows]:
             if row.id is not None:
                 await self.contact_repo.delete_important_date(row.id)
 
@@ -1254,17 +1272,18 @@ class ContactService:
             )
             applied[id(incoming)] = edited
 
+        inserts = [*plan.inserts, *(incoming for _, incoming in plan.recreated)]
         inserted = await self._save_contact_important_dates(
             contact_id,
-            plan.inserts,
+            inserts,
             transaction,
             changed_by,
             source,
             affects_history=False,
         )
-        saved = self._in_submitted_order(submitted, plan.inserts, inserted, applied)
+        saved = self._in_submitted_order(submitted, inserts, inserted, applied)
 
-        if plan.inserts or plan.deletions:
+        if plan.inserts or plan.deletions or plan.recreated:
             return saved, aggregate_change(IMPORTANT_DATES, stored or [], saved)
         return saved, {}
 

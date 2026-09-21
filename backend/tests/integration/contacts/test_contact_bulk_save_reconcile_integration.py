@@ -615,3 +615,16 @@ class TestUniqueIndexesDuringASave:
             "home": "swap.two@example.com",
             "work": "swap.one@example.com",
         }
+        # Both halves of the swap are edits and both reach the feed - including
+        # the row re-created to break the cycle, keyed by its new id.
+        ids = {m.label: m.id for m in updated.methods}
+        changed = _changed_fields(recorded_events)
+        assert changed[f"method_{ids['home']}_value"] == (
+            "swap.one@example.com",
+            "swap.two@example.com",
+        )
+        assert changed[f"method_{ids['work']}_value"] == (
+            "swap.two@example.com",
+            "swap.one@example.com",
+        )
+        assert "contact_methods" not in changed

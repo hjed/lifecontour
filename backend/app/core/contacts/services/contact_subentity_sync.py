@@ -13,7 +13,7 @@ and what moved.
 """
 
 from collections.abc import Callable, Hashable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
@@ -54,12 +54,17 @@ class Reconciliation[T: SubEntity]:
     """What a submitted list means for the rows already stored.
 
     ``updates`` pairs each stored row with the submission that claimed it, in
-    the order the submission arrived.
+    an order the database can apply one row at a time. ``recreated`` pairs are
+    edits too, but ones no order can apply in place - one side of a swap of
+    unique values - so the stored row is deleted with the deletions and the
+    submission inserted with the inserts, while the pairing is kept so the edit
+    can still be reported.
     """
 
     inserts: list[T]
     updates: list[tuple[T, T]]
     deletions: list[T]
+    recreated: list[tuple[T, T]] = field(default_factory=list)
 
 
 def reconcile[T: SubEntity](
@@ -129,13 +134,13 @@ def reconcile[T: SubEntity](
 
     deletions = [item for item in stored if id(item) not in claimed]
 
+    recreated: list[tuple[T, T]] = []
     if unique_claims is not None and updates:
         updates, recreated = _order_around_unique_keys(updates, unique_claims)
-        for row, item in recreated:
-            deletions.append(row)
-            unmatched.append(item)
 
-    return Reconciliation(inserts=unmatched, updates=updates, deletions=deletions)
+    return Reconciliation(
+        inserts=unmatched, updates=updates, deletions=deletions, recreated=recreated
+    )
 
 
 def _order_around_unique_keys[T](
@@ -156,7 +161,8 @@ def _order_around_unique_keys[T](
     row and taken by another. A cycle is broken by returning its first member
     to be re-created instead: its value is released in the deletion phase and
     taken back in the insert phase, around the updates. Nothing references a
-    method row by id, so re-creating one loses no link.
+    method row by id, so re-creating one loses no link, and the pairing is kept
+    so its edit is still reported - under the id the row has afterwards.
 
     Returns the ordered updates and the ones to re-create.
     """

@@ -1121,7 +1121,8 @@ by a **reconcile** rather than by replacement:
   wrong order. A row that lets a value go is updated before the row that takes
   it. Two rows *swapping* emails have no such order, so the first of them is
   re-created — deleted before the updates and re-inserted after — which is safe
-  because nothing references a method row by id.
+  because nothing references a method row by id. Its edit is still reported,
+  as `method_{new_id}_value`, so both halves of a swap reach the feed.
 - **An added or removed item is recorded on the list's aggregate key** —
   `contact_methods`, `addresses`, `notes` or `important_dates` on the
   `ContactUpdated` — and the per-item add events keep `affects_history=False`,
