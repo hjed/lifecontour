@@ -203,3 +203,52 @@ class TestPushTaskStillDelegates:
         mock_push.assert_awaited_once()
         assert result["status"] == "success"
         assert result["pushed_count"] == 2
+
+
+class TestPushIsCommittedBeforeThePull:
+    """Augment review of #1551: the push's etags must not ride on the pull."""
+
+    @pytest.mark.asyncio
+    async def test_successful_push_is_committed_before_the_pull_starts(
+        self,
+    ) -> None:
+        """Google keeps a write once accepted, so its etag is committed at once."""
+        from worker import _push_before_pull
+
+        session = AsyncMock()
+        with patch(
+            "worker._push_pending_local_contacts",
+            new_callable=AsyncMock,
+            return_value=_push_result(),
+        ):
+            await _push_before_pull(
+                session=session,
+                client=AsyncMock(),
+                google_account_email="test@example.com",
+            )
+
+        session.commit.assert_awaited_once()
+        session.rollback.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failed_push_is_rolled_back_so_the_pull_gets_a_clean_session(
+        self,
+    ) -> None:
+        """A push that died on a database error would poison the pull's session."""
+        from worker import _push_before_pull
+
+        session = AsyncMock()
+        with patch(
+            "worker._push_pending_local_contacts",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ):
+            result = await _push_before_pull(
+                session=session,
+                client=AsyncMock(),
+                google_account_email="test@example.com",
+            )
+
+        assert result["push_failed"] is True
+        session.rollback.assert_awaited_once()
+        session.commit.assert_not_awaited()

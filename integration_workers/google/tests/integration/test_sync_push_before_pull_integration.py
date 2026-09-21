@@ -31,7 +31,15 @@ _REMOTE = "people/c-push-before-pull"
 def _ctx(db_session: AsyncSession) -> dict[str, Any]:
     @asynccontextmanager
     async def factory() -> AsyncIterator[AsyncSession]:
-        yield db_session
+        # Mirror a real session: an exception escaping the ``async with``
+        # discards whatever was not committed. The fixture joins the test
+        # transaction with SAVEPOINTs, so committed work survives this rollback
+        # exactly as it would in production.
+        try:
+            yield db_session
+        except BaseException:
+            await db_session.rollback()
+            raise
 
     return {
         "session_factory": factory,
@@ -233,18 +241,21 @@ class TestSyncPushesPendingChangesFirst:
     async def test_a_failing_push_does_not_stop_the_pull(
         self, db_session: AsyncSession, contact_edited_since_last_sync: int
     ) -> None:
-        """Inbound sync must survive a Google write outage."""
+        """Inbound sync must survive a Google write outage.
+
+        This drives the real failure path rather than patching the push out:
+        the contact-group listing fails, which the outbound push treats as fatal
+        (its strict lookup raises, since a partial mapping would strip
+        memberships) while the inbound transformer tolerates it (its lenient
+        lookup only costs tags on import). So the push fails and the pull still
+        reaches ``list_connections``.
+        """
         mock_client = _mock_google_client()
         mock_client.list_contact_groups.side_effect = RuntimeError("Google is down")
 
         with (
             patch("worker.GoogleAuthService"),
             patch("worker.GoogleAPIClient", return_value=mock_client),
-            patch(
-                "worker._push_pending_local_contacts",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("Google is down"),
-            ),
         ):
             result = await sync_google_contacts(
                 ctx=_ctx(db_session),
@@ -255,4 +266,43 @@ class TestSyncPushesPendingChangesFirst:
 
         assert result["status"] == "success"
         assert result["push_failed"] is True
+        mock_client.update_contact.assert_not_called()
         mock_client.list_connections.assert_awaited()
+
+    async def test_pushed_etag_survives_a_failing_pull(
+        self, db_session: AsyncSession, contact_edited_since_last_sync: int
+    ) -> None:
+        """Augment review of #1551: commit the push before pulling.
+
+        Google keeps a write the moment it accepts it. If the stored etag were
+        only committed with the pull, a failing pull would roll it back and the
+        next push would go out against a stale etag, conflict, and let the
+        following inbound event overwrite a newer local edit.
+        """
+        mock_client = _mock_google_client()
+        mock_client.list_connections.side_effect = RuntimeError("pull failed")
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            result = await sync_google_contacts(
+                ctx=_ctx(db_session),
+                google_account_email=_EMAIL,
+                user_id=1,
+                sync_type="incremental",
+            )
+
+        assert result["status"] == "error"
+        mock_client.update_contact.assert_called_once()
+
+        stored = await db_session.execute(
+            text(
+                """
+                SELECT version_hash FROM sync_metadata
+                WHERE integration_source = 'google' AND internal_id = :cid
+                """
+            ),
+            {"cid": contact_edited_since_last_sync},
+        )
+        assert stored.scalar_one() == "etag-after-push"

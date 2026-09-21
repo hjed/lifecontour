@@ -1897,6 +1897,13 @@ async def _push_before_pull(
     idempotency check skips that contact and the local edit survives to be
     pushed on the next cycle.
 
+    The push owns its own commit. Google keeps a write the moment it accepts it,
+    so the etags recorded for those writes are committed before the pull starts
+    rather than riding on the pull's transaction: a failing pull would otherwise
+    roll them back, and the next push would go out against a stale etag. A
+    failed push is rolled back instead, so a database error cannot leave the
+    pull a poisoned session.
+
     Returns:
         ``pushed_count`` and ``push_*`` counters to merge into the sync metrics,
         with ``push_failed`` recording whether the push raised.
@@ -1908,6 +1915,7 @@ async def _push_before_pull(
             google_account_email=google_account_email,
         )
     except Exception as e:  # noqa: BLE001
+        await session.rollback()
         logger.error(
             "Pushing local contact changes failed, continuing with inbound sync",
             google_account_email=google_account_email,
@@ -1915,6 +1923,8 @@ async def _push_before_pull(
             error_type=type(e).__name__,
         )
         return {"pushed_count": 0, "push_failed": True}
+
+    await session.commit()
 
     return {
         "pushed_count": push_result.get("pushed_count", 0),
