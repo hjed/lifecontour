@@ -260,6 +260,41 @@ class TestMatchedImportantDate:
         assert recorded_events.of_type("ImportantDateUpdated") == []
         assert len(recorded_events.of_type("ImportantDateAdded")) == 1
 
+    @pytest.mark.asyncio
+    async def test_date_edits_are_published_in_the_order_they_were_submitted(
+        self,
+        contact_service: ContactService,
+        async_connection: AsyncConnection,
+        recorded_events: RecordingEventPublisher,
+    ) -> None:
+        """An id-less date matched on its type, submitted before one matched by
+        id, is still published first - ids are matched in an earlier pass, but
+        that is not the order the caller asked for."""
+        saved = await _contact_with(
+            contact_service,
+            async_connection,
+            recorded_events,
+            important_dates=[_birthday(), _anniversary()],
+        )
+        assert saved.important_dates is not None
+        by_type = {d.date_type: d for d in saved.important_dates}
+        birthday_id = by_type[ImportantDateType.BIRTHDAY].id
+        anniversary_id = by_type[ImportantDateType.WORK_ANNIVERSARY].id
+        edited_anniversary = _anniversary(saved.id or 0, year=2016)
+        edited_anniversary.id = anniversary_id
+        saved.important_dates = [
+            _birthday(saved.id or 0, year=1991),
+            edited_anniversary,
+        ]
+
+        await contact_service.update_contact(saved, async_connection)
+
+        published = recorded_events.of_type("ImportantDateUpdated")
+        assert [e.event_data["date_id"] for e in published] == [
+            birthday_id,
+            anniversary_id,
+        ]
+
 
 class TestMatchedMethodAddressAndNote:
     @pytest.mark.asyncio
