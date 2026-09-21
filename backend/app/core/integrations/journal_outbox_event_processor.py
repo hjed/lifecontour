@@ -85,6 +85,10 @@ EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
 # worker's past-event skip buffer (all-day events are midnight-normalised).
 _SERIES_DELETION_BUFFER = timedelta(days=1)
 
+# Integration source of Snipe-IT maintenance imports. Must equal
+# ``INBOUND_SYNC_CHANGED_BY`` in the Snipe-IT worker.
+_SNIPEIT_MAINTENANCE_SOURCE = "snipeit_maintenance"
+
 # Maps an inbound sync event's integration_source to the history Provenance
 # recorded for the journal changes it produces.
 _PROVENANCE_BY_INTEGRATION_SOURCE: dict[str, Provenance] = {
@@ -267,6 +271,18 @@ class JournalOutboxEventProcessor:
             event_type=event.event_type,
         )
 
+        if event.event_type in (
+            EVENT_TYPE_JOURNAL_EVENT_CREATED,
+            EVENT_TYPE_JOURNAL_EVENT_UPDATED,
+        ) and await self._is_superseded_snipeit_maintenance(event):
+            # Terminal, not an error: raising would only have the stream
+            # redeliver an event that can never become the latest again.
+            return {
+                "status": "skipped",
+                "reason": "superseded",
+                "event_type": event.event_type,
+            }
+
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_CREATED:
             return await self._process_journal_created(event)
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_UPDATED:
@@ -281,6 +297,58 @@ class JournalOutboxEventProcessor:
         raise JournalOutboxEventProcessingError(
             f"Unknown journal event type: {event.event_type}"
         )
+
+    async def _is_superseded_snipeit_maintenance(self, event: OutboxEvent) -> bool:
+        """Has a newer event for this Snipe-IT maintenance replaced ``event``?
+
+        The Snipe-IT worker records every maintenance event's ``version_hash``
+        on the record's sync row, in the same transaction it enqueues the event
+        — so the row always names the latest event sent for the record. The
+        stream cannot promise to deliver them in that order: an event delivered
+        and not acknowledged before its consumer died waits in the pending list,
+        and the consumer reads new events before it reclaims pending ones.
+        Applying such an event late would put the record's older state over the
+        journal, and nothing would correct it, since the row already says the
+        journal is current.
+
+        An event is therefore applied only while the row still records its
+        hash. With no row at all, the record was deleted after the event was
+        sent, and applying it would bring back a journal for a record that is
+        no longer there.
+
+        Other sources return ``False``: Strava also sends a ``version_hash``
+        but keys its sync rows differently, so the row would not be found.
+        """
+        payload = JournalSyncEventData.model_validate(event.event_data)
+        if payload.integration_source != _SNIPEIT_MAINTENANCE_SOURCE:
+            return False
+
+        result = await self.connection.execute(
+            text("""
+                SELECT version_hash
+                FROM sync_metadata
+                WHERE integration_source = :integration_source
+                  AND external_id = :external_id
+            """),
+            {
+                "integration_source": _SNIPEIT_MAINTENANCE_SOURCE,
+                "external_id": payload.external_event_id,
+            },
+        )
+        row = result.fetchone()
+        sent_hash = payload.journal_data.get("version_hash")
+        if row is not None and row.version_hash == sent_hash:
+            return False
+
+        logger.info(
+            "Skipping a Snipe-IT maintenance event a newer one has replaced",
+            event_id=event.id,
+            event_type=event.event_type,
+            external_event_id=payload.external_event_id,
+            sent_hash=sent_hash,
+            recorded_hash=row.version_hash if row is not None else None,
+        )
+        return True
 
     async def _process_journal_created(self, event: OutboxEvent) -> dict[str, Any]:
         """

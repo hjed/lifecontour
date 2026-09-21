@@ -2304,8 +2304,8 @@ class TestAnUnansweredImportRecovers:
     ) -> None:
         """The backend answers a create in seconds, so a fresh row is still pending.
 
-        Importing it would be a second journal for the record the create is
-        about, which is the duplicate the raise exists to prevent.
+        Sending another create now would only race the one on its way, so the
+        record is failed and left for the next sync to look at again.
         """
         await _an_import_whose_journal_is_gone(
             async_connection, maintenance_id=17, age_seconds=0

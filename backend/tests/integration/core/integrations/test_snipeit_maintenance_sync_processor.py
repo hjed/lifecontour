@@ -48,6 +48,8 @@ def _maintenance_event(
     *,
     maintenance_type: str = "routine maintenance",
     existing_journal_id: int | None = None,
+    title: str = "Split Canyoneroo 50 -> 34 + 15",
+    version_hash: str | None = None,
 ) -> OutboxEvent:
     """A ``journal_event.created``/``.updated`` shaped like the Snipe-IT worker's payload.
 
@@ -61,7 +63,7 @@ def _maintenance_event(
         "calendar_id": SNIPEIT_MAINTENANCE_CALENDAR_ID,
         "journal_data": {
             "user_id": USER_ID,
-            "title": "Split Canyoneroo 50 -> 34 + 15",
+            "title": title,
             "content": "",
             "event_date_range_start": "2026-09-11T00:00:00+00:00",
             "event_date_range_end": "2026-09-11T00:00:00+00:00",
@@ -70,7 +72,7 @@ def _maintenance_event(
                 "maintenance_type": maintenance_type,
             },
             "journal_types": ["GEAR_MAINTENANCE"],
-            "version_hash": f"maintenance-hash-{sync_action}",
+            "version_hash": version_hash or f"maintenance-hash-{sync_action}",
         },
         "calendar_info_data": {"calendar_id": SNIPEIT_MAINTENANCE_CALENDAR_ID},
         "sync_timestamp": datetime.now(UTC).isoformat(),
@@ -87,6 +89,44 @@ def _maintenance_event(
     )
 
 
+async def _record_sent(connection: AsyncConnection, event: OutboxEvent) -> None:
+    """Write the sync row the worker writes in the same transaction as ``event``.
+
+    The worker never enqueues a maintenance event without recording its hash on
+    the record's sync row, so the processor can rely on that row saying which
+    event for the record is the latest.
+    """
+    event_data: dict[str, Any] = event.event_data  # type: ignore[assignment]
+    await connection.execute(
+        text(
+            """
+            INSERT INTO sync_metadata
+                (integration_source, external_id, last_synced_at, version_hash,
+                 sync_status, retry_count, created_at, updated_at)
+            VALUES
+                ('snipeit_maintenance', :external_id, now(), :version_hash,
+                 'success', 0, now(), now())
+            ON CONFLICT (integration_source, external_id)
+            DO UPDATE SET version_hash = EXCLUDED.version_hash
+            """
+        ),
+        {
+            "external_id": event_data["external_event_id"],
+            "version_hash": event_data["journal_data"]["version_hash"],
+        },
+    )
+
+
+async def _send(
+    processor: JournalOutboxEventProcessor,
+    connection: AsyncConnection,
+    event: OutboxEvent,
+) -> dict[str, Any]:
+    """Send ``event`` as the worker does, then process it straight away."""
+    await _record_sent(connection, event)
+    return await processor.process_event(event)
+
+
 async def _import_edited_maintenance(
     connection: AsyncConnection,
     *,
@@ -100,8 +140,8 @@ async def _import_edited_maintenance(
     """
     gear_item_id = await _create_gear_item(connection)
     processor = build_processor(connection)
-    created = await processor.process_event(
-        _maintenance_event(gear_item_id, maintenance_id=17)
+    created = await _send(
+        processor, connection, _maintenance_event(gear_item_id, maintenance_id=17)
     )
     journal_id = int(created["journal_id"])
     await connection.execute(
@@ -146,8 +186,10 @@ class TestSnipeItMaintenanceImportLink:
         gear_item_id = await _create_gear_item(async_connection)
         processor = build_processor(async_connection)
 
-        result = await processor.process_event(
-            _maintenance_event(gear_item_id, maintenance_id=17)
+        result = await _send(
+            processor,
+            async_connection,
+            _maintenance_event(gear_item_id, maintenance_id=17),
         )
 
         links = await async_connection.execute(
@@ -185,13 +227,15 @@ class TestSnipeItMaintenanceResyncKeepsLocalFields:
             async_connection, activity_types=["canyoning"]
         )
 
-        await processor.process_event(
+        await _send(
+            processor,
+            async_connection,
             _maintenance_event(
                 gear_item_id,
                 maintenance_id=17,
                 maintenance_type="upgrading gear",
                 existing_journal_id=journal_id,
-            )
+            ),
         )
 
         row = await _maintenance_row(async_connection, journal_id)
@@ -208,13 +252,15 @@ class TestSnipeItMaintenanceResyncKeepsLocalFields:
             retirement_reason="Core shot",
         )
 
-        await processor.process_event(
+        await _send(
+            processor,
+            async_connection,
             _maintenance_event(
                 gear_item_id,
                 maintenance_id=17,
                 maintenance_type="retiring gear",
                 existing_journal_id=journal_id,
-            )
+            ),
         )
 
         row = await _maintenance_row(async_connection, journal_id)
@@ -230,10 +276,12 @@ class TestSnipeItMaintenanceResyncKeepsLocalFields:
         gear_item_id = await _create_gear_item(async_connection)
         processor = build_processor(async_connection)
 
-        result = await processor.process_event(
+        result = await _send(
+            processor,
+            async_connection,
             _maintenance_event(
                 gear_item_id, maintenance_id=17, maintenance_type="retiring gear"
-            )
+            ),
         )
 
         rows = await async_connection.execute(
@@ -244,3 +292,84 @@ class TestSnipeItMaintenanceResyncKeepsLocalFields:
             {"journal_id": result["journal_id"]},
         )
         assert rows.fetchall() == []
+
+
+async def _journal_titles(connection: AsyncConnection) -> list[str]:
+    """The titles of every journal imported from a Snipe-IT maintenance."""
+    result = await connection.execute(
+        text(
+            """
+            SELECT j.title
+            FROM journals j
+            JOIN journal_external_event_links l ON l.journal_id = j.id
+            WHERE l.calendar_id = :calendar_id
+            ORDER BY j.id
+            """
+        ),
+        {"calendar_id": SNIPEIT_MAINTENANCE_CALENDAR_ID},
+    )
+    return [row.title for row in result]
+
+
+@pytest.mark.integration
+class TestOnlyTheLatestSnipeItEventApplies:
+    """An event a newer one for the same record has replaced is not applied.
+
+    The worker records each event's hash on the record's sync row in the same
+    transaction it enqueues the event, so the row always names the latest. The
+    stream cannot promise delivery in that order: a create delivered and not
+    acknowledged before its consumer died sits in the pending list, and the
+    consumer reads new events before it reclaims pending ones. Applying such an
+    event late put a record's older state over the journal, and nothing
+    corrected it — the row's hash said the journal was already current.
+    """
+
+    async def test_an_event_overtaken_by_a_newer_one_is_skipped(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The order a consumer outage delivers them in: newest first."""
+        gear_item_id = await _create_gear_item(async_connection)
+        processor = build_processor(async_connection)
+        original = _maintenance_event(
+            gear_item_id, maintenance_id=17, version_hash="as-first-imported"
+        )
+        recovery = _maintenance_event(
+            gear_item_id,
+            maintenance_id=17,
+            title="Re-taped the sheath",
+            version_hash="as-edited-in-snipeit",
+        )
+        # Both were sent, in order; the row names the later one.
+        await _record_sent(async_connection, original)
+        await _record_sent(async_connection, recovery)
+
+        await processor.process_event(recovery)
+        late = await processor.process_event(original)
+
+        assert late["status"] == "skipped"
+        assert await _journal_titles(async_connection) == ["Re-taped the sheath"]
+
+    async def test_an_event_for_a_record_no_longer_synced_is_skipped(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A record whose row has gone was deleted after its event was sent.
+
+        Applying the event would bring back a journal for a record that is no
+        longer in Snipe-IT.
+        """
+        gear_item_id = await _create_gear_item(async_connection)
+        processor = build_processor(async_connection)
+        event = _maintenance_event(gear_item_id, maintenance_id=17)
+        await _record_sent(async_connection, event)
+        await async_connection.execute(
+            text(
+                "DELETE FROM sync_metadata"
+                " WHERE integration_source = 'snipeit_maintenance'"
+                "   AND external_id = 'snipeit_maint:17'"
+            )
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        assert await _journal_titles(async_connection) == []

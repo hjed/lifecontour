@@ -289,15 +289,15 @@ INBOUND_SYNC_CHANGED_BY = "snipeit_maintenance"
 # nothing else does, since a push of an imported journal deliberately leaves
 # the row alone — so its age is how long that event has gone unanswered.
 #
-# **It must outlast the inbound consumer's redelivery budget**, which is what
-# ``test_the_import_grace_outlasts_the_streams_redelivery_budget`` pins. An
-# event the backend has not finished with is either retried or dead-lettered
-# within ``retry_min_idle_ms × max_delivery_count`` (five minutes on the shared
-# defaults), and a dead letter is never replayed. Importing inside that window
-# would race a create still due to be delivered, and the redelivery — converted
-# to an update by the link the import just wrote — would put the record's older
-# state back with nothing to correct it afterwards, since the row's hash by
-# then says the journal is up to date.
+# This only decides whether to wait or to import; nothing depends on it for
+# correctness. No length of grace could: a create delivered and not
+# acknowledged before the backend's consumer died can arrive after any amount
+# of time, once that consumer is back. What keeps it from overwriting the
+# journal the import creates is the backend, which applies a maintenance event
+# only while this row still records that event's hash (see
+# ``JournalOutboxEventProcessor._is_superseded_snipeit_maintenance``). The
+# grace just keeps a sync from re-sending a create the backend is about to
+# answer anyway.
 IMPORT_LINK_GRACE_SECONDS = 900
 
 
@@ -489,10 +489,10 @@ async def _recorded_maintenance(session: Any, journal_id: int) -> str | None:
 def _unanswered_create_has_expired(meta_row: Any) -> bool:
     """Has this row waited too long for the journal link its create promised?
 
-    ``True`` means the create will never be answered — the journal it made was
-    deleted, or the event was lost — so the record belongs to nothing and is
-    imported again. A row whose age cannot be read is treated as still waiting:
-    retrying costs a sync, while importing wrongly costs a duplicate journal.
+    ``True`` means the create has gone unanswered long enough to count as never
+    coming — the journal it made was deleted, or the event was lost — so the
+    record belongs to nothing and is imported again. A row whose age cannot be
+    read is treated as still waiting, which costs no more than a later sync.
     """
     age_seconds = getattr(meta_row, "age_seconds", None)
     if age_seconds is None:
@@ -1193,9 +1193,10 @@ class SnipeItSyncService:
                     # been deleted, taking the link with it. The row looks the
                     # same, so they are told apart by how long it has waited.
                     if not _unanswered_create_has_expired(existing_meta):
-                        # Still plausibly in flight. An update needs the journal
-                        # id, and a second create would duplicate the journal,
-                        # so fail the record and let the next sync look again.
+                        # Still plausibly in flight, so there is no journal to
+                        # update yet. Sending another create now would only race
+                        # the one the backend is about to answer, so fail the
+                        # record and let the next sync look again.
                         raise RuntimeError(
                             "Outbox creation event pending, cannot update yet"
                         )
