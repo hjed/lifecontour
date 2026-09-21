@@ -881,9 +881,24 @@ async def _ensure_google_groups_exist(
     return updated_mapping
 
 
+class UnresolvedTagGroupsError(Exception):
+    """Raised when a tag's Google contact group could not be found or created.
+
+    Pushing without the membership would acknowledge a change Google never
+    received, so the event path raises this to have the stream redeliver it.
+    """
+
+    def __init__(self, tag_names: list[str]) -> None:
+        self.tag_names = tag_names
+        super().__init__(
+            f"No Google contact group could be resolved for tags: {tag_names}"
+        )
+
+
 async def _resolve_group_mapping_for_tags(
     client: GoogleAPIClient,
     tag_names: list[str],
+    require_all_tags: bool = False,
 ) -> dict[str, str]:
     """Resolve local tag names to Google contact-group resource names.
 
@@ -901,8 +916,17 @@ async def _resolve_group_mapping_for_tags(
     would look groupless and be created again. Raising leaves the stream event
     unacknowledged for retry; the cron's push-before-pull logs it and moves on.
 
+    Group *creation* failures are a separate question, answered per caller by
+    ``require_all_tags``. ``_ensure_google_groups_exist`` skips a tag whose group
+    it could not create. The event path passes ``True``: pushing without that
+    membership would acknowledge a change Google never received, so it raises
+    for a stream redelivery instead. The cron push leaves it ``False``, because
+    a tag Google persistently rejects must not block every other contact.
+
     Raises:
         Exception: If any page of the contact-group listing fails.
+        UnresolvedTagGroupsError: If ``require_all_tags`` and a tag still has
+            no group after creation was attempted.
     """
     forward_mapping = await _fetch_contact_group_mapping(client)
     reverse_mapping = _build_reverse_group_mapping(forward_mapping)
@@ -910,11 +934,20 @@ async def _resolve_group_mapping_for_tags(
     if not tag_names:
         return reverse_mapping
 
-    return await _ensure_google_groups_exist(
+    mapping = await _ensure_google_groups_exist(
         client=client,
         tag_names=tag_names,
         existing_groups=reverse_mapping,
     )
+
+    if require_all_tags:
+        # Case-insensitive, matching how tags resolve to memberships.
+        resolved = {name.lower() for name in mapping}
+        unresolved = [name for name in tag_names if name.lower() not in resolved]
+        if unresolved:
+            raise UnresolvedTagGroupsError(unresolved)
+
+    return mapping
 
 
 async def _create_contact_in_google(
@@ -3318,7 +3351,7 @@ async def process_contact_event(
                     # Groups are per Google account, so the mapping is resolved
                     # inside the loop even though the tag names are not.
                     group_name_to_resource = await _resolve_group_mapping_for_tags(
-                        client=client, tag_names=tag_names
+                        client=client, tag_names=tag_names, require_all_tags=True
                     )
 
                     result = await _push_contact_to_google_for_event(

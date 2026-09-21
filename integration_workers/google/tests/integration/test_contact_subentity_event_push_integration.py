@@ -492,6 +492,39 @@ class TestPushDoesNotDropGoogleOnlyState:
 
 
 @pytest.mark.asyncio
+class TestUnresolvableTagGroupIsRetried:
+    """Augment review of #1549: a failed group creation must not be acked.
+
+    Swallowed, the push went ahead without the tag's membership and advanced
+    ``last_synced_at``, so the tag silently never reached Google.
+    """
+
+    async def test_failed_group_creation_pushes_nothing_and_raises(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        from worker import UnresolvedTagGroupsError
+
+        contact_id = synced_contact["contact_id"]
+        # No existing group for "Colleagues", and creating one fails.
+        mock_client = _mock_google_client(groups={})
+        mock_client.create_contact_group.side_effect = RuntimeError("quota")
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+            pytest.raises(UnresolvedTagGroupsError, match="Colleagues"),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="TagAssigned",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        mock_client.update_contact.assert_not_called()
+        assert await _stored_version_hash(db_session, contact_id) == "etag-before"
+
+
+@pytest.mark.asyncio
 class TestDeletingTheLastValueClearsGoogle:
     """Augment review of #1548: a deletion must name the field it empties.
 

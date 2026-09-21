@@ -1113,3 +1113,125 @@ class TestGroupLookupFailureIsNotDestructive:
                 )
 
         mock_push.assert_not_called()
+
+
+class TestUnresolvedTagGroupsOnTheEventPath:
+    """Augment review of #1549: a failed group *creation* was swallowed.
+
+    ``_ensure_google_groups_exist`` logs a ``create_contact_group`` failure and
+    returns a mapping without that tag. The event push then succeeded without
+    the membership, advanced ``last_synced_at`` and acknowledged the event, so
+    the tag never reached Google until the contact changed again.
+
+    The event path now requires every tag to resolve and raises otherwise, so
+    the stream redelivers the event (bounded by the consumer's dead-letter
+    limit). The cron path stays tolerant: a tag Google persistently rejects
+    must not block every other contact's push.
+    """
+
+    @pytest.mark.asyncio
+    async def test_strict_resolution_raises_for_a_tag_left_unmapped(self) -> None:
+        from worker import UnresolvedTagGroupsError, _resolve_group_mapping_for_tags
+
+        with (
+            patch(
+                "worker._fetch_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={"contactGroups/abc123": "Friends"},
+            ),
+            patch(
+                "worker._ensure_google_groups_exist",
+                new_callable=AsyncMock,
+                # "Work" could not be created, so it is missing from the result.
+                return_value={"Friends": "contactGroups/abc123"},
+            ),
+        ):
+            with pytest.raises(UnresolvedTagGroupsError, match="Work"):
+                await _resolve_group_mapping_for_tags(
+                    client=AsyncMock(),
+                    tag_names=["Friends", "Work"],
+                    require_all_tags=True,
+                )
+
+    @pytest.mark.asyncio
+    async def test_tolerant_resolution_returns_the_partial_mapping(self) -> None:
+        """The default keeps the cron path's skip-and-continue behaviour."""
+        from worker import _resolve_group_mapping_for_tags
+
+        with (
+            patch(
+                "worker._fetch_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={"contactGroups/abc123": "Friends"},
+            ),
+            patch(
+                "worker._ensure_google_groups_exist",
+                new_callable=AsyncMock,
+                return_value={"Friends": "contactGroups/abc123"},
+            ),
+        ):
+            result = await _resolve_group_mapping_for_tags(
+                client=AsyncMock(), tag_names=["Friends", "Work"]
+            )
+
+        assert result == {"Friends": "contactGroups/abc123"}
+
+    @pytest.mark.asyncio
+    async def test_case_variant_group_counts_as_resolved(self) -> None:
+        """Tags match groups case-insensitively, as the membership transform does."""
+        from worker import _resolve_group_mapping_for_tags
+
+        with (
+            patch(
+                "worker._fetch_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={"contactGroups/abc123": "Friends"},
+            ),
+            patch(
+                "worker._ensure_google_groups_exist",
+                new_callable=AsyncMock,
+                return_value={"Friends": "contactGroups/abc123"},
+            ),
+        ):
+            result = await _resolve_group_mapping_for_tags(
+                client=AsyncMock(), tag_names=["friends"], require_all_tags=True
+            )
+
+        assert result == {"Friends": "contactGroups/abc123"}
+
+    @pytest.mark.asyncio
+    async def test_event_path_requires_every_tag_to_resolve(self) -> None:
+        """process_contact_event opts into strict resolution."""
+        from worker import process_contact_event
+
+        mock_sync_row = MagicMock()
+        mock_sync_row.external_id = "people/c123"
+        mock_sync_row.version_hash = "etag-old"
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=mock_sync_row,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+            tag_names=["Friends"],
+        )
+
+        with (
+            patch(
+                "worker._resolve_group_mapping_for_tags",
+                new_callable=AsyncMock,
+                return_value={"Friends": "contactGroups/abc123"},
+            ) as mock_resolve,
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "updated"},
+            ),
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
+        ):
+            await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="TagAssigned",
+                event_data={"contact_id": 42, "source": "ui"},
+            )
+
+        assert mock_resolve.call_args[1]["require_all_tags"] is True
