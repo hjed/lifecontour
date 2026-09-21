@@ -1,7 +1,5 @@
 """Integration tests for important date service methods."""
 
-from collections.abc import Sequence
-
 import pytest
 from core_shared.models.contacts.entities import Contact, ImportantDate
 from core_shared.models.contacts.exceptions import ContactValidationError
@@ -11,62 +9,11 @@ from core_shared.models.contacts.important_date_types import (
 )
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
-from app.core.contacts.models.repositories import (
-    ContactEventPublisher,
-    DomainEventProtocol,
-)
 from app.core.contacts.services.contact_service import ContactService
-
-
-class RecordingEventPublisher(ContactEventPublisher):
-    """Captures published events so a test can assert on the payload."""
-
-    def __init__(self) -> None:
-        self.events: list[DomainEventProtocol] = []
-
-    async def publish(self, event: DomainEventProtocol) -> None:
-        self.events.append(event)
-
-    async def publish_batch(self, events: Sequence[DomainEventProtocol]) -> None:
-        self.events.extend(events)
-
-    def of_type(self, event_type: str) -> list[DomainEventProtocol]:
-        """Every captured event of one type, in publication order."""
-        return [e for e in self.events if e.event_type == event_type]
-
-
-def _build_contact_service(
-    connection: AsyncConnection, event_publisher: ContactEventPublisher
-) -> ContactService:
-    """Assemble a ContactService over the real repositories."""
-    from app.core.contacts.adapters.sql.contact_field_history_repository import (
-        SqlContactFieldHistoryRepository,
-    )
-    from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
-    from app.core.contacts.services.address_validation_service import (
-        AddressValidationService,
-    )
-    from app.core.contacts.services.contact_history_service import ContactHistoryService
-    from app.core.contacts.services.contact_validation_service import (
-        ContactValidationService,
-    )
-    from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
-
-    contact_repo = SqlContactRepository(connection=connection)
-    tag_repo = SqlTagRepository(connection=connection)
-    history_repo = SqlContactFieldHistoryRepository(connection=connection)
-
-    return ContactService(
-        contact_repo=contact_repo,
-        tag_repo=tag_repo,
-        history_repo=history_repo,
-        event_publisher=event_publisher,
-        address_validation_service=AddressValidationService(),
-        contact_validation_service=ContactValidationService(contact_repo),
-        history_service=ContactHistoryService(history_repo),
-        tag_hierarchy_service=TagHierarchyService(tag_repo),
-    )
+from tests.integration.contacts.contact_service_harness import (
+    RecordingEventPublisher,
+    build_contact_service,
+)
 
 
 @pytest.fixture
@@ -80,49 +27,13 @@ def recording_contact_service(
     async_connection: AsyncConnection, recorded_events: RecordingEventPublisher
 ) -> ContactService:
     """A ContactService whose published events can be inspected."""
-    return _build_contact_service(async_connection, recorded_events)
+    return build_contact_service(async_connection, recorded_events)
 
 
 @pytest.fixture
-def contact_service(
-    async_connection: AsyncConnection,
-) -> ContactService:
-    from app.core.contacts.adapters.sql.contact_field_history_repository import (
-        SqlContactFieldHistoryRepository,
-    )
-    from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
-    from app.core.contacts.models.repositories import ContactEventPublisher
-    from app.core.contacts.services.address_validation_service import (
-        AddressValidationService,
-    )
-    from app.core.contacts.services.contact_history_service import ContactHistoryService
-    from app.core.contacts.services.contact_validation_service import (
-        ContactValidationService,
-    )
-    from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
-
-    class MockEventPublisher(ContactEventPublisher):
-        async def publish(self, event, connection=None):
-            pass
-
-        async def publish_batch(self, events, connection=None):
-            pass
-
-    contact_repo = SqlContactRepository(connection=async_connection)
-    tag_repo = SqlTagRepository(connection=async_connection)
-    history_repo = SqlContactFieldHistoryRepository(connection=async_connection)
-    event_publisher = MockEventPublisher()
-
-    return ContactService(
-        contact_repo=contact_repo,
-        tag_repo=tag_repo,
-        history_repo=history_repo,
-        event_publisher=event_publisher,
-        address_validation_service=AddressValidationService(),
-        contact_validation_service=ContactValidationService(contact_repo),
-        history_service=ContactHistoryService(history_repo),
-        tag_hierarchy_service=TagHierarchyService(tag_repo),
-    )
+def contact_service(async_connection: AsyncConnection) -> ContactService:
+    """A ContactService whose events go nowhere."""
+    return build_contact_service(async_connection, RecordingEventPublisher())
 
 
 @pytest.mark.asyncio

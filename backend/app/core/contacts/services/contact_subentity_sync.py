@@ -25,9 +25,10 @@ type ChangedFields = dict[str, tuple[Any, Any]]
 
 
 class SubEntity(Protocol):
-    """A contact sub-entity: a row of its own, with its own id."""
+    """A contact sub-entity: a row of its own, belonging to one contact."""
 
     id: int | None
+    contact_id: int
 
 
 type NaturalKey[T] = Callable[[T], Hashable]
