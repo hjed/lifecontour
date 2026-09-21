@@ -22,12 +22,14 @@ def _make_ctx(session_factory: Any = None) -> dict[str, Any]:
 def _mock_session_factory(
     sync_row: Any = None,
     users: list[Any] | None = None,
+    tag_names: list[str] | None = None,
 ) -> tuple[MagicMock, AsyncMock]:
-    """Build a mock session factory with sync_metadata + user_google_auth results.
+    """Build a mock session factory with the queries the handler runs.
 
-    The new code executes queries in this order:
+    The code executes queries in this order:
       1. sync_metadata lookup (fetchone)
       2. user_google_auth lookup (fetchall)
+      3. the contact's tag names (fetchall), skipped for ContactDeleted
 
     Returns:
         (factory, mock_session) — the factory to pass to _make_ctx and
@@ -45,9 +47,16 @@ def _mock_session_factory(
     mock_users_result = MagicMock()
     mock_users_result.fetchall.return_value = users or []
 
+    # tag-name result — rows expose the recursive CTE's `name` column
+    mock_tags_result = MagicMock()
+    mock_tags_result.fetchall.return_value = [
+        MagicMock(name=name) for name in tag_names or []
+    ]
+
     mock_session.execute.side_effect = [
         mock_sync_result,  # 1st call: sync_metadata
         mock_users_result,  # 2nd call: user_google_auth
+        mock_tags_result,  # 3rd call: contact tag names
     ]
 
     mock_factory = MagicMock()
@@ -844,3 +853,160 @@ class TestNewlyRoutedContactEvents:
         assert call_kwargs["contact_id"] == 42
         assert call_kwargs["sync_action"] == "update"
         assert call_kwargs["external_id"] == "people/c123"
+
+
+class TestEventPushSendsTagMemberships:
+    """LOCAL-177: the event path never built a Google contact-group mapping.
+
+    Without one ``_transform_contact_to_google_person`` omits ``memberships``
+    entirely, so a tag change could not reach Google even once the event was
+    routed. The mapping is resolved per Google account, creating any group a
+    local tag needs.
+    """
+
+    @pytest.mark.asyncio
+    async def test_push_receives_a_group_mapping(self) -> None:
+        """process_contact_event resolves the mapping and hands it to the push."""
+        from worker import process_contact_event
+
+        mock_sync_row = MagicMock()
+        mock_sync_row.external_id = "people/c123"
+        mock_sync_row.version_hash = "etag-old"
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=mock_sync_row,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._load_tag_names_for_contact",
+                new_callable=AsyncMock,
+                return_value=["Friends"],
+            ),
+            patch(
+                "worker._resolve_group_mapping_for_tags",
+                new_callable=AsyncMock,
+                return_value={"Friends": "contactGroups/abc123"},
+            ) as mock_resolve,
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "updated"},
+            ) as mock_push,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="TagAssigned",
+                event_data={"contact_id": 42, "source": "ui"},
+            )
+
+        assert result["status"] == "success"
+        assert mock_resolve.call_args[1]["tag_names"] == ["Friends"]
+        assert mock_push.call_args[1]["group_name_to_resource"] == {
+            "Friends": "contactGroups/abc123"
+        }
+
+    @pytest.mark.asyncio
+    async def test_delete_event_resolves_no_group_mapping(self) -> None:
+        """A delete needs no groups, so it makes no contactGroups API calls."""
+        from worker import process_contact_event
+
+        mock_sync_row = MagicMock()
+        mock_sync_row.external_id = "people/c123"
+        mock_sync_row.version_hash = "etag-old"
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=mock_sync_row,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._resolve_group_mapping_for_tags", new_callable=AsyncMock
+            ) as mock_resolve,
+            patch(
+                "worker._delete_contact_from_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "deleted"},
+            ),
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactDeleted",
+                event_data={"contact_id": 42, "source": "ui"},
+            )
+
+        assert result["status"] == "success"
+        mock_resolve.assert_not_called()
+
+
+class TestResolveGroupMappingForTags:
+    """The shared tag-name → Google group resolution used by both push paths."""
+
+    @pytest.mark.asyncio
+    async def test_returns_reverse_mapping_and_creates_missing_groups(self) -> None:
+        """Existing groups are reversed by name; a missing one is created."""
+        from worker import _resolve_group_mapping_for_tags
+
+        mock_client = AsyncMock()
+
+        with (
+            patch(
+                "worker._build_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={"contactGroups/abc123": "Friends"},
+            ),
+            patch(
+                "worker._ensure_google_groups_exist",
+                new_callable=AsyncMock,
+                return_value={
+                    "Friends": "contactGroups/abc123",
+                    "Work": "contactGroups/new999",
+                },
+            ) as mock_ensure,
+        ):
+            result = await _resolve_group_mapping_for_tags(
+                client=mock_client, tag_names=["Friends", "Work"]
+            )
+
+        assert result == {
+            "Friends": "contactGroups/abc123",
+            "Work": "contactGroups/new999",
+        }
+        assert mock_ensure.call_args[1]["existing_groups"] == {
+            "Friends": "contactGroups/abc123"
+        }
+
+    @pytest.mark.asyncio
+    async def test_no_tags_still_returns_a_mapping_so_memberships_are_sent(
+        self,
+    ) -> None:
+        """An empty mapping is not "no mapping": it clears stale tag groups.
+
+        The caller passes the result through to the transform, where a present
+        (even empty) mapping means memberships are included in the update mask.
+        """
+        from worker import _resolve_group_mapping_for_tags
+
+        with (
+            patch(
+                "worker._build_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch(
+                "worker._ensure_google_groups_exist", new_callable=AsyncMock
+            ) as mock_ensure,
+        ):
+            result = await _resolve_group_mapping_for_tags(
+                client=AsyncMock(), tag_names=[]
+            )
+
+        assert result == {}
+        # Nothing to create, so no group-creation round trip.
+        mock_ensure.assert_not_called()

@@ -615,14 +615,17 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if "group_name_to_resource" in contact:
         group_name_to_resource = contact["group_name_to_resource"]
         # Always include memberships when tag push is active (group mapping
-        # provided), even if empty, so that removed local tags clear existing
-        # Google group memberships via the updatePersonFields mask.
-        memberships = (
+        # provided), even if the contact has no tags, so that removed local tags
+        # clear existing Google group memberships via the updatePersonFields
+        # mask. The reserved groups lead the list and are never cleared: the
+        # mask replaces memberships wholesale, so omitting myContacts would
+        # drop the contact out of the user's contacts altogether.
+        tag_memberships = (
             _transform_tags_to_memberships(tag_names, group_name_to_resource)
             if tag_names and group_name_to_resource
             else []
         )
-        person_data["memberships"] = memberships
+        person_data["memberships"] = _with_reserved_group_memberships(tag_memberships)
 
     # Transform important dates to Google birthdays and events
     # Always include birthdays/events when important_dates is present on the
@@ -635,6 +638,49 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
         person_data["events"] = events
 
     return person_data
+
+
+def _reserved_group_memberships() -> list[dict[str, Any]]:
+    """Build the memberships every pushed contact must retain.
+
+    Google's ``updatePersonFields=memberships`` replaces the membership list
+    rather than merging into it, so any membership left out of the payload is
+    removed. ``contactGroups/myContacts`` is what makes a person one of the
+    user's contacts at all, so dropping it demotes the contact to an "other
+    contact" — invisible in Google Contacts. The set is read from
+    ``google_reserved_groups``, the same configuration the inbound sync uses to
+    decide which groups are not tags.
+    """
+    return [
+        {
+            "contactGroupMembership": {
+                "contactGroupResourceName": f"contactGroups/{group_id}"
+            }
+        }
+        for group_id in settings.google_reserved_groups
+    ]
+
+
+def _with_reserved_group_memberships(
+    tag_memberships: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Prepend the reserved memberships, de-duplicated by resource name.
+
+    A local tag can resolve to a reserved group's resource name (a user may have
+    tagged someone "myContacts"), so the two lists are merged rather than
+    concatenated.
+    """
+    memberships = _reserved_group_memberships()
+    seen = {
+        entry["contactGroupMembership"]["contactGroupResourceName"]
+        for entry in memberships
+    }
+    for entry in tag_memberships:
+        resource_name = entry["contactGroupMembership"]["contactGroupResourceName"]
+        if resource_name not in seen:
+            seen.add(resource_name)
+            memberships.append(entry)
+    return memberships
 
 
 def _transform_tags_to_memberships(
@@ -814,6 +860,33 @@ async def _ensure_google_groups_exist(
             # Continue without this group — tag won't be synced this cycle
 
     return updated_mapping
+
+
+async def _resolve_group_mapping_for_tags(
+    client: GoogleAPIClient,
+    tag_names: list[str],
+) -> dict[str, str]:
+    """Resolve local tag names to Google contact-group resource names.
+
+    Fetches the account's existing groups, reverses the mapping to be keyed by
+    name, and creates a group for any tag that does not have one yet.
+
+    An empty result is meaningful and is not the same as "no mapping": callers
+    pass it straight through to the transform, where a present mapping — even an
+    empty one — is what includes ``memberships`` in the update mask, so tags
+    removed locally clear their Google groups.
+    """
+    forward_mapping = await _build_contact_group_mapping(client)
+    reverse_mapping = _build_reverse_group_mapping(forward_mapping)
+
+    if not tag_names:
+        return reverse_mapping
+
+    return await _ensure_google_groups_exist(
+        client=client,
+        tag_names=tag_names,
+        existing_groups=reverse_mapping,
+    )
 
 
 async def _create_contact_in_google(
@@ -2815,6 +2888,7 @@ async def _push_contact_to_google_for_event(
     google_account_email: str,
     external_id: str | None,
     version_hash: str | None,
+    group_name_to_resource: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Push a single contact to Google, triggered by a domain event.
 
@@ -2829,6 +2903,9 @@ async def _push_contact_to_google_for_event(
         google_account_email: Google account email
         external_id: Google resource name (for updates)
         version_hash: ETag for optimistic concurrency (for updates)
+        group_name_to_resource: Tag name to Google contact-group resource name.
+            Passing it (even empty) is what includes ``memberships`` in the
+            payload, so tag changes reach Google and removed tags are cleared.
 
     Returns:
         Result dict with status and resource details
@@ -2870,6 +2947,12 @@ async def _push_contact_to_google_for_event(
     # Load full contact data (methods, addresses, notes, tags, important_dates)
     full_data = await _load_full_contact(session, contact_id)
     contact.update(full_data)
+
+    # Use `is not None` so an empty mapping still activates membership handling
+    # (an empty tag list must clear the contact's Google groups), matching
+    # _push_single_contact on the cron path.
+    if group_name_to_resource is not None:
+        contact["group_name_to_resource"] = group_name_to_resource
 
     # Transform to Google Person format
     person_data = _transform_contact_to_google_person(contact)
@@ -3146,6 +3229,13 @@ async def process_contact_event(
             )
             return {"status": "skipped", "reason": "no_google_integrations"}
 
+        # Tag names are account-independent, so they are read once; the
+        # name-to-group mapping they resolve to is per account. A delete needs
+        # neither, so the read is skipped for it.
+        tag_names: list[str] = []
+        if event_type != "ContactDeleted":
+            tag_names = await _load_tag_names_for_contact(session, contact_id)
+
         results = []
         for row in users:
             user_id = row.user_id
@@ -3197,6 +3287,12 @@ async def process_contact_event(
                         external_id = None
                         version_hash = None
 
+                    # Groups are per Google account, so the mapping is resolved
+                    # inside the loop even though the tag names are not.
+                    group_name_to_resource = await _resolve_group_mapping_for_tags(
+                        client=client, tag_names=tag_names
+                    )
+
                     result = await _push_contact_to_google_for_event(
                         session=session,
                         client=client,
@@ -3205,6 +3301,7 @@ async def process_contact_event(
                         google_account_email=google_account_email,
                         external_id=external_id,
                         version_hash=version_hash,
+                        group_name_to_resource=group_name_to_resource,
                     )
 
                 results.append(result)
@@ -3306,15 +3403,10 @@ async def push_local_contacts_to_google(
                     **metrics,
                 }
 
-            # Build group mapping for tag→membership push.
-            # Fetch existing groups, reverse the mapping, and pre-create any
-            # missing groups for local tags.
-            forward_group_mapping = await _build_contact_group_mapping(client)
-            reverse_group_mapping = _build_reverse_group_mapping(forward_group_mapping)
-
-            # Collect all tag names across contacts with a single batch query.
-            # Tags are loaded again per-contact in _load_full_contact, but we
-            # need all unique names upfront to ensure groups exist before push.
+            # Build group mapping for tag→membership push, creating any group a
+            # local tag still needs. Tags are loaded again per contact in
+            # _load_full_contact, but every unique name is needed upfront so the
+            # groups exist before the first push.
             contact_ids = [c["id"] for c in contacts_to_push]
             tags_by_contact = await _load_tag_names_for_contacts_batch(
                 session, contact_ids
@@ -3323,13 +3415,9 @@ async def push_local_contacts_to_google(
             for tag_list in tags_by_contact.values():
                 all_tag_names.update(tag_list)
 
-            # Ensure groups exist for all tags
-            if all_tag_names:
-                reverse_group_mapping = await _ensure_google_groups_exist(
-                    client=client,
-                    tag_names=list(all_tag_names),
-                    existing_groups=reverse_group_mapping,
-                )
+            reverse_group_mapping = await _resolve_group_mapping_for_tags(
+                client=client, tag_names=sorted(all_tag_names)
+            )
 
             # Push contacts to Google
             push_result = await push_contacts_to_google(

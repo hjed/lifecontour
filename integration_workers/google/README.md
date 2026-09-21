@@ -84,6 +84,15 @@ has to identify which contact changed. Events carrying the inbound sync's
 provenance (`source == "google_contacts"`) are skipped, so applying Google's data
 locally does not write it straight back to Google.
 
+Tags are pushed as contact-group memberships. The handler resolves the contact's
+tag names to group resource names per Google account (creating any group a tag
+still needs) via `_resolve_group_mapping_for_tags`, which the cron push shares.
+The payload always carries the **reserved** groups from `GOOGLE_RESERVED_GROUPS`
+alongside the tag groups: `updatePersonFields=memberships` replaces the
+membership list rather than merging into it, so a payload without
+`contactGroups/myContacts` would drop the contact out of the user's contacts
+altogether.
+
 Each handler builds a minimal ARQ-compatible context (`session_factory` +
 `job_id`) and calls the existing worker function directly, bypassing ARQ enqueue.
 A handler that raises leaves its event unacknowledged so the base class retries

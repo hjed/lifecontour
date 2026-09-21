@@ -8,11 +8,20 @@ and push payload verification.
 """
 
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, "/core_shared")
+
+
+def _resource_names(memberships: list[dict[str, Any]]) -> list[str]:
+    """Pull the contact-group resource names out of a memberships payload."""
+    return [
+        entry["contactGroupMembership"]["contactGroupResourceName"]
+        for entry in memberships
+    ]
 
 
 class TestLoadTagNamesForContact:
@@ -289,12 +298,21 @@ class TestTransformContactToGooglePersonWithTags:
         result = _transform_contact_to_google_person(contact)
 
         assert "memberships" in result
-        assert len(result["memberships"]) == 2
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/abc123",
+            "contactGroups/def456",
+        ]
 
-    def test_empty_memberships_when_no_tags_but_group_mapping_present(self):
-        """Test person payload has empty memberships when tags are empty
-        but group_name_to_resource is provided — ensures Google clears
-        existing memberships via updatePersonFields mask."""
+    def test_reserved_membership_is_kept_when_the_contact_has_no_tags(self):
+        """A tagless contact still stays in My Contacts.
+
+        ``updatePersonFields=memberships`` replaces the membership list
+        wholesale, so sending a bare ``[]`` removes the contact from
+        ``contactGroups/myContacts`` — in Google that demotes it out of the
+        user's contacts entirely. The tag memberships are cleared; the reserved
+        ones are not.
+        """
         from worker import _transform_contact_to_google_person
 
         contact = {
@@ -309,8 +327,52 @@ class TestTransformContactToGooglePersonWithTags:
 
         result = _transform_contact_to_google_person(contact)
 
-        assert "memberships" in result
-        assert result["memberships"] == []
+        assert result["memberships"] != []
+        assert _resource_names(result["memberships"]) == ["contactGroups/myContacts"]
+
+    def test_reserved_membership_is_not_duplicated_by_a_same_named_tag(self):
+        """A local tag resolving to a reserved group appears exactly once."""
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": ["myContacts"],
+            "group_name_to_resource": {"myContacts": "contactGroups/myContacts"},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == ["contactGroups/myContacts"]
+
+    def test_reserved_memberships_follow_the_configured_group_list(self):
+        """The reserved set is configuration, not a hard-coded myContacts."""
+        import worker
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        # Resolve ``worker.settings`` at call time: other tests reload the
+        # worker module, so an instance bound at import time can be stale.
+        with patch.object(
+            worker.settings, "google_reserved_groups", ["myContacts", "starred"]
+        ):
+            result = worker._transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/starred",
+        ]
 
     def test_no_memberships_when_tags_key_missing(self):
         """Test person payload has no memberships when tags key is absent."""
@@ -597,10 +659,10 @@ class TestPushContactWithTagsEndToEnd:
             )
 
             assert "memberships" in person_data
-            assert len(person_data["memberships"]) == 1
-            assert (
-                person_data["memberships"][0]["contactGroupMembership"][
-                    "contactGroupResourceName"
-                ]
-                == "contactGroups/abc123"
-            )
+            # The tag's group, plus the reserved myContacts membership the
+            # payload must always carry so the update does not demote the
+            # contact out of the user's contacts.
+            assert _resource_names(person_data["memberships"]) == [
+                "contactGroups/myContacts",
+                "contactGroups/abc123",
+            ]

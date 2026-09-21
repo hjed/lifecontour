@@ -45,8 +45,13 @@ def _ctx(db_session: AsyncSession) -> dict[str, Any]:
     }
 
 
-def _mock_google_client() -> AsyncMock:
-    """A Google client whose writes return a fresh resource name and etag."""
+def _mock_google_client(groups: dict[str, str] | None = None) -> AsyncMock:
+    """A Google client whose writes return a fresh resource name and etag.
+
+    ``groups`` maps a contact-group display name to its resource name and seeds
+    ``contactGroups.list``; anything the contact needs and is missing is created
+    through ``create_contact_group``.
+    """
     client = AsyncMock()
     client.update_contact.return_value = {
         "resourceName": _REMOTE,
@@ -56,7 +61,25 @@ def _mock_google_client() -> AsyncMock:
         "resourceName": _REMOTE,
         "etag": _NEW_ETAG,
     }
+    client.list_contact_groups.return_value = {
+        "contactGroups": [
+            {"resourceName": resource, "name": name, "formattedName": name}
+            for name, resource in (groups or {}).items()
+        ]
+    }
+    client.create_contact_group.return_value = {
+        "resourceName": "contactGroups/created-for-tag"
+    }
     return client
+
+
+def _pushed_membership_resources(client: AsyncMock) -> list[str]:
+    """The contact-group resource names in the person the worker pushed."""
+    pushed = client.update_contact.call_args[1]["contact_data"]
+    return [
+        entry["contactGroupMembership"]["contactGroupResourceName"]
+        for entry in pushed.get("memberships", [])
+    ]
 
 
 @pytest_asyncio.fixture
@@ -279,6 +302,122 @@ class TestInboundEchoIsNotPushedBack:
         mock_client.update_contact.assert_not_called()
         # The stored etag is untouched, so the next pull still reconciles.
         assert await _stored_version_hash(db_session, contact_id) == "etag-before"
+
+
+@pytest.mark.asyncio
+class TestTagMembershipsReachGoogle:
+    """LOCAL-177: the event push path never sent contact-group memberships.
+
+    ``_push_contact_to_google_for_event`` built no group mapping, so
+    ``_transform_contact_to_google_person`` omitted ``memberships`` and a tag
+    change could not reach Google even once its event was routed.
+    """
+
+    async def test_existing_group_is_pushed_as_a_membership(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """The contact's tag is sent as a membership of its Google group."""
+        contact_id = synced_contact["contact_id"]
+        mock_client = _mock_google_client(
+            groups={"Colleagues": "contactGroups/colleagues1"}
+        )
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="TagAssigned",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        assert _pushed_membership_resources(mock_client) == [
+            "contactGroups/myContacts",
+            "contactGroups/colleagues1",
+        ]
+        mock_client.create_contact_group.assert_not_called()
+
+    async def test_missing_group_is_created_then_pushed(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """A tag with no Google group yet gets one before the contact is pushed."""
+        contact_id = synced_contact["contact_id"]
+        mock_client = _mock_google_client(groups={})
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="TagAssigned",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        mock_client.create_contact_group.assert_called_once_with("Colleagues")
+        assert _pushed_membership_resources(mock_client) == [
+            "contactGroups/myContacts",
+            "contactGroups/created-for-tag",
+        ]
+
+    async def test_removing_the_last_tag_clears_groups_but_keeps_my_contacts(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """A contact with no tags left sends only the reserved memberships.
+
+        The mask replaces the list, so this is how a removed tag clears its
+        Google group — while ``myContacts`` must survive, or the contact drops
+        out of the user's contacts entirely.
+        """
+        contact_id = synced_contact["contact_id"]
+        await db_session.execute(
+            text("DELETE FROM contact_tags WHERE contact_id = :cid"),
+            {"cid": contact_id},
+        )
+        await db_session.flush()
+
+        mock_client = _mock_google_client(
+            groups={"Colleagues": "contactGroups/colleagues1"}
+        )
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="TagRemoved",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        assert _pushed_membership_resources(mock_client) == ["contactGroups/myContacts"]
+
+    async def test_memberships_are_in_the_update_field_mask(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """Google only applies fields named in updatePersonFields.
+
+        The mask is derived from the payload's keys, so this asserts the key is
+        present rather than re-deriving the mask.
+        """
+        contact_id = synced_contact["contact_id"]
+        mock_client = _mock_google_client(
+            groups={"Colleagues": "contactGroups/colleagues1"}
+        )
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="TagAssigned",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        pushed = mock_client.update_contact.call_args[1]["contact_data"]
+        assert "memberships" in pushed
 
 
 @pytest.mark.asyncio
