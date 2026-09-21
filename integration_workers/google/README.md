@@ -45,9 +45,16 @@ Both paths update `sync_metadata` with the Google resource name and the ETag
 Google returns, which is what makes the following pull a no-op for that contact
 rather than a re-apply of Google's older copy.
 
-A failing push is logged and the pull still runs: if the push failed, Google's
-ETag is unchanged, so the inbound idempotency check skips that contact and the
-local edit survives to be pushed next cycle.
+A failing push is logged and the pull still runs. Ordinarily a failed push
+leaves Google's ETag unchanged, so the inbound idempotency check skips that
+contact and the local edit survives to be pushed next cycle. The exception is a
+genuine two-sided conflict — the contact was also edited in Google and the
+push's conflict retry failed too — where the pull applies Google's copy.
+
+Both push paths take a per-contact advisory lock (`_lock_contact_for_push`)
+before reading the contact's sync link, and the cron path commits per contact.
+Without it the stream handler and the cron could both see a new contact as
+unlinked and both create it, leaving two Google contacts for one local contact.
 
 `push_local_contacts_to_google` remains as a standalone ARQ task over the same
 helper, for pushing an account on demand without a pull.

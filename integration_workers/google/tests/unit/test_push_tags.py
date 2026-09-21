@@ -8,6 +8,7 @@ and push payload verification.
 """
 
 import sys
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -708,6 +709,21 @@ class TestGoogleAPIClientGroupManagement:
 
 class TestPushContactWithTagsEndToEnd:
     """End-to-end unit test for pushing a contact with tags to Google."""
+
+    @pytest.fixture(autouse=True)
+    def _no_contact_link(self) -> Iterator[None]:
+        """Stub the per-contact lock and link re-read, like the other DB helpers.
+
+        These tests drive ``push_contacts_to_google`` with a bare ``AsyncMock``
+        session and patch its database helpers. The push now locks each contact
+        and re-reads its link under the lock; with no link the list's
+        ``sync_action`` stands, which is what these tests exercise.
+        """
+        with (
+            patch("worker._lock_contact_for_push", new_callable=AsyncMock),
+            patch("worker._read_sync_link", new_callable=AsyncMock, return_value=None),
+        ):
+            yield
 
     @pytest.fixture
     def mock_session(self):

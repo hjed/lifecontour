@@ -18,16 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _session_factory() -> MagicMock:
-    """A session factory yielding an AsyncMock session."""
-    session = AsyncMock()
-    session.commit = AsyncMock()
-    factory = MagicMock()
-    factory.return_value.__aenter__ = AsyncMock(return_value=session)
-    factory.return_value.__aexit__ = AsyncMock(return_value=False)
-    return factory
-
-
 def _push_result(**overrides: Any) -> dict[str, Any]:
     """A successful push helper result."""
     result: dict[str, Any] = {
@@ -45,7 +35,9 @@ class TestPushRunsBeforePull:
     """The outbound push happens first, so a pull cannot clobber a local edit."""
 
     @pytest.mark.asyncio
-    async def test_push_is_called_before_the_pull(self) -> None:
+    async def test_push_is_called_before_the_pull(
+        self, session_factory_mock: MagicMock
+    ) -> None:
         """Ordering is asserted directly, not inferred from both being called."""
         from worker import sync_google_contacts
 
@@ -67,7 +59,7 @@ class TestPushRunsBeforePull:
             patch("worker._perform_full_sync", side_effect=record_pull),
         ):
             result = await sync_google_contacts(
-                ctx={"session_factory": _session_factory()},
+                ctx={"session_factory": session_factory_mock},
                 google_account_email="test@example.com",
                 user_id=1,
                 sync_type="full",
@@ -77,7 +69,9 @@ class TestPushRunsBeforePull:
         assert call_order == ["push", "pull"]
 
     @pytest.mark.asyncio
-    async def test_push_runs_before_an_incremental_pull_too(self) -> None:
+    async def test_push_runs_before_an_incremental_pull_too(
+        self, session_factory_mock: MagicMock
+    ) -> None:
         """The incremental path is the one the cron usually takes."""
         from worker import sync_google_contacts
 
@@ -99,7 +93,7 @@ class TestPushRunsBeforePull:
             patch("worker._perform_incremental_sync", side_effect=record_pull),
         ):
             await sync_google_contacts(
-                ctx={"session_factory": _session_factory()},
+                ctx={"session_factory": session_factory_mock},
                 google_account_email="test@example.com",
                 user_id=1,
                 sync_type="incremental",
@@ -108,7 +102,9 @@ class TestPushRunsBeforePull:
         assert call_order == ["push", "pull"]
 
     @pytest.mark.asyncio
-    async def test_push_counts_are_reported_in_the_sync_metrics(self) -> None:
+    async def test_push_counts_are_reported_in_the_sync_metrics(
+        self, session_factory_mock: MagicMock
+    ) -> None:
         """Push outcomes are visible on the sync job rather than lost."""
         from worker import sync_google_contacts
 
@@ -128,7 +124,7 @@ class TestPushRunsBeforePull:
             ),
         ):
             result = await sync_google_contacts(
-                ctx={"session_factory": _session_factory()},
+                ctx={"session_factory": session_factory_mock},
                 google_account_email="test@example.com",
                 user_id=1,
                 sync_type="full",
@@ -142,7 +138,9 @@ class TestPushFailureDoesNotBlockThePull:
     """A Google write outage must not stop inbound sync."""
 
     @pytest.mark.asyncio
-    async def test_a_raising_push_still_lets_the_pull_run(self) -> None:
+    async def test_a_raising_push_still_lets_the_pull_run(
+        self, session_factory_mock: MagicMock
+    ) -> None:
         """The pull is safe here: a failed push leaves Google's etag unchanged.
 
         The inbound idempotency check then skips that contact, so the local edit
@@ -166,7 +164,7 @@ class TestPushFailureDoesNotBlockThePull:
             ) as mock_pull,
         ):
             result = await sync_google_contacts(
-                ctx={"session_factory": _session_factory()},
+                ctx={"session_factory": session_factory_mock},
                 google_account_email="test@example.com",
                 user_id=1,
                 sync_type="full",
@@ -181,7 +179,9 @@ class TestPushTaskStillDelegates:
     """``push_local_contacts_to_google`` keeps working as a standalone task."""
 
     @pytest.mark.asyncio
-    async def test_arq_task_delegates_to_the_shared_helper(self) -> None:
+    async def test_arq_task_delegates_to_the_shared_helper(
+        self, session_factory_mock: MagicMock
+    ) -> None:
         """The ARQ entry point is a thin wrapper over the extracted helper."""
         from worker import push_local_contacts_to_google
 
@@ -195,7 +195,7 @@ class TestPushTaskStillDelegates:
             ) as mock_push,
         ):
             result = await push_local_contacts_to_google(
-                ctx={"session_factory": _session_factory()},
+                ctx={"session_factory": session_factory_mock},
                 google_account_email="test@example.com",
                 user_id=1,
             )

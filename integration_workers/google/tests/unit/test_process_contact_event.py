@@ -39,9 +39,10 @@ def _mock_session_factory(
     """Build a mock session factory with the queries the handler runs.
 
     The code executes queries in this order:
-      1. sync_metadata lookup (fetchone)
-      2. user_google_auth lookup (fetchall)
-      3. the contact's tag names (fetchall), skipped for ContactDeleted
+      1. the per-contact push lock (advisory, result unused)
+      2. sync_metadata lookup (fetchone)
+      3. user_google_auth lookup (fetchall)
+      4. the contact's tag names (fetchall), skipped for ContactDeleted
 
     Returns:
         (factory, mock_session) — the factory to pass to _make_ctx and
@@ -66,9 +67,10 @@ def _mock_session_factory(
     ]
 
     mock_session.execute.side_effect = [
-        mock_sync_result,  # 1st call: sync_metadata
-        mock_users_result,  # 2nd call: user_google_auth
-        mock_tags_result,  # 3rd call: contact tag names
+        MagicMock(),  # 1st call: per-contact push lock
+        mock_sync_result,  # 2nd call: sync_metadata
+        mock_users_result,  # 3rd call: user_google_auth
+        mock_tags_result,  # 4th call: contact tag names
     ]
 
     mock_factory = MagicMock()
@@ -1235,3 +1237,42 @@ class TestUnresolvedTagGroupsOnTheEventPath:
             )
 
         assert mock_resolve.call_args[1]["require_all_tags"] is True
+
+
+class TestEventPushTakesTheContactLock:
+    """Greptile review of #1551: the event path and the cron push can race.
+
+    Both could read "no sync link" for a new contact and both create it in
+    Google. The event path takes the per-contact push lock *before* it reads the
+    link, so it sees a link the cron committed while it waited.
+    """
+
+    @pytest.mark.asyncio
+    async def test_lock_is_taken_before_the_link_is_read(self) -> None:
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_session_factory(
+            sync_row=None,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "created"},
+            ),
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
+        ):
+            await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactCreated",
+                event_data={"contact_id": 42, "source": "ui"},
+            )
+
+        first_sql, first_params = mock_session.execute.call_args_list[0][0]
+        second_sql = str(mock_session.execute.call_args_list[1][0][0])
+        assert "pg_advisory_xact_lock" in str(first_sql)
+        assert first_params == {"key": "google-contact-push:42"}
+        assert "FROM sync_metadata" in second_sql

@@ -1072,6 +1072,45 @@ def _handle_http_error(
         metrics["error_count"] += 1
 
 
+async def _lock_contact_for_push(session: Any, contact_id: int) -> None:
+    """Serialise outbound pushes of one contact across concurrent sessions.
+
+    The stream handler and the cron's push-before-pull can pick up the same
+    contact at once. For a new contact both would read "no sync link" and both
+    create it in Google, and since ``sync_metadata`` is unique on
+    ``(integration_source, external_id)`` — not on the local contact — both
+    links would commit: two Google contacts for one local contact.
+
+    Callers take this *before* reading the link, so a link another session
+    committed while they waited is visible. The lock is transaction-scoped and
+    released by the caller's commit or rollback. It follows the idiom in
+    ``CalendarWatchRepository.lock_calendar_setup``.
+    """
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"google-contact-push:{contact_id}"},
+    )
+
+
+async def _read_sync_link(session: Any, contact_id: int) -> Any:
+    """Read a contact's Google sync link: ``external_id`` and ``version_hash``.
+
+    Returns the row, or ``None`` when the contact has never been pushed. The
+    link is keyed by ``(integration_source, internal_id)`` and is independent of
+    which Google account is pushed to.
+    """
+    result = await session.execute(
+        text("""
+            SELECT external_id, version_hash
+            FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND internal_id = :internal_id
+        """),
+        {"integration_source": "google", "internal_id": contact_id},
+    )
+    return result.fetchone()
+
+
 async def _push_single_contact(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -1080,10 +1119,26 @@ async def _push_single_contact(
     metrics: dict[str, int],
     group_name_to_resource: dict[str, str] | None = None,
 ) -> None:
-    """Push a single contact to Google."""
+    """Push a single contact to Google, committing its link on success.
+
+    The contact was selected by ``find_contacts_to_push`` before any lock was
+    held, so its ``sync_action`` may be stale: the stream handler can link the
+    contact in between. The link is therefore re-read under the per-contact
+    push lock, and a link that appeared meanwhile turns a "create" into an
+    update of the already-linked person rather than a duplicate. Each contact
+    commits on its own, which releases the lock promptly and keeps earlier
+    contacts' links if a later one fails.
+    """
     from googleapiclient.errors import HttpError
 
     try:
+        await _lock_contact_for_push(session, contact["id"])
+        link = await _read_sync_link(session, contact["id"])
+        if link is not None:
+            contact["sync_action"] = "update"
+            contact["external_id"] = link.external_id
+            contact["version_hash"] = link.version_hash
+
         # Load full contact data (methods, addresses, notes, tags)
         full_contact_data = await _load_full_contact(session, contact["id"])
         contact.update(full_contact_data)
@@ -1110,9 +1165,13 @@ async def _push_single_contact(
             metrics["updated_count"] += 1
             metrics["pushed_count"] += 1
 
+        await session.commit()
+
     except HttpError as e:
+        await session.rollback()
         _handle_http_error(e, contact, metrics)
     except Exception as e:  # noqa: BLE001
+        await session.rollback()
         logger.error(
             "Unexpected error pushing contact to Google",
             contact_id=contact["id"],
@@ -1893,9 +1952,15 @@ async def _push_before_pull(
     """Run the outbound push ahead of an inbound sync, never failing it.
 
     A Google write outage must not block inbound sync, and the pull is safe to
-    run anyway: if the push failed, Google's etag is unchanged, so the backend's
-    idempotency check skips that contact and the local edit survives to be
-    pushed on the next cycle.
+    run in the ordinary case: a failed push leaves Google's etag where it was,
+    so the backend's idempotency check skips that contact and the local edit
+    survives to be pushed on the next cycle.
+
+    The exception is a genuine two-sided conflict: the contact was also edited
+    in Google, the push's conflict retry failed too, and the changed remote etag
+    lets the pull apply Google's copy over the local edit. Someone has to win
+    that race and Google does, which is how every conflict resolved before the
+    push ran at all; the error is logged per contact.
 
     The push owns its own commit. Google keeps a write the moment it accepts it,
     so the etags recorded for those writes are committed before the pull starts
@@ -3327,20 +3392,15 @@ async def process_contact_event(
     session_factory = ctx["session_factory"]
 
     async with session_factory() as session:
+        # Take the per-contact push lock before reading the link, so a link the
+        # cron's push committed while this waited is seen and the contact is
+        # not created in Google twice. Released by the commit in the loop below.
+        await _lock_contact_for_push(session, contact_id)
+
         # Look up sync metadata once — it's keyed by
         # (integration_source, internal_id) and is independent of which
         # Google account we push to.
-        sync_stmt = text("""
-            SELECT external_id, version_hash
-            FROM sync_metadata
-            WHERE integration_source = :integration_source
-              AND internal_id = :internal_id
-        """)
-        sync_result = await session.execute(
-            sync_stmt,
-            {"integration_source": "google", "internal_id": contact_id},
-        )
-        sync_row = sync_result.fetchone()
+        sync_row = await _read_sync_link(session, contact_id)
 
         # Find all Google integrations for all users
         auth_stmt = text("""
@@ -3462,7 +3522,8 @@ async def _push_pending_local_contacts(
     ``sync_google_contacts``, which runs it before pulling so a pull cannot
     overwrite a local edit that has not reached Google yet.
 
-    The caller owns the session lifecycle and commits.
+    Each contact commits on its own inside ``_push_single_contact``; the caller
+    owns the session and any work outside the per-contact pushes.
 
     Returns:
         Push metrics: pushed/created/updated/error/conflict counts.
