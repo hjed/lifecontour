@@ -51,6 +51,14 @@ from app.core.contacts.services.address_validation_service import (
     AddressValidationService,
 )
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.contacts.services.contact_subentity_sync import (
+    ADDRESS_PREFIX,
+    IMPORTANT_DATE_FIELDS,
+    METHOD_PREFIX,
+    NOTE_PREFIX,
+    diff_fields,
+    prefixed,
+)
 from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )
@@ -642,7 +650,9 @@ class ContactService:
             # the "method_{id}_{field}" key back to the contact_method row.
             event = ContactUpdated(
                 contact_id,
-                {f"method_{method_id}_{field_name}": (old_value, new_value)},
+                prefixed(
+                    METHOD_PREFIX, method_id, {field_name: (old_value, new_value)}
+                ),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -732,7 +742,9 @@ class ContactService:
             # decodes "address_{id}_{field}" to the contact_address row.
             event = ContactUpdated(
                 contact_id,
-                {f"address_{address_id}_{field_name}": (old_value, new_value)},
+                prefixed(
+                    ADDRESS_PREFIX, address_id, {field_name: (old_value, new_value)}
+                ),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -822,7 +834,7 @@ class ContactService:
             # decodes "note_{id}_{field}" to the contact_note row.
             event = ContactUpdated(
                 contact_id,
-                {f"note_{note_id}_{field_name}": (old_value, new_value)},
+                prefixed(NOTE_PREFIX, note_id, {field_name: (old_value, new_value)}),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -2022,14 +2034,12 @@ class ContactService:
             date.contact_id = contact_id
             date.__post_init__()
 
-            changed_fields = self._calculate_important_date_changed_fields(
-                existing, date
-            )
+            date_changes = diff_fields(existing, date, IMPORTANT_DATE_FIELDS)
 
             # Nothing moved. Writing anyway would bump the row's updated_at and
             # the contact's ETag, and publishing anyway would put an empty edit
             # in the feed and re-index for nothing.
-            if not changed_fields:
+            if not date_changes:
                 return existing
 
             saved_date = await self.contact_repo.update_important_date(date)
@@ -2039,7 +2049,7 @@ class ContactService:
                 contact_id,
                 date_id,
                 date.date_type.value,
-                changed_fields,
+                date_changes,
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -2053,34 +2063,6 @@ class ContactService:
             ImportantDate,
             await self._execute_with_retry(_update_date_operation, transaction),
         )
-
-    @staticmethod
-    def _calculate_important_date_changed_fields(
-        existing: ImportantDate, updated: ImportantDate
-    ) -> dict[str, Any]:
-        """Diff two important dates into ``{field: (old, new)}`` pairs.
-
-        Enums are compared and reported by value, because the result is carried
-        in an outbox event payload and has to survive JSON.
-        """
-        changed: dict[str, Any] = {}
-
-        def _add_if_changed(field: str, old: Any, new: Any) -> None:
-            if old != new:
-                changed[field] = (old, new)
-
-        _add_if_changed("date_type", existing.date_type.value, updated.date_type.value)
-        _add_if_changed("precision", existing.precision.value, updated.precision.value)
-        _add_if_changed("year", existing.year, updated.year)
-        _add_if_changed("month", existing.month, updated.month)
-        _add_if_changed("day", existing.day, updated.day)
-        _add_if_changed(
-            "custom_date_type_id",
-            existing.custom_date_type_id,
-            updated.custom_date_type_id,
-        )
-
-        return changed
 
     async def delete_contact_important_date(
         self,
