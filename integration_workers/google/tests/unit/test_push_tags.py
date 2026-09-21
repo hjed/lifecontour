@@ -8,11 +8,21 @@ and push payload verification.
 """
 
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from collections.abc import Iterator
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, "/core_shared")
+
+
+def _resource_names(memberships: list[dict[str, Any]]) -> list[str]:
+    """Pull the contact-group resource names out of a memberships payload."""
+    return [
+        entry["contactGroupMembership"]["contactGroupResourceName"]
+        for entry in memberships
+    ]
 
 
 class TestLoadTagNamesForContact:
@@ -289,12 +299,21 @@ class TestTransformContactToGooglePersonWithTags:
         result = _transform_contact_to_google_person(contact)
 
         assert "memberships" in result
-        assert len(result["memberships"]) == 2
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/abc123",
+            "contactGroups/def456",
+        ]
 
-    def test_empty_memberships_when_no_tags_but_group_mapping_present(self):
-        """Test person payload has empty memberships when tags are empty
-        but group_name_to_resource is provided — ensures Google clears
-        existing memberships via updatePersonFields mask."""
+    def test_reserved_membership_is_kept_when_the_contact_has_no_tags(self):
+        """A tagless contact still stays in My Contacts.
+
+        ``updatePersonFields=memberships`` replaces the membership list
+        wholesale, so sending a bare ``[]`` removes the contact from
+        ``contactGroups/myContacts`` — in Google that demotes it out of the
+        user's contacts entirely. The tag memberships are cleared; the reserved
+        ones are not.
+        """
         from worker import _transform_contact_to_google_person
 
         contact = {
@@ -309,8 +328,174 @@ class TestTransformContactToGooglePersonWithTags:
 
         result = _transform_contact_to_google_person(contact)
 
-        assert "memberships" in result
-        assert result["memberships"] == []
+        assert result["memberships"] != []
+        assert _resource_names(result["memberships"]) == ["contactGroups/myContacts"]
+
+    def test_reserved_membership_is_not_duplicated_by_a_same_named_tag(self):
+        """A local tag resolving to a reserved group appears exactly once."""
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": ["myContacts"],
+            "group_name_to_resource": {"myContacts": "contactGroups/myContacts"},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == ["contactGroups/myContacts"]
+
+    def test_reserved_memberships_follow_the_configured_group_list(self):
+        """The reserved set is configuration, not a hard-coded myContacts."""
+        import worker
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        # Resolve ``worker.settings`` at call time: other tests reload the
+        # worker module, so an instance bound at import time can be stale.
+        with patch.object(
+            worker.settings, "google_reserved_groups", ["myContacts", "chatBuddies"]
+        ):
+            result = worker._transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/chatBuddies",
+        ]
+
+    def test_starred_in_the_reserved_config_does_not_star_everyone(self):
+        """Greptile on #1549: ``starred`` is state, never retained blanket.
+
+        ``GOOGLE_RESERVED_GROUPS=myContacts,starred`` is a supported setting —
+        inbound uses the list to decide which groups are not tags, and starred
+        is not a tag. Treating every reserved group as always-present would
+        send ``contactGroups/starred`` for every contact and star them all.
+        """
+        import worker
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": False,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        with patch.object(
+            worker.settings, "google_reserved_groups", ["myContacts", "starred"]
+        ):
+            result = worker._transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == ["contactGroups/myContacts"]
+
+    def test_starred_in_the_reserved_config_still_stars_a_favourite_once(self):
+        """With ``starred`` configured as reserved, a favourite appears once."""
+        import worker
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": True,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        with patch.object(
+            worker.settings, "google_reserved_groups", ["myContacts", "starred"]
+        ):
+            result = worker._transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/starred",
+        ]
+
+    def test_favourite_contact_keeps_its_starred_membership(self):
+        """``is_favourite`` is pushed back as ``contactGroups/starred``.
+
+        Inbound sync reads the starred group into ``is_favourite``, but the
+        outbound transform never wrote it back. Once memberships are in the
+        update mask that silently unstars every favourite on any edit.
+        """
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": True,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": ["Friends"],
+            "group_name_to_resource": {"Friends": "contactGroups/abc123"},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/starred",
+            "contactGroups/abc123",
+        ]
+
+    def test_favourite_without_tags_is_still_starred(self):
+        """The star does not depend on the contact having any tags."""
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": True,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/starred",
+        ]
+
+    def test_non_favourite_contact_is_not_starred(self):
+        """Un-favouriting locally removes the star in Google."""
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": False,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert "contactGroups/starred" not in _resource_names(result["memberships"])
 
     def test_no_memberships_when_tags_key_missing(self):
         """Test person payload has no memberships when tags key is absent."""
@@ -525,6 +710,21 @@ class TestGoogleAPIClientGroupManagement:
 class TestPushContactWithTagsEndToEnd:
     """End-to-end unit test for pushing a contact with tags to Google."""
 
+    @pytest.fixture(autouse=True)
+    def _no_contact_link(self) -> Iterator[None]:
+        """Stub the per-contact lock and link re-read, like the other DB helpers.
+
+        These tests drive ``push_contacts_to_google`` with a bare ``AsyncMock``
+        session and patch its database helpers. The push now locks each contact
+        and re-reads its link under the lock; with no link the list's
+        ``sync_action`` stands, which is what these tests exercise.
+        """
+        with (
+            patch("worker._lock_contact_for_push", new_callable=AsyncMock),
+            patch("worker._read_sync_link", new_callable=AsyncMock, return_value=None),
+        ):
+            yield
+
     @pytest.fixture
     def mock_session(self):
         return AsyncMock()
@@ -597,10 +797,10 @@ class TestPushContactWithTagsEndToEnd:
             )
 
             assert "memberships" in person_data
-            assert len(person_data["memberships"]) == 1
-            assert (
-                person_data["memberships"][0]["contactGroupMembership"][
-                    "contactGroupResourceName"
-                ]
-                == "contactGroups/abc123"
-            )
+            # The tag's group, plus the reserved myContacts membership the
+            # payload must always carry so the update does not demote the
+            # contact out of the user's contacts.
+            assert _resource_names(person_data["memberships"]) == [
+                "contactGroups/myContacts",
+                "contactGroups/abc123",
+            ]

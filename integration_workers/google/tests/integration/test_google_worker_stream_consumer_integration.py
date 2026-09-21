@@ -175,6 +175,87 @@ class TestGoogleWorkerStreamConsumerIntegration:
         assert received_calls[0]["event_type"] == "TagUpdated"
         assert received_calls[0]["event_data"] == event_data
 
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "TagAssigned",
+            "TagRemoved",
+            "ContactMethodAdded",
+            "ContactMethodDeleted",
+            "ImportantDateAdded",
+            "ImportantDateUpdated",
+            "ImportantDateDeleted",
+            "ContactAddressAdded",
+            "ContactAddressDeleted",
+            "ContactNoteAdded",
+        ],
+    )
+    async def test_contact_sub_entity_event_reaches_the_contact_handler(
+        self,
+        stream_client: StreamClient,
+        redis_client: Any,
+        unique_stream_name: str,
+        cleanup_stream: Any,
+        event_type: str,
+    ) -> None:
+        """LOCAL-177 regression: these events used to be acked and dropped.
+
+        The route table listed only the four aggregate-level contact events, so
+        adding a tag or an email address was read off the stream, acknowledged
+        and discarded — the change never reached Google. This is the end-to-end
+        guard for that: a real event on a real stream must reach
+        ``process_contact_event``.
+        """
+        mock_session_factory = AsyncMock()
+        event_id = f"evt-{uuid.uuid4().hex[:8]}"
+        event_data = {"contact_id": 77, "source": "ui"}
+
+        await redis_client.xadd(
+            unique_stream_name,
+            {
+                "event_id": event_id,
+                "event_type": event_type,
+                "aggregate_id": "77",
+                "event_data": json.dumps(event_data),
+                "occurred_at": "2024-06-15T10:30:00+00:00",
+            },
+        )
+
+        consumer = GoogleWorkerStreamConsumer(
+            stream_client=stream_client,
+            session_factory=mock_session_factory,
+            stream_name=unique_stream_name,
+            batch_size=1,
+            block_ms=1000,
+        )
+        await stream_client.ensure_consumer_group(unique_stream_name, "google-worker")
+
+        received_calls: list[dict[str, Any]] = []
+
+        async def mock_process_contact(
+            ctx: Any, event_type: str, event_data: Any
+        ) -> dict[str, str]:
+            received_calls.append({"event_type": event_type, "event_data": event_data})
+            return {"status": "success"}
+
+        with patch(
+            "stream_consumer_tasks.process_contact_event",
+            side_effect=mock_process_contact,
+        ):
+            processed = await consumer._process_batch()
+
+        assert processed == 1
+        assert len(received_calls) == 1, (
+            f"{event_type} was consumed but never dispatched to "
+            "process_contact_event - it is missing from the contact route table"
+        )
+        assert received_calls[0]["event_type"] == event_type
+        assert received_calls[0]["event_data"] == event_data
+
+        # Dispatched successfully, so it is acknowledged rather than left pending.
+        pending = await redis_client.xpending(unique_stream_name, "google-worker")
+        assert pending["pending"] == 0
+
     async def test_irrelevant_event_acknowledged_immediately(
         self,
         stream_client: StreamClient,

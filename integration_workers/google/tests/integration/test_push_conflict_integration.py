@@ -6,6 +6,7 @@ PostgreSQL database to verify that sync metadata is correctly persisted
 and that conflict handling (409 ETag mismatch) works end-to-end.
 """
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -72,6 +73,14 @@ def _make_mock_google_client() -> MagicMock:
         "etag": "etag_updated",
     }
     return client
+
+
+def _membership_resources(person_data: dict[str, Any]) -> list[str]:
+    """The contact-group resource names in a pushed person payload."""
+    return [
+        entry["contactGroupMembership"]["contactGroupResourceName"]
+        for entry in person_data.get("memberships", [])
+    ]
 
 
 @pytest.mark.asyncio
@@ -220,23 +229,27 @@ class TestPushContactsWithRealDB:
             group_name_to_resource=group_mapping,
         )
 
-        # Verify the Google API was called with memberships
+        # Verify the Google API was called with memberships: the tag's group,
+        # led by the reserved myContacts membership the payload must always
+        # carry (the update mask replaces the list, so omitting it would drop
+        # the contact out of the user's contacts).
         call_args = mock_client.create_contact.call_args
         person_data = call_args[0][0]
         assert "memberships" in person_data
-        assert len(person_data["memberships"]) == 1
-        assert (
-            person_data["memberships"][0]["contactGroupMembership"][
-                "contactGroupResourceName"
-            ]
-            == "contactGroups/pushGroup"
-        )
+        assert _membership_resources(person_data) == [
+            "contactGroups/myContacts",
+            "contactGroups/pushGroup",
+        ]
 
-    async def test_push_empty_tags_sends_empty_memberships(
+    async def test_push_empty_tags_sends_only_reserved_memberships(
         self, db_session: AsyncSession
     ) -> None:
-        """Test that a contact with no tags still sends empty memberships
-        when group_name_to_resource is provided (to clear Google groups)."""
+        """A contact with no tags sends just the reserved memberships.
+
+        The memberships key must still be present so Google clears any stale tag
+        groups, but it can never be a bare ``[]`` — that would also clear
+        ``contactGroups/myContacts`` and demote the contact.
+        """
         # Create a contact with NO tags
         result = await db_session.execute(
             text(
@@ -272,9 +285,9 @@ class TestPushContactsWithRealDB:
 
         call_args = mock_client.create_contact.call_args
         person_data = call_args[0][0]
-        # Should include memberships key with empty list
+        # Present so tag groups are cleared, but never empty.
         assert "memberships" in person_data
-        assert person_data["memberships"] == []
+        assert _membership_resources(person_data) == ["contactGroups/myContacts"]
 
 
 @pytest.mark.asyncio

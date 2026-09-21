@@ -79,12 +79,13 @@ class TestGoogleWorkerStreamConsumerEventMatching:
             "journal_event.created",
             "journal_event.updated",
             "journal_review.detect_matches",
-            # Search/summary events — handled by other consumers
+            # Search/summary events — handled by other consumers.
+            # TagAssigned/TagRemoved/ImportantDate* used to be listed here;
+            # LOCAL-177 found they are contact changes Google must receive, so
+            # they are now routed (see CONTACT_PUSH_EVENT_TYPES).
             "ContactSummaryRefreshRequested",
-            "TagAssigned",
-            "TagRemoved",
-            "ImportantDateAdded",
-            "ImportantDateDeleted",
+            "ContactSummaryUpdated",
+            "ContactRelationshipCreated",
             # Unknown events
             "SomethingElse",
             "route.created",

@@ -67,7 +67,7 @@ from google_client import (
     is_permission_denied,
 )
 from google_settings import GoogleSettings
-from group_mapping import _build_contact_group_mapping
+from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
@@ -87,6 +87,16 @@ logger = get_logger(__name__)
 # is what applied it. Derived from the enum rather than spelled out, so a
 # rename of the provenance value cannot silently disable the echo guard.
 INBOUND_SYNC_SOURCE = Provenance.GOOGLE_CALENDAR.value
+
+# The contacts equivalent: the inbound contacts sync applies Google's data
+# through the backend's ContactService, which re-publishes the same contact
+# events this worker consumes. Pushing those back out would write Google's own
+# data to Google once per sub-entity it touched (LOCAL-177).
+INBOUND_CONTACT_SYNC_SOURCE = Provenance.GOOGLE_CONTACTS.value
+
+# Google's system group for starred contacts. The inbound transformer reads
+# membership of it into ``is_favourite``; the outbound push writes it back.
+STARRED_GROUP_RESOURCE = "contactGroups/starred"
 
 # Initialize metrics collector for this worker
 metrics_collector = MetricsCollector(worker_type="google")
@@ -578,18 +588,21 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if nicknames:
         person_data["nicknames"] = nicknames
 
-    # Transform contact methods (emails and phones)
-    methods = contact.get("methods", [])
-    email_addresses, phone_numbers = _transform_contact_methods(methods)
-    if email_addresses:
+    # Transform contact methods (emails and phones). Both fields are sent
+    # whenever methods were loaded, even when empty: update_contact derives
+    # updatePersonFields from the payload's keys, so omitting an empty list
+    # would leave a deleted contact's last email or phone standing in Google —
+    # and the next inbound pull would re-import it.
+    if "methods" in contact:
+        email_addresses, phone_numbers = _transform_contact_methods(
+            contact["methods"] or []
+        )
         person_data["emailAddresses"] = email_addresses
-    if phone_numbers:
         person_data["phoneNumbers"] = phone_numbers
 
-    # Transform addresses
-    google_addresses = _transform_addresses(contact.get("addresses", []))
-    if google_addresses:
-        person_data["addresses"] = google_addresses
+    # Transform addresses, sent even when empty for the same reason.
+    if "addresses" in contact:
+        person_data["addresses"] = _transform_addresses(contact["addresses"] or [])
 
     # Transform notes to biographies
     biographies = _transform_notes(contact.get("notes", []))
@@ -606,14 +619,19 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if "group_name_to_resource" in contact:
         group_name_to_resource = contact["group_name_to_resource"]
         # Always include memberships when tag push is active (group mapping
-        # provided), even if empty, so that removed local tags clear existing
-        # Google group memberships via the updatePersonFields mask.
-        memberships = (
+        # provided), even if the contact has no tags, so that removed local tags
+        # clear existing Google group memberships via the updatePersonFields
+        # mask. The reserved groups lead the list and are never cleared: the
+        # mask replaces memberships wholesale, so omitting myContacts would
+        # drop the contact out of the user's contacts altogether.
+        tag_memberships = (
             _transform_tags_to_memberships(tag_names, group_name_to_resource)
             if tag_names and group_name_to_resource
             else []
         )
-        person_data["memberships"] = memberships
+        person_data["memberships"] = _with_reserved_group_memberships(
+            tag_memberships, is_favourite=bool(contact.get("is_favourite"))
+        )
 
     # Transform important dates to Google birthdays and events
     # Always include birthdays/events when important_dates is present on the
@@ -626,6 +644,67 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
         person_data["events"] = events
 
     return person_data
+
+
+def _reserved_group_memberships() -> list[dict[str, Any]]:
+    """Build the memberships every pushed contact must retain.
+
+    Google's ``updatePersonFields=memberships`` replaces the membership list
+    rather than merging into it, so any membership left out of the payload is
+    removed. ``contactGroups/myContacts`` is what makes a person one of the
+    user's contacts at all, so dropping it demotes the contact to an "other
+    contact" — invisible in Google Contacts. The set is read from
+    ``google_reserved_groups``, the same configuration the inbound sync uses to
+    decide which groups are not tags.
+    """
+    # ``starred`` may legitimately appear in the reserved list — inbound uses it
+    # to decide which groups are not tags, and starred is not a tag — but it is
+    # per-contact state driven by ``is_favourite``, not a group every contact
+    # belongs to. Retaining it here would star every contact.
+    return [
+        _group_membership(f"contactGroups/{group_id}")
+        for group_id in settings.google_reserved_groups
+        if f"contactGroups/{group_id}" != STARRED_GROUP_RESOURCE
+    ]
+
+
+def _group_membership(resource_name: str) -> dict[str, Any]:
+    """Build one People API contact-group membership entry."""
+    return {"contactGroupMembership": {"contactGroupResourceName": resource_name}}
+
+
+def _with_reserved_group_memberships(
+    tag_memberships: list[dict[str, Any]],
+    is_favourite: bool = False,
+) -> list[dict[str, Any]]:
+    """Prepend the system memberships, de-duplicated by resource name.
+
+    Two kinds of system group must be carried because the update replaces the
+    whole list:
+
+    * the reserved groups (``myContacts``), which are always retained;
+    * ``starred``, which is not reserved but *state*: inbound sync reads it into
+      ``is_favourite``, so outbound writes it back from the same field. Leaving
+      it out would unstar every favourite on any edit; sending it
+      unconditionally would star every contact.
+
+    A local tag can resolve to a system group's resource name (a user may have
+    tagged someone "myContacts"), so the lists are merged rather than
+    concatenated.
+    """
+    memberships = _reserved_group_memberships()
+    if is_favourite:
+        memberships.append(_group_membership(STARRED_GROUP_RESOURCE))
+    seen = {
+        entry["contactGroupMembership"]["contactGroupResourceName"]
+        for entry in memberships
+    }
+    for entry in tag_memberships:
+        resource_name = entry["contactGroupMembership"]["contactGroupResourceName"]
+        if resource_name not in seen:
+            seen.add(resource_name)
+            memberships.append(entry)
+    return memberships
 
 
 def _transform_tags_to_memberships(
@@ -807,6 +886,75 @@ async def _ensure_google_groups_exist(
     return updated_mapping
 
 
+class UnresolvedTagGroupsError(Exception):
+    """Raised when a tag's Google contact group could not be found or created.
+
+    Pushing without the membership would acknowledge a change Google never
+    received, so the event path raises this to have the stream redeliver it.
+    """
+
+    def __init__(self, tag_names: list[str]) -> None:
+        self.tag_names = tag_names
+        super().__init__(
+            f"No Google contact group could be resolved for tags: {tag_names}"
+        )
+
+
+async def _resolve_group_mapping_for_tags(
+    client: GoogleAPIClient,
+    tag_names: list[str],
+    require_all_tags: bool = False,
+) -> dict[str, str]:
+    """Resolve local tag names to Google contact-group resource names.
+
+    Fetches the account's existing groups, reverses the mapping to be keyed by
+    name, and creates a group for any tag that does not have one yet.
+
+    An empty result is meaningful and is not the same as "no mapping": callers
+    pass it straight through to the transform, where a present mapping — even an
+    empty one — is what includes ``memberships`` in the update mask, so tags
+    removed locally clear their Google groups.
+
+    That is exactly why a failed listing must raise rather than come back empty
+    or partial: the update replaces ``memberships`` wholesale, so an incomplete
+    mapping would strip the contact from every group it missed, and the tags
+    would look groupless and be created again. Raising leaves the stream event
+    unacknowledged for retry; the cron's push-before-pull logs it and moves on.
+
+    Group *creation* failures are a separate question, answered per caller by
+    ``require_all_tags``. ``_ensure_google_groups_exist`` skips a tag whose group
+    it could not create. The event path passes ``True``: pushing without that
+    membership would acknowledge a change Google never received, so it raises
+    for a stream redelivery instead. The cron push leaves it ``False``, because
+    a tag Google persistently rejects must not block every other contact.
+
+    Raises:
+        Exception: If any page of the contact-group listing fails.
+        UnresolvedTagGroupsError: If ``require_all_tags`` and a tag still has
+            no group after creation was attempted.
+    """
+    forward_mapping = await _fetch_contact_group_mapping(client)
+    reverse_mapping = _build_reverse_group_mapping(forward_mapping)
+
+    if not tag_names:
+        return reverse_mapping
+
+    mapping = await _ensure_google_groups_exist(
+        client=client,
+        tag_names=tag_names,
+        existing_groups=reverse_mapping,
+    )
+
+    if require_all_tags:
+        # Case-insensitive, matching how tags resolve to memberships.
+        resolved = {name.lower() for name in mapping}
+        unresolved = [name for name in tag_names if name.lower() not in resolved]
+        if unresolved:
+            raise UnresolvedTagGroupsError(unresolved)
+
+    return mapping
+
+
 async def _create_contact_in_google(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -924,6 +1072,45 @@ def _handle_http_error(
         metrics["error_count"] += 1
 
 
+async def _lock_contact_for_push(session: Any, contact_id: int) -> None:
+    """Serialise outbound pushes of one contact across concurrent sessions.
+
+    The stream handler and the cron's push-before-pull can pick up the same
+    contact at once. For a new contact both would read "no sync link" and both
+    create it in Google, and since ``sync_metadata`` is unique on
+    ``(integration_source, external_id)`` — not on the local contact — both
+    links would commit: two Google contacts for one local contact.
+
+    Callers take this *before* reading the link, so a link another session
+    committed while they waited is visible. The lock is transaction-scoped and
+    released by the caller's commit or rollback. It follows the idiom in
+    ``CalendarWatchRepository.lock_calendar_setup``.
+    """
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"google-contact-push:{contact_id}"},
+    )
+
+
+async def _read_sync_link(session: Any, contact_id: int) -> Any:
+    """Read a contact's Google sync link: ``external_id`` and ``version_hash``.
+
+    Returns the row, or ``None`` when the contact has never been pushed. The
+    link is keyed by ``(integration_source, internal_id)`` and is independent of
+    which Google account is pushed to.
+    """
+    result = await session.execute(
+        text("""
+            SELECT external_id, version_hash
+            FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND internal_id = :internal_id
+        """),
+        {"integration_source": "google", "internal_id": contact_id},
+    )
+    return result.fetchone()
+
+
 async def _push_single_contact(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -932,10 +1119,26 @@ async def _push_single_contact(
     metrics: dict[str, int],
     group_name_to_resource: dict[str, str] | None = None,
 ) -> None:
-    """Push a single contact to Google."""
+    """Push a single contact to Google, committing its link on success.
+
+    The contact was selected by ``find_contacts_to_push`` before any lock was
+    held, so its ``sync_action`` may be stale: the stream handler can link the
+    contact in between. The link is therefore re-read under the per-contact
+    push lock, and a link that appeared meanwhile turns a "create" into an
+    update of the already-linked person rather than a duplicate. Each contact
+    commits on its own, which releases the lock promptly and keeps earlier
+    contacts' links if a later one fails.
+    """
     from googleapiclient.errors import HttpError
 
     try:
+        await _lock_contact_for_push(session, contact["id"])
+        link = await _read_sync_link(session, contact["id"])
+        if link is not None:
+            contact["sync_action"] = "update"
+            contact["external_id"] = link.external_id
+            contact["version_hash"] = link.version_hash
+
         # Load full contact data (methods, addresses, notes, tags)
         full_contact_data = await _load_full_contact(session, contact["id"])
         contact.update(full_contact_data)
@@ -962,9 +1165,13 @@ async def _push_single_contact(
             metrics["updated_count"] += 1
             metrics["pushed_count"] += 1
 
+        await session.commit()
+
     except HttpError as e:
+        await session.rollback()
         _handle_http_error(e, contact, metrics)
     except Exception as e:  # noqa: BLE001
+        await session.rollback()
         logger.error(
             "Unexpected error pushing contact to Google",
             contact_id=contact["id"],
@@ -1737,6 +1944,63 @@ async def periodic_sync_all_accounts(ctx: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+async def _push_before_pull(
+    session: AsyncSession,
+    client: GoogleAPIClient,
+    google_account_email: str,
+) -> dict[str, Any]:
+    """Run the outbound push ahead of an inbound sync, never failing it.
+
+    A Google write outage must not block inbound sync, and the pull is safe to
+    run in the ordinary case: a failed push leaves Google's etag where it was,
+    so the backend's idempotency check skips that contact and the local edit
+    survives to be pushed on the next cycle.
+
+    The exception is a genuine two-sided conflict: the contact was also edited
+    in Google, the push's conflict retry failed too, and the changed remote etag
+    lets the pull apply Google's copy over the local edit. Someone has to win
+    that race and Google does, which is how every conflict resolved before the
+    push ran at all; the error is logged per contact.
+
+    The push owns its own commit. Google keeps a write the moment it accepts it,
+    so the etags recorded for those writes are committed before the pull starts
+    rather than riding on the pull's transaction: a failing pull would otherwise
+    roll them back, and the next push would go out against a stale etag. A
+    failed push is rolled back instead, so a database error cannot leave the
+    pull a poisoned session.
+
+    Returns:
+        ``pushed_count`` and ``push_*`` counters to merge into the sync metrics,
+        with ``push_failed`` recording whether the push raised.
+    """
+    try:
+        push_result = await _push_pending_local_contacts(
+            session=session,
+            client=client,
+            google_account_email=google_account_email,
+        )
+    except Exception as e:  # noqa: BLE001
+        await session.rollback()
+        logger.error(
+            "Pushing local contact changes failed, continuing with inbound sync",
+            google_account_email=google_account_email,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return {"pushed_count": 0, "push_failed": True}
+
+    await session.commit()
+
+    return {
+        "pushed_count": push_result.get("pushed_count", 0),
+        "push_created_count": push_result.get("created_count", 0),
+        "push_updated_count": push_result.get("updated_count", 0),
+        "push_error_count": push_result.get("error_count", 0),
+        "push_conflict_count": push_result.get("conflict_count", 0),
+        "push_failed": False,
+    }
+
+
 @trace_arq_job
 async def sync_google_contacts(
     ctx: dict[str, Any],
@@ -1817,6 +2081,18 @@ async def sync_google_contacts(
                 google_client_id=settings.google_client_id,
                 google_client_secret=settings.google_client_secret.get_secret_value(),
                 user_id=user_id,
+            )
+
+            # Push pending local changes BEFORE pulling. Keeping both halves
+            # in one job is what makes the ordering structural: as two ARQ jobs
+            # the pull could land first and overwrite an edit that had not
+            # reached Google yet (LOCAL-177).
+            metrics.update(
+                await _push_before_pull(
+                    session=session,
+                    client=client,
+                    google_account_email=google_account_email,
+                )
             )
 
             # Determine sync strategy
@@ -2806,6 +3082,7 @@ async def _push_contact_to_google_for_event(
     google_account_email: str,
     external_id: str | None,
     version_hash: str | None,
+    group_name_to_resource: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Push a single contact to Google, triggered by a domain event.
 
@@ -2820,6 +3097,9 @@ async def _push_contact_to_google_for_event(
         google_account_email: Google account email
         external_id: Google resource name (for updates)
         version_hash: ETag for optimistic concurrency (for updates)
+        group_name_to_resource: Tag name to Google contact-group resource name.
+            Passing it (even empty) is what includes ``memberships`` in the
+            payload, so tag changes reach Google and removed tags are cleared.
 
     Returns:
         Result dict with status and resource details
@@ -2861,6 +3141,12 @@ async def _push_contact_to_google_for_event(
     # Load full contact data (methods, addresses, notes, tags, important_dates)
     full_data = await _load_full_contact(session, contact_id)
     contact.update(full_data)
+
+    # Use `is not None` so an empty mapping still activates membership handling
+    # (an empty tag list must clear the contact's Google groups), matching
+    # _push_single_contact on the cron path.
+    if group_name_to_resource is not None:
+        contact["group_name_to_resource"] = group_name_to_resource
 
     # Transform to Google Person format
     person_data = _transform_contact_to_google_person(contact)
@@ -3069,6 +3355,18 @@ async def process_contact_event(
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
 
+    # Echo guard: skip anything the inbound contacts sync caused, before any
+    # database work. It runs ahead of the ContactMerged branch so every consumed
+    # contact event is covered by one check.
+    if event_data.get("source") == INBOUND_CONTACT_SYNC_SOURCE:
+        logger.debug(
+            "Skipping contact event applied by the inbound Google sync",
+            job_id=job_id,
+            event_type=event_type,
+            contact_id=event_data.get("contact_id"),
+        )
+        return {"status": "skipped", "reason": "inbound_echo"}
+
     # ContactMerged carries no contact_id (only survivor/source ids and the
     # external collisions to reconcile), so it is handled before the
     # contact_id guard below.
@@ -3094,20 +3392,15 @@ async def process_contact_event(
     session_factory = ctx["session_factory"]
 
     async with session_factory() as session:
+        # Take the per-contact push lock before reading the link, so a link the
+        # cron's push committed while this waited is seen and the contact is
+        # not created in Google twice. Released by the commit in the loop below.
+        await _lock_contact_for_push(session, contact_id)
+
         # Look up sync metadata once — it's keyed by
         # (integration_source, internal_id) and is independent of which
         # Google account we push to.
-        sync_stmt = text("""
-            SELECT external_id, version_hash
-            FROM sync_metadata
-            WHERE integration_source = :integration_source
-              AND internal_id = :internal_id
-        """)
-        sync_result = await session.execute(
-            sync_stmt,
-            {"integration_source": "google", "internal_id": contact_id},
-        )
-        sync_row = sync_result.fetchone()
+        sync_row = await _read_sync_link(session, contact_id)
 
         # Find all Google integrations for all users
         auth_stmt = text("""
@@ -3124,6 +3417,13 @@ async def process_contact_event(
                 event_type=event_type,
             )
             return {"status": "skipped", "reason": "no_google_integrations"}
+
+        # Tag names are account-independent, so they are read once; the
+        # name-to-group mapping they resolve to is per account. A delete needs
+        # neither, so the read is skipped for it.
+        tag_names: list[str] = []
+        if event_type != "ContactDeleted":
+            tag_names = await _load_tag_names_for_contact(session, contact_id)
 
         results = []
         for row in users:
@@ -3176,6 +3476,12 @@ async def process_contact_event(
                         external_id = None
                         version_hash = None
 
+                    # Groups are per Google account, so the mapping is resolved
+                    # inside the loop even though the tag names are not.
+                    group_name_to_resource = await _resolve_group_mapping_for_tags(
+                        client=client, tag_names=tag_names, require_all_tags=True
+                    )
+
                     result = await _push_contact_to_google_for_event(
                         session=session,
                         client=client,
@@ -3184,6 +3490,7 @@ async def process_contact_event(
                         google_account_email=google_account_email,
                         external_id=external_id,
                         version_hash=version_hash,
+                        group_name_to_resource=group_name_to_resource,
                     )
 
                 results.append(result)
@@ -3200,6 +3507,67 @@ async def process_contact_event(
                 raise
 
         return {"status": "success", "results": results}
+
+
+async def _push_pending_local_contacts(
+    session: AsyncSession,
+    client: GoogleAPIClient,
+    google_account_email: str,
+) -> dict[str, Any]:
+    """Push contacts with unsynced local changes to Google.
+
+    Finds contacts that are new locally or were modified since their last sync,
+    resolves the contact groups their tags need, and pushes them. Shared by the
+    standalone ``push_local_contacts_to_google`` task and by
+    ``sync_google_contacts``, which runs it before pulling so a pull cannot
+    overwrite a local edit that has not reached Google yet.
+
+    Each contact commits on its own inside ``_push_single_contact``; the caller
+    owns the session and any work outside the per-contact pushes.
+
+    Returns:
+        Push metrics: pushed/created/updated/error/conflict counts.
+    """
+    empty_metrics: dict[str, Any] = {
+        "pushed_count": 0,
+        "created_count": 0,
+        "updated_count": 0,
+        "error_count": 0,
+        "conflict_count": 0,
+    }
+
+    contacts_to_push = await find_contacts_to_push(
+        session=session, integration_source="google"
+    )
+
+    if not contacts_to_push:
+        logger.info(
+            "No local changes to push",
+            google_account_email=google_account_email,
+        )
+        return empty_metrics
+
+    # Build group mapping for tag→membership push, creating any group a local
+    # tag still needs. Tags are loaded again per contact in _load_full_contact,
+    # but every unique name is needed upfront so the groups exist before the
+    # first push.
+    contact_ids = [c["id"] for c in contacts_to_push]
+    tags_by_contact = await _load_tag_names_for_contacts_batch(session, contact_ids)
+    all_tag_names: set[str] = set()
+    for tag_list in tags_by_contact.values():
+        all_tag_names.update(tag_list)
+
+    reverse_group_mapping = await _resolve_group_mapping_for_tags(
+        client=client, tag_names=sorted(all_tag_names)
+    )
+
+    return await push_contacts_to_google(
+        session=session,
+        client=client,
+        contacts=contacts_to_push,
+        google_account_email=google_account_email,
+        group_name_to_resource=reverse_group_mapping,
+    )
 
 
 @trace_arq_job
@@ -3268,55 +3636,10 @@ async def push_local_contacts_to_google(
                 user_id=user_id,
             )
 
-            # Find contacts that need to be pushed
-            contacts_to_push = await find_contacts_to_push(
-                session=session, integration_source="google"
-            )
-
-            if not contacts_to_push:
-                logger.info(
-                    "No local changes to push",
-                    google_account_email=google_account_email,
-                )
-                metrics["completed_at"] = datetime.now(UTC).isoformat()
-                return {
-                    "status": "success",
-                    "google_account_email": google_account_email,
-                    **metrics,
-                }
-
-            # Build group mapping for tag→membership push.
-            # Fetch existing groups, reverse the mapping, and pre-create any
-            # missing groups for local tags.
-            forward_group_mapping = await _build_contact_group_mapping(client)
-            reverse_group_mapping = _build_reverse_group_mapping(forward_group_mapping)
-
-            # Collect all tag names across contacts with a single batch query.
-            # Tags are loaded again per-contact in _load_full_contact, but we
-            # need all unique names upfront to ensure groups exist before push.
-            contact_ids = [c["id"] for c in contacts_to_push]
-            tags_by_contact = await _load_tag_names_for_contacts_batch(
-                session, contact_ids
-            )
-            all_tag_names: set[str] = set()
-            for tag_list in tags_by_contact.values():
-                all_tag_names.update(tag_list)
-
-            # Ensure groups exist for all tags
-            if all_tag_names:
-                reverse_group_mapping = await _ensure_google_groups_exist(
-                    client=client,
-                    tag_names=list(all_tag_names),
-                    existing_groups=reverse_group_mapping,
-                )
-
-            # Push contacts to Google
-            push_result = await push_contacts_to_google(
+            push_result = await _push_pending_local_contacts(
                 session=session,
                 client=client,
-                contacts=contacts_to_push,
                 google_account_email=google_account_email,
-                group_name_to_resource=reverse_group_mapping,
             )
 
             metrics.update(push_result)

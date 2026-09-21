@@ -17,6 +17,7 @@ import asyncio
 from typing import Any
 
 import structlog
+from core_shared.models.contacts.event_types import CONTACT_PUSH_EVENT_TYPES
 from core_shared.stream_client import StreamClient, StreamEvent, create_stream_redis
 from core_shared.stream_consumer import EventRoute, StreamConsumer
 
@@ -31,14 +32,17 @@ _JOURNAL_EVENT_TYPES = ("JournalCreated", "JournalUpdated", "JournalDeleted")
 _TAG_EVENT_TYPES = ("TagUpdated", "TagDeleted")
 
 # Contact event types that trigger outbound push to Google.
+#
+# Derived from the shared registry rather than listed here: LOCAL-177 found that
+# a hand-maintained list had fallen behind the contacts domain, so tag
+# assignments, contact-method edits and important-date changes were read off the
+# stream, acknowledged and dropped. ``core_shared.models.contacts.event_types``
+# documents what each event maps to, and a backend guard test fails if a newly
+# declared contact event is left unclassified.
+#
 # ``ContactMerged`` (ITER13-005 Phase 2) reconciles a same-service merge by
 # deleting the source contact's orphaned remote Google record.
-_CONTACT_EVENT_TYPES = (
-    "ContactCreated",
-    "ContactUpdated",
-    "ContactDeleted",
-    "ContactMerged",
-)
+_CONTACT_EVENT_TYPES = CONTACT_PUSH_EVENT_TYPES
 
 
 class GoogleWorkerStreamConsumer(StreamConsumer):

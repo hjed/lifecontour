@@ -27,10 +27,37 @@ The worker uses ARQ (Async Redis Queue) for task processing and supports:
 4. `OutboxEventProcessor` transforms Google Person data to Contact entities
 5. Domain services create/update local contacts
 
-**Outbound (Local → Google)**:
-1. Worker detects locally created/updated contacts
-2. Pushes changes to Google People API
-3. Updates sync metadata with Google resource names and ETags
+**Outbound (Local → Google)** — two paths, both pushing the contact's whole
+current state:
+
+1. **Event-driven (the normal path).** A contact domain event arrives on the
+   stream and `process_contact_event` pushes that contact immediately. See
+   [Stream Consumer](#stream-consumer) for the events this covers.
+2. **Reconciliation (the safety net).** `sync_google_contacts` calls
+   `_push_pending_local_contacts` **before** it pulls, pushing every contact
+   that is new locally or whose `updated_at` is newer than its
+   `sync_metadata.last_synced_at`. This repairs anything the event path missed —
+   a worker restart, a trimmed stream — and, because it runs in the same job as
+   the pull, guarantees the pull cannot overwrite an edit that has not reached
+   Google yet. Splitting the two into separate ARQ jobs would lose that ordering.
+
+Both paths update `sync_metadata` with the Google resource name and the ETag
+Google returns, which is what makes the following pull a no-op for that contact
+rather than a re-apply of Google's older copy.
+
+A failing push is logged and the pull still runs. Ordinarily a failed push
+leaves Google's ETag unchanged, so the inbound idempotency check skips that
+contact and the local edit survives to be pushed next cycle. The exception is a
+genuine two-sided conflict — the contact was also edited in Google and the
+push's conflict retry failed too — where the pull applies Google's copy.
+
+Both push paths take a per-contact advisory lock (`_lock_contact_for_push`)
+before reading the contact's sync link, and the cron path commits per contact.
+Without it the stream handler and the cron could both see a new contact as
+unlinked and both create it, leaving two Google contacts for one local contact.
+
+`push_local_contacts_to_google` remains as a standalone ARQ task over the same
+helper, for pushing an account on demand without a pull.
 
 ### What the outbound journal push declines to do
 
@@ -62,7 +89,44 @@ the single source of truth for the worker's consumed-event set:
 |---|---|
 | `JournalCreated`, `JournalUpdated`, `JournalDeleted` | `process_journal_event` |
 | `TagUpdated`, `TagDeleted` | `process_tag_event` |
-| `ContactCreated`, `ContactUpdated`, `ContactDeleted`, `ContactMerged` | `process_contact_event` |
+| every event in `CONTACT_PUSH_EVENT_TYPES` (see below) | `process_contact_event` |
+
+The contact half of that table is **derived from**
+`core_shared.models.contacts.event_types.CONTACT_PUSH_EVENT_TYPES` rather than
+listed here, because a hand-maintained list fell behind the contacts domain
+(LOCAL-177): only the four aggregate-level events were routed, so adding a tag,
+adding or removing an email address, and every important-date edit were read off
+the stream, acknowledged and dropped. That registry currently covers:
+
+- `ContactCreated`, `ContactUpdated`, `ContactDeleted`, `ContactMerged`
+- `TagAssigned`, `TagRemoved` — contact-group membership
+- `ContactMethodAdded`, `ContactMethodDeleted` — emails and phone numbers
+- `ContactAddressAdded`, `ContactAddressDeleted` — postal addresses
+- `ContactNoteAdded` — biographies
+- `ImportantDateAdded`, `ImportantDateUpdated`, `ImportantDateDeleted` —
+  birthdays and events
+
+Every one of them pushes the contact's **whole current state**, so the event only
+has to identify which contact changed. Events carrying the inbound sync's
+provenance (`source == "google_contacts"`) are skipped, so applying Google's data
+locally does not write it straight back to Google.
+
+Tags are pushed as contact-group memberships. The handler resolves the contact's
+tag names to group resource names per Google account (creating any group a tag
+still needs) via `_resolve_group_mapping_for_tags`, which the cron push shares.
+The payload always carries the **reserved** groups from `GOOGLE_RESERVED_GROUPS`
+alongside the tag groups: `updatePersonFields=memberships` replaces the
+membership list rather than merging into it, so a payload without
+`contactGroups/myContacts` would drop the contact out of the user's contacts
+altogether. For the same reason `contactGroups/starred` is written back from
+`is_favourite` (the field inbound sync reads it into): omitting it would unstar
+every favourite on any edit.
+
+Because an incomplete group mapping would strip memberships, outbound code lists
+groups with the strict `_fetch_contact_group_mapping`, which raises on any failed
+page. On the event path that leaves the stream event unacknowledged for retry;
+the inbound sync keeps the tolerant `_build_contact_group_mapping`, where a
+missing group only costs a tag on import.
 
 Each handler builds a minimal ARQ-compatible context (`session_factory` +
 `job_id`) and calls the existing worker function directly, bypassing ARQ enqueue.
