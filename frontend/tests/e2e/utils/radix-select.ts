@@ -11,10 +11,15 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * loop has stopped retrying. The trigger is opened from the keyboard too: under
  * load, Mobile Chrome reports a neighbouring element intercepting the tap.
  *
- * Typing must wait for focus to enter the listbox. Radix only moves focus there
+ * Nor is the option chosen by typeahead. In the production build a space typed
+ * mid-search commits whichever option has focus, so a label such as
+ * "Year Only" closes the select on its space and the rest of the keystrokes
+ * land on the trigger. Instead the option is focused directly and committed
+ * with Enter, through the item's own key handler.
+ *
+ * That focus has to wait for Radix's. Radix focuses the selected option only
  * once the popper is positioned, which on a slow runner lands after the listbox
- * is already visible. Until then keys reach the trigger, whose own typeahead
- * changes the value while Enter, an open key, leaves the listbox open.
+ * is visible, and would take focus back from an option focused before then.
  *
  * Each attempt starts from a closed listbox, so retrying is idempotent. The
  * Escape that closes a listbox a previous attempt left open is gated on one
@@ -24,7 +29,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * the select is no longer open.
  *
  * @param trigger - The select's trigger (the `combobox`).
- * @param optionLabel - The option's visible label; the trigger shows it once selected.
+ * @param optionLabel - The option's accessible name; the trigger shows it once selected.
  */
 export async function selectRadixOption(
   page: Page,
@@ -32,6 +37,10 @@ export async function selectRadixOption(
   optionLabel: string
 ): Promise<void> {
   const listbox = page.getByRole('listbox');
+  const option = listbox.getByRole('option', {
+    name: optionLabel,
+    exact: true,
+  });
 
   await expect(async () => {
     if (await listbox.isVisible()) {
@@ -48,8 +57,9 @@ export async function selectRadixOption(
       )
       .toBe(true);
 
-    await page.keyboard.type(optionLabel, { delay: 50 });
-    await page.keyboard.press('Enter');
+    await option.focus({ timeout: 3000 });
+    await expect(option).toBeFocused({ timeout: 3000 });
+    await option.press('Enter', { timeout: 3000 });
 
     await expect(trigger).toContainText(optionLabel, { timeout: 3000 });
     await expect(listbox).toBeHidden({ timeout: 3000 });

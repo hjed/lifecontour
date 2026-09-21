@@ -77,7 +77,7 @@ test.describe('Important Dates', () => {
     // --- Add a new Important Date ---
     await authenticatedPage.getByLabel('Add important date').click();
 
-    // Choose the type and precision by typeahead; see selectRadixOption for
+    // Choose the type and precision from the keyboard; see selectRadixOption for
     // why the portaled options are never clicked.
     await selectRadixOption(
       authenticatedPage,

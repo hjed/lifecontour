@@ -647,8 +647,13 @@ test.describe('Calendar Views', () => {
 
     await dataManager.clearAllJournals();
 
+    // Unique per run: calendars outlive clearAllJournals, and the picker must
+    // resolve to this test's calendar, not a same-named one from an earlier run.
     const calendars = await dataManager.createCalendars([
-      { name: 'Quick Create Cal', color: '#10B981' },
+      {
+        name: `Quick Create Cal ${crypto.randomUUID().slice(0, 8)}`,
+        color: '#10B981',
+      },
     ]);
 
     testCleanup(async () => {

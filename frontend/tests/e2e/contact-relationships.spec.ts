@@ -77,7 +77,7 @@ test.describe('Contact Relationships', () => {
       listbox.getByRole('option', { name: 'Partner', exact: true })
     ).toBeVisible();
 
-    // Select the first option by typeahead; see selectRadixOption for why the
+    // Select the first option from the keyboard; see selectRadixOption for why the
     // portaled option is never clicked.
     await selectRadixOption(page, typeTrigger, 'Parent');
   });
