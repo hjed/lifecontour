@@ -365,6 +365,59 @@ class TestTransformContactToGooglePersonWithTags:
         # Resolve ``worker.settings`` at call time: other tests reload the
         # worker module, so an instance bound at import time can be stale.
         with patch.object(
+            worker.settings, "google_reserved_groups", ["myContacts", "chatBuddies"]
+        ):
+            result = worker._transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/chatBuddies",
+        ]
+
+    def test_starred_in_the_reserved_config_does_not_star_everyone(self):
+        """Greptile on #1549: ``starred`` is state, never retained blanket.
+
+        ``GOOGLE_RESERVED_GROUPS=myContacts,starred`` is a supported setting —
+        inbound uses the list to decide which groups are not tags, and starred
+        is not a tag. Treating every reserved group as always-present would
+        send ``contactGroups/starred`` for every contact and star them all.
+        """
+        import worker
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": False,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        with patch.object(
+            worker.settings, "google_reserved_groups", ["myContacts", "starred"]
+        ):
+            result = worker._transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == ["contactGroups/myContacts"]
+
+    def test_starred_in_the_reserved_config_still_stars_a_favourite_once(self):
+        """With ``starred`` configured as reserved, a favourite appears once."""
+        import worker
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": True,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        with patch.object(
             worker.settings, "google_reserved_groups", ["myContacts", "starred"]
         ):
             result = worker._transform_contact_to_google_person(contact)

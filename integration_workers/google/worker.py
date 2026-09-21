@@ -657,9 +657,14 @@ def _reserved_group_memberships() -> list[dict[str, Any]]:
     ``google_reserved_groups``, the same configuration the inbound sync uses to
     decide which groups are not tags.
     """
+    # ``starred`` may legitimately appear in the reserved list — inbound uses it
+    # to decide which groups are not tags, and starred is not a tag — but it is
+    # per-contact state driven by ``is_favourite``, not a group every contact
+    # belongs to. Retaining it here would star every contact.
     return [
         _group_membership(f"contactGroups/{group_id}")
         for group_id in settings.google_reserved_groups
+        if f"contactGroups/{group_id}" != STARRED_GROUP_RESOURCE
     ]
 
 
