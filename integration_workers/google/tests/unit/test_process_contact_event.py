@@ -19,6 +19,18 @@ def _make_ctx(session_factory: Any = None) -> dict[str, Any]:
     }
 
 
+def _google_client() -> AsyncMock:
+    """A Google client whose contact-group listing succeeds with no groups.
+
+    The push resolves tag groups before writing, and a listing failure now
+    raises rather than being swallowed. A bare ``MagicMock`` client cannot be
+    awaited, so these dispatch-focused tests need a client that lists cleanly.
+    """
+    client = AsyncMock()
+    client.list_contact_groups.return_value = {"contactGroups": []}
+    return client
+
+
 def _mock_session_factory(
     sync_row: Any = None,
     users: list[Any] | None = None,
@@ -120,7 +132,7 @@ class TestProcessContactCreated:
                 return_value={"status": "created"},
             ) as mock_push,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -159,7 +171,7 @@ class TestProcessContactUpdated:
                 return_value={"status": "updated"},
             ) as mock_push,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -195,7 +207,7 @@ class TestProcessContactUpdated:
                 return_value={"status": "created"},
             ) as mock_push,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -233,7 +245,7 @@ class TestProcessContactDeleted:
                 return_value={"status": "deleted"},
             ) as mock_delete,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -258,7 +270,7 @@ class TestProcessContactDeleted:
 
         with (
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -332,7 +344,7 @@ class TestProcessContactMerged:
                 return_value={"status": "deleted", "external_id": "people/source123"},
             ) as mock_delete,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -393,7 +405,7 @@ class TestProcessContactMerged:
                 new_callable=AsyncMock,
             ) as mock_delete,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -451,7 +463,7 @@ class TestProcessContactMerged:
                 return_value={"status": "deleted"},
             ) as mock_delete,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -489,7 +501,7 @@ class TestProcessContactEventErrorHandling:
                 side_effect=Exception("Google API error"),
             ),
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
             pytest.raises(Exception, match="Google API error"),
         ):
             await process_contact_event(
@@ -756,7 +768,7 @@ class TestInboundEchoGuard:
                 return_value={"status": "created"},
             ) as mock_push,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -784,7 +796,7 @@ class TestInboundEchoGuard:
                 return_value={"status": "created"},
             ) as mock_push,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -839,7 +851,7 @@ class TestNewlyRoutedContactEvents:
                 return_value={"status": "updated"},
             ) as mock_push,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -895,7 +907,7 @@ class TestEventPushSendsTagMemberships:
                 return_value={"status": "updated"},
             ) as mock_push,
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -933,7 +945,7 @@ class TestEventPushSendsTagMemberships:
                 return_value={"status": "deleted"},
             ),
             patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
         ):
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
@@ -957,7 +969,7 @@ class TestResolveGroupMappingForTags:
 
         with (
             patch(
-                "worker._build_contact_group_mapping",
+                "worker._fetch_contact_group_mapping",
                 new_callable=AsyncMock,
                 return_value={"contactGroups/abc123": "Friends"},
             ),
@@ -995,7 +1007,7 @@ class TestResolveGroupMappingForTags:
 
         with (
             patch(
-                "worker._build_contact_group_mapping",
+                "worker._fetch_contact_group_mapping",
                 new_callable=AsyncMock,
                 return_value={},
             ),
@@ -1010,3 +1022,94 @@ class TestResolveGroupMappingForTags:
         assert result == {}
         # Nothing to create, so no group-creation round trip.
         mock_ensure.assert_not_called()
+
+
+class TestGroupLookupFailureIsNotDestructive:
+    """Greptile P1 on #1549: a swallowed listing failure stripped tag groups.
+
+    ``_build_contact_group_mapping`` logs and returns a partial (often empty)
+    mapping when ``contactGroups.list`` fails. Fed into the event push, every
+    tag then looked groupless, so the update — which replaces ``memberships``
+    wholesale — removed the contact from all its tag groups, and the
+    swallowed error meant the event was acknowledged and never retried.
+    """
+
+    @pytest.mark.asyncio
+    async def test_resolver_raises_when_group_listing_fails(self) -> None:
+        """A failed listing propagates instead of looking like "no groups"."""
+        from worker import _resolve_group_mapping_for_tags
+
+        mock_client = AsyncMock()
+        mock_client.list_contact_groups.side_effect = RuntimeError("503")
+
+        with patch(
+            "worker._ensure_google_groups_exist", new_callable=AsyncMock
+        ) as mock_ensure:
+            with pytest.raises(RuntimeError, match="503"):
+                await _resolve_group_mapping_for_tags(
+                    client=mock_client, tag_names=["Friends"]
+                )
+
+        # Groups that merely *looked* absent must not be re-created.
+        mock_ensure.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolver_raises_when_a_later_page_fails(self) -> None:
+        """A partial listing is as dangerous as an empty one."""
+        from worker import _resolve_group_mapping_for_tags
+
+        mock_client = AsyncMock()
+        mock_client.list_contact_groups.side_effect = [
+            {
+                "contactGroups": [
+                    {
+                        "resourceName": "contactGroups/abc123",
+                        "name": "Friends",
+                        "formattedName": "Friends",
+                    }
+                ],
+                "nextPageToken": "page-2",
+            },
+            RuntimeError("503 on page 2"),
+        ]
+
+        with pytest.raises(RuntimeError, match="page 2"):
+            await _resolve_group_mapping_for_tags(
+                client=mock_client, tag_names=["Friends"]
+            )
+
+    @pytest.mark.asyncio
+    async def test_event_is_left_for_retry_and_nothing_is_pushed(self) -> None:
+        """process_contact_event raises, so the stream redelivers the event."""
+        from worker import process_contact_event
+
+        mock_sync_row = MagicMock()
+        mock_sync_row.external_id = "people/c123"
+        mock_sync_row.version_hash = "etag-old"
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=mock_sync_row,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+            tag_names=["Friends"],
+        )
+
+        with (
+            patch(
+                "worker._resolve_group_mapping_for_tags",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("503"),
+            ),
+            patch(
+                "worker._push_contact_to_google_for_event", new_callable=AsyncMock
+            ) as mock_push,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
+        ):
+            with pytest.raises(RuntimeError, match="503"):
+                await process_contact_event(
+                    ctx=_make_ctx(mock_factory),
+                    event_type="TagAssigned",
+                    event_data={"contact_id": 42, "source": "ui"},
+                )
+
+        mock_push.assert_not_called()

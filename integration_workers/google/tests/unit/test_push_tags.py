@@ -374,6 +374,75 @@ class TestTransformContactToGooglePersonWithTags:
             "contactGroups/starred",
         ]
 
+    def test_favourite_contact_keeps_its_starred_membership(self):
+        """``is_favourite`` is pushed back as ``contactGroups/starred``.
+
+        Inbound sync reads the starred group into ``is_favourite``, but the
+        outbound transform never wrote it back. Once memberships are in the
+        update mask that silently unstars every favourite on any edit.
+        """
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": True,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": ["Friends"],
+            "group_name_to_resource": {"Friends": "contactGroups/abc123"},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/starred",
+            "contactGroups/abc123",
+        ]
+
+    def test_favourite_without_tags_is_still_starred(self):
+        """The star does not depend on the contact having any tags."""
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": True,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert _resource_names(result["memberships"]) == [
+            "contactGroups/myContacts",
+            "contactGroups/starred",
+        ]
+
+    def test_non_favourite_contact_is_not_starred(self):
+        """Un-favouriting locally removes the star in Google."""
+        from worker import _transform_contact_to_google_person
+
+        contact = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "is_favourite": False,
+            "methods": [],
+            "addresses": [],
+            "notes": [],
+            "tags": [],
+            "group_name_to_resource": {},
+        }
+
+        result = _transform_contact_to_google_person(contact)
+
+        assert "contactGroups/starred" not in _resource_names(result["memberships"])
+
     def test_no_memberships_when_tags_key_missing(self):
         """Test person payload has no memberships when tags key is absent."""
         from worker import _transform_contact_to_google_person

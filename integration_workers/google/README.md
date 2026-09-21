@@ -91,7 +91,15 @@ The payload always carries the **reserved** groups from `GOOGLE_RESERVED_GROUPS`
 alongside the tag groups: `updatePersonFields=memberships` replaces the
 membership list rather than merging into it, so a payload without
 `contactGroups/myContacts` would drop the contact out of the user's contacts
-altogether.
+altogether. For the same reason `contactGroups/starred` is written back from
+`is_favourite` (the field inbound sync reads it into): omitting it would unstar
+every favourite on any edit.
+
+Because an incomplete group mapping would strip memberships, outbound code lists
+groups with the strict `_fetch_contact_group_mapping`, which raises on any failed
+page. On the event path that leaves the stream event unacknowledged for retry;
+the inbound sync keeps the tolerant `_build_contact_group_mapping`, where a
+missing group only costs a tag on import.
 
 Each handler builds a minimal ARQ-compatible context (`session_factory` +
 `job_id`) and calls the existing worker function directly, bypassing ARQ enqueue.

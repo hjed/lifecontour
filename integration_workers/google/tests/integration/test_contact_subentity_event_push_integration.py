@@ -421,6 +421,77 @@ class TestTagMembershipsReachGoogle:
 
 
 @pytest.mark.asyncio
+class TestPushDoesNotDropGoogleOnlyState:
+    """Greptile P1s on #1549: memberships the push must not silently remove."""
+
+    async def test_favourite_contact_stays_starred(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """``is_favourite`` read from the database is pushed as the star.
+
+        Inbound sync stores Google's starred group as ``is_favourite``; without
+        writing it back, any edit to a favourite would unstar it in Google.
+        """
+        contact_id = synced_contact["contact_id"]
+        await db_session.execute(
+            text("UPDATE contacts SET is_favourite = true WHERE id = :cid"),
+            {"cid": contact_id},
+        )
+        await db_session.flush()
+
+        mock_client = _mock_google_client(
+            groups={"Colleagues": "contactGroups/colleagues1"}
+        )
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactMethodAdded",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        assert _pushed_membership_resources(mock_client) == [
+            "contactGroups/myContacts",
+            "contactGroups/starred",
+            "contactGroups/colleagues1",
+        ]
+
+    async def test_failed_group_listing_pushes_nothing_and_is_retried(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """A listing failure raises instead of pushing a stripped membership list.
+
+        Swallowed, it made every tag look groupless: the update then removed the
+        contact from all its tag groups, the groups were re-created as
+        duplicates, and the acknowledged event was never retried.
+        """
+        contact_id = synced_contact["contact_id"]
+        mock_client = _mock_google_client(
+            groups={"Colleagues": "contactGroups/colleagues1"}
+        )
+        mock_client.list_contact_groups.side_effect = RuntimeError("503")
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+            pytest.raises(RuntimeError, match="503"),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="TagAssigned",
+                event_data={"contact_id": contact_id, "source": "ui"},
+            )
+
+        mock_client.update_contact.assert_not_called()
+        mock_client.create_contact_group.assert_not_called()
+        # Nothing was written, so the stored etag still reflects Google's state.
+        assert await _stored_version_hash(db_session, contact_id) == "etag-before"
+
+
+@pytest.mark.asyncio
 class TestDeletingTheLastValueClearsGoogle:
     """Augment review of #1548: a deletion must name the field it empties.
 

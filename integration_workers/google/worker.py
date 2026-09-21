@@ -67,7 +67,7 @@ from google_client import (
     is_permission_denied,
 )
 from google_settings import GoogleSettings
-from group_mapping import _build_contact_group_mapping
+from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
@@ -93,6 +93,10 @@ INBOUND_SYNC_SOURCE = Provenance.GOOGLE_CALENDAR.value
 # events this worker consumes. Pushing those back out would write Google's own
 # data to Google once per sub-entity it touched (LOCAL-177).
 INBOUND_CONTACT_SYNC_SOURCE = Provenance.GOOGLE_CONTACTS.value
+
+# Google's system group for starred contacts. The inbound transformer reads
+# membership of it into ``is_favourite``; the outbound push writes it back.
+STARRED_GROUP_RESOURCE = "contactGroups/starred"
 
 # Initialize metrics collector for this worker
 metrics_collector = MetricsCollector(worker_type="google")
@@ -625,7 +629,9 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
             if tag_names and group_name_to_resource
             else []
         )
-        person_data["memberships"] = _with_reserved_group_memberships(tag_memberships)
+        person_data["memberships"] = _with_reserved_group_memberships(
+            tag_memberships, is_favourite=bool(contact.get("is_favourite"))
+        )
 
     # Transform important dates to Google birthdays and events
     # Always include birthdays/events when important_dates is present on the
@@ -652,25 +658,38 @@ def _reserved_group_memberships() -> list[dict[str, Any]]:
     decide which groups are not tags.
     """
     return [
-        {
-            "contactGroupMembership": {
-                "contactGroupResourceName": f"contactGroups/{group_id}"
-            }
-        }
+        _group_membership(f"contactGroups/{group_id}")
         for group_id in settings.google_reserved_groups
     ]
 
 
+def _group_membership(resource_name: str) -> dict[str, Any]:
+    """Build one People API contact-group membership entry."""
+    return {"contactGroupMembership": {"contactGroupResourceName": resource_name}}
+
+
 def _with_reserved_group_memberships(
     tag_memberships: list[dict[str, Any]],
+    is_favourite: bool = False,
 ) -> list[dict[str, Any]]:
-    """Prepend the reserved memberships, de-duplicated by resource name.
+    """Prepend the system memberships, de-duplicated by resource name.
 
-    A local tag can resolve to a reserved group's resource name (a user may have
-    tagged someone "myContacts"), so the two lists are merged rather than
+    Two kinds of system group must be carried because the update replaces the
+    whole list:
+
+    * the reserved groups (``myContacts``), which are always retained;
+    * ``starred``, which is not reserved but *state*: inbound sync reads it into
+      ``is_favourite``, so outbound writes it back from the same field. Leaving
+      it out would unstar every favourite on any edit; sending it
+      unconditionally would star every contact.
+
+    A local tag can resolve to a system group's resource name (a user may have
+    tagged someone "myContacts"), so the lists are merged rather than
     concatenated.
     """
     memberships = _reserved_group_memberships()
+    if is_favourite:
+        memberships.append(_group_membership(STARRED_GROUP_RESOURCE))
     seen = {
         entry["contactGroupMembership"]["contactGroupResourceName"]
         for entry in memberships
@@ -875,8 +894,17 @@ async def _resolve_group_mapping_for_tags(
     pass it straight through to the transform, where a present mapping — even an
     empty one — is what includes ``memberships`` in the update mask, so tags
     removed locally clear their Google groups.
+
+    That is exactly why a failed listing must raise rather than come back empty
+    or partial: the update replaces ``memberships`` wholesale, so an incomplete
+    mapping would strip the contact from every group it missed, and the tags
+    would look groupless and be created again. Raising leaves the stream event
+    unacknowledged for retry; the cron's push-before-pull logs it and moves on.
+
+    Raises:
+        Exception: If any page of the contact-group listing fails.
     """
-    forward_mapping = await _build_contact_group_mapping(client)
+    forward_mapping = await _fetch_contact_group_mapping(client)
     reverse_mapping = _build_reverse_group_mapping(forward_mapping)
 
     if not tag_names:
