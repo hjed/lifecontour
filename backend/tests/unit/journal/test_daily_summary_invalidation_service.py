@@ -28,6 +28,7 @@ from core_shared.models.tasks import Task
 
 from app.core.journal.services import daily_summary_invalidation_service
 from app.core.journal.services.daily_summary_invalidation_service import (
+    HANDLED_EVENT_TYPES,
     DailySummaryInvalidationService,
 )
 from tests.unit.journal.upcoming_date_doubles import stored_date
@@ -828,11 +829,10 @@ class TestAnImportantDateChange:
         contact_repo: AsyncMock,
         summary_repo: AsyncMock,
     ) -> None:
-        """Most contact edits re-save every date, so this is the common case.
+        """A date added far from the week cannot be in this week's summary.
 
-        ``update_contact`` deletes a contact's dates and re-adds them, which
-        republishes one of these per surviving date — so without the window test
-        every contact edit would cost an AI call for a birthday six months away.
+        Without the window test, adding a birthday six months away would cost
+        an AI call for a summary that could not have mentioned it.
         """
         contact_repo.get_important_dates.return_value = [
             stored_date(1, month=11, day=3)
@@ -861,21 +861,26 @@ class TestAnImportantDateChange:
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
 
     @pytest.mark.asyncio
-    async def test_a_contact_update_that_changed_the_date_count_marks_today(
+    async def test_a_contact_update_that_added_or_removed_a_date_marks_today(
         self, service: DailySummaryInvalidationService, summary_repo: AsyncMock
     ) -> None:
-        """The app's *delete* path, which publishes no deletion event.
+        """The whole-contact save's *delete* path, which publishes no deletion
+        event.
 
-        ``update_contact`` replaces a contact's dates wholesale: the removed one
-        leaves no event of its own, and the survivors' ``ImportantDateAdded``
-        events say nothing about it. This count pair is the only announcement
-        that a date went away.
+        A date the save removes leaves no event of its own; the aggregate
+        ``important_dates`` row is the only announcement that it went away. Its
+        presence is the whole question — its value names the dates either side.
         """
         await service.invalidate_for_event(
             "ContactUpdated",
             {
                 "contact_id": 101,
-                "changed_fields": {"important_dates": ["count:2", "count:1"]},
+                "changed_fields": {
+                    "important_dates": [
+                        "birthday:1990-03-09, work_anniversary:2015",
+                        "birthday:1990-03-09",
+                    ]
+                },
             },
         )
 
@@ -930,6 +935,117 @@ class TestAnImportantDateChange:
         )
 
         summary_repo.invalidate_for_range.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_edit_into_the_week_marks_today(
+        self,
+        service: DailySummaryInvalidationService,
+        contact_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """The stored row is the date as it now reads, two days ahead."""
+        await service.invalidate_for_event(
+            "ImportantDateUpdated",
+            {
+                "contact_id": 101,
+                "date_id": 1,
+                "changed_fields": {"month": [11, 4], "day": [3, 29]},
+            },
+        )
+
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    @pytest.mark.asyncio
+    async def test_an_edit_out_of_the_week_marks_today(
+        self,
+        service: DailySummaryInvalidationService,
+        contact_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """The summary still lists the date where it used to be, so the row as
+        it now reads — six months away — is not the only one to test."""
+        contact_repo.get_important_dates.return_value = [
+            stored_date(1, month=11, day=3)
+        ]
+
+        await service.invalidate_for_event(
+            "ImportantDateUpdated",
+            {
+                "contact_id": 101,
+                "date_id": 1,
+                "changed_fields": {"month": [4, 11], "day": [29, 3]},
+            },
+        )
+
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    @pytest.mark.asyncio
+    async def test_an_edit_far_from_the_week_either_side_marks_nothing(
+        self,
+        service: DailySummaryInvalidationService,
+        contact_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """A birth year corrected on a November birthday moves nothing this
+        week's summary could say."""
+        contact_repo.get_important_dates.return_value = [
+            stored_date(1, month=11, day=3, year=1991)
+        ]
+
+        await service.invalidate_for_event(
+            "ImportantDateUpdated",
+            {
+                "contact_id": 101,
+                "date_id": 1,
+                "changed_fields": {"year": [1990, 1991]},
+            },
+        )
+
+        summary_repo.invalidate_for_range.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_edit_whose_old_date_cannot_be_rebuilt_marks_today(
+        self,
+        service: DailySummaryInvalidationService,
+        contact_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """Without a before-image there is nothing to test it against, so the
+        safe answer is the only one."""
+        contact_repo.get_important_dates.return_value = [
+            stored_date(1, month=11, day=3)
+        ]
+
+        await service.invalidate_for_event(
+            "ImportantDateUpdated",
+            {
+                "contact_id": 101,
+                "date_id": 1,
+                "changed_fields": {"precision": ["no-such-precision", "day_month"]},
+            },
+        )
+
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    @pytest.mark.asyncio
+    async def test_an_edit_of_a_date_that_is_gone_marks_today(
+        self,
+        service: DailySummaryInvalidationService,
+        contact_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        contact_repo.get_important_dates.return_value = []
+
+        await service.invalidate_for_event(
+            "ImportantDateUpdated",
+            {"contact_id": 101, "date_id": 1, "changed_fields": {"year": [1, 2]}},
+        )
+
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    def test_an_important_date_edit_is_a_handled_event(self) -> None:
+        """Both the per-date PUT and the whole-contact save publish one."""
+        assert "ImportantDateUpdated" in HANDLED_EVENT_TYPES
 
     @pytest.mark.asyncio
     async def test_a_date_row_that_is_gone_marks_today(

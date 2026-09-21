@@ -1114,11 +1114,20 @@ by a **reconcile** rather than by replacement:
   keys on the aggregate `ContactUpdated` for methods, addresses and notes, and
   `ImportantDateUpdated` for a date. A submitted item identical to the stored
   one is not written at all.
-- **An added or removed item is unchanged from before.** The aggregate
-  `ContactUpdated` row (`contact_methods`, `important_dates`, `tags`, …) stays
-  the feed for those, and the per-item add events keep `affects_history=False`,
+- **An added or removed item is recorded on the list's aggregate key** —
+  `contact_methods`, `addresses`, `notes` or `important_dates` on the
+  `ContactUpdated` — and the per-item add events keep `affects_history=False`,
   so a bulk save still writes no spurious "created" markers (ITER12-003
   Phase 2, locked by `test_bulk_update_produces_no_spurious_subentity_markers`).
+  The aggregate key is written **only** when the save added or removed
+  something, and it names the items either side (`birthday:1990-03-09`)
+  rather than counting them, so a same-count swap — a retyped date, a replaced
+  note — is recorded too. A matched edit is described by its per-field rows
+  alone, with no aggregate row beside it, which is what a field-level `PATCH`
+  writes. Consumers read only the key's presence: the daily-summary
+  invalidation treats it as "a date may have gone", and handles
+  `ImportantDateUpdated` itself by testing the date as it read before and
+  after the edit.
 - **Tags are the exception**: a tag has no fields of its own to edit, so a
   submitted set still replaces the stored one and shows one aggregate `tags`
   row.
