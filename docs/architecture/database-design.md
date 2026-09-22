@@ -692,6 +692,11 @@ journal's rows on every sync.
 
 Migration: `backend/app/migrations/versions/0116_create_journal_unmatched_participant_emails.py`.
 
+`contact_suggestion_ignores` is each user's persistent list of emails never to
+suggest as contacts. PK `(user_id, email)`; `email` is lower-case (check
+constraint); `provenance` records where the ignore came from (`ui` / `mcp`).
+Migration: `backend/app/migrations/versions/0117_create_contact_suggestion_ignores.py`.
+
 ## MeiliSearch Integration
 
 ### Search Engine Architecture
