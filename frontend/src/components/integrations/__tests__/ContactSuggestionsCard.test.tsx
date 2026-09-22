@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ContactSuggestionsCard } from '../ContactSuggestionsCard';
 import {
@@ -195,6 +195,56 @@ describe('ContactSuggestionsCard', () => {
       { email: 'jane@x.com', target: { kind: 'existing', contact_id: 42 } },
       expect.anything()
     );
+  });
+
+  it("keeps another suggestion's dialog open when an earlier accept succeeds", async () => {
+    const user = userEvent.setup();
+    mockLists([
+      suggestion('jane@x.com', 'Jane Smith', 6),
+      suggestion('sam@x.com', 'Sam Jones', 5),
+    ]);
+
+    render(<ContactSuggestionsCard />);
+    await user.click(
+      screen.getByRole('button', { name: 'Create contact for jane@x.com' })
+    );
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Create contact',
+      })
+    );
+    const [, { onSuccess }] = acceptMutate.mock.calls[0] as [
+      unknown,
+      { onSuccess: () => void },
+    ];
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' })
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Create contact for sam@x.com' })
+    );
+
+    act(() => onSuccess());
+
+    expect(
+      within(screen.getByRole('dialog')).getByLabelText('First name')
+    ).toHaveValue('Sam');
+  });
+
+  it('shows an error when the ignored list fails to load', () => {
+    mockLists([suggestion('jane@x.com', 'Jane Smith', 6)]);
+    (useIgnoredContactSuggestions as jest.Mock).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Server unavailable'),
+    });
+
+    render(<ContactSuggestionsCard />);
+
+    expect(
+      screen.getByText('Error loading ignored suggestions')
+    ).toBeInTheDocument();
+    expect(screen.getByText('Server unavailable')).toBeInTheDocument();
   });
 
   it('restores an ignored email', async () => {

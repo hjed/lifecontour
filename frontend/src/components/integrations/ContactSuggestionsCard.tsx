@@ -56,8 +56,17 @@ export function ContactSuggestionsCard() {
   const unignore = useUnignoreContactSuggestion();
   const [pending, setPending] = useState<PendingAction | null>(null);
 
+  // Close the dialog only if it is still the accepted suggestion's: the user
+  // may have dismissed it and opened another while the request was in flight.
   const acceptAndClose = (variables: AcceptContactSuggestionVariables) =>
-    accept.mutate(variables, { onSuccess: () => setPending(null) });
+    accept.mutate(variables, {
+      onSuccess: () =>
+        setPending(current =>
+          current?.suggestion.attributes.email === variables.email
+            ? null
+            : current
+        ),
+    });
 
   const items = suggestions.data?.data ?? [];
   const ignored = ignoredList.data?.data ?? [];
@@ -102,6 +111,14 @@ export function ContactSuggestionsCard() {
               />
             ))}
           </ul>
+        )}
+
+        {ignoredList.error && (
+          <Alert variant='destructive'>
+            <AlertCircle className='h-4 w-4' />
+            <AlertTitle>Error loading ignored suggestions</AlertTitle>
+            <AlertDescription>{ignoredList.error.message}</AlertDescription>
+          </Alert>
         )}
 
         {ignored.length > 0 && (
