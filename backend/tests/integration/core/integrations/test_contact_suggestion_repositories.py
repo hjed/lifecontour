@@ -143,6 +143,19 @@ class TestForEmail:
             (mine, JournalContactRelationshipType.INVITEE, AttendeeStatus.ATTENDING)
         ]
 
+    async def test_lookups_canonicalise_the_email(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        mine = await create_journal(async_connection)
+        await record_unmatched(async_connection, mine, "jane@x.com")
+        repo = SqlUnmatchedParticipantEmailRepository(async_connection)
+
+        rows = await repo.list_for_email(USER_ID, " Jane@X.com ")
+
+        assert [r.journal_id for r in rows] == [mine]
+        await repo.delete_for_email(USER_ID, " Jane@X.com ")
+        assert await unmatched_journal_ids(async_connection, "jane@x.com") == set()
+
     async def test_delete_for_email_leaves_other_users_rows(
         self, async_connection: AsyncConnection
     ) -> None:
@@ -173,6 +186,30 @@ class TestIgnoreList:
             ("noisy@x.com", Provenance.UI)
         ]
         assert await repo.list_ignored(OTHER_USER_ID) == []
+
+    async def test_re_ignoring_keeps_and_returns_the_first_entry(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A second ignore reports what is stored, not what it asked for."""
+        repo = SqlContactSuggestionIgnoreRepository(async_connection)
+
+        first = await repo.ignore(USER_ID, "noisy@x.com", Provenance.MCP)
+        again = await repo.ignore(USER_ID, "noisy@x.com", Provenance.UI)
+
+        assert again.provenance == Provenance.MCP
+        assert again.created_at == first.created_at
+
+    async def test_emails_are_canonicalised_by_the_repository(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Callers holding an address in any spelling still hit the same row."""
+        repo = SqlContactSuggestionIgnoreRepository(async_connection)
+
+        stored = await repo.ignore(USER_ID, " Noisy@X.com ", Provenance.UI)
+
+        assert stored.email == "noisy@x.com"
+        assert [i.email for i in await repo.list_ignored(USER_ID)] == ["noisy@x.com"]
+        assert await repo.unignore(USER_ID, "NOISY@x.com ") is True
 
     async def test_unignore_reports_whether_anything_was_removed(
         self, async_connection: AsyncConnection

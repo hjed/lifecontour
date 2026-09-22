@@ -7,6 +7,7 @@ from core_shared.models.journals.contact_event_role import ContactEventRole
 from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
 )
+from core_shared.models.participant_email import normalise_participant_email
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -132,7 +133,7 @@ class SqlUnmatchedParticipantEmailRepository:
                 ORDER BY u.journal_id
                 """
             ),
-            {"user_id": user_id, "email": email},
+            {"user_id": user_id, "email": normalise_participant_email(email)},
         )
         return [
             UnmatchedParticipantEmail(
@@ -158,5 +159,5 @@ class SqlUnmatchedParticipantEmailRepository:
                   AND u.email = :email
                 """
             ),
-            {"user_id": user_id, "email": email},
+            {"user_id": user_id, "email": normalise_participant_email(email)},
         )
