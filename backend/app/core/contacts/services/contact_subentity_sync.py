@@ -444,11 +444,44 @@ def with_primary_method(
     ]
 
 
+def with_added_method(
+    methods: Sequence[ContactMethod],
+    method_type: MethodType,
+    value: str,
+    contact_id: int,
+) -> list[ContactMethod]:
+    """``methods``, holding ``value`` as a ``method_type`` method.
+
+    Unchanged when a method of the type already holds the value (emails
+    compared case-insensitively). Otherwise the value is appended, primary
+    only when it is the first of its type, so the existing primary stays.
+    """
+    of_type = [m for m in methods if m.method_type == method_type]
+
+    def same(held: str) -> bool:
+        if method_type == MethodType.EMAIL:
+            return held.lower() == value.lower()
+        return held == value
+
+    if any(same(m.value) for m in of_type):
+        return list(methods)
+    return [
+        *methods,
+        ContactMethod(
+            method_type=method_type,
+            value=value,
+            contact_id=contact_id,
+            is_primary=not of_type,
+        ),
+    ]
+
+
 @dataclass(frozen=True)
 class SubResourceMerge:
     """Sub-resource changes named rather than listed.
 
-    A caller that wants to set the primary email, or add one note, would
+    A caller that wants to set the primary email, add an email, or add one
+    note, would
     otherwise have to hand ``update_contact`` the whole list, built from a
     read it made itself - and a row added by someone else between that read
     and the write would be missing from the list, and deleted. The service
@@ -459,6 +492,7 @@ class SubResourceMerge:
 
     primary_methods: Mapping[MethodType, str] = field(default_factory=dict)
     new_notes: Sequence[str] = ()
+    added_methods: Sequence[tuple[MethodType, str]] = ()
 
     def conflicts(self, contact: Contact) -> list[str]:
         """The sub-resources ``contact`` also gives a whole list for.
@@ -466,7 +500,9 @@ class SubResourceMerge:
         Two answers to one question: refused rather than guessed between.
         """
         clashes = []
-        if self.primary_methods and contact.methods is not None:
+        if (self.primary_methods or self.added_methods) and (
+            contact.methods is not None
+        ):
             clashes.append("methods")
         if self.new_notes and contact.notes is not None:
             clashes.append("notes")
@@ -475,10 +511,12 @@ class SubResourceMerge:
     def apply_to(self, contact: Contact, stored: Contact) -> None:
         """Give ``contact`` the whole lists this merge implies over ``stored``."""
         contact_id = stored.id or 0
-        if self.primary_methods:
+        if self.primary_methods or self.added_methods:
             methods = list(stored.methods or [])
             for method_type, value in self.primary_methods.items():
                 methods = with_primary_method(methods, method_type, value, contact_id)
+            for method_type, value in self.added_methods:
+                methods = with_added_method(methods, method_type, value, contact_id)
             contact.methods = methods
         if self.new_notes:
             contact.notes = [
