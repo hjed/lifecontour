@@ -328,7 +328,13 @@ class TestIgnore:
 
 @pytest.mark.integration
 class TestMalformedEmails:
-    @pytest.mark.parametrize("email", ["not-an-email", "@x.com", "a b@x.com"])
+    """Rejected exactly where a ``ContactMethod`` would reject them, so an
+    address the service accepts can always reach a contact."""
+
+    @pytest.mark.parametrize(
+        "email",
+        ["not-an-email", "@x.com", "a b@x.com", "a@b", "a@b@c.com"],
+    )
     async def test_accept_and_ignore_reject_them(
         self,
         service: ContactSuggestionService,

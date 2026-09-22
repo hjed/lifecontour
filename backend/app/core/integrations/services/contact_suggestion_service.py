@@ -12,6 +12,7 @@ from typing import assert_never
 import structlog
 from core_shared.models.contacts.entities import Contact, ContactMethod, MethodType
 from core_shared.models.contacts.exceptions import ContactValidationError
+from core_shared.models.contacts.value_objects import Email
 from core_shared.models.history import Provenance
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
@@ -23,7 +24,10 @@ from core_shared.models.participant_email import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.exceptions import ContactNotFoundError
+from app.core.contacts.models.exceptions import (
+    ContactNotFoundError,
+    DuplicateEmailError,
+)
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.adapters.sql.contact_suggestion_ignore_repository import (
     SqlContactSuggestionIgnoreRepository,
@@ -78,14 +82,14 @@ def canonical_email(email: str) -> str:
             REST and MCP callers alike cannot store junk entries.
     """
     canonical = normalise_participant_email(email)
-    local, _, domain = canonical.partition("@")
-    if (
-        not local
-        or not domain
-        or any(c.isspace() for c in canonical)
-        or len(canonical) > MAX_PARTICIPANT_EMAIL_LENGTH
-    ):
+    if len(canonical) > MAX_PARTICIPANT_EMAIL_LENGTH:
         raise ContactValidationError("email", "must be an email address")
+    try:
+        # The same value object a ContactMethod validates with, so an address
+        # accepted here cannot be refused when it reaches the contact.
+        Email(canonical)
+    except ValueError as error:
+        raise ContactValidationError("email", "must be an email address") from error
     return canonical
 
 
@@ -253,21 +257,40 @@ class ContactSuggestionService:
         if stored is None:
             raise ContactNotFoundError(contact_id)
         emails = [m for m in stored.methods or [] if m.method_type == MethodType.EMAIL]
-        if any(normalise_participant_email(m.value) == email for m in emails):
+        if self._holds_email(stored, email):
             return stored
-        await self.contact_service.add_contact_method(
-            contact_id,
-            ContactMethod(
-                method_type=MethodType.EMAIL,
-                value=email,
-                contact_id=contact_id,
-                is_primary=not emails,
-            ),
-            transaction,
-            changed_by=changed_by,
-            source=provenance,
-        )
+        try:
+            await self.contact_service.add_contact_method(
+                contact_id,
+                ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value=email,
+                    contact_id=contact_id,
+                    is_primary=not emails,
+                ),
+                transaction,
+                changed_by=changed_by,
+                source=provenance,
+            )
+        except DuplicateEmailError:
+            # The read above is not under the contact's lock, so a concurrent
+            # accept of the same suggestion can add the email first. That is
+            # the outcome this one wanted, as long as it landed on this
+            # contact; on any other it is a genuine conflict.
+            settled = await self.contact_service.get_contact_by_id(contact_id)
+            if settled is None or not self._holds_email(settled, email):
+                raise
+            return settled
         updated = await self.contact_service.get_contact_by_id(contact_id)
         if updated is None:
             raise ContactNotFoundError(contact_id)
         return updated
+
+    @staticmethod
+    def _holds_email(contact: Contact, email: str) -> bool:
+        """Whether ``contact`` already has ``email``, in any spelling."""
+        return any(
+            m.method_type == MethodType.EMAIL
+            and normalise_participant_email(m.value) == email
+            for m in contact.methods or []
+        )
