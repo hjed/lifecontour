@@ -171,6 +171,19 @@ class TestUnmatchedParticipantBackfill:
 
         assert await _updated_journal_ids(db_session) == []
 
+    async def test_address_too_long_to_record_does_not_promote(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The backend never records it, so it must not keep the event
+        qualifying for a re-sync."""
+        await _seed_synced_event(db_session)
+
+        await _run_sync(
+            db_session, [_unchanged_event([{"email": f"{'a' * 320}@x.com"}])]
+        )
+
+        assert await _updated_journal_ids(db_session) == []
+
     async def test_attendee_already_linked_to_a_contact_does_not_promote(
         self, db_session: AsyncSession
     ) -> None:

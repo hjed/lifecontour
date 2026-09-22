@@ -42,7 +42,10 @@ from core_shared.models.journal_external_event_link import (
 )
 from core_shared.models.journals import CalendarInfo
 from core_shared.models.outbox import OutboxEvent
-from core_shared.models.participant_email import normalise_participant_email
+from core_shared.models.participant_email import (
+    is_recordable_participant_email,
+    normalise_participant_email,
+)
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import (
     ActiveCalendarChannel,
@@ -3913,23 +3916,28 @@ async def _participants_need_resync(
 
     True when an attendee now matches a contact the journal is not linked to,
     or has an address that matches no contact and is not yet recorded as
-    unmatched. The account owner's own address is never recorded, so it counts
-    only towards the first. Emails compare in their canonical form.
+    unmatched. Only addresses the backend would record count towards the
+    second -- never the account owner's own, nor one too long to record --
+    or the event would never stop qualifying. Emails compare in their
+    canonical form.
     """
     all_emails = sorted(
         {normalise_participant_email(r["email"]) for r in contact_relationships}
     )
-    other_emails = sorted(
-        {
-            normalise_participant_email(r["email"])
-            for r in contact_relationships
-            if not r.get("is_self")
-        }
+    other_emails = {
+        normalise_participant_email(r["email"])
+        for r in contact_relationships
+        if not r.get("is_self")
+    }
+    recordable_emails = sorted(
+        email for email in other_emails if is_recordable_participant_email(email)
     )
     repo = UnmatchedParticipantRepository(await session.connection())
     return await repo.has_unlinked_contact_email(
         user_id, journal_id, all_emails
-    ) or await repo.has_unrecorded_unmatched_email(user_id, journal_id, other_emails)
+    ) or await repo.has_unrecorded_unmatched_email(
+        user_id, journal_id, recordable_emails
+    )
 
 
 async def _fetch_calendar_access_roles(client: GoogleAPIClient) -> dict[str, str]:

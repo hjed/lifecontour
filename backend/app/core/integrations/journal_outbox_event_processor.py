@@ -42,7 +42,7 @@ from core_shared.models.outbox_events import (
 )
 from core_shared.models.participant_email import (
     MAX_PARTICIPANT_DISPLAY_NAME_LENGTH,
-    MAX_PARTICIPANT_EMAIL_LENGTH,
+    is_recordable_participant_email,
     normalise_participant_email,
 )
 from core_shared.models.route import Route
@@ -2404,7 +2404,7 @@ class JournalOutboxEventProcessor:
             if payload["email"] in resolved_contact_ids or payload.get("is_self"):
                 continue
             email = normalise_participant_email(payload["email"])
-            if not email or len(email) > MAX_PARTICIPANT_EMAIL_LENGTH:
+            if not is_recordable_participant_email(email):
                 continue
             status = self._parse_inbound_status(payload.get("status"), journal_id)
             role = self._parse_inbound_role(payload.get("role"), journal_id)
