@@ -99,7 +99,8 @@ class JournalSyncEventData(BaseModel):
         default_factory=list,
         description=(
             "List of contact relationship dicts with 'email' and "
-            "'relationship_type' keys"
+            "'relationship_type' keys, and optionally 'status', 'role', "
+            "'display_name' and 'is_self'"
         ),
     )
     recurring_event_id: str | None = Field(

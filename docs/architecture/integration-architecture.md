@@ -690,6 +690,34 @@ Anything a retry cannot fix (a read-only calendar, a refused write, a journal
 that no longer exists) must return rather than raise, or it burns the full
 retry budget on every occurrence before dead-lettering.
 
+### Participant Emails and Contact Suggestions
+
+Any integration that publishes `journal_event.*` events can report a journal's
+participants in `contact_relationships`. The backend
+(`JournalOutboxEventProcessor._sync_contact_relationships`) links each email
+that resolves to a contact, and records the rest in
+`journal_unmatched_participant_emails`. Emails seen on enough journals become
+contact suggestions on the Integrations page. Nothing in that path is
+Google-specific, so a new integration gets suggestions by sending:
+
+| Key | Required | Meaning |
+|---|---|---|
+| `email` | yes | The participant's email address |
+| `relationship_type` | yes | A `JournalContactRelationshipType` value, e.g. `INVITEE` |
+| `status` / `role` | no | `AttendeeStatus` / `ContactEventRole` values |
+| `display_name` | no | Prefills the name of a contact created from a suggestion |
+| `is_self` | no | The account owner's own address, which is never recorded |
+
+Each sync replaces the journal's unmatched rows, so emails that leave the
+event, or start resolving to a contact, drop out. Leave out participants that
+are not people (the Google worker skips attendees marked `resource`, such as
+meeting rooms).
+
+The Google worker backfills events synced before this existed. An
+ETag-unchanged event that has an attendee email matching no contact and not
+yet recorded for its journal is promoted to an update once. Only full syncs
+revisit unchanged events, so history fills in on the next full sync.
+
 ## Deployment Architecture
 
 ### Development Environment

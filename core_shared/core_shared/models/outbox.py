@@ -179,7 +179,7 @@ class OutboxEvent(Base):
         sync_action: str,
         etag: str | None = None,
         existing_journal_id: int | None = None,
-        contact_relationships: list[dict[str, str]] | None = None,
+        contact_relationships: list[dict[str, Any]] | None = None,
         recurring_event_id: str | None = None,
         external_identity: str | None = None,
     ) -> OutboxEvent:
@@ -198,6 +198,8 @@ class OutboxEvent(Base):
             contact_relationships: List of contact relationship dicts with
                 'email' and 'relationship_type' keys. Generic format supports
                 INVITEE, PARTICIPANT, ABOUT, etc. for future integrations.
+                Optional 'display_name' and 'is_self' (the account owner)
+                feed contact suggestions for emails that match no contact.
             recurring_event_id: Recurring master event id when the event is an
                 instance of a recurring series (drives series auto-linking)
             external_identity: Opaque token, meaningful only to the source

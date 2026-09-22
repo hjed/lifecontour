@@ -57,6 +57,12 @@ from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
+from app.core.integrations.adapters.sql.unmatched_participant_email_repository import (
+    SqlUnmatchedParticipantEmailRepository,
+)
+from app.core.integrations.models.unmatched_participant import (
+    UnmatchedParticipantEmail,
+)
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
     SqlGearMaintenanceDataRepository,
@@ -251,6 +257,9 @@ class JournalOutboxEventProcessor:
         self.link_repo = SqlJournalEventLinkRepository(connection)
         self.series_repo = SqlJournalSeriesRepository(connection)
         self.review_item_repo = SqlReviewItemRepository(connection)
+        self.unmatched_participant_repo = SqlUnmatchedParticipantEmailRepository(
+            connection
+        )
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -2277,11 +2286,17 @@ class JournalOutboxEventProcessor:
         journal_id: int,
         contact_relationships: list[dict[str, Any]],
     ) -> None:
-        """Sync contact relationships for a journal from inbound data."""
+        """Sync contact relationships for a journal from inbound data.
+
+        Emails that resolve to no contact are recorded as the journal's
+        unmatched participants (see ``_unmatched_entries``), replacing whatever
+        the previous sync recorded.
+        """
         if contact_relationships is None:
             return
 
         by_type = self._group_relationships_by_type(contact_relationships)
+        unmatched: dict[str, UnmatchedParticipantEmail] = {}
 
         for rel_type_str, payloads in by_type.items():
             try:
@@ -2298,6 +2313,10 @@ class JournalOutboxEventProcessor:
             resolved_contact_ids = await self._resolve_emails_to_contact_ids(
                 emails, journal_id
             )
+            for entry in self._unmatched_entries(
+                journal_id, rel_type, payloads, resolved_contact_ids
+            ):
+                unmatched.setdefault(entry.email, entry)
 
             existing = await self._get_relationships_by_type(journal_id, rel_type)
             existing_by_contact_id = {r.contact_id: r for r in existing}
@@ -2355,6 +2374,44 @@ class JournalOutboxEventProcessor:
                     updated=len(to_update),
                     deleted=len(to_delete),
                 )
+
+        await self.unmatched_participant_repo.replace_for_journal(
+            journal_id, list(unmatched.values())
+        )
+
+    def _unmatched_entries(
+        self,
+        journal_id: int,
+        rel_type: JournalContactRelationshipType,
+        payloads: list[dict[str, Any]],
+        resolved_contact_ids: dict[str, int],
+    ) -> list[UnmatchedParticipantEmail]:
+        """The payloads' emails that resolved to no contact, as unmatched rows.
+
+        The account owner's own address (``is_self``) is never a participant
+        worth suggesting, so it is left out.
+        """
+        entries: list[UnmatchedParticipantEmail] = []
+        for payload in payloads:
+            email = payload["email"]
+            if email in resolved_contact_ids or payload.get("is_self"):
+                continue
+            status = self._parse_inbound_status(payload.get("status"), journal_id)
+            role = self._parse_inbound_role(payload.get("role"), journal_id)
+            display_name = payload.get("display_name")
+            entries.append(
+                UnmatchedParticipantEmail(
+                    journal_id=journal_id,
+                    email=email.lower(),
+                    relationship_type=rel_type,
+                    display_name=display_name
+                    if isinstance(display_name, str)
+                    else None,
+                    status=AttendeeStatus(status) if status else None,
+                    role=ContactEventRole(role) if role else None,
+                )
+            )
+        return entries
 
     async def _get_relationships_by_type(
         self,

@@ -370,17 +370,23 @@ class GoogleEventTransformer:
     @staticmethod
     def extract_contact_relationships(
         google_event: GoogleEvent,
-    ) -> list[dict[str, str]]:
-        """Extract contact relationships (invitees) from a Google Event with status and role."""
+    ) -> list[dict[str, Any]]:
+        """Extract contact relationships (invitees) from a Google Event with status and role.
+
+        Resources such as meeting rooms are not participants and are skipped.
+        Each relationship also carries the attendee's ``display_name`` and
+        ``is_self`` (the calendar owner), which the backend uses to suggest
+        contacts for recurring participants it cannot match.
+        """
         from core_shared.models.journals.attendee_status import AttendeeStatus
         from core_shared.models.journals.contact_event_role import ContactEventRole
 
-        relationships: list[dict[str, str]] = []
+        relationships: list[dict[str, Any]] = []
         if not google_event.attendees:
             return relationships
 
         for attendee in google_event.attendees:
-            if not attendee.email:
+            if not attendee.email or attendee.resource:
                 continue
 
             # Default to NO_REPLY
@@ -397,10 +403,12 @@ class GoogleEventTransformer:
             # Map organizer
             role = ContactEventRole.ORGANISER if attendee.organizer else None
 
-            rel = {
+            rel: dict[str, Any] = {
                 "email": attendee.email,
                 "relationship_type": "INVITEE",
                 "status": status.value,
+                "display_name": attendee.display_name,
+                "is_self": attendee.is_self,
             }
             if role:
                 rel["role"] = role.value

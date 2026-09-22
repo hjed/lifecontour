@@ -48,6 +48,7 @@ from core_shared.repositories import (
     CalendarWatchRenewal,
     CalendarWatchRepository,
     SyncJobRepository,
+    UnmatchedParticipantRepository,
 )
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from googleapiclient.errors import HttpError
@@ -3901,6 +3902,26 @@ async def _find_journal_by_event_identity(
     return int(row.journal_id) if row else None
 
 
+async def _has_unrecorded_unmatched_participant(
+    session: Any,
+    user_id: str,
+    journal_id: int,
+    contact_relationships: list[dict[str, Any]],
+) -> bool:
+    """Whether an attendee email matches no contact and is not yet recorded.
+
+    The backend records a journal's unmatched attendee emails when it syncs the
+    event, so this is true only for events last synced before it did -- or
+    since a contact holding the email was removed. The account owner's own
+    address is never recorded, so it never counts.
+    """
+    emails = sorted(
+        {r["email"].lower() for r in contact_relationships if not r.get("is_self")}
+    )
+    repo = UnmatchedParticipantRepository(await session.connection())
+    return await repo.has_unrecorded_unmatched_email(user_id, journal_id, emails)
+
+
 async def _fetch_calendar_access_roles(client: GoogleAPIClient) -> dict[str, str]:
     """Return Google's current access role for every calendar in the list."""
     roles: dict[str, str] = {}
@@ -4455,6 +4476,22 @@ async def sync_calendar_events(
                             and external_identity
                             and existing_link is not None
                             and existing_link.external_identity is None
+                        ):
+                            action = InboundSyncAction.UPDATE_JOURNAL
+
+                        # Same, for events synced before the backend recorded
+                        # attendee emails that match no contact (the source of
+                        # contact suggestions). Once it has recorded them the
+                        # event stops qualifying.
+                        if (
+                            action == InboundSyncAction.SKIP_UNCHANGED
+                            and existing_link is not None
+                            and await _has_unrecorded_unmatched_participant(
+                                session,
+                                str(user_id),
+                                existing_link.journal_id,
+                                transformer.extract_contact_relationships(google_event),
+                            )
                         ):
                             action = InboundSyncAction.UPDATE_JOURNAL
 
