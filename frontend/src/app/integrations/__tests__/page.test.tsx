@@ -36,6 +36,11 @@ jest.mock('@/lib/api/integrations', () => ({
   useSnipeItWebhookUrl: jest.fn(),
 }));
 
+// The card has its own tests; here it only needs to be on the page.
+jest.mock('@/components/integrations/ContactSuggestionsCard', () => ({
+  ContactSuggestionsCard: () => <div data-testid='contact-suggestions' />,
+}));
+
 // Mock AuthGuard
 jest.mock('@/components/auth/AuthGuard', () => ({
   AuthGuard: function MockAuthGuard({
