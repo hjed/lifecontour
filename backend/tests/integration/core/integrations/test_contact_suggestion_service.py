@@ -7,6 +7,7 @@ on, with the status and role the integration reported.
 
 import pytest
 from core_shared.models.contacts.entities import MethodType
+from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.history import Provenance
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -45,13 +46,18 @@ from tests.integration.core.integrations.contact_suggestion_seeding import (
 
 
 @pytest.fixture
-def service(async_connection: AsyncConnection) -> ContactSuggestionService:
+def contact_events() -> RecordingEventPublisher:
+    return RecordingEventPublisher()
+
+
+@pytest.fixture
+def service(
+    async_connection: AsyncConnection, contact_events: RecordingEventPublisher
+) -> ContactSuggestionService:
     return ContactSuggestionService(
         unmatched_repo=SqlUnmatchedParticipantEmailRepository(async_connection),
         ignore_repo=SqlContactSuggestionIgnoreRepository(async_connection),
-        contact_service=build_contact_service(
-            async_connection, RecordingEventPublisher()
-        ),
+        contact_service=build_contact_service(async_connection, contact_events),
         journal_contact_service=JournalContactService(
             SqlJournalContactRelationshipRepository(async_connection),
             OutboxEventPublisher(async_connection),
@@ -94,7 +100,7 @@ class TestAcceptAsNewContact:
 
         accepted = await service.accept(
             USER_ID,
-            "Jane@X.com",
+            " Jane@X.com ",
             NewContactTarget(first_name="Jane", last_name="Smith"),
             transaction=async_connection,
             provenance=Provenance.UI,
@@ -186,6 +192,27 @@ class TestAcceptIntoExistingContact:
             journal_ids
         )
 
+    async def test_adds_only_the_email_and_saves_nothing_else(
+        self,
+        service: ContactSuggestionService,
+        async_connection: AsyncConnection,
+        contact_events: RecordingEventPublisher,
+    ) -> None:
+        """The email is added as a method, not by saving a copy of the contact
+        read earlier, which would undo edits made since that read."""
+        contact_id = await create_contact(async_connection, first_name="Jane")
+
+        await service.accept(
+            USER_ID,
+            "jane@x.com",
+            ExistingContactTarget(contact_id=contact_id),
+            transaction=async_connection,
+            provenance=Provenance.UI,
+        )
+
+        assert [e.event_type for e in contact_events.events] == ["ContactMethodAdded"]
+        assert await _emails_of(async_connection, contact_id) == ["jane@x.com"]
+
     async def test_email_already_held_is_not_duplicated(
         self, service: ContactSuggestionService, async_connection: AsyncConnection
     ) -> None:
@@ -274,3 +301,28 @@ class TestIgnore:
         assert [s.email for s in await service.list_suggestions(USER_ID)] == [
             "noisy@x.com"
         ]
+
+
+@pytest.mark.integration
+class TestMalformedEmails:
+    @pytest.mark.parametrize("email", ["not-an-email", "@x.com", "a b@x.com"])
+    async def test_accept_and_ignore_reject_them(
+        self,
+        service: ContactSuggestionService,
+        async_connection: AsyncConnection,
+        email: str,
+    ) -> None:
+        with pytest.raises(ContactValidationError):
+            await service.accept(
+                USER_ID,
+                email,
+                NewContactTarget(first_name="Jane"),
+                transaction=async_connection,
+                provenance=Provenance.UI,
+            )
+        with pytest.raises(ContactValidationError):
+            await service.ignore(
+                USER_ID, email, transaction=async_connection, provenance=Provenance.MCP
+            )
+
+        assert await service.list_ignored(USER_ID) == []

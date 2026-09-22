@@ -6,7 +6,7 @@ a contact; the user can make it one -- as a new contact or on an existing
 one -- or ignore it for good.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import assert_never
 
 import structlog
@@ -16,12 +16,15 @@ from core_shared.models.history import Provenance
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
 )
+from core_shared.models.participant_email import (
+    MAX_PARTICIPANT_EMAIL_LENGTH,
+    normalise_participant_email,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.services.contact_service import ContactService
-from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 from app.core.integrations.adapters.sql.contact_suggestion_ignore_repository import (
     SqlContactSuggestionIgnoreRepository,
 )
@@ -67,9 +70,23 @@ class AcceptedContactSuggestion:
     linked_journal_count: int
 
 
-def normalise_email(email: str) -> str:
-    """The form participant emails are recorded and ignored in."""
-    return email.strip().lower()
+def canonical_email(email: str) -> str:
+    """``email`` in the form participant emails are recorded and ignored in.
+
+    Raises:
+        ContactValidationError: If it is not shaped like an email address, so
+            REST and MCP callers alike cannot store junk entries.
+    """
+    canonical = normalise_participant_email(email)
+    local, _, domain = canonical.partition("@")
+    if (
+        not local
+        or not domain
+        or any(c.isspace() for c in canonical)
+        or len(canonical) > MAX_PARTICIPANT_EMAIL_LENGTH
+    ):
+        raise ContactValidationError("email", "must be an email address")
+    return canonical
 
 
 class ContactSuggestionService:
@@ -115,8 +132,9 @@ class ContactSuggestionService:
         Raises:
             ContactNotFoundError: If ``target`` names a contact that does not
                 exist. Nothing is written.
+            ContactValidationError: If ``email`` is not an email address.
         """
-        email = normalise_email(email)
+        email = canonical_email(email)
         contact = await self._contact_holding(email, target, transaction, provenance)
         if contact.id is None:
             raise ContactValidationError("id", "Contact ID is required after save")
@@ -157,15 +175,25 @@ class ContactSuggestionService:
         transaction: AsyncConnection,
         provenance: Provenance,
     ) -> None:
-        """Never suggest ``email`` to the user again, until it is unignored."""
-        await self.ignore_repo.ignore(user_id, normalise_email(email), provenance)
+        """Never suggest ``email`` to the user again, until it is unignored.
+
+        Raises:
+            ContactValidationError: If ``email`` is not an email address.
+        """
+        await self.ignore_repo.ignore(user_id, canonical_email(email), provenance)
 
     @transactional
     async def unignore(
         self, user_id: str, email: str, transaction: AsyncConnection
     ) -> bool:
-        """Let ``email`` be suggested again; whether it was ignored."""
-        return await self.ignore_repo.unignore(user_id, normalise_email(email))
+        """Let ``email`` be suggested again; whether it was ignored.
+
+        Not validated, so an entry stored before validation existed can
+        still be removed.
+        """
+        return await self.ignore_repo.unignore(
+            user_id, normalise_participant_email(email)
+        )
 
     async def _contact_holding(
         self,
@@ -195,27 +223,46 @@ class ContactSuggestionService:
                     source=provenance,
                 )
             case ExistingContactTarget(contact_id=contact_id):
-                stored = await self.contact_service.get_contact_by_id(contact_id)
-                if stored is None:
-                    raise ContactNotFoundError(contact_id)
-                # Every list left as None, so only the named email changes.
-                return await self.contact_service.update_contact(
-                    replace(
-                        stored,
-                        methods=None,
-                        addresses=None,
-                        notes=None,
-                        tags=None,
-                        relationships=None,
-                        important_dates=None,
-                        summary=None,
-                    ),
-                    transaction,
-                    changed_by=changed_by,
-                    source=provenance,
-                    subresource_merge=SubResourceMerge(
-                        added_methods=[(MethodType.EMAIL, email)]
-                    ),
+                return await self._add_email_to_contact(
+                    contact_id, email, transaction, changed_by, provenance
                 )
             case _:
                 assert_never(target)
+
+    async def _add_email_to_contact(
+        self,
+        contact_id: int,
+        email: str,
+        transaction: AsyncConnection,
+        changed_by: str,
+        provenance: Provenance,
+    ) -> Contact:
+        """Give the contact ``email`` unless it already holds it.
+
+        Adds just the method, under the contact's lock, rather than saving the
+        whole contact: a snapshot saved back would undo any edit made to the
+        contact since it was read. The email becomes primary only when the
+        contact has none.
+        """
+        stored = await self.contact_service.get_contact_by_id(contact_id)
+        if stored is None:
+            raise ContactNotFoundError(contact_id)
+        emails = [m for m in stored.methods or [] if m.method_type == MethodType.EMAIL]
+        if any(normalise_participant_email(m.value) == email for m in emails):
+            return stored
+        await self.contact_service.add_contact_method(
+            contact_id,
+            ContactMethod(
+                method_type=MethodType.EMAIL,
+                value=email,
+                contact_id=contact_id,
+                is_primary=not emails,
+            ),
+            transaction,
+            changed_by=changed_by,
+            source=provenance,
+        )
+        updated = await self.contact_service.get_contact_by_id(contact_id)
+        if updated is None:
+            raise ContactNotFoundError(contact_id)
+        return updated
