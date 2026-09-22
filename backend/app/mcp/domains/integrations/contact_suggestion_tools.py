@@ -58,6 +58,7 @@ class AcceptedContactSuggestionMCPResponse(BaseModel):
 class IgnoredContactSuggestionMCPResponse(BaseModel):
     email: str
     ignored: bool
+    provenance: str | None = None
     was_ignored: bool | None = None
     summary: str
 
@@ -179,15 +180,15 @@ async def ignore_contact_suggestion(
     reversible with ``unignore_contact_suggestion``. Rejects anything that is
     not an email address.
     """
-    await service.ignore(
+    ignored = await service.ignore(
         user_id, email, transaction=db_connection, provenance=Provenance.MCP
     )
-    normalised = normalise_participant_email(email)
     return MCPResponseBuilder.success_response(
         IgnoredContactSuggestionMCPResponse(
-            email=normalised,
+            email=ignored.email,
             ignored=True,
-            summary=f"{normalised} will no longer be suggested as a contact.",
+            provenance=ignored.provenance.value,
+            summary=f"{ignored.email} will no longer be suggested as a contact.",
         )
     )
 

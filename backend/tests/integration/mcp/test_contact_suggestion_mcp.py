@@ -148,6 +148,7 @@ async def test_ignore_and_unignore(
 
     assert ignored["email"] == "noisy@x.com"
     assert ignored["ignored"] is True
+    assert ignored["provenance"] == "mcp"
     assert after_ignore["total_count"] == 0
     assert unignored["was_ignored"] is True
     assert after_unignore["total_count"] == 1

@@ -8,10 +8,15 @@ the test's savepoint connection, which the client's requests share.
 from typing import Any
 
 import pytest
+from core_shared.models.history import Provenance
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.contact_suggestion_ignore_repository import (
+    SqlContactSuggestionIgnoreRepository,
+)
 from tests.integration.core.integrations.contact_suggestion_seeding import (
+    USER_ID,
     create_contact,
     journal_relationships,
     seed_participant,
@@ -161,3 +166,22 @@ async def test_an_email_with_a_slash_can_be_restored(
 
     assert restored.status_code == 204
     assert (await authenticated_client.get(IGNORED_URL)).json()["data"] == []
+
+
+async def test_ignoring_again_reports_the_stored_provenance(
+    authenticated_client: AsyncClient, async_connection: AsyncConnection
+) -> None:
+    """An entry ignored from MCP keeps that provenance when the UI ignores it
+    again, and the response says so rather than claiming "ui"."""
+    await SqlContactSuggestionIgnoreRepository(async_connection).ignore(
+        USER_ID, "noisy@x.com", Provenance.MCP
+    )
+
+    response = await authenticated_client.post(
+        IGNORED_URL, json=_ignore_body("noisy@x.com")
+    )
+
+    assert response.status_code == 201
+    attributes = response.json()["data"]["attributes"]
+    assert attributes["provenance"] == "mcp"
+    assert attributes["created_at"] is not None

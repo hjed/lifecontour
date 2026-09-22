@@ -149,16 +149,24 @@ async def ignore_contact_suggestion(
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
 ) -> IgnoredContactSuggestionResponse:
-    """Never suggest the email again. Ignoring it twice changes nothing."""
-    email = request.data.attributes.email
-    await service.ignore(
-        user.id, email, transaction=connection, provenance=Provenance.UI
+    """Never suggest the email again.
+
+    Ignoring it twice changes nothing: the response then reports the stored
+    entry, whose provenance is that of the first ignore.
+    """
+    ignored = await service.ignore(
+        user.id,
+        request.data.attributes.email,
+        transaction=connection,
+        provenance=Provenance.UI,
     )
     return IgnoredContactSuggestionResponse(
         data=IgnoredContactSuggestionResource(
-            id=email,
+            id=ignored.email,
             attributes=IgnoredContactSuggestionAttributes(
-                email=email, provenance=Provenance.UI.value
+                email=ignored.email,
+                provenance=ignored.provenance.value,
+                created_at=ignored.created_at,
             ),
         )
     )
