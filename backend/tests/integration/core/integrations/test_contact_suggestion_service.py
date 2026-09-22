@@ -281,6 +281,29 @@ class TestAcceptIntoExistingContact:
 
 @pytest.mark.integration
 class TestIgnore:
+    async def test_ignoring_again_reports_the_stored_entry(
+        self, service: ContactSuggestionService, async_connection: AsyncConnection
+    ) -> None:
+        """A UI ignore of an address already ignored from MCP reports the
+        provenance that is stored, not the one it asked for."""
+        first = await service.ignore(
+            USER_ID,
+            "noisy@x.com",
+            transaction=async_connection,
+            provenance=Provenance.MCP,
+        )
+        again = await service.ignore(
+            USER_ID,
+            "noisy@x.com",
+            transaction=async_connection,
+            provenance=Provenance.UI,
+        )
+
+        assert (first.provenance, again.provenance) == (
+            Provenance.MCP,
+            Provenance.MCP,
+        )
+
     async def test_ignored_email_leaves_suggestions_until_restored(
         self, service: ContactSuggestionService, async_connection: AsyncConnection
     ) -> None:

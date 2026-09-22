@@ -174,13 +174,18 @@ class ContactSuggestionService:
         email: str,
         transaction: AsyncConnection,
         provenance: Provenance,
-    ) -> None:
+    ) -> IgnoredContactSuggestion:
         """Never suggest ``email`` to the user again, until it is unignored.
+
+        Returns the stored entry, which keeps the provenance and creation time
+        of the first ignore.
 
         Raises:
             ContactValidationError: If ``email`` is not an email address.
         """
-        await self.ignore_repo.ignore(user_id, canonical_email(email), provenance)
+        return await self.ignore_repo.ignore(
+            user_id, canonical_email(email), provenance
+        )
 
     @transactional
     async def unignore(
