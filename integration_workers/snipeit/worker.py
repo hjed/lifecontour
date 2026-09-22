@@ -22,6 +22,7 @@ from core_shared import (
 )
 from core_shared.integration_constants import SNIPEIT_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
+from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 
 from snipeit_settings import SnipeItWorkerSettings
@@ -91,6 +92,21 @@ def _create_sync_service(
     )
 
 
+def _batch_job_id(
+    prefix: str,
+    ctx: dict,  # type: ignore[type-arg]
+    user_id: str,
+    batch_count: int,
+) -> str:
+    """The ARQ job id for one batch of an orchestrator run.
+
+    Scoped to the orchestrator's own job id: arq keeps a finished job's result
+    for ``keep_result`` seconds and refuses to enqueue an id it still holds, so
+    ids shared across runs would silently drop a later run's batches.
+    """
+    return f"{prefix}:{user_id}:{ctx['job_id']}:{batch_count}"
+
+
 @trace_arq_job
 async def sync_snipeit_assets(
     ctx: dict,  # type: ignore[type-arg]
@@ -147,7 +163,7 @@ async def sync_snipeit_assets(
             if not asset_ids:
                 continue
 
-            job_id = f"snipeit_sync_batch:{user_id}:{batch_count}"
+            job_id = _batch_job_id("snipeit_sync_batch", ctx, user_id, batch_count)
             await redis.enqueue_job(
                 "sync_snipeit_asset_batch",
                 user_id,
@@ -281,7 +297,7 @@ async def sync_snipeit_maintenances(
             if not maintenance_ids:
                 continue
 
-            job_id = f"snipeit_maint_batch:{user_id}:{batch_count}"
+            job_id = _batch_job_id("snipeit_maint_batch", ctx, user_id, batch_count)
             await redis.enqueue_job(
                 "sync_snipeit_maintenance_batch",
                 user_id,
@@ -465,6 +481,100 @@ async def periodic_checkin_all_snipeit_accounts(
     return {"accounts_found": accounts_found, "checked_in": checked_in}
 
 
+# Each periodic run enqueues these orchestrators for every account. Snipe-IT
+# sends no webhooks for asset changes or maintenance records, so this is the
+# only way they arrive without a manual sync.
+_PERIODIC_SYNC_JOBS = ("sync_snipeit_assets", "sync_snipeit_maintenances")
+
+
+@trace_arq_job
+async def periodic_sync_all_snipeit_accounts(
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Periodic sync that imports Snipe-IT assets and maintenance records.
+
+    Called by ARQ cron. For every user with Snipe-IT settings and working auth,
+    enqueues ``sync_snipeit_assets`` and ``sync_snipeit_maintenances`` with the
+    'smart' sync type and records a ``sync_jobs`` row for each. Users whose auth
+    needs re-authorising are left out, since their syncs could not run. A
+    failure for one user is recorded in ``errors`` and the rest are still
+    synced.
+
+    Re-imports are idempotent: unchanged assets and maintenance records are
+    skipped by version hash.
+    """
+    session_factory = ctx["session_factory"]
+
+    from sqlalchemy import text
+
+    jobs_enqueued = 0
+    errors: list[str] = []
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT s.user_id
+                FROM snipeit_settings s
+                JOIN user_snipe_it_auth a ON a.user_id = s.user_id
+                WHERE a.needs_reauth = FALSE
+                ORDER BY s.user_id
+            """)
+        )
+        accounts = result.fetchall()
+
+        for row in accounts:
+            user_id = str(row.user_id)
+            for function in _PERIODIC_SYNC_JOBS:
+                try:
+                    job = await ctx["redis"].enqueue_job(
+                        function,
+                        user_id,
+                        "smart",
+                        _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
+                    )
+                    if job is None:
+                        errors.append(f"{function} was not enqueued for {user_id}")
+                        logger.warning(
+                            "Failed to enqueue periodic Snipe-IT sync job",
+                            function=function,
+                            user_id=user_id,
+                        )
+                        continue
+
+                    repo = SyncJobRepository(await session.connection())
+                    await repo.create(
+                        job_id=job.job_id,
+                        user_id=user_id,
+                        integration_source="snipeit",
+                        sync_type="smart",
+                        status="queued",
+                    )
+                    await session.commit()
+                    jobs_enqueued += 1
+                except Exception as exc:  # noqa: BLE001
+                    await session.rollback()
+                    errors.append(f"{function} failed for {user_id}: {exc!s}")
+                    logger.error(
+                        "Error enqueueing periodic Snipe-IT sync job",
+                        function=function,
+                        user_id=user_id,
+                        exc_info=True,
+                    )
+
+    logger.info(
+        "Periodic Snipe-IT sync scheduling complete",
+        accounts_found=len(accounts),
+        jobs_enqueued=jobs_enqueued,
+        errors_count=len(errors),
+    )
+    return {
+        "status": "success",
+        "accounts_found": len(accounts),
+        "jobs_enqueued": jobs_enqueued,
+        "errors": errors,
+    }
+
+
 async def _run_stream_consumer(session_factory: Any, worker_settings: Any) -> None:
     """Adapt the Snipe-IT stream consumer to the shared lifecycle factory's shape.
 
@@ -498,7 +608,9 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
 
     Operational defaults (``job_timeout``, ``keep_result``, retry backoff) come from
     :class:`core_shared.SharedARQWorkerSettings` and equal arq's own constructor
-    defaults, so they apply unchanged. The only periodic job is the check-in sweep
+    defaults, so they apply unchanged. Two periodic jobs share the periodic-sync
+    cadence: the asset and maintenance import
+    (``periodic_sync_all_snipeit_accounts``) and the check-in sweep
     (``periodic_checkin_all_snipeit_accounts``), which returns assets whose usage
     period has ended. Only the functions list, consumer wiring, cron schedule, and
     documented overrides live here.
@@ -513,15 +625,27 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_snipeit_maintenances,
         sync_snipeit_maintenance_batch,
         periodic_checkin_all_snipeit_accounts,
+        periodic_sync_all_snipeit_accounts,
     ]
 
-    # Cron schedule: the periodic check-in sweep (shared helper; empty when
-    # periodic sync is disabled).
-    cron_jobs = generate_cron_jobs(
-        periodic_checkin_all_snipeit_accounts,
-        enable_periodic_sync=settings.enable_periodic_sync,
-        sync_interval_hours=settings.sync_interval_hours,
-    )
+    # Cron schedule: the periodic asset/maintenance import and the check-in
+    # sweep (shared helper; both empty when periodic sync is disabled). The
+    # import runs half an hour after the sweep: each job has its own rate
+    # limiter, so running together they could exceed Snipe-IT's limit, and a
+    # rate-limited check-in waits for the next sweep.
+    cron_jobs = [
+        *generate_cron_jobs(
+            periodic_sync_all_snipeit_accounts,
+            enable_periodic_sync=settings.enable_periodic_sync,
+            sync_interval_hours=settings.sync_interval_hours,
+            minute=30,
+        ),
+        *generate_cron_jobs(
+            periodic_checkin_all_snipeit_accounts,
+            enable_periodic_sync=settings.enable_periodic_sync,
+            sync_interval_hours=settings.sync_interval_hours,
+        ),
+    ]
 
     # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
     # the hooks accept ``ctx`` but the shared LifecycleHook alias is a plain
