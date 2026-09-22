@@ -151,3 +151,18 @@ async def test_ignore_and_unignore(
     assert after_ignore["total_count"] == 0
     assert unignored["was_ignored"] is True
     assert after_unignore["total_count"] == 1
+
+
+async def test_ignore_rejects_a_malformed_email(
+    authenticated_lifespan_client: LifespanClient,
+) -> None:
+    async with authenticated_lifespan_client() as client:
+        ignored = await call_mcp_tool(
+            client, "ignore_contact_suggestion", {"email": "not-an-email"}
+        )
+        listed = await call_mcp_tool(
+            client, "list_contact_suggestions", {}, request_id=2
+        )
+
+    assert "error" in ignored
+    assert listed["ignored_emails"] == []

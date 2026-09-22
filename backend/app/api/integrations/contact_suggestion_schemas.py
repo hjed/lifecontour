@@ -3,15 +3,17 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
+from core_shared.models.contacts.exceptions import ContactValidationError
 from pydantic import BaseModel, Field, field_validator
+
+from app.core.integrations.services.contact_suggestion_service import canonical_email
 
 
 def _normalised_email(value: str) -> str:
-    email = value.strip().lower()
-    local, _, domain = email.partition("@")
-    if not local or not domain or " " in email:
-        raise ValueError("must be an email address")
-    return email
+    try:
+        return canonical_email(value)
+    except ContactValidationError as error:
+        raise ValueError("must be an email address") from error
 
 
 class ContactSuggestionAttributes(BaseModel):

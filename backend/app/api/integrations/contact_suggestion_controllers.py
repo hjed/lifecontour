@@ -35,7 +35,6 @@ from app.core.integrations.services.contact_suggestion_service import (
     ContactSuggestionService,
     ExistingContactTarget,
     NewContactTarget,
-    normalise_email,
 )
 from app.infrastructure.auth.models import SessionUser
 
@@ -165,7 +164,8 @@ async def ignore_contact_suggestion(
     )
 
 
-@router.delete("/ignored/{email}", status_code=status.HTTP_204_NO_CONTENT)
+# ``:path`` so an address with a ``/`` in its local part still routes here.
+@router.delete("/ignored/{email:path}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def unignore_contact_suggestion(
     email: str,
@@ -174,5 +174,5 @@ async def unignore_contact_suggestion(
     user: FromDishka[SessionUser],
 ) -> Response:
     """Let the email be suggested again. Idempotent."""
-    await service.unignore(user.id, normalise_email(email), transaction=connection)
+    await service.unignore(user.id, email, transaction=connection)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

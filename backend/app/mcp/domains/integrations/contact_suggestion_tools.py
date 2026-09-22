@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Annotated
 
 from core_shared.models.history import Provenance
+from core_shared.models.participant_email import normalise_participant_email
 from fastmcp import FastMCP
 from fastmcp.tools import tool
 from pydantic import BaseModel, Field
@@ -21,7 +22,6 @@ from app.core.integrations.services.contact_suggestion_service import (
     ContactSuggestionService,
     ExistingContactTarget,
     NewContactTarget,
-    normalise_email,
 )
 from app.mcp.shared.annotations import ADDITIVE_WRITE, IDEMPOTENT_WRITE, READ_ONLY
 from app.mcp.shared.decorators import mcp_unified_error_handler
@@ -152,7 +152,7 @@ async def accept_contact_suggestion(
     )
     saved_id = accepted.contact.id
     assert saved_id is not None  # a saved contact always has one
-    normalised = normalise_email(email)
+    normalised = normalise_participant_email(email)
     return MCPResponseBuilder.success_response(
         AcceptedContactSuggestionMCPResponse(
             email=normalised,
@@ -176,12 +176,13 @@ async def ignore_contact_suggestion(
 ) -> str:
     """
     Stop suggesting an email as a contact. Idempotent and persistent;
-    reversible with ``unignore_contact_suggestion``.
+    reversible with ``unignore_contact_suggestion``. Rejects anything that is
+    not an email address.
     """
     await service.ignore(
         user_id, email, transaction=db_connection, provenance=Provenance.MCP
     )
-    normalised = normalise_email(email)
+    normalised = normalise_participant_email(email)
     return MCPResponseBuilder.success_response(
         IgnoredContactSuggestionMCPResponse(
             email=normalised,
@@ -204,7 +205,7 @@ async def unignore_contact_suggestion(
     restoring an email that was not ignored succeeds with ``was_ignored`` false.
     """
     was_ignored = await service.unignore(user_id, email, transaction=db_connection)
-    normalised = normalise_email(email)
+    normalised = normalise_participant_email(email)
     return MCPResponseBuilder.success_response(
         IgnoredContactSuggestionMCPResponse(
             email=normalised,

@@ -147,3 +147,17 @@ async def test_ignore_hides_the_suggestion_until_restored(
     assert [
         r["id"] for r in (await authenticated_client.get(BASE_URL)).json()["data"]
     ] == ["noisy@x.com"]
+
+
+async def test_an_email_with_a_slash_can_be_restored(
+    authenticated_client: AsyncClient,
+) -> None:
+    email = "team/leads@x.com"
+    assert (
+        await authenticated_client.post(IGNORED_URL, json=_ignore_body(email))
+    ).status_code == 201
+
+    restored = await authenticated_client.delete(f"{IGNORED_URL}/team%2Fleads@x.com")
+
+    assert restored.status_code == 204
+    assert (await authenticated_client.get(IGNORED_URL)).json()["data"] == []
