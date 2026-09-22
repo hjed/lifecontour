@@ -7,8 +7,9 @@ import, and gear checkout sync).
 ## Architecture
 
 The worker uses ARQ (Async Redis Queue) for task processing and supports manual
-sync (triggered via the main application), webhook-driven updates, and a
-domain-events stream consumer.
+sync (triggered via the main application), a scheduled periodic sync (when
+enabled, see below), webhook-driven updates, and a domain-events stream
+consumer.
 
 Per-user Snipe-IT credentials (API key + base URL) are stored **encrypted in the
 database** (`user_snipe_it_auth`), not in environment variables; the worker
@@ -73,18 +74,33 @@ sites read the raw value via `.get_secret_value()`.
 ### Periodic Sync Configuration
 
 Periodic sync is **disabled by default**. The worker inherits
-`ENABLE_PERIODIC_SYNC`/`SYNC_INTERVAL_HOURS` from `BaseWorkerSettings`; enable
-periodic full syncs by setting `ENABLE_PERIODIC_SYNC=true` and a
-`SYNC_INTERVAL_HOURS` cadence.
+`ENABLE_PERIODIC_SYNC`/`SYNC_INTERVAL_HOURS` from `BaseWorkerSettings`; enable it
+by setting `ENABLE_PERIODIC_SYNC=true` and a `SYNC_INTERVAL_HOURS` cadence. Two
+cron jobs then run at the top of every `SYNC_INTERVAL_HOURS`-th hour:
+
+- `periodic_sync_all_snipeit_accounts` — for every user with Snipe-IT settings
+  and working auth (`needs_reauth = FALSE`), enqueues `sync_snipeit_assets` and
+  `sync_snipeit_maintenances` with sync type `smart`, and records a `sync_jobs`
+  row for each. Snipe-IT sends no webhooks for asset creation, asset edits or
+  maintenance records, so this is the only way those changes arrive without a
+  manual sync. Neither orchestrator honours `smart` yet (#1560), so each run is a
+  full re-import; unchanged assets and maintenance records are skipped by
+  version hash.
+- `periodic_checkin_all_snipeit_accounts` — checks in assets whose usage period
+  has ended.
+
+Batch job ids include the orchestrator's own job id
+(`snipeit_sync_batch:<user>:<job_id>:<n>`), because arq refuses an id whose
+result it still keeps (`keep_result`, one hour).
 
 ### ARQ Worker Settings
 
 The ARQ `WorkerSettings` (in [`worker.py`](worker.py)) is built from the shared
 toolkit in `core_shared` (ITER14-002): operational defaults, the
 `build_worker_lifecycle` startup/shutdown factory, and `redis_settings_from_url`.
-Snipe-IT has **no periodic sync task**, so it declares **no cron jobs** and
-schedules nothing. It declares only its functions list, its consumer wiring, and
-documented overrides:
+It declares only its functions list, its consumer wiring, its cron schedule (see
+[Periodic Sync Configuration](#periodic-sync-configuration)), and documented
+overrides:
 
 ```python
 class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
@@ -93,6 +109,13 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_snipeit_asset_batch,
         sync_snipeit_maintenances,
         sync_snipeit_maintenance_batch,
+        periodic_checkin_all_snipeit_accounts,
+        periodic_sync_all_snipeit_accounts,
+    ]
+    # Empty unless ENABLE_PERIODIC_SYNC=true
+    cron_jobs = [
+        *generate_cron_jobs(periodic_sync_all_snipeit_accounts, ...),
+        *generate_cron_jobs(periodic_checkin_all_snipeit_accounts, ...),
     ]
     # Both from build_worker_lifecycle(
     #     close_session_factory=False, log_consumer_errors=True
