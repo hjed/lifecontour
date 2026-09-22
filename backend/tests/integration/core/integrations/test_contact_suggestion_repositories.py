@@ -93,11 +93,11 @@ class TestListCandidates:
 
         assert candidates == []
 
-    async def test_email_held_by_a_contact_in_any_case_is_excluded(
+    async def test_email_held_by_a_contact_in_any_spelling_is_excluded(
         self, async_connection: AsyncConnection
     ) -> None:
         await seed_participant(async_connection, "jane@x.com", 5)
-        await create_contact(async_connection, email="Jane@X.com")
+        await create_contact(async_connection, email=" Jane@X.com ")
 
         candidates = await SqlUnmatchedParticipantEmailRepository(
             async_connection

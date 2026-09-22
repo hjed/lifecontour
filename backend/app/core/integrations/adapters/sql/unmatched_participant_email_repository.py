@@ -75,8 +75,8 @@ class SqlUnmatchedParticipantEmailRepository:
     ) -> list[ContactSuggestion]:
         """Emails on at least ``min_journals`` of the user's journals.
 
-        Emails a contact already holds (in any case) and emails the user has
-        ignored are left out. Most-seen first.
+        Emails a contact already holds (compared trimmed and case-insensitively)
+        and emails the user has ignored are left out. Most-seen first.
         """
         result = await self.connection.execute(
             text(
@@ -92,7 +92,7 @@ class SqlUnmatchedParticipantEmailRepository:
                   AND NOT EXISTS (
                       SELECT 1 FROM contact_methods cm
                       WHERE cm.method_type = 'email'
-                        AND lower(cm.value) = u.email
+                        AND LOWER(BTRIM(cm.value)) = u.email
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM contact_suggestion_ignores i
